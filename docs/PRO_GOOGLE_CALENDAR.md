@@ -57,7 +57,13 @@ Add to the repo-root `.env`:
 GOOGLE_OAUTH_CLIENT_ID=<paste-from-google-cloud>
 GOOGLE_OAUTH_CLIENT_SECRET=<paste-from-google-cloud>
 CERID_CONNECTORS_BEARER=<openssl rand -hex 32>
+USER_GOOGLE_EMAIL=<the account you are connecting>
 ```
+
+`USER_GOOGLE_EMAIL` is required, not cosmetic: `get_events` and every other
+tool on the sibling declares `user_google_email` as a required argument, and a
+call without it fails validation as a tool RESULT — the connector then reports
+zero events, which is indistinguishable from an empty calendar.
 
 `CERID_CONNECTORS_BEARER` is any 32-byte hex string. Generate one with
 `openssl rand -hex 32`. The same token must be present when the Cerid

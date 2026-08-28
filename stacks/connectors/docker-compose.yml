@@ -15,7 +15,25 @@
 # OAuth credentials persist in named volumes keyed per connector so a
 # `docker compose down` (without -v) preserves refresh tokens.
 
+# YAML anchors do not cross compose files, so the main file's x-logging cannot
+# be reused here — these two need their own. Same cap and same reason: the
+# json-file driver is unbounded by default.
+x-logging: &connector-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
+  # ── Cerid MCP server — extends the main compose file's service ─────────
+  # Keeps llm-network for the datastores and gains `connectors` so
+  # MCPClientPool can still resolve the siblings by name after they moved
+  # off the shared network. Compose merges the two `networks` lists.
+  mcp-server:
+    networks:
+      - llm-network
+      - connectors
+
   # ── Google Workspace MCP — Gmail + Google Calendar ─────────────────────
   # Upstream: github.com/taylorwilsdon/google_workspace_mcp (v1.21.0)
   # Tools surfaced to Cerid: search_gmail_messages, get_gmail_message_content,
@@ -27,6 +45,7 @@ services:
   # settings were inert. Each fix is annotated; do not "simplify" them back.
   google-workspace-mcp:
     container_name: cerid-google-workspace-mcp
+    logging: *connector-logging
     profiles: ["pro"]
     build:
       # Pinned to v1.21.0 commit so we don't pick up breaking changes
@@ -51,7 +70,14 @@ services:
     # localhost:8000, where nothing listens, so the handshake could never
     # complete even once the server was reachable.
     ports:
-      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GOOGLE_MCP:-8810}:${CERID_PORT_GOOGLE_MCP:-8810}"
+      # Loopback is HARD-CODED, not ${CERID_BIND_ADDR}. Neither sibling has
+      # any client-auth mechanism, and ms365 additionally runs with the bearer
+      # check disabled, so the bind address is load-bearing security — one
+      # stray export of CERID_BIND_ADDR=0.0.0.0 would put an unauthenticated
+      # reader of the operator's mail and calendar on the LAN. Published at
+      # all only because the Google OAuth consent redirect targets this port
+      # from the operator's browser (see the port-match note above).
+      - "127.0.0.1:${CERID_PORT_GOOGLE_MCP:-8810}:${CERID_PORT_GOOGLE_MCP:-8810}"
     environment:
       # Operator provides these in .env from a Google Cloud Console
       # "Desktop app" OAuth client. The sibling-MCP server owns the OAuth
@@ -81,7 +107,7 @@ services:
       # and is app-owned, so the volume inherits that. Verified empirically.
       - google-workspace-mcp-credentials:/home/app
     networks:
-      - llm-network
+      - connectors
     restart: unless-stopped
     healthcheck:
       # The streamable-HTTP endpoint accepts an unauthenticated GET on /mcp
@@ -105,6 +131,7 @@ services:
   # Tools scope-restricted to Mail.Read + Calendars.Read for v1.
   ms365-mcp:
     container_name: cerid-ms365-mcp
+    logging: *connector-logging
     profiles: ["pro"]
     build:
       # Pinned by tag. Softeria ships ~1 release/day — every bump must pass the
@@ -126,8 +153,13 @@ services:
       - "--http=3000"
       - "--enable-auth-tools"
       - "--read-only"
+      # Loopback-bound, so the bearer check is redundant with the access control this
+      # stack already relies on. All callers share the cached MSAL identity.
+      - "--trust-proxy-auth"
     ports:
-      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MS365_MCP:-8811}:3000"
+      # Loopback HARD-CODED — see the google-workspace-mcp note. This one
+      # runs --trust-proxy-auth, so there is no token check at all behind it.
+      - "127.0.0.1:${CERID_PORT_MS365_MCP:-8811}:3000"
     environment:
       # File-based token cache because keytar isn't available in containers.
       - MS365_MCP_TOKEN_CACHE_PATH=/data/token-cache.json
@@ -162,10 +194,18 @@ services:
     volumes:
       - ms365-mcp-data:/data
     networks:
-      - llm-network
+      - connectors
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/mcp | grep -qE '^(2|4)' || exit 1"]
+      # curl is NOT in this image — the healthcheck shipped broken and the
+      # container sat "unhealthy" (failing streak 3010) for its whole life
+      # while the server answered every real request. `/bin/sh: curl: not
+      # found` was the only output the probe ever produced. node IS present
+      # (it is the ENTRYPOINT), so use its own fetch. A plain GET on the
+      # streamable-HTTP endpoint answers 406 — any sub-500 status means the
+      # process is alive and serving. Verified in-container, including a
+      # negative control against a dead port (exit 1).
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/mcp').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -176,9 +216,28 @@ services:
           cpus: '1.0'
           memory: 512M
 
+# ── Networks ────────────────────────────────────────────────────────────
+#
+# The siblings were on the shared `llm-network` until 2026-08-27. That put
+# them one DNS name away from all eight other containers on it — cerid-web,
+# cerid-sso, cerid-gateway, neo4j, chroma, redis. Since ms365-mcp runs with
+# --trust-proxy-auth (no bearer check) and google-workspace-mcp has no
+# client-auth mechanism in the image at all, every one of those containers
+# could read the operator's mail and calendar with no credential. Verified:
+# an unauthenticated tools/list against ms365 returns all 32 Graph tools.
+#
+# The host-port binding was never the control it was documented to be — it
+# does not apply to traffic inside the bridge network. `connectors` is that
+# control: only mcp-server, the one legitimate client, is attached.
+#
+# NOT `internal: true` — both siblings must reach graph.microsoft.com and
+# googleapis.com outbound.
 networks:
   llm-network:
     external: true
+  connectors:
+    driver: bridge
+
 
 volumes:
   google-workspace-mcp-credentials:

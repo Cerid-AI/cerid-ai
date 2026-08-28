@@ -26,6 +26,37 @@ from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.data_sources.google_calendar")
 
+# Words that describe the ASK rather than an event. Same failure as Gmail: the
+# inherited adapt_query joins keywords and `get_events` filters the window by
+# them, so "what's on my calendar tomorrow?" searched events for the literal
+# word "calendar" and matched nothing. The time window is the real filter here.
+_CAL_META_WORDS = frozenset({
+    "calendar", "event", "events", "meeting", "meetings", "appointment",
+    "appointments", "schedule", "scheduled", "agenda", "today", "tomorrow",
+    "yesterday", "week", "month", "upcoming", "next", "recent", "latest",
+    "what", "whats", "when", "any", "anything", "do", "does", "have", "has",
+    "my", "me", "i", "on", "is", "there", "show", "list", "find", "get", "tell",
+})
+
+
+# Every google-workspace-mcp tool except ``start_google_auth`` declares
+# ``user_google_email`` as a REQUIRED argument — verified against the live
+# tools/list schema on 2026-08-27 (search_gmail_messages, get_events,
+# get_gmail_message_content, list_calendars, ... all of them). Cerid passed it
+# on none, so the sibling answered
+#     1 validation error for call[...]
+#     user_google_email  Missing required argument
+# as a tool RESULT rather than an exception. client_pool logs that and returns
+# the result, the parsers find no ids, and the connector reports "returned 0
+# results" — indistinguishable from an empty mailbox. Same silent-zero shape as
+# the 2026-08-09 ``max_results``/``q`` keyword defects, and it hid just as long.
+#
+# ``--single-user`` does NOT make the argument optional: it only fixes which
+# account the OAuth flow consents. The value must still ride on every call.
+def _google_account() -> str:
+    """The Google account every sibling tool call is made on behalf of."""
+    return os.getenv("USER_GOOGLE_EMAIL", "").strip()
+
 
 class GoogleCalendarDataSource(DataSource):
     name = "google_calendar"
@@ -34,11 +65,22 @@ class GoogleCalendarDataSource(DataSource):
     api_key_env_var = "CERID_CONNECTORS_BEARER"  # pragma: allowlist secret
 
     def is_configured(self) -> bool:
-        return bool(os.getenv("CERID_CONNECTORS_BEARER")) and bool(
-            os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        return (
+            bool(os.getenv("CERID_CONNECTORS_BEARER"))
+            and bool(os.getenv("GOOGLE_OAUTH_CLIENT_ID"))
+            # See gmail/data_source.py — no account means every call is a
+            # validation error, which reads downstream as "no events".
+            and bool(_google_account())
         )
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
+        # Inject the account on every call rather than at each call site —
+        # the argument is required by the whole tool surface, so a per-site
+        # fix would just wait for the next tool to be added without it.
+        account = _google_account()
+        if account and "user_google_email" not in args:
+            args = {**args, "user_google_email": account}
+
         from core.mcp_clients.client_pool import get_pool
 
         pool = get_pool()
@@ -70,6 +112,22 @@ class GoogleCalendarDataSource(DataSource):
             return []
         return parse_events(raw)
 
+    def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
+        """Keep only terms that could name an EVENT.
+
+        ``get_events`` treats its ``query`` as a filter over the time window, so
+        a term the events do not contain removes everything. The inherited
+        default joined generic keywords and did exactly that — a live call on
+        2026-08-27 filtered on ``'summarize recent email'`` and returned zero
+        events from a window that had them.
+
+        Returning "" is meaningful, not a failure: ``query()`` drops the
+        parameter entirely and the caller gets the window's events, which is
+        what "what's on my calendar tomorrow?" is actually asking for.
+        """
+        terms = [k for k in keywords if k.lower() not in _CAL_META_WORDS]
+        return " ".join(terms[:6])
+
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         """DataSource fan-out — natural-language calendar query.
 
@@ -81,23 +139,26 @@ class GoogleCalendarDataSource(DataSource):
         from datetime import timedelta, timezone
 
         now = datetime.now(tz=timezone.utc)
+        args: dict[str, Any] = {
+            "time_min": now.isoformat(),
+            "time_max": (now + timedelta(days=30)).isoformat(),
+            "max_results": int(kwargs.get("max_results", 25)),
+            "detailed": True,
+        }
+        # The parameter is `query`, not `q`. Unknown keywords are not "ignored
+        # otherwise" as the old comment assumed — the server validates with
+        # pydantic and rejects the whole call ("q Unexpected keyword
+        # argument"), returning that error as a tool RESULT. Every calendar
+        # query failed this way and reported zero events.
+        #
+        # Sent ONLY when adapt_query left something event-shaped. It filters the
+        # window, so an empty or meta-only term removes every event; omitting it
+        # returns the window itself, which is what "what's on my calendar
+        # tomorrow?" is asking for.
+        if query and query.strip():
+            args["query"] = query
         try:
-            raw = await self._call_mcp(
-                "get_events",
-                {
-                    "time_min": now.isoformat(),
-                    "time_max": (now + timedelta(days=30)).isoformat(),
-                    "max_results": int(kwargs.get("max_results", 25)),
-                    # The parameter is `query`, not `q`. Unknown keywords are
-                    # not "ignored otherwise" as the old comment assumed — the
-                    # server validates with pydantic and rejects the whole
-                    # call ("q Unexpected keyword argument"), returning that
-                    # error as a tool RESULT. Every calendar query failed this
-                    # way and reported zero events.
-                    "query": query,
-                    "detailed": True,
-                },
-            )
+            raw = await self._call_mcp("get_events", args)
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("google_calendar.query", exc)
             return []

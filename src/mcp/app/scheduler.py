@@ -998,6 +998,16 @@ async def _run_wiki_stale_sweep() -> None:
         # on the read path (wiki_pages._compute_next_refresh).
         cutoff_iso = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
 
+        # Retry window for entities whose last refresh produced no summary.
+        # Long relative to the 24h staleness cutoff on purpose: re-running a
+        # summary the corpus cannot support costs a full LLM call and yields
+        # the same sentinel. 0 disables the backoff (every skip retried
+        # nightly, the pre-2026-08-27 behaviour).
+        backoff_days = int(os.environ.get("WIKI_REFRESH_SKIP_BACKOFF_DAYS", "7"))
+        attempt_cutoff_iso = (
+            datetime.now(tz=timezone.utc) - timedelta(days=backoff_days)
+        ).isoformat()
+
         def _scan_with_cutoff() -> list[str]:
             with driver.session() as session:
                 result = session.run(
@@ -1020,11 +1030,32 @@ async def _run_wiki_stale_sweep() -> None:
                       // They become refreshable again the moment any artifact
                       // mentions them, via the ingest-triggered path.
                       AND exists((:Artifact)-[:MENTIONS]->(e))
+                      // Same defect, one gate further down: an entity that
+                      // HAS artifacts but whose excerpts cannot support a
+                      // summary skips as insufficient_excerpts / no_chunks /
+                      // empty_summary, writes nothing, and re-qualifies
+                      // tomorrow. Measured 2026-08-27: 77 of that night's 88
+                      // skips were the same entities as the night before
+                      // (88%), each paying a max_tokens=1024 local LLM call
+                      // that is the head-of-line block starving the four
+                      // graph-pipeline stages — derive_domains waited 26 min
+                      // behind this queue against a 600s budget, then ran in
+                      // 4.4s. Meanwhile 2,407 entities were eligible and
+                      // ~2,300 never got a turn.
+                      //
+                      // Back off on the recorded ATTEMPT rather than skipping
+                      // such entities forever: new artifacts make an entity
+                      // summarisable, and the ingest-triggered path does not
+                      // consult this property, so real improvements still
+                      // refresh immediately.
+                      AND (e.summary_attempted_at IS NULL
+                           OR e.summary_attempted_at < $attempt_cutoff)
                     RETURN e.canonical_id AS slug
                     ORDER BY coalesce(e.mention_count, 0) DESC
                     LIMIT $lim
                     """,
                     cutoff=cutoff_iso,
+                    attempt_cutoff=attempt_cutoff_iso,
                     human_edit_cutoff=(
                         datetime.now(tz=timezone.utc)
                         - timedelta(seconds=HUMAN_EDIT_PROTECT_WINDOW_S)

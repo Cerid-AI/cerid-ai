@@ -16,6 +16,7 @@ query orchestration on top of it.
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -48,13 +49,21 @@ def _detail_reply(mid: str) -> str:
 
 
 class TestGmailDataSource:
-    def test_is_configured_requires_both(self, monkeypatch):
+    def test_is_configured_requires_bearer_client_id_and_account(self, monkeypatch):
         ds = GmailDataSource()
         monkeypatch.delenv("CERID_CONNECTORS_BEARER", raising=False)
         monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.delenv("USER_GOOGLE_EMAIL", raising=False)
         assert ds.is_configured() is False
         monkeypatch.setenv("CERID_CONNECTORS_BEARER", "tok")
         monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "id")
+        # Bearer + client id are not sufficient: every sibling tool requires
+        # user_google_email, and without it the server rejects each call as a
+        # validation error that this class surfaces as an empty result set.
+        # Reporting "configured" there is what made the outage look like an
+        # empty mailbox for as long as it did.
+        assert ds.is_configured() is False
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
         assert ds.is_configured() is True
 
     @pytest.mark.asyncio
@@ -138,3 +147,119 @@ class TestGmailDataSource:
         # First content fetch failed → skipped; second succeeded
         assert len(results) == 1
         assert results[0].title == "Subject m2"
+
+
+class TestAccountArgument:
+    """``user_google_email`` rides on every sibling call.
+
+    The live tools/list schema (probed 2026-08-27) declares it REQUIRED on
+    every google-workspace tool except ``start_google_auth``. Cerid sent it on
+    none, so the server answered "1 validation error … Missing required
+    argument" as a tool RESULT — not an exception — and the connector logged
+    "returned 0 results" on every query for the life of the integration.
+
+    These assert on ``_call_mcp`` rather than through ``query()`` on purpose:
+    the injection lives there, so a test that stubs ``_call_mcp`` (as the rest
+    of this file does) would step straight over the thing being pinned.
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_injects_account(self, monkeypatch):
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
+        ds = GmailDataSource()
+        pool = AsyncMock()
+        pool.call_tool = AsyncMock(return_value="ok")
+        with patch("core.mcp_clients.client_pool.get_pool", return_value=pool):
+            await ds._call_mcp("search_gmail_messages", {"query": "hi"})
+        sent = pool.call_tool.await_args.args[2]
+        assert sent["user_google_email"] == "someone@example.com"
+        assert sent["query"] == "hi"
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_does_not_override_explicit_account(self, monkeypatch):
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "default@example.com")
+        ds = GmailDataSource()
+        pool = AsyncMock()
+        pool.call_tool = AsyncMock(return_value="ok")
+        with patch("core.mcp_clients.client_pool.get_pool", return_value=pool):
+            await ds._call_mcp(
+                "search_gmail_messages",
+                {"query": "hi", "user_google_email": "explicit@example.com"},
+            )
+        assert (
+            pool.call_tool.await_args.args[2]["user_google_email"]
+            == "explicit@example.com"
+        )
+
+
+class TestAdaptQuery:
+    """Gmail searches message CONTENT, so the inherited keyword-join default
+    sent words describing the request rather than the mail. A live call went out
+    as `Query: 'summarize recent email'` and correctly returned 0 messages."""
+
+    def test_operator_syntax_passes_through_untouched(self):
+        ds = GmailDataSource()
+        for q in ("from:alice@example.com", "in:inbox newer_than:7d", "has:attachment"):
+            assert ds.adapt_query(q, ["ignored"]) == q
+
+    def test_content_terms_survive(self):
+        ds = GmailDataSource()
+        out = ds.adapt_query("find the invoice from acme", ["find", "invoice", "acme"])
+        assert "invoice" in out and "acme" in out
+        assert "find" not in out.split()
+
+    def test_meta_only_question_falls_back_to_recency(self):
+        """The failing live case. "summarize my recent email" describes the ask,
+        not the mail — searching bodies for it is correct and useless."""
+        ds = GmailDataSource()
+        out = ds.adapt_query("summarize my recent email", ["summarize", "recent", "email"])
+        assert out == "in:inbox newer_than:30d"
+
+    def test_fallback_is_bounded(self):
+        """A chat question must never walk the whole mailbox."""
+        ds = GmailDataSource()
+        out = ds.adapt_query("show me my inbox", ["show", "inbox"])
+        assert "newer_than:" in out
+
+
+class TestHydrationDegradesGracefully:
+    """A found message the user never sees is the same silent-zero failure this
+    connector spent its life in. Search hits must survive hydration problems."""
+
+    @pytest.mark.asyncio
+    async def test_hydration_timeout_still_returns_citations(self, monkeypatch):
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "a@example.com")
+        ds = GmailDataSource()
+
+        async def _slow(tool, args):
+            if tool == "search_gmail_messages":
+                return _search_reply("m1", "m2", "m3")
+            await asyncio.sleep(5)  # never finishes inside the budget
+
+        monkeypatch.setattr(
+            "plugins.gmail.data_source._HYDRATE_BUDGET_S", 0.05, raising=False,
+        )
+        with patch.object(ds, "_call_mcp", _slow):
+            out = await ds.query("in:inbox")
+        assert out, "search hits must survive a hydration timeout"
+        assert all(r.source_name == "Gmail" for r in out)
+
+    @pytest.mark.asyncio
+    async def test_per_message_failure_does_not_lose_the_others(self, monkeypatch):
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "a@example.com")
+        ds = GmailDataSource()
+        calls = {"n": 0}
+
+        async def _flaky(tool, args):
+            if tool == "search_gmail_messages":
+                return _search_reply("m1", "m2", "m3")
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("one bad message")
+            return _detail_reply(args["message_id"])
+
+        with patch.object(ds, "_call_mcp", _flaky):
+            out = await ds.query("in:inbox")
+        # The failed one is skipped (a tested decision, unchanged); the others
+        # still come back.
+        assert out, "one unreadable message must not lose the rest"

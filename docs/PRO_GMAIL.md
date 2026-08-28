@@ -35,9 +35,19 @@ not inside the Cerid backend:
   The Cerid backend never sees Google refresh tokens.
 
 The Cerid backend registers the sibling server as a remote MCP endpoint
-at startup if both the bearer token and the OAuth client credentials are
-present in the environment. Missing either one disables the connector
-with a clear log line rather than failing the boot.
+at startup if the bearer token, the OAuth client credentials, **and**
+`USER_GOOGLE_EMAIL` are present in the environment. Any one missing disables
+the connector with a clear log line rather than failing the boot.
+
+`USER_GOOGLE_EMAIL` is not optional and is not only for the consent flow.
+Every tool this sibling exposes declares `user_google_email` as a REQUIRED
+argument — `search_gmail_messages`, `get_events`, `get_gmail_message_content`,
+all of them — and `--single-user` does not change that; it only fixes which
+account the OAuth flow consents. Without the value the sibling rejects each
+call with `1 validation error … Missing required argument`, which arrives as a
+tool RESULT rather than an exception, so the connector reports zero results and
+looks exactly like an empty mailbox. It is part of `is_configured()` for that
+reason: an unset account now reads as "not configured" instead of "no mail".
 
 ## Operator setup
 
@@ -58,7 +68,13 @@ Add to the repo-root `.env`:
 GOOGLE_OAUTH_CLIENT_ID=<paste-from-google-cloud>
 GOOGLE_OAUTH_CLIENT_SECRET=<paste-from-google-cloud>
 CERID_CONNECTORS_BEARER=<openssl rand -hex 32>
+USER_GOOGLE_EMAIL=<the account you are connecting>
 ```
+
+`USER_GOOGLE_EMAIL` is required, not cosmetic: `get_events` and every other
+tool on the sibling declares `user_google_email` as a required argument, and a
+call without it fails validation as a tool RESULT — the connector then reports
+zero events, which is indistinguishable from an empty calendar.
 
 `CERID_CONNECTORS_BEARER` is any 32-byte hex string. Generate one with
 `openssl rand -hex 32`. The same token must be present when the Cerid

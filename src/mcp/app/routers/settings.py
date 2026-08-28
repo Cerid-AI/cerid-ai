@@ -358,7 +358,7 @@ class SettingsUpdateRequest(BaseModel):
         description=(
             "Model name passed to the internal-LLM provider. Empty resolves "
             "to provider-specific default (Ollama: OLLAMA_DEFAULT_MODEL; "
-            "OpenRouter: meta-llama/llama-3.3-70b-instruct:free per call_llm "
+            "OpenRouter: llm_client._DEFAULT_INTERNAL_MODEL per call_llm "
             "fallback). For Quenchforge, must match a GGUF filename under "
             "the Quenchforge models dir."
         ),

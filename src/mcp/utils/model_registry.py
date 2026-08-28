@@ -27,7 +27,11 @@ ACTIVE_MODELS: dict[str, dict[str, Any]] = {
     },
     "internal": {
         "default": "openrouter/openai/gpt-4o-mini",
-        "free": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+        # OpenRouter retired the free llama-3.3 slug on 2026-08-27 (404) and
+        # the remaining :free pool is shared/rate-limited, so "free" now
+        # resolves to the cheapest RELIABLE model. Same id as "cheap" —
+        # deliberately, so nothing silently reports $0 for a paid call.
+        "free": "openrouter/openai/gpt-4o-mini",
         "pro": "openrouter/anthropic/claude-sonnet-4.6",
     },
     "verification": {
@@ -42,7 +46,11 @@ ACTIVE_MODELS: dict[str, dict[str, Any]] = {
         "complex": "openrouter/google/gemini-2.5-flash",
     },
     "tiers": {
-        "free": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+        # OpenRouter retired the free llama-3.3 slug on 2026-08-27 (404) and
+        # the remaining :free pool is shared/rate-limited, so "free" now
+        # resolves to the cheapest RELIABLE model. Same id as "cheap" —
+        # deliberately, so nothing silently reports $0 for a paid call.
+        "free": "openrouter/openai/gpt-4o-mini",
         "cheap": "openrouter/openai/gpt-4o-mini",
         "capable": "openrouter/anthropic/claude-sonnet-4.6",
         "research": "openrouter/x-ai/grok-4.3",
@@ -57,7 +65,6 @@ _FALLBACK_PRICING: dict[str, tuple[float, float]] = {  # per 1M tokens
     "openrouter/anthropic/claude-opus-4.6": (15.0, 75.0),
     "openrouter/google/gemini-2.5-flash": (0.15, 0.60),
     "openrouter/x-ai/grok-4.3": (0.20, 0.50),
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
     "openrouter/openai/o3-mini": (1.10, 4.40),
 }
 

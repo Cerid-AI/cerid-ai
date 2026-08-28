@@ -25,6 +25,7 @@ other sources.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -35,6 +36,54 @@ from core.mcp_clients.result_text import tool_text
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.data_sources.gmail")
+
+# Gmail search operators. If the user typed any of these they mean them
+# literally, and rewriting the query would only break a precise request.
+_GMAIL_OPERATOR_RE = re.compile(
+    r"\b(from|to|cc|bcc|subject|label|in|is|has|filename|after|before|"
+    r"older_than|newer_than|list|category|size|larger|smaller):",
+    re.IGNORECASE,
+)
+
+# Words that describe the ASK rather than the mail. Searching message bodies
+# for these is what produced "Found 0 messages" on every chat question.
+_MAIL_META_WORDS = frozenset({
+    "email", "emails", "mail", "message", "messages", "inbox", "gmail",
+    "summarize", "summarise", "summary", "recent", "latest", "new", "unread",
+    "find", "search", "show", "list", "get", "read", "check", "any", "anything",
+    "my", "me", "i", "please", "tell", "about",
+})
+
+# What "my recent email" should actually retrieve. Bounded so a chat question
+# never walks the whole mailbox.
+_GMAIL_RECENCY_FALLBACK = "in:inbox newer_than:30d"
+
+# Hydration budget, well inside the fan-out slice (3.0s for the first source,
+# less afterwards). Search costs ~0.65s of that, so 1.5s leaves headroom.
+_HYDRATE_BUDGET_S = float(os.getenv("GMAIL_HYDRATE_BUDGET_S", "1.5"))
+
+# Sentinel for "we ran out of budget before attempting this one", kept distinct
+# from None ("attempted and failed") so the two get different treatment.
+_UNHYDRATED = object()
+
+
+# Every google-workspace-mcp tool except ``start_google_auth`` declares
+# ``user_google_email`` as a REQUIRED argument — verified against the live
+# tools/list schema on 2026-08-27 (search_gmail_messages, get_events,
+# get_gmail_message_content, list_calendars, ... all of them). Cerid passed it
+# on none, so the sibling answered
+#     1 validation error for call[...]
+#     user_google_email  Missing required argument
+# as a tool RESULT rather than an exception. client_pool logs that and returns
+# the result, the parsers find no ids, and the connector reports "returned 0
+# results" — indistinguishable from an empty mailbox. Same silent-zero shape as
+# the 2026-08-09 ``max_results``/``q`` keyword defects, and it hid just as long.
+#
+# ``--single-user`` does NOT make the argument optional: it only fixes which
+# account the OAuth flow consents. The value must still ride on every call.
+def _google_account() -> str:
+    """The Google account every sibling tool call is made on behalf of."""
+    return os.getenv("USER_GOOGLE_EMAIL", "").strip()
 
 
 class GmailDataSource(DataSource):
@@ -47,8 +96,13 @@ class GmailDataSource(DataSource):
         # Configured iff (a) bearer present, (b) Pro-tier gating allows it,
         # (c) the operator has actually wired the OAuth at the sibling MCP
         # server (we surface (c) via runtime call failure, not pre-flight).
-        return bool(os.getenv("CERID_CONNECTORS_BEARER")) and bool(
-            os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        return (
+            bool(os.getenv("CERID_CONNECTORS_BEARER"))
+            and bool(os.getenv("GOOGLE_OAUTH_CLIENT_ID"))
+            # Without an account the sibling rejects every tool call as a
+            # validation error, which this class surfaces as zero results.
+            # Report "not configured" instead of pretending an empty mailbox.
+            and bool(_google_account())
         )
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
@@ -57,10 +111,42 @@ class GmailDataSource(DataSource):
         Lazy-imports the pool so this module loads cleanly when the
         connector stack isn't running.
         """
+        # Inject the account on every call rather than at each call site —
+        # the argument is required by the whole tool surface, so a per-site
+        # fix would just wait for the next tool to be added without it.
+        account = _google_account()
+        if account and "user_google_email" not in args:
+            args = {**args, "user_google_email": account}
+
         from core.mcp_clients.client_pool import get_pool
 
         pool = get_pool()
         return await pool.call_tool("google_workspace", tool_name, args)
+
+    def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
+        """Map a chat question onto Gmail search syntax.
+
+        Gmail searches message CONTENT, so the inherited default — keywords
+        joined with spaces — sends words that describe the *request* rather than
+        the mail. A live call on 2026-08-27 went out as
+        ``Query: 'summarize recent email'`` and the server answered
+        ``Found 0 messages``: a correct search for a phrase nobody wrote. The
+        connector looked broken when it was doing exactly what it was told.
+
+        Three cases:
+          - the user already typed operator syntax -> pass it through untouched
+          - content terms survive the meta-word filter -> search those
+          - nothing survives ("summarize my recent email") -> fall back to a
+            RECENCY query instead of a nonsense content search, because the
+            honest reading of that request is "my recent mail", not "mail
+            containing the word summarize"
+        """
+        if _GMAIL_OPERATOR_RE.search(raw_query):
+            return raw_query
+        terms = [k for k in keywords if k.lower() not in _MAIL_META_WORDS]
+        if not terms:
+            return _GMAIL_RECENCY_FALLBACK
+        return " ".join(terms[:6])
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         max_results = int(kwargs.get("max_results", 10))
@@ -87,31 +173,78 @@ class GmailDataSource(DataSource):
             return []
 
         # Hydrate the top N with full body (bounded — full-fetch is per-message
-        # round-trip and we don't want every fan-out query to walk an inbox)
+        # round-trip and we don't want every fan-out query to walk an inbox).
+        #
+        # CONCURRENTLY. These were sequential, which only became visible once
+        # the search stopped returning nothing (2026-08-27): five round trips
+        # in series blew the fan-out budget and the source started reporting
+        # "gmail timed out after 3.0s" instead of delivering the mail it had
+        # just found. The calls are independent reads of distinct message ids,
+        # so the whole batch costs about one round trip. Failures stay
+        # per-message — one unreadable message must not lose the others.
+        async def _hydrate(mid: str) -> Any:
+            try:
+                return await self._call_mcp(
+                    "get_gmail_message_content", {"message_id": mid},
+                )
+            except Exception as exc:  # noqa: BLE001 — sibling MCP can fail many ways
+                log_swallowed_error("gmail.query.get_content", exc)
+                return None
+
+        # Bounded so a slow mailbox degrades instead of failing. Measured
+        # 2026-08-27 against the live account: search 0.65s + five concurrent
+        # hydrations 2.25s = 2.90s, against the 3.0s slice the fan-out hands
+        # this source (less for sources later in the round). Sitting that close
+        # to the cliff meant the whole call was cancelled and gmail contributed
+        # NOTHING despite having already found the mail. Hydration now gets its
+        # own budget; whatever does not land in time falls back to the
+        # id-and-link citation below, so the source always returns its hits.
+        try:
+            details: list[Any] = await asyncio.wait_for(
+                asyncio.gather(*(_hydrate(m["id"]) for m in messages[:max_full_fetch])),
+                timeout=_HYDRATE_BUDGET_S,
+            )
+        except asyncio.TimeoutError:
+            # Budget policy, NOT an error: the same class of decision as the
+            # past-max_full_fetch path below, so it gets the same citation.
+            logger.info(
+                "gmail.hydrate budget %.1fs exceeded — returning %d citation-only result(s)",
+                _HYDRATE_BUDGET_S, min(len(messages), max_full_fetch),
+            )
+            details = [_UNHYDRATED] * min(len(messages), max_full_fetch)
+
+        def _citation_only(m: dict) -> DataSourceResult:
+            """Cite a message we could not hydrate.
+
+            The search reply carries no subject or snippet — only ids and links
+            — so cite by id rather than inventing a title from a field that is
+            not there.
+            """
+            return DataSourceResult(
+                title=f"Gmail message {m['id']}",
+                content="",
+                source_url=m.get("web_link")
+                or f"https://mail.google.com/mail/u/0/#all/{m['id']}",
+                source_name="Gmail",
+                confidence=0.55,
+            )
+
         out: list[DataSourceResult] = []
         for i, msg in enumerate(messages):
             if i >= max_full_fetch:
-                # Past the budget. The search reply carries no subject or
-                # snippet — only ids and links — so cite the message by id
-                # rather than inventing a title from a field that is not there.
-                out.append(
-                    DataSourceResult(
-                        title=f"Gmail message {msg['id']}",
-                        content="",
-                        source_url=msg.get("web_link")
-                        or f"https://mail.google.com/mail/u/0/#all/{msg['id']}",
-                        source_name="Gmail",
-                        confidence=0.55,
-                    ),
-                )
+                out.append(_citation_only(msg))
                 continue
-            try:
-                detail = await self._call_mcp(
-                    "get_gmail_message_content",
-                    {"message_id": msg["id"]},
-                )
-            except Exception as exc:  # noqa: BLE001
-                log_swallowed_error("gmail.query.get_content", exc)
+            detail = details[i]
+            if detail is _UNHYDRATED:
+                # Out of budget, never attempted. Cite it — a message we found
+                # but never showed is the silent-zero failure this connector
+                # spent its whole life in.
+                out.append(_citation_only(msg))
+                continue
+            if detail is None:
+                # Attempted and FAILED. Deliberately skipped, not cited: an
+                # error is not budget policy, and test_query_skips_failed_
+                # content_fetches pins that decision. Left as-is on purpose.
                 continue
             detail_dict = parse_message_detail(detail)
             if not detail_dict:

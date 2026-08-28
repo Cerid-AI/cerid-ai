@@ -83,6 +83,19 @@ MEMORY_CONFLICT_LLM_BUDGET_S = float(os.getenv("MEMORY_CONFLICT_LLM_BUDGET_S", "
 # ~39s for this exact extraction prompt — so on a local-provider install the
 # cloud-tuned ceiling times out EVERY extraction, `extract_memories` returns [],
 # and no memory is ever created. Local installs get a proportionate ceiling.
+#
+# INVARIANT: this must stay BELOW internal_llm._LOCAL_READ_TIMEOUT_S. It is the
+# latency SLO; that one is the liveness bound. Until 2026-08-27 the two were
+# inverted (90s budget over a 60s transport timeout), so this budget was
+# unreachable: the transport cut the call first, the retry loop re-ran the same
+# too-slow generation twice more, and the budget fired mid-retry. The failure
+# surfaced as a ReadTimeout plus an empty-string parse
+# ("Expecting value: line 1 column 1") rather than the clean budget branch this
+# constant exists to provide.
+#
+# 90s is kept: a representative extraction measures ~44s end-to-end on the
+# current CPU-placed slot (294 tokens at 7.0 tok/s, finishing well inside
+# max_tokens=1000), so this is ~2x headroom and now actually reachable.
 _DEFAULT_MEMORY_LLM_BUDGET_S = 6.0
 _LOCAL_MEMORY_LLM_BUDGET_S = 90.0
 

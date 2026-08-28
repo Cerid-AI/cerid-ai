@@ -220,11 +220,49 @@ fi
 # Uses delete+append (not sed substitution) to safely handle special chars
 # in hardware strings like "Intel(R) Core(TM) i9-13900K @ 3.00GHz".
 _persist_host_var() {
-    local key="$1" val="$2"
+    local key="$1" val="$2" rc=0 before=0 after=0
     [ -z "$val" ] && return
-    # Remove existing line (if any), then append the new value
-    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" 2>/dev/null || true
+
+    # Remove existing line (if any), then append the new value.
+    #
+    # The read is allowed to FAIL LOUDLY and abort this key. It used to be
+    #     grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" 2>/dev/null || true
+    # which silently tolerated an unreadable .env — the exact shape this volume
+    # produces under its TCC failure mode, where stat() succeeds and read()
+    # returns EPERM. The empty .tmp then got the new line appended and mv'd
+    # over the top, replacing the operator's entire configuration with a single
+    # HOST_* line. Losing one hardware hint costs a container some tuning;
+    # truncating .env takes down every credential the install has.
+    if [ ! -r "$ENV_FILE" ]; then
+        echo "WARN: $ENV_FILE unreadable — not persisting $key" >&2
+        return
+    fi
+    before=$(wc -l < "$ENV_FILE")
+
+    set +e
+    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp"
+    rc=$?
+    set -e
+    # grep exits 1 when it filters every line — legitimate only for a .env that
+    # held nothing but this key. Anything above 1 is a real read/write error.
+    if [ "$rc" -gt 1 ]; then
+        rm -f "${ENV_FILE}.tmp"
+        echo "WARN: could not rewrite $ENV_FILE — not persisting $key" >&2
+        return
+    fi
+
     echo "${key}=${val}" >> "${ENV_FILE}.tmp"
+
+    # Final guard: the rewrite may drop at most the one line it filtered.
+    # Anything shorter means the read came back short and we are about to
+    # destroy the file.
+    after=$(wc -l < "${ENV_FILE}.tmp")
+    if [ "$after" -lt "$before" ]; then
+        rm -f "${ENV_FILE}.tmp"
+        echo "WARN: refusing to shrink $ENV_FILE ($before -> $after) for $key" >&2
+        return
+    fi
+
     mv "${ENV_FILE}.tmp" "$ENV_FILE"
 }
 _persist_host_var HOST_MEMORY_GB "$HOST_MEMORY_GB"

@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -141,6 +142,18 @@ class WikiRefreshJob(BaseJob):
             )
             raise
 
+        # A skip writes no summary, so nothing here stamps summary_updated_at
+        # and the entity stays permanently overdue for the nightly sweep.
+        # Record the ATTEMPT instead, which the sweep backs off on. Without
+        # this the same entities are re-attempted every night forever — see
+        # db.neo4j.wiki.mark_summary_attempt for the measurements.
+        #
+        # entity_not_found is excluded: there is no node to write to, and the
+        # MATCH would simply affect zero rows.
+        skipped = stats.get("skipped")
+        if skipped and skipped != "entity_not_found":
+            await self._mark_attempt(skipped)
+
         return JobResult(
             job_id="",  # filled in by the worker after dequeue
             actual_tokens_in=stats.get("tokens_in", _EST_TOKENS_IN),
@@ -153,6 +166,32 @@ class WikiRefreshJob(BaseJob):
                 "external_refs_count": stats.get("external_refs_count", 0),
             },
         )
+
+    async def _mark_attempt(self, reason: str) -> None:
+        """Stamp ``summary_attempted_at`` so the sweep can back off.
+
+        Best-effort: a bookkeeping write must never turn an otherwise
+        successful (if skipped) refresh into a FAILED job.
+        """
+        from app.db.neo4j.wiki import mark_summary_attempt
+        from app.deps import get_neo4j
+
+        driver = get_neo4j()
+        if driver is None:
+            return
+        try:
+            await asyncio.to_thread(
+                mark_summary_attempt,
+                driver,
+                self._entity_slug,
+                datetime.now(tz=timezone.utc).isoformat(),
+            )
+        except Exception as exc:  # noqa: BLE001 — bookkeeping only
+            log_swallowed_error(
+                "processor.wiki_refresh.mark_attempt",
+                exc,
+                context={"entity_slug": self._entity_slug, "reason": reason},
+            )
 
     # ------------------------------------------------------------------
     # Internal pipeline

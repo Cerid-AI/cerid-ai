@@ -1,13 +1,23 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""E1 Phase-5 — claim-extraction external fallback leads with a free model (CR-071).
+"""E1 Phase-5 — claim-extraction external fallback leads with a DISTINCT model (CR-071).
 
 Registry: ``docs/superpowers/specs/2026-07-17-audit-e1-findings-registry.jsonl``
 (CR-071). The external fallback chain's first entry was config.LLM_INTERNAL_MODEL —
 the INTERNAL model, already attempted via call_internal_llm and possibly a bare
-local name — mislabeled as the free tier, so "try free models first" did not hold.
-The fix leads with the genuinely-free ":free" Llama slug. RED-then-GREEN.
+local name — so the first "fallback" re-tried the model that had just failed.
+The fix leads with CATEGORIZE_MODELS["smart"] instead. RED-then-GREEN.
+
+Originally this also asserted the lead entry carried a ":free" suffix, because
+the fix of the day pointed it at the free Llama 3.3 slug. OpenRouter retired
+that slug on 2026-08-27 (404: "This model is unavailable for free"), and the
+remaining :free pool is shared and rate-limited, so no reliable free entry
+exists to lead with. That assertion is dropped rather than re-pointed at
+another :free slug, which would only trade a 404 for a 429.
+
+The regression CR-071 actually guarded is unchanged and still pinned: the first
+external attempt must not be the model call_internal_llm already tried.
 """
 from __future__ import annotations
 
@@ -35,7 +45,10 @@ async def test_cr071_external_chain_leads_with_free_model(monkeypatch):
     claims = await ext._extract_claims_llm("The sky is blue today outside.", 5)
 
     assert claims == ["The sky is blue."]
-    # The first external fallback is the genuinely-free ":free" model, not the
-    # already-tried internal model mislabeled as free.
+    # The first external fallback is the categorization model, NOT the internal
+    # model that call_internal_llm just tried and failed on. That is the whole
+    # of CR-071 and it is what must never regress.
     assert seen[0] == config.CATEGORIZE_MODELS["smart"]
-    assert ":free" in seen[0]
+    internal = getattr(config, "LLM_INTERNAL_MODEL", None)
+    if internal:
+        assert seen[0] != internal, "chain must not lead with the already-tried internal model"

@@ -2,6 +2,85 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — Connectors, scheduling, and local inference told the truth (2026-08-27)
+
+A live-service audit of the running stack. Every item here was found by reading
+what the services were actually doing, not the code that was supposed to do it,
+and the through-line is the same as 1.0.2: several subsystems reported success
+while doing nothing.
+
+### The Google connector was never working
+
+Gmail and Google Calendar returned zero results for the life of the
+integration. Every tool on the sibling MCP server declares `user_google_email`
+as a required argument and Cerid passed it on none of them, so each call came
+back `1 validation error … Missing required argument` — as a tool RESULT, not
+an exception, which the connector reported as an empty mailbox. The account now
+rides on every call, injected in one place rather than at each call site, and
+an unset account reads as "not configured" instead of "no mail".
+
+Fixing that exposed the next layer. The raw chat question was being used as the
+search string: `search_gmail_messages` was called with `summarize recent email`
+and correctly found nothing. Both sources now implement `adapt_query`, the hook
+six other sources already used — operator syntax passes through untouched,
+words describing the request are dropped, and a question with no content terms
+falls back to recency rather than a nonsense body search. For calendar an empty
+adaptation is meaningful: the `query` parameter is omitted entirely, because it
+filters the window and a meta-only term removes every event.
+
+Hydration then blew the fan-out budget — search plus five sequential message
+fetches against a 3.0s slice. Fetches are concurrent, have their own budget,
+and anything that misses it degrades to an id-and-link citation, so the source
+always returns the mail it found.
+
+### Scheduling: the nightly graph pipeline was starved, not slow
+
+`derive_domains` was enqueued at 03:32, started at 03:58, and ran in 4.4
+seconds; the scheduler had given up at 03:42 against a 600s budget. It was
+queued behind `wiki_refresh` work that could never succeed: a refresh that
+skips writes no summary, so nothing advances `summary_updated_at`, so the
+entity stays permanently overdue and is picked again the next night. 77 of one
+night's 88 skips were the same entities as the night before, while 2,407
+entities were eligible and roughly 2,300 had never had a turn.
+
+Skips now record the attempt on a separate property and the sweep backs off on
+it, with a successful summary clearing the marker so a recovered entity is not
+held out. This is the same defect the `exists((:Artifact)-[:MENTIONS]->(e))`
+guard was added to fix, one gate further down.
+
+### Local inference: two ceilings were inverted
+
+Memory extraction returned `[]` on every call on a local-provider install. The
+transport timeout sat *below* the per-stage budget, so the budget was
+unreachable: the transport cut first, the retry loop re-ran the same too-slow
+generation twice more, and the budget fired mid-retry having produced nothing.
+Retrying a generation that is simply slower than its ceiling is not a retry of
+a transient fault. The transport timeout is now a liveness bound and the stage
+budget is the latency SLO, with a test pinning the ordering.
+
+### Security
+
+The two cloud-connector siblings sat on the shared application network, one DNS
+name away from every other container on it. Neither validates a bearer, and
+ms365 runs with its token check disabled, so an unauthenticated tool listing
+from any of them returned the full Microsoft Graph tool surface. They now sit on
+a private network with only the MCP server attached, and their loopback publish
+is hard-coded rather than read from an environment variable that could widen it.
+
+### Fixed
+
+- `ms365-mcp` reported unhealthy for its entire life on a 3,010-check failing
+  streak: the healthcheck shells `curl`, which is not in that image. The
+  service was fine throughout.
+- `CATEGORIZE_MODELS["smart"]` pinned a free model slug OpenRouter has retired,
+  so the first attempt of every claim extraction was a hard 404. Retargeted to
+  a cheap reliable model rather than another free slug — the free pool is
+  shared and rate-limited, which is why internal calls moved off it already.
+- Container logs were unrotated with the json-file default; one reached 256MB.
+  All services are now capped. Scheduler execution logging no longer duplicates
+  outcomes the application already records, and a recovery cron that finds
+  nothing 1,200 times a day no longer says so at INFO.
+
 ## [1.0.2] — 2026-08-15
 
 164 commits. Four audits and their remediation, two features that were sold

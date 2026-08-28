@@ -88,7 +88,7 @@ async def _get_ollama_client() -> httpx.AsyncClient:
             # from here; drop the reference and let GC reap its sockets
             # (same trade-off as llm_client's per-loop replacement).
             _ollama_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(60.0, connect=5.0),
+                timeout=httpx.Timeout(_LOCAL_READ_TIMEOUT_S, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
             _ollama_client_loop = loop
@@ -142,6 +142,28 @@ def _get_pacing_semaphore() -> asyncio.Semaphore:
             _pacing_sem = asyncio.Semaphore(_pacing_max_concurrency())
             _pacing_sem_loop = loop
         return _pacing_sem
+
+
+# Read timeout for the local daemon.
+#
+# This is a LIVENESS bound ("the daemon has stopped responding"), not a latency
+# SLO. Per-stage budgets (e.g. core.agents.memory's asyncio.wait_for) are where
+# latency is capped, and they only work if they are TIGHTER than this — a stage
+# budget above the transport ceiling can never be reached.
+#
+# It used to be 60s, a cloud-shaped number, and the layering was inverted:
+# memory extraction's 90s local budget sat ABOVE it, so a slow generation was
+# cut by the transport at 60s, retried twice more (each attempt doing the same
+# work against the same ceiling — a deterministic failure, not a transient
+# one), and the 90s budget fired mid-retry having produced nothing. Measured
+# 2026-08-27 on the CPU-placed chat slot: ~7 tok/s, so a typical extraction
+# takes ~44s and the largest internal call in the tree (max_tokens=2000) needs
+# ~290s of generation. Nothing above ~410 tokens could ever finish.
+#
+# `connect` stays short, so a genuinely dead daemon still fails over fast; this
+# bounds GENERATION, which is legitimately slow on local hardware.
+# app/routers/ollama_proxy.py already uses 600s against the same backend.
+_LOCAL_READ_TIMEOUT_S = float(os.environ.get("INTERNAL_LLM_READ_TIMEOUT_S", "300"))
 
 
 def _record_pacing_timeout() -> None:

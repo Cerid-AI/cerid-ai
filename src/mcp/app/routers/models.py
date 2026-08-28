@@ -67,8 +67,10 @@ DEFAULT_ASSIGNMENTS: dict[str, str] = {
     "general": "anthropic/claude-sonnet-4.6",
     "classifier": "meta-llama/llama-3.3-70b-instruct",
     "verification": "x-ai/grok-4.3",
-    "categorization": "meta-llama/llama-3.3-70b-instruct:free",
-    "synopsis": "meta-llama/llama-3.3-70b-instruct:free",
+    # Retired upstream (404) as of 2026-08-27 — see config/settings.py
+    # CATEGORIZE_MODELS for the full note.
+    "categorization": "openai/gpt-4o-mini",
+    "synopsis": "openai/gpt-4o-mini",
 }
 
 # ── Pydantic models ─────────────────────────────────────────────────────────

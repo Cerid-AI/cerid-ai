@@ -419,3 +419,86 @@ class TestInsufficientExcerptsAreNotStored:
         )
         assert result == {"skipped": "wrong_entity_summary"}
         assert writes == [], "a subject-redirecting summary must not be stored"
+
+
+# ---------------------------------------------------------------------------
+# summary_attempted_at bookkeeping
+# ---------------------------------------------------------------------------
+
+
+class TestSkipMarksAttempt:
+    """Every skip path writes no summary, so nothing stamps
+    ``summary_updated_at`` and the entity stays permanently overdue for the
+    nightly stale sweep. Measured 2026-08-27: 77 of that night's 88 skips were
+    the same entities as the night before, each paying a max_tokens=1024 local
+    LLM call, while ~2,300 eligible entities never got a turn. The attempt
+    stamp is what lets the sweep back off, so these pin it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_skip_stamps_attempt(self):
+        job = _make_job()
+        with patch.object(job, "_run_pipeline",
+                          new=AsyncMock(return_value={"skipped": "insufficient_excerpts"})), \
+             patch.object(job, "_mark_attempt", new=AsyncMock()) as marked:
+            await job.run(_noop_progress)
+        marked.assert_awaited_once()
+        assert marked.await_args.args[0] == "insufficient_excerpts"
+
+    @pytest.mark.asyncio
+    async def test_success_does_not_stamp_attempt(self):
+        """A real summary stamps summary_updated_at via the write path; adding
+        an attempt marker there would back off entities that are working."""
+        job = _make_job()
+        with patch.object(job, "_run_pipeline",
+                          new=AsyncMock(return_value={"summary_chars": 800, "artifacts_used": 3})), \
+             patch.object(job, "_mark_attempt", new=AsyncMock()) as marked:
+            await job.run(_noop_progress)
+        marked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_entity_not_found_does_not_stamp(self):
+        """No node to write to — the MATCH would affect zero rows."""
+        job = _make_job()
+        with patch.object(job, "_run_pipeline",
+                          new=AsyncMock(return_value={"skipped": "entity_not_found"})), \
+             patch.object(job, "_mark_attempt", new=AsyncMock()) as marked:
+            await job.run(_noop_progress)
+        marked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mark_attempt_failure_does_not_fail_the_job(self):
+        """Bookkeeping is best-effort: a Neo4j blip must not turn a skipped
+        refresh into a FAILED job and trip failure-keyed alerting."""
+        job = _make_job()
+        driver = MagicMock()
+        with patch.object(job, "_run_pipeline",
+                          new=AsyncMock(return_value={"skipped": "no_chunks"})), \
+             patch("app.deps.get_neo4j", return_value=driver), \
+             patch("app.db.neo4j.wiki.mark_summary_attempt",
+                   side_effect=RuntimeError("neo4j down")):
+            result = await job.run(_noop_progress)
+        assert result.metadata.get("skipped") == "no_chunks"
+
+    @pytest.mark.asyncio
+    async def test_mark_attempt_noop_without_driver(self):
+        job = _make_job()
+        with patch("app.deps.get_neo4j", return_value=None), \
+             patch("app.db.neo4j.wiki.mark_summary_attempt") as writer:
+            await job._mark_attempt("insufficient_excerpts")
+        writer.assert_not_called()
+
+    def test_successful_write_clears_the_attempt_marker(self):
+        """An entity that skipped once and then succeeded via the
+        ingest-triggered path must not stay blocked from the sweep for the
+        whole backoff window. The success write clears the stamp."""
+        from app.db.neo4j import wiki
+
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        wiki.write_entity_summary(driver, "asset:nginx", "a real summary", "2026-08-27T00:00:00+00:00")
+
+        cypher = session.run.call_args.args[0]
+        assert "e.summary_attempted_at = NULL" in cypher

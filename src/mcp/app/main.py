@@ -103,6 +103,17 @@ from app.observability.request_id_filter import RequestIdFilter  # noqa: I001
 _rid_filter = RequestIdFilter()
 for _handler in logging.getLogger().handlers:
     _handler.addFilter(_rid_filter)
+# APScheduler logs a "Running job" + "Job ... executed successfully" pair at
+# INFO for every execution of all 27 jobs. On 2026-08-27 that was 4,871 lines —
+# and the app already records every job's real outcome itself via
+# scheduler._log_execution, so the pair is pure duplication that buries the
+# outcome lines. Warnings and errors from the executor still come through.
+# CERID_APSCHEDULER_LOG_LEVEL=INFO restores the old behaviour when debugging
+# the scheduler itself.
+logging.getLogger("apscheduler.executors").setLevel(
+    getattr(logging, os.getenv("CERID_APSCHEDULER_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
+)
+
 logger = logging.getLogger("ai-companion")
 logger.info("sentry_tracing=%s", "on" if _sentry_enabled else "off")
 

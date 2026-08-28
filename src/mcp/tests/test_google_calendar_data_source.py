@@ -39,16 +39,20 @@ EMPTY_REPLY = (
 
 
 class TestDataSourceContract:
-    def test_is_configured_requires_bearer_and_client_id(self, monkeypatch):
+    def test_is_configured_requires_bearer_client_id_and_account(self, monkeypatch):
         ds = GoogleCalendarDataSource()
         monkeypatch.delenv("CERID_CONNECTORS_BEARER", raising=False)
         monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.delenv("USER_GOOGLE_EMAIL", raising=False)
         assert ds.is_configured() is False
 
         monkeypatch.setenv("CERID_CONNECTORS_BEARER", "tok")
         assert ds.is_configured() is False  # need client id too
 
         monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+        assert ds.is_configured() is False  # and an account — see gmail test
+
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
         assert ds.is_configured() is True
 
     @pytest.mark.asyncio
@@ -181,3 +185,52 @@ class TestResultBodyCarriesWhatWasParsed:
         with patch.object(ds, "_call_mcp", AsyncMock(return_value=reply)):
             results = await ds.query("test")
         assert results[0].source_url.startswith("https://calendar.google.com/")
+
+
+class TestAccountArgument:
+    """``user_google_email`` rides on every sibling call — see the matching
+    class in ``test_gmail_data_source.py`` for the full failure history."""
+
+    @pytest.mark.asyncio
+    async def test_call_mcp_injects_account(self, monkeypatch):
+        monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
+        ds = GoogleCalendarDataSource()
+        pool = AsyncMock()
+        pool.call_tool = AsyncMock(return_value="ok")
+        with patch("core.mcp_clients.client_pool.get_pool", return_value=pool):
+            await ds._call_mcp("get_events", {"time_min": "2026-01-01T00:00:00Z"})
+        sent = pool.call_tool.await_args.args[2]
+        assert sent["user_google_email"] == "someone@example.com"
+        assert sent["time_min"] == "2026-01-01T00:00:00Z"
+
+
+class TestAdaptQuery:
+    """`get_events` treats `query` as a filter over the time window, so a term
+    the events do not contain removes all of them."""
+
+    def test_meta_words_stripped(self):
+        ds = GoogleCalendarDataSource()
+        out = ds.adapt_query("what meetings do I have with acme", ["meetings", "acme"])
+        assert out == "acme"
+
+    def test_meta_only_question_yields_empty_so_the_window_is_returned(self):
+        ds = GoogleCalendarDataSource()
+        assert ds.adapt_query("what's on my calendar tomorrow", ["calendar", "tomorrow"]) == ""
+
+    @pytest.mark.asyncio
+    async def test_empty_query_is_omitted_from_the_call(self):
+        """Sending query="" would filter every event out; omitting it returns
+        the window, which is what the question actually asked for."""
+        ds = GoogleCalendarDataSource()
+        mock_call = AsyncMock(return_value=EVENTS_REPLY)
+        with patch.object(ds, "_call_mcp", mock_call):
+            await ds.query("")
+        assert "query" not in mock_call.await_args.args[1]
+
+    @pytest.mark.asyncio
+    async def test_real_term_is_still_sent(self):
+        ds = GoogleCalendarDataSource()
+        mock_call = AsyncMock(return_value=EVENTS_REPLY)
+        with patch.object(ds, "_call_mcp", mock_call):
+            await ds.query("acme")
+        assert mock_call.await_args.args[1]["query"] == "acme"

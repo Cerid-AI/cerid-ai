@@ -364,3 +364,53 @@ class TestOllamaClientLoopAffinity:
         asyncio.run(_scenario())
         assert mod._ollama_client is None
         assert mod._ollama_client_loop is None
+
+
+class TestLocalTimeoutLayering:
+    """The transport timeout is a LIVENESS bound; per-stage budgets are the
+    latency SLO. A stage budget above the transport ceiling can never be
+    reached — the transport cuts first, the retry loop re-runs the same
+    too-slow generation, and the budget fires mid-retry having produced
+    nothing. That inversion (90s budget over a 60s transport) is what made
+    every local memory extraction return []. Pin the ordering.
+    """
+
+    def test_stage_budget_is_below_the_transport_ceiling(self):
+        from core.agents.memory import _LOCAL_MEMORY_LLM_BUDGET_S
+        from core.utils.internal_llm import _LOCAL_READ_TIMEOUT_S
+
+        assert _LOCAL_MEMORY_LLM_BUDGET_S < _LOCAL_READ_TIMEOUT_S, (
+            "memory's local budget must stay under the local transport timeout; "
+            "above it the budget is unreachable and slow calls become a retry storm"
+        )
+
+    def test_transport_ceiling_covers_the_largest_local_generation(self):
+        """max_tokens=2000 is the largest call on the internal path. At the
+        measured ~7 tok/s of a CPU-placed slot that is ~290s of generation, so
+        a ceiling below it silently caps output length."""
+        from core.utils.internal_llm import _LOCAL_READ_TIMEOUT_S
+
+        measured_tok_per_s = 7.0
+        largest_local_max_tokens = 2000
+        assert _LOCAL_READ_TIMEOUT_S >= largest_local_max_tokens / measured_tok_per_s
+
+    def test_connect_timeout_stays_short(self, monkeypatch):
+        """Raising the READ ceiling must not slow failover from a dead daemon."""
+        import asyncio
+
+        import httpx
+
+        from core.utils import internal_llm
+
+        captured = {}
+        real_client = httpx.AsyncClient
+
+        def _spy(*args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            return real_client(*args, **kwargs)
+
+        monkeypatch.setattr(internal_llm, "_ollama_client", None)
+        monkeypatch.setattr(httpx, "AsyncClient", _spy)
+        asyncio.run(internal_llm._get_ollama_client())
+        assert captured["timeout"].connect == 5.0
+        assert captured["timeout"].read == internal_llm._LOCAL_READ_TIMEOUT_S

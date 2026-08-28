@@ -31,7 +31,6 @@ PROVIDER_REGISTRY: dict[str, dict] = {
             "openrouter/openai/gpt-4o-mini",
             "openrouter/anthropic/claude-sonnet-4.6",
             "openrouter/google/gemini-3.1-flash-lite",
-            "openrouter/meta-llama/llama-3.3-70b-instruct:free",
             "openrouter/x-ai/grok-4.3",
             "openrouter/x-ai/grok-4.20",
         ],

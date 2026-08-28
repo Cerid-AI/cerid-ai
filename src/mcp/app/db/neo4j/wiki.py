@@ -414,9 +414,15 @@ def write_entity_summary(
             session.run(
                 """
                 MATCH (e:Entity {canonical_id: $slug})
-                SET e.summary            = $summary,
-                    e.summary_updated_at = $summary_updated_at,
-                    e.summary_edited_by  = $summary_edited_by
+                SET e.summary              = $summary,
+                    e.summary_updated_at   = $summary_updated_at,
+                    e.summary_edited_by    = $summary_edited_by,
+                    // A successful summary clears any recorded skip. Without
+                    // this an entity that skipped once, then succeeded via the
+                    // ingest-triggered path, would keep the stale attempt
+                    // stamp and stay blocked from the nightly sweep for the
+                    // whole backoff window despite being healthy.
+                    e.summary_attempted_at = NULL
                 """,
                 slug=slug,
                 summary=summary,
@@ -425,6 +431,49 @@ def write_entity_summary(
             )
     except Exception as exc:
         log_swallowed_error("wiki.write_entity_summary", exc, context={"slug": slug})
+        raise
+
+
+def mark_summary_attempt(driver: Any, slug: str, attempted_at: str) -> None:
+    """Record that a refresh ran for this entity and wrote no summary.
+
+    ``write_entity_summary`` stamps ``summary_updated_at``, which is what ages
+    an entity out of the nightly stale sweep. Every skip path writes nothing,
+    so before this existed a skipping entity stayed permanently overdue and the
+    sweep re-picked it every night — ranked by ``mention_count DESC``, so the
+    same high-mention entities held the whole budget indefinitely. Measured on
+    2026-08-27: 77 of the 88 entities skipped that night were the same ones
+    skipped the night before (88%), each costing a ``max_tokens=1024`` local
+    LLM call, while 2,407 entities were sweep-eligible and roughly 2,300 of
+    them never got a turn.
+
+    This is the same defect the ``exists((:Artifact)-[:MENTIONS]->(e))`` guard
+    in the sweep was added to fix — an entity that skips, writes nothing, and
+    therefore re-qualifies forever — one gate further down the pipeline.
+
+    Deliberately a SEPARATE property from ``summary_updated_at``: that one
+    means "this entity has a summary as of", and the read path, freshness
+    reporting and the human-edit protection window all key off it. Writing it
+    on a skip would claim a summary that was never produced.
+
+    The backoff this drives is time-based, not permanent. An entity becomes
+    summarisable when new artifacts mention it, and that path
+    (``subscribers.wiki_refresh.enqueue_refresh``) is triggered by ingest and
+    does not consult this property at all — so genuinely improved entities
+    still refresh immediately.
+    """
+    try:
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (e:Entity {canonical_id: $slug})
+                SET e.summary_attempted_at = $attempted_at
+                """,
+                slug=slug,
+                attempted_at=attempted_at,
+            )
+    except Exception as exc:
+        log_swallowed_error("wiki.mark_summary_attempt", exc, context={"slug": slug})
         raise
 
 

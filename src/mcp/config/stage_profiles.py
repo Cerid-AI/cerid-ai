@@ -27,7 +27,7 @@ all knobs already exposed via ``/models/assignments`` still work:
 ==========  =====================  ====================================
 Hardness    Tier in registry       Typical model (defaults shipped)
 ==========  =====================  ====================================
-TRIVIAL     ``free``               llama-3.3-70b-instruct:free
+TRIVIAL     ``free``               gpt-4o-mini class (no free tier upstream)
 SIMPLE      ``cheap``              gpt-4o-mini class
 MODERATE    ``research``           grok-4.x class (capable + cheap + fast)
 HARD        ``capable``            claude-sonnet-4.6 class (reasoning)

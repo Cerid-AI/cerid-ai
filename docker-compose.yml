@@ -29,6 +29,22 @@
 # COMPOSE_PROJECT_NAME, if set, matches that basename. Sandbox overlays pin their
 # own `-p`.
 
+# Log rotation. The json-file driver defaults to UNBOUNDED, and nothing here
+# overrode it: ai-companion-mcp's log reached 256MB before 2026-08-27, growing
+# ~10MB/day, and `docker logs` on it could not be read to the end. The volume
+# of that stream is itself a defect (ingest_recovery runs every 60s and logs
+# ~8,500 lines/day finding nothing), but a cap belongs here regardless — an
+# unrotated log is a slow disk-fill on a machine that also hosts the archive.
+#
+# 50MB x 3 keeps roughly a week of the current rate per service while bounding
+# worst case at 150MB. Raise max-file, not max-size: `docker logs` reads the
+# rotated set, but a single oversized file is what makes it unreadable.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # ──────────────────────────────────────────────
   # Layer 1: Infrastructure (no dependencies)
@@ -36,6 +52,7 @@ services:
 
   neo4j:
     container_name: ai-companion-neo4j
+    logging: *default-logging
     # Calver release line — Neo4j skipped semver after 5.26 LTS.
     # Direct upgrade from 5.26 is supported (no intermediate version, no
     # store-format change between 4.4 and 2026.x; existing databases
@@ -84,6 +101,7 @@ services:
 
   chromadb:
     container_name: ai-companion-chroma
+    logging: *default-logging
     image: chromadb/chroma:1.5.9
     ports:
       - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
@@ -127,6 +145,7 @@ services:
 
   redis:
     container_name: ai-companion-redis
+    logging: *default-logging
     image: redis:7.4.8-alpine
     ports:
       - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
@@ -156,6 +175,7 @@ services:
 
   mcp-server:
     container_name: ai-companion-mcp
+    logging: *default-logging
     build:
       # Repo root, so the Dockerfile can read pyproject.toml and bake the
       # canonical version into /app/VERSION at build time. The .dockerignore
@@ -304,6 +324,7 @@ services:
 
   cerid-web:
     container_name: cerid-web
+    logging: *default-logging
     build:
       context: ./src/web
       dockerfile: Dockerfile
@@ -353,6 +374,7 @@ services:
 
   ollama:
     container_name: cerid-ollama
+    logging: *default-logging
     image: ${CERID_OLLAMA_IMAGE:-ollama/ollama:latest}
     profiles: ["ollama"]
     ports:
@@ -391,6 +413,7 @@ services:
 
   searxng:
     container_name: cerid-searxng
+    logging: *default-logging
     image: searxng/searxng:latest
     profiles: ["searxng"]
     ports:

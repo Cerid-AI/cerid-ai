@@ -83,7 +83,13 @@ class IngestRecoveryJob(BaseJob):
         errors          — unexpected exceptions (logged; not re-raised)
         """
         await progress_cb(0.0)
-        logger.info("ingest_recovery.start max_age_seconds=%s", self._max_age_seconds)
+        # DEBUG, not INFO: this cron fires every 60s and the overwhelming
+        # majority of runs find nothing. On 2026-08-27 all 1,208 runs reported
+        # orphans=0, and the start/done pair alone was 2,416 lines. The `done`
+        # line below still logs at INFO whenever the run actually did something,
+        # so a real recovery remains just as visible — it is now easier to spot,
+        # not harder, because it is no longer buried in its own no-op history.
+        logger.debug("ingest_recovery.start max_age_seconds=%s", self._max_age_seconds)
 
         try:
             stats = await self._run_recovery()
@@ -96,7 +102,14 @@ class IngestRecoveryJob(BaseJob):
             raise
 
         await progress_cb(1.0)
-        logger.info(
+        # INFO only when the run had an effect (or hit an error); a clean no-op
+        # is DEBUG. Keeps every recovery that mattered at INFO.
+        _did_work = bool(
+            stats["orphans_found"] or stats["committed"]
+            or stats["deferred"] or stats["purged"] or stats["errors"]
+        )
+        logger.log(
+            logging.INFO if _did_work else logging.DEBUG,
             "ingest_recovery.done orphans=%d committed=%d deferred=%d purged=%d errors=%d",
             stats["orphans_found"],
             stats["committed"],

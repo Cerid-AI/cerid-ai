@@ -65,7 +65,27 @@ _PROVIDER_STAGE_CONTEXTUAL_CHUNKS_EXAMPLE = os.getenv("PROVIDER_STAGE_CONTEXTUAL
 CATEGORIZE_MODE = os.getenv("CATEGORIZE_MODE", "smart")
 
 CATEGORIZE_MODELS = {
-    "smart": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    # Was llama-3.3-70b:free until 2026-08-27. OpenRouter retired that slug —
+    # it now answers 404 "This model is unavailable for free. The paid version
+    # is available now" — so every claim extraction (which leads its fallback
+    # chain with this entry, see agents/hallucination/extraction.py) burned a
+    # round trip before falling through.
+    #
+    # NOT retargeted to another :free slug: that pool is shared and
+    # rate-limited upstream (gemma-4 and glm-5.2 both answer 429 on probe), so
+    # it would only trade a 404 for a 429 — the same reason the internal
+    # default moved off free models, see the note above BIFROST_TIMEOUT.
+    #
+    # And NOT to gpt-4o-mini, which is what LLM_INTERNAL_MODEL and
+    # VERIFICATION_MODEL both already resolve to. Putting it here re-creates
+    # CR-071: call_internal_llm tries that model, fails, and the first
+    # "external fallback" is the same model again. A fallback chain whose
+    # entries share a provider does not fall back — if OpenAI is degraded,
+    # retrying OpenAI helps nothing. gemini-3.1-flash-lite is a different
+    # provider at a comparable price (0.00025 vs 0.00015 per 1K), and it
+    # leaves the deduped chain as [gemini-flash, gpt-4o-mini]. Categorization
+    # sends ~400 tokens per document, so the delta is cents per corpus pass.
+    "smart": "openrouter/google/gemini-3.1-flash-lite",
     "pro": "openrouter/anthropic/claude-sonnet-4.6",
 }
 
@@ -735,8 +755,11 @@ SYNOPSIS_MAX_TOKENS = 100
 # Settings doc and a sudden removal would break their synopsis route on
 # next regenerate.
 SYNOPSIS_MODEL_OPTIONS = {
+    # Key retained for back-compat with persisted Settings docs (see the note
+    # above), but OpenRouter no longer serves this slug — it 404s. Relabelled
+    # so the picker stops presenting a dead route as the free option.
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
-        "label": "Llama 3.3 (Free)",
+        "label": "Llama 3.3 Free (retired — no longer served)",
         "input_per_1m": 0.0,
         "output_per_1m": 0.0,
         "rpm": 8,
@@ -1448,6 +1471,15 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": ["trading"],
         "strict_domains": True,      # No bleed into personal/finance/coding data
+    },
+    "cerid-anneal": {
+        "description": "cerid-anneal orchestrator — lessons/outcomes push (Lane A) and hub reads",
+        "rate_limits": {
+            "/sdk/": (40, 60),       # 40 req/min — lessons/outcomes push + hub reads
+            "/agent/": (40, 60),
+        },
+        "allowed_domains": ["anneal_lessons", "general"],
+        "strict_domains": True,      # No bleed into personal/finance/trading/coding data
     },
     "folder_scanner": {
         "rate_limits": {
