@@ -535,20 +535,27 @@ async def _extract_claims_llm(
         "JSON array:"
     )
 
-    # Model fallback chain: try free models first, then paid. The final
-    # diversity slot pulls the smart-router CHEAP tier (gemini-flash) rather
-    # than a pinned literal, so it tracks the routing tables / catalog refresh.
+    # Model fallback chain, cheapest first. There is no free tier in it any
+    # more: OpenRouter retired the llama-3.3-70b :free slug on 2026-08-27 and
+    # CATEGORIZE_MODELS["smart"] was retargeted at a paid model rather than at
+    # another :free id, because that pool is shared and rate-limited.
     from core.routing.smart_router import CHEAP_MODELS
 
     fallback_models = [
-        # E1 CR-071: lead with a GENUINELY free model. The previous first entry
-        # was config.LLM_INTERNAL_MODEL — the INTERNAL model, already attempted via
-        # call_internal_llm just above (and possibly a bare local name that 400s on
-        # OpenRouter) — yet labeled here as the free tier. CATEGORIZE_MODELS["smart"]
-        # is the real ":free" Llama 3.3 slug, so "try free models first" holds.
-        config.CATEGORIZE_MODELS["smart"],                    # Free tier (Llama 3.3 70B :free)
-        config.VERIFICATION_MODEL,                            # Paid (GPT-4o-mini)
-        str(CHEAP_MODELS["gemini-flash"]["id"]),              # Cheap-tier fallback
+        # E1 CR-071: the first entry must not be the model call_internal_llm
+        # just tried. It used to be config.LLM_INTERNAL_MODEL — the INTERNAL
+        # model, already attempted immediately above (and possibly a bare local
+        # name that 400s on OpenRouter) — so the first "fallback" re-tried what
+        # had just failed. What makes a chain a fallback is provider diversity,
+        # not length.
+        config.CATEGORIZE_MODELS["smart"],                    # Google (gemini-3.1-flash-lite)
+        config.VERIFICATION_MODEL,                            # OpenAI (gpt-4o-mini)
+        # Deduplicates away TODAY: the cheap tier holds exactly gpt-4o-mini and
+        # gemini-3.1-flash-lite, which are already the two entries above, so
+        # this resolves to a duplicate and the chain runs two deep. It is kept
+        # as a tier reference rather than a pinned literal so that adding a
+        # third distinct cheap model restores a third attempt on its own.
+        str(CHEAP_MODELS["gemini-flash"]["id"]),
     ]
     # Deduplicate while preserving order
     seen_models: set[str] = set()

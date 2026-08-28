@@ -64,6 +64,27 @@ updates:
     commit-message:
       prefix: "deps(npm):"
 
+  # NPM — published TypeScript SDK (own lockfile, ships to npm)
+  #
+  # Added 2026-08-28. Until then this directory was in the dependency graph but
+  # in no update schedule, so nothing routine ever bumped it and it accumulated
+  # advisories that only a manual pass caught. Note this file is deliberately
+  # NOT synced from the internal repo — the two trees do not ship the same
+  # packages, so each declares the ecosystems it actually has.
+  - package-ecosystem: npm
+    directory: /packages/sdk/typescript
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      sdk-npm-deps:
+        patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps(npm):"
+
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
