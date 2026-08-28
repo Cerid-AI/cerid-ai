@@ -29,7 +29,10 @@ export default defineConfig(({ mode }) => {
         },
         // Inline CSS into JS (no separate CSS file)
         cssCodeSplit: false,
-        minify: "esbuild",
+        // Vite 8 unbundled esbuild: `minify: "esbuild"` now resolves esbuild
+        // from node_modules and this package does not depend on it. `true` takes
+        // whatever minifier Vite ships, which is the intent here.
+        minify: true,
         target: "es2019",
         // Report bundle size
         reportCompressedSize: true,

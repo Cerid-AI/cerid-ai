@@ -39,23 +39,9 @@ PY="${PYTHON:-.venv/bin/python}"
 PYTHON_IMAGE="python:3.12-slim"
 PIP_AUDIT_VERSION="2.10.0"
 
-# CVE-2026-26013      SSRF in ChatOpenAI image token counting — we use the Bifrost proxy, not
-#                     ChatOpenAI.                                      Re-eval 2026-06-30 (Phase 11 langchain-core 0.3→1.2).
-# CVE-2025-64439      RCE in LangGraph JsonPlusSerializer — we control all inputs, no untrusted
-#                     data.                                            Re-eval 2026-06-30 (Phase 11).
-# CVE-2026-27794      RCE via pickle fallback — internal caching only, no untrusted pickle read.
-#                                                                      Re-eval 2026-06-30 (Phase 11).
-# CVE-2026-28277      msgpack deserialization in the LangGraph checkpointer — we don't persist
-#                     checkpointers.                                   Re-eval 2026-06-30 (Phase 11).
-# CVE-2026-4539       ReDoS in the pygments AdlLexer — local-only, we don't use that lexer.
-#                                                                      Re-eval 2026-07-31 (pygments cadence).
 # CVE-2026-3219       pip concatenated tar+ZIP confusion — no upstream fix; we install only from
 #                     pinned hashes in requirements.lock, so no poly-glot archive reaches the
 #                     install path. CI runner's preinstalled pip only. Re-eval 2026-09-30 (pip cadence).
-# GHSA-fv5p-p927-qmxr SSRF via redirect bypass in langchain-text-splitters
-#                     HTMLHeaderTextSplitter.split_text_from_url(). We only call
-#                     MarkdownHeaderTextSplitter.split_text(text) — no URL fetching, no HTML
-#                     splitter anywhere.                               Re-eval 2026-06-30 (Phase 11).
 # CVE-2026-6357       pip self-update ran after installing wheels. Production installs from pinned
 #                     hashes with self-update disabled; CI runner pip only.
 #                                                                      Re-eval 2026-08-31 (pip 26.1 on hosted runners).
@@ -66,8 +52,6 @@ PIP_AUDIT_VERSION="2.10.0"
 #                     anywhere (grep-verified); Chroma binds loopback. Re-eval 2026-09-30.
 # PYSEC-2026-196      pip writes console_scripts outside the resolved install dir. CI runner pip
 #                     only; we author no malicious entry-point names.  Re-eval 2026-08-31 (pip 26.1.2).
-# CVE-2025-3000       torch.jit.script memory corruption, local-host vector only. Never called
-#                     (grep-verified); no fixed version published.     Re-eval 2026-07-31 (torch cadence).
 # PYSEC-2026-3624     lightning RCE via attacker-crafted checkpoint in load_from_checkpoint.
 #                     Our only path into lightning's checkpoint loader is pyannote's
 #                     pyannote/speaker-diarization-3.1, pulled from HF with the operator's token
@@ -82,19 +66,35 @@ PIP_AUDIT_VERSION="2.10.0"
 #                     THOSE repos is not covered. Fixed only in an unreleased commit — 2.6.5 is
 #                     still the newest release on PyPI (checked 2026-08-08), so there is no
 #                     version to upgrade to.                           Re-eval 2026-09-30 (lightning release cadence).
+# CVE-2026-45830      Chroma performs no authorization validation, so ANY authenticated user can
+# CVE-2026-45831      read/write/delete another tenant's collections; and SimpleRBACAuthorizationProvider
+#                     checks that a permission is held but never which tenant/database/collection it
+#                     applies to. Both presuppose a deployment with Chroma authn/authz turned on.
+#                     Ours has none: no CHROMA_SERVER_AUTHN_*/AUTHZ_* is set anywhere
+#                     (grep-verified), so no authenticated principal exists to escalate, and the
+#                     server publishes on 127.0.0.1 only in both compose files with no gateway or
+#                     tunnel route to it. Cerid's own tenant isolation does not go through Chroma's
+#                     tenant primitives either — core/context/identity.py fuses tenant_id into the
+#                     `where` clause at the application layer — so neither CVE governs it.
+#                     RESIDUAL, accepted: if Chroma authn is ever enabled, or its native
+#                     tenants/databases are ever adopted, both become live and this entry must be
+#                     re-justified before that ships. No fixed version exists — 1.5.9 is still the
+#                     newest release on PyPI (checked 2026-08-28).
+#                                                                      Re-eval 2026-09-30 (chromadb release cadence, with CVE-2026-45829).
+# CVE-2026-45833      Post-auth code injection in chromadb via a malicious model repository with
+#                     trust_remote_code=true on collection update. Same mechanism as CVE-2026-45829
+#                     above and the same basis: trust_remote_code is never set anywhere
+#                     (grep-verified), and the UPDATE_COLLECTION permission it requires only exists
+#                     under an authz provider we do not configure.     Re-eval 2026-09-30.
 IGNORES=(
-  CVE-2026-26013
-  CVE-2025-64439
-  CVE-2026-27794
-  CVE-2026-28277
-  CVE-2026-4539
   CVE-2026-3219
-  GHSA-fv5p-p927-qmxr
   CVE-2026-6357
   PYSEC-2025-183
   CVE-2026-45829
+  CVE-2026-45830
+  CVE-2026-45831
+  CVE-2026-45833
   PYSEC-2026-196
-  CVE-2025-3000
   PYSEC-2026-3624
 )
 

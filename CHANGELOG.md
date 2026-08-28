@@ -81,6 +81,101 @@ is hard-coded rather than read from an environment variable that could widen it.
   outcomes the application already records, and a recovery cron that finds
   nothing 1,200 times a day no longer says so at INFO.
 
+### Dependencies: the packaging drive 1.0.2 deferred
+
+1.0.2 took "the non-breaking half of the dependency debt" and left the
+`electron` and `electron-builder` majors for a packaging drive. This is that
+drive, and the reason it could not keep waiting: 47 of the repository's 52 open
+advisories were against `packages/desktop`, and every one of them named a
+version of Electron newer than the 33.x the app was pinned to.
+
+The cause is smaller than the number suggests. `packages/desktop` and
+`packages/sdk/typescript` are both in the dependency graph but were in no
+update schedule — `.github/dependabot.yml` listed `/src/web` and
+`/packages/widget` and nothing else. Across 135 Dependabot pull requests in this
+repository's history, neither directory has ever had one. Both now sit on the
+same weekly minor/patch group as the other two.
+
+Electron moves 33.4.11 to 43.4.1, into the band upstream still patches, and
+electron-builder 25 to 26.15.3. Two advisories close by disappearing rather than
+by upgrading: Electron 43 replaced `extract-zip` — vulnerable at every published
+version, with no patch that will ever exist — with `@electron-internal/extract-zip`,
+and `@electron/get` 5 dropped `tar` entirely, leaving one copy in the tree at
+7.5.22 where there had been four at 6.2.1.
+
+The native-module ABI is what makes this a drive rather than a bump.
+`better-sqlite3` 11.10 does not compile against a current V8 at all, so it moves
+to 13.0.3 — which ships N-API prebuilds and therefore stops needing a rebuild
+per Electron major. `cpu-features`, an optional transitive dependency of `ssh2`
+under `dockerode`, failed against Electron 43 through `nan` 2.26 and the
+three-argument `v8::External::New` it does not know about. `nan` 2.28 detects
+that API. It is pinned as an override because a downgrade would break only the
+signed release build, which runs on a tag and nowhere else.
+
+Verified by rebuilding both native modules against Electron 43.4.1 for arm64,
+plus typecheck, the 202 desktop unit tests, and an unsigned `electron-builder`
+pack. Not verified: the app has not been launched. That happens on the signing
+run.
+
+`js-yaml` was pinned to an exact `4.3.0` in the `src/web` overrides by an
+earlier security fix, and the advisory published after it could not be picked up
+because the pin forbade it. An override is a floor, so it is a range now.
+`nanoid` and `esbuild` clear in the widget and the SDK the same way. All four
+locked npm roots audit clean.
+
+### The claim-extraction fallback chain is two deep, and now says so
+
+Retargeting `CATEGORIZE_MODELS["smart"]` off the retired free Llama slug pointed
+it at `gemini-3.1-flash-lite` — which is byte-identical to the cheap-tier
+"diversity slot" at the end of the same chain, so that third entry now
+deduplicates away and claim extraction falls back twice, not three times. Two
+providers is still a real fallback and the behaviour is left alone; what was
+wrong is that the comments around it still described a free tier that no longer
+exists and a diversity slot that no longer does anything.
+
+Nothing had ever asserted the property that matters, either. The existing test
+pins only the first entry, and its stub succeeds on the first call, so the rest
+of the chain was unobserved — which is how the collapse from three to two went
+unnoticed. There is now a test that fails every model with a connect error and
+asserts the resulting chain spans more than one provider. Pointing
+`VERIFICATION_MODEL` at a Google model makes it go red, which is the check it
+exists to perform: retrying a single provider is not a fallback, because if that
+provider is degraded every attempt fails together.
+
+### Three new chromadb advisories, and seven ignores that were suppressing nothing
+
+`security` went red on main for the first time since 2026-08-24: pip-audit
+raised CVE-2026-45830, CVE-2026-45831 and CVE-2026-45833 against chromadb 1.5.9.
+None has a fixed version — 1.5.9 is still the newest release on PyPI — so they
+are curated ignores under the existing sunset policy, and the justification is
+verified rather than asserted. All three presuppose a Chroma deployment with
+authn or authz enabled. Ours has neither: no `CHROMA_SERVER_AUTHN_*` or
+`AUTHZ_*` is set anywhere, both compose files publish on 127.0.0.1 with no
+gateway or tunnel route, and `trust_remote_code` is never set. Cerid's own
+tenant isolation does not run through Chroma's tenant primitives either — it is
+fused into the `where` clause in `core/context/identity.py` — so the two
+cross-tenant CVEs do not govern it. The residual is written down: enabling
+Chroma auth, or adopting its native tenants, makes all three live again.
+
+Auditing that list against the actual tree then showed that only 5 of its 16
+entries were suppressing anything. Seven of the other eleven were also past
+their sunset dates, five of them waiting on "Phase 11 langchain-core 0.3 → 1.2"
+— which has since landed, `requirements.txt` pins `langchain-core>=1.3.3`, and
+the advisories went with it. They are deleted. The file's own policy is that an
+ignore without a live justification is an unreported vulnerability; a dead one
+is worse, because it is a pre-authorised suppression for an advisory nobody has
+looked at since.
+
+### The widget's CDN bundle has not built since June
+
+Vite 6 to 8 landed on 2026-06-08 as a routine group bump. Vite 8 stopped
+bundling esbuild, the widget config asked for `minify: "esbuild"`, and
+`vite build --mode cdn` has failed ever since — for two and a half months,
+unnoticed, because the widget's build and tests run nowhere in CI. It now takes
+whatever minifier Vite ships. The committed `dist/` is deliberately unchanged:
+the widget's sources have not moved since that bundle was built, so regenerating
+it would be toolchain churn rather than a fix.
+
 ## [1.0.2] — 2026-08-15
 
 164 commits. Four audits and their remediation, two features that were sold
