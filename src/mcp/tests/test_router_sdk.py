@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers.sdk import router as sdk_router
+from tests.route_utils import iter_app_routes
 
 
 def _make_app(trading_enabled: bool = False) -> FastAPI:
@@ -157,7 +158,7 @@ class TestSDKTradingGate:
         """Trading endpoints live in the internal-only SDK extension.
         Base sdk.py should NOT have any /sdk/v1/trading/* routes."""
         app = _make_app()
-        trading_paths = [r.path for r in app.routes if hasattr(r, "path") and "/trading/" in getattr(r, "path", "")]
+        trading_paths = [r.path for r in iter_app_routes(app) if "/trading/" in getattr(r, "path", "")]
         assert trading_paths == [], f"Base SDK router should not include trading routes, found: {trading_paths}"
 
     @pytest.mark.asyncio

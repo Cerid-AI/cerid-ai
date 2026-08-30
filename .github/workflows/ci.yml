@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: pip install ruff==0.15.4
@@ -75,7 +75,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Full history for secret scanning
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Secret detection (detect-secrets)
@@ -274,7 +274,7 @@ jobs:
     # exactly the per-step cwd difference that hid a bug once already.
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: src/web/.nvmrc
           cache: npm
@@ -309,7 +309,7 @@ jobs:
     needs: [lint, typecheck]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"  # public pins 3.11 (see .sync-manifest.yaml); canonical is 3.12
           cache: pip
@@ -321,7 +321,7 @@ jobs:
           pip install -q pyyaml
           python scripts/collect-lock-licenses.py --lock src/mcp/requirements.lock --output /tmp/pip-licenses.json
           python scripts/lint-license-denylist.py --tool pip-licenses --input /tmp/pip-licenses.json --label python
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: src/web/.nvmrc
           cache: npm
@@ -549,7 +549,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Every required gate ran and passed
