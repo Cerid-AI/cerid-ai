@@ -2,7 +2,7 @@
 
 All notable changes to cerid-ai are documented here.
 
-## [1.0.3] — 2026-08-28
+## [1.0.3] — 2026-08-30
 
 Two days of reading what was actually running rather than what was supposed to
 be. A live-service audit came first — the Google connector that had never

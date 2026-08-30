@@ -1,16 +1,20 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-08-09 (v1.0 release arc closed. Status authority:
+> **Last updated:** 2026-08-30 (1.0.3 shipped; v1.0 release arc closed. Status authority:
 > [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md).
 > Prior: 2026-07-24 Tier A audit + remediation T0–T4; 2026-06-13 RAG Quality Program
 > close-out; 2026-06-02 Commercial-GA Track 1).
-> **Shipped:** `v1.0.2` tagged 2026-08-15 (both repos) with `v1.0.2-desktop`
-> signed + notarized; previously `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop`
+> **Shipped:** `v1.0.3` tagged 2026-08-30 (both repos) with `v1.0.3-desktop`
+> signed + notarized (macOS universal DMG + Windows installer), now Latest on the
+> public repo where the updater polls; previously `v1.0.2` 2026-08-15 and
+> `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop`
 > was WITHDRAWN 2026-08-16 — its binaries could not launch (restricted
 > entitlements, no provisioning profile); the tag remains, the release does not.
 > SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`), trusted publishing verified
-> 2026-08-09. Forward focus: Electron runtime refresh, Sentry go-live (web DSN + alert
-> thresholds), the soak/beta validation program, and multi-user.
+> 2026-08-09. The Electron runtime refresh CLOSED in 1.0.3 (33 → 43, universal
+> build, native modules rebuilt per-arch). Forward focus: Sentry go-live (web DSN +
+> alert thresholds), the soak/beta validation program, multi-user, and CI coverage
+> for the widget/SDK bundles — which still have no build or test job.
 > **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
 > Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
 > (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO
