@@ -2,7 +2,24 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — Connectors, scheduling, and local inference told the truth (2026-08-27)
+## [1.0.3] — 2026-08-28
+
+Two days of reading what was actually running rather than what was supposed to
+be. A live-service audit came first — the Google connector that had never
+returned a result, a nightly graph pipeline that was starved rather than slow,
+two inverted timeout ceilings — and pulling on those threads reached the supply
+chain and then the pipeline that was meant to be guarding it.
+
+The through-line is narrower than 1.0.2's and worth stating plainly: almost
+everything here looked healthy because the one environment it ran in hid the
+problem. Two package directories raised advisories but sat in no update
+schedule. A `js-yaml` pin that had *been* a security fix became the reason the
+next one could not apply. Eleven of sixteen audit suppressions were suppressing
+nothing. Two CI gates queued against runners that no longer existed and expired
+instead of failing, silently, for eleven days — and the gates that did run
+reported after the merge rather than blocking it. None of that showed up as a
+red check.
+
 
 A live-service audit of the running stack. Every item here was found by reading
 what the services were actually doing, not the code that was supposed to do it,
@@ -122,6 +139,88 @@ earlier security fix, and the advisory published after it could not be picked up
 because the pin forbade it. An override is a floor, so it is a range now.
 `nanoid` and `esbuild` clear in the widget and the SDK the same way. All four
 locked npm roots audit clean.
+
+### The CI gates that reported but did not gate
+
+Two independent faults, neither of which ever showed up as a red check.
+
+**The heavy gates ran after the merge.** `ci.yml` carries `merge_group:`
+triggers and its rule-7 comments say the expensive jobs "gate at merge time via
+the merge queue" — but there was no merge queue. `test`, `security`, `frontend`,
+`frontend-desktop` and `docker` all skip on `pull_request` and fired on
+`push: main`, so they reported on work that had already landed. A failure landed
+with it. The sharp edge showed up in this very release: the pull request that
+FIXED a red `security` job ran with `security: skipping`.
+
+There is a merge queue now, and the heavy tier runs in it. The obvious way to do
+that costs double — `merge_group` and the follow-on `push: main` both fire for
+one change — so `MERGE_QUEUE_ENABLED=1` suppresses the post-merge repeat. It is
+a variable rather than a hardcoded condition so the thing fails safe: clear it
+and the gates go straight back to running on `push: main`. There is no state in
+which they run nowhere.
+
+**Two gates had not run at all since 2026-08-17.** `preservation` and
+`benchmark-slo` were routed by `vars.LIVESTACK_RUNNER`, set to the self-hosted
+mac-pro pool on 2026-05-30 and never cleared when that pool went offline. A
+self-hosted job whose runner is offline does not fail — it queues for 24 hours
+and expires. So both gates, and the entire nightly eval, stopped running for
+eleven days without a single red check, and `preservation` was failing on five
+consecutive runs before it went dark.
+
+The variable is deleted. `runner-preflight` already probed the runner API on
+every run and degraded to `ubuntu-latest` — it protected the other ten jobs
+correctly the whole time; these two simply bypassed it. They use it now, via a
+new `docker_target` output that only offers self-hosted when an online runner
+actually carries the `docker` label (`mac-pro-1` did, `mac-pro-2` did not).
+Inside the jobs, the hosted-vs-self-hosted branches ask `runner.environment`
+instead of a variable that can disagree with the host they landed on.
+
+The eval moves from nightly to weekly. Its `# why:` said "consumed daily during
+the v1 launch window"; that window closed, and rule 5's own default is that
+RAGAS-class evals go weekly unless someone reads them daily. The cost stopped
+being notional when the free self-hosted pool died — roughly 900 hosted minutes
+a month against 120, plus real OpenRouter credits per run, for a signal nobody
+reads between releases.
+
+Restoring the gates immediately proved they had never been portable. Their first
+run anywhere but the Mac Pro died four minutes in with `No space left on device`
+— neo4j with GDS, chromadb, redis and the MCP image (torch, onnxruntime) do not
+fit in the ~14GB a hosted runner leaves free. The failure arrived as an *empty
+log*, because the runner could not write its own diagnostic file either; the
+cause was only visible in the check annotations. Reclaiming the preinstalled
+toolchains nobody uses buys ~25GB and both gates boot. That step is
+hosted-only — those paths do not exist on the Mac Pro, and deleting things off a
+machine someone owns is not a CI job's business.
+
+`scripts/setup-self-hosted-runner.sh` brings a runner back when that is wanted.
+It refuses to install under `/Volumes/Level 1`, because a `_work` checkout
+containing a space makes `@electron/rebuild` skip native modules with a warning
+rather than fail — the same trap documented for the desktop build above.
+
+### The heavy gates gate now, on the other side of the merge
+
+Rule 7 says the expensive CI jobs are gated "at merge time via the merge queue".
+There was no merge queue, and there cannot be one: merge queue on a private
+repository requires GitHub Enterprise Cloud and this org is on Team. The API
+refuses the rule outright — `422 Invalid rule 'merge_queue'` — while accepting an
+otherwise identical payload carrying only the pull_request rule. So the design
+those comments described was never available, and `test`, `security`,
+`frontend`, `frontend-desktop`, `docker`, `preservation` and `benchmark-slo` all
+ran *after* the merge. They reported; they never prevented. The sharp edge
+appeared in this same release: the pull request that FIXED a red `security` job
+ran with `security: skipping`.
+
+Pull requests are now required on `main`, which moves the gate to the other side
+of the merge. The heavy tier runs on a pull request once it leaves draft, and
+`ci / all-required-gates-ran` is a required check, so nothing lands until it is
+green.
+
+Cost is held down by not running them rather than by weakening the gate. Drafts
+are exempt, so iterating is free until the work is marked ready. Superseded runs
+cancel, so a ten-push branch does not pay ten times. And the now-redundant
+post-merge repeat is suppressed by `HEAVY_GATES_PRE_MERGE=1` — a variable and not
+a hardcoded condition, so clearing it returns the gates to `push: main` rather
+than leaving them running nowhere.
 
 ### The claim-extraction fallback chain is two deep, and now says so
 

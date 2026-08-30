@@ -1,6 +1,6 @@
 [project]
 name = "cerid-ai"
-version = "1.0.2"
+version = "1.0.3"
 description = "Privacy-first Personal AI Knowledge Companion"
 requires-python = ">=3.12"
 license = "FSL-1.1-ALv2"

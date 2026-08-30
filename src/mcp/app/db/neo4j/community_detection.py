@@ -243,18 +243,53 @@ def detect_communities(
                 threshold=min_community_size,
             )
 
-        # Assign degree-0 orphan entities the 'isolated' sentinel.  GDS
-        # projections include only nodes that participate in at least one
-        # CO_MENTIONED edge, so Leiden never touches pure orphans and their
-        # community_id stays NULL after the loop above.  Renderers and UMAP
-        # jobs skip NULL community_id; this one Cypher makes every entity
-        # queryable with a non-null value.  'isolated' is intentionally NOT
-        # in the '{level}:{native_id}' Leiden format — Task 4.4 wires it to
-        # a fixed graphite/neutral colour without touching the Leiden hierarchy.
+        # Assign degree-0 orphan entities the 'isolated' sentinel.
+        #
+        # This used to test `community_id IS NULL` alone, on the stated theory
+        # that "GDS projections include only nodes that participate in at least
+        # one CO_MENTIONED edge, so Leiden never touches pure orphans". That is
+        # not what a native label projection does. gds.graph.project(name,
+        # "Entity", {...}) above projects EVERY Entity node, edges or not, so
+        # Leiden hands each orphan its own singleton community and the
+        # write-back loop stamps a real '{level}:{native}' id on it. The NULL
+        # test then matched nothing and the sentinel was never assigned.
+        #
+        # In production (min_community_size=2) the prune above then deletes that
+        # singleton Community and its IN_COMMUNITY edge but leaves the id on the
+        # entity, so orphans carried a community_id pointing at a Community that
+        # no longer existed — coloured by the renderers as members of a live
+        # community, and counted by graph.py's community_count.
+        #
+        # Orphan-ness is asked of the graph directly: no CO_MENTIONED edge.
+        # Those edges are rebuilt from MENTIONS at the top of this function, so
+        # within a run they are exactly this partition's adjacency. Entities in
+        # a pruned but genuinely multi-member community are deliberately NOT
+        # swept — that is a separate policy question and the serving stack
+        # already treats them as peripheral either way.
+        session.run(
+            """
+            MATCH (e:Entity) WHERE NOT (e)-[:CO_MENTIONED]-()
+            OPTIONAL MATCH (e)-[r:IN_COMMUNITY]->(:Community)
+            DELETE r
+            """
+        )
         isolated_summary = session.run(
-            "MATCH (e:Entity) WHERE e.community_id IS NULL SET e.community_id = 'isolated'"
+            """
+            MATCH (e:Entity)
+            WHERE e.community_id IS NULL OR NOT (e)-[:CO_MENTIONED]-()
+            SET e.community_id = 'isolated'
+            """
         ).consume()
         stats["isolated_assigned"] = isolated_summary.counters.properties_set
+
+        # No Community cleanup here on purpose. A labelled
+        # `MATCH (c:Community) ... DELETE c` is exactly the blanket wipe
+        # test_detection_preserves_community_summaries forbids: it discards the
+        # cached LLM `.summary` on every recurring community and defeats the
+        # summary cost-guard. It is also unnecessary — in production
+        # (min_community_size=2) the tiny-community prune above has already
+        # removed singleton communities, and any that survive one run are
+        # reaped by the stale-id prune on the next.
 
     stats["communities_per_level"] = {
         level: len(comms) for level, comms in communities_seen.items()

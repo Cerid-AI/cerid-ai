@@ -78,9 +78,11 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # setuptools==70.3.0, and so does pip's main branch. Upgrading pip changes
 # nothing.
 #
-# Removing it is the real fix rather than a suppression. Nothing here needs
-# pip: CMD is uvicorn, no code shells out to it, and every "pip install ..."
-# string in the tree is operator guidance in an error message. It also matches
+# Removing it is the real fix rather than a suppression. Nothing in the
+# running server needs pip: CMD is uvicorn, no app code shells out to it.
+# Eval jobs bootstrap pip via `python -m ensurepip` in an ephemeral
+# `docker run --rm` (user-site, not this image). Do not put `pip` back on
+# PATH here. It also matches
 # the plugin convention stated above — optional dependencies belong in a
 # plugin-specific build layer or the sidecar, not installed into a running
 # container. The real setuptools (81.0.0, from requirements.lock, above both

@@ -139,16 +139,24 @@ def test_detection_preserves_community_summaries():
 
 def test_isolated_sentinel_cypher_in_module():
     """After prune, detect_communities must SET community_id = 'isolated' on
-    any Entity whose community_id is still NULL (degree-0 orphans that GDS
-    never projected).  The sentinel must be the exact string 'isolated', NOT
-    in the Leiden '{level}:{native_id}' format.
+    every degree-0 orphan.  The sentinel must be the exact string 'isolated',
+    NOT in the Leiden '{level}:{native_id}' format.
+
+    The NULL test alone is not sufficient and used to be the whole condition.
+    gds.graph.project(name, "Entity", {...}) is a native LABEL projection: it
+    includes every Entity, edges or not, so Leiden gives each orphan its own
+    singleton community and the write-back stamps a real id on it. Nothing was
+    ever NULL, so the sentinel was never assigned — caught by the live
+    AF-087 invariant once it stopped being skipped in CI.
     """
     import inspect
 
     import app.db.neo4j.community_detection as mod
     src = inspect.getsource(mod)
-    # Exact Cypher that plugs the NULL gap for orphans.
-    assert "WHERE e.community_id IS NULL SET e.community_id = 'isolated'" in src
+    assert "SET e.community_id = 'isolated'" in src
+    # Orphan-ness is asked of the graph, not inferred from a NULL that a label
+    # projection guarantees will not be there.
+    assert "NOT (e)-[:CO_MENTIONED]-()" in src
 
 
 def test_partition_reset_cypher_in_module():
@@ -207,7 +215,8 @@ class TestDetectCommunitiesIsolatedSentinel:
         # 7-8. MERGE Community + SET e.community_id for each connected entity
         # 9. DETACH DELETE stale communities
         # 10. tiny-community prune (min_community_size=1 default → skipped in test)
-        # 11. SET community_id = 'isolated' for NULL entities → 1 affected
+        # 11. DELETE IN_COMMUNITY for orphans (no CO_MENTIONED edge)
+        # 12. SET community_id = 'isolated' for NULL-or-orphan entities → 1 affected
         count_result = MagicMock()
         count_result.single.return_value = {"n": 3}
 
@@ -229,6 +238,10 @@ class TestDetectCommunitiesIsolatedSentinel:
         # stale-community prune
         prune_result = MagicMock()
 
+        # orphan IN_COMMUNITY detach (no labelled Community delete follows it —
+        # see test_detection_preserves_community_summaries)
+        orphan_detach = MagicMock()
+
         # isolated sentinel: counters.properties_set = 1 (SET e.community_id sets a property)
         isolated_result = MagicMock()
         isolated_summary = MagicMock()
@@ -245,6 +258,7 @@ class TestDetectCommunitiesIsolatedSentinel:
             merge_comm_result,  # MERGE Community for ent-a
             merge_comm_result,  # MERGE Community for ent-b
             prune_result,       # DETACH DELETE stale
+            orphan_detach,      # DELETE IN_COMMUNITY for orphans
             isolated_result,    # SET community_id = 'isolated'
         ]
         return driver
@@ -309,11 +323,14 @@ class TestDetectCommunitiesIsolatedSentinel:
         but that the mock was invoked with a query embedding ``'isolated'``.
         """
         session_ctx, _ = self._run_detect()
-        # The isolated-sentinel SET is the final session.run call.
-        all_calls = session_ctx.run.call_args_list
-        last_cypher: str = all_calls[-1].args[0]
-        assert "'isolated'" in last_cypher, (
-            f"Expected sentinel Cypher to contain \"'isolated'\"; got: {last_cypher!r}"
+        # Searched rather than indexed: this used to assert on the LAST call,
+        # which broke the moment a statement was added after the sentinel. The
+        # contract is that the sentinel is issued, not that it is issued last.
+        cyphers = [c.args[0] for c in session_ctx.run.call_args_list if c.args]
+        sentinel = [q for q in cyphers if "'isolated'" in q]
+        assert sentinel, (
+            "Expected one session.run call embedding \"'isolated'\"; "
+            f"got: {cyphers!r}"
         )
 
     def test_connected_entity_merge_uses_level0_cid(self):
