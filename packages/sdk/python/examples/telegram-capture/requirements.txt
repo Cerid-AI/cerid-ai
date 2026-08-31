@@ -6,4 +6,4 @@
 #   .venv/bin/pip install -r requirements.txt
 
 python-telegram-bot==21.9
-httpx>=0.27,<1.0
+httpx>=0.28.1,<1.0
