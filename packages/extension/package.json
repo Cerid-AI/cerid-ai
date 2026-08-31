@@ -13,7 +13,7 @@
   "dependencies": {},
   "devDependencies": {
     "@playwright/test": "^1.50.0",
-    "@types/chrome": "^0.0.300",
+    "@types/chrome": "^0.2.7",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
   }
