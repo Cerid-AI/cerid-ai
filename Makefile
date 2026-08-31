@@ -150,6 +150,10 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	else \
 	  echo "  (internal-only gate — not present in this checkout, skipped)"; \
 	fi
+	@echo "[drift] dependency-currency"
+	.venv/bin/python scripts/lint-dependency-currency.py
+	@echo "[drift] suppression-expiry"
+	.venv/bin/python scripts/lint-suppression-expiry.py
 	@echo "[drift] doc-env-vars"
 	.venv/bin/python scripts/lint-doc-env-vars.py
 	@echo "[drift] swift-helper-manifests"

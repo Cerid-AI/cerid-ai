@@ -23,7 +23,18 @@ mkdir -p .ci-artifacts
 for pkg in src/web packages/desktop packages/widget packages/sdk/typescript; do
   label=$(basename "$pkg")
   echo "::group::license-checker: $pkg"
-  (cd "$pkg" && npm ci --no-audit --no-fund)
+  # --ignore-scripts is load-bearing, not a speed-up. packages/desktop depends on
+  # better-sqlite3, whose install script falls back to `node-gyp rebuild` when no
+  # prebuild matches — and the containerised path runs in node:*-slim, which has
+  # no Python. That path only executes on the self-hosted macOS runners, so when
+  # the mac-pro pool died on 2026-08-17 it stopped running and nobody saw it rot;
+  # it failed the moment the runners came back on 2026-08-30.
+  #
+  # Neither job needs a compiled native module: this one type-checks and runs unit
+  # tests, and the license half only reads package.json metadata out of the
+  # dependency tree. Whether better-sqlite3 actually BUILDS is proven where it
+  # matters, by electron-build packaging and notarizing the real thing.
+  (cd "$pkg" && npm ci --no-audit --no-fund --ignore-scripts)
   (cd "$pkg" && npx --yes license-checker@25.0.1 --production --json) > ".ci-artifacts/lc-$label.json"
   echo "::endgroup::"
 done

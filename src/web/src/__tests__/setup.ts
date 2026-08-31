@@ -224,3 +224,24 @@ if (typeof Element.prototype.releasePointerCapture === "undefined") {
 if (typeof Element.prototype.scrollIntoView === "undefined") {
   Element.prototype.scrollIntoView = () => {}
 }
+
+// ---------------------------------------------------------------------------
+// jsdom has no WebGL, and sigma.js reads `WebGL2RenderingContext` at MODULE
+// LOAD. Until now that was handled per-file: entity-hover-card.test.tsx and
+// mini-graph.test.tsx each mock sigma or Atlas, and atlas-programs.ts carries
+// its own note. That defence is opt-in, so it only holds while every test that
+// transitively reaches sigma remembers to mock it.
+//
+// One did not. article-infobox.test.tsx reaches it through a LAZY import, so
+// whether the reference lands before or after teardown is a race — the run
+// fails with `ReferenceError: WebGL2RenderingContext is not defined` counted as
+// an unhandled error (vitest fails the run on those, and warns they "might
+// cause false positive tests"). It failed CI on 2026-08-31 and passed on main
+// minutes earlier from the same commit.
+//
+// Defining the global removes the class rather than adding a fourth per-file
+// mock. Nothing asserts WebGL is absent, and the existing mocks still stand —
+// they replace components for their own reasons, not just this one.
+if (typeof (globalThis as Record<string, unknown>).WebGL2RenderingContext === "undefined") {
+  ;(globalThis as Record<string, unknown>).WebGL2RenderingContext = class WebGL2RenderingContext {}
+}

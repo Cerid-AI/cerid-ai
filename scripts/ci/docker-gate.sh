@@ -32,9 +32,17 @@ cd "$(dirname "$0")/../.."   # repo root, whatever the caller's cwd was
 # same build succeeded interactively). Anonymous Hub access is sufficient
 # here (~4 metadata fetches/run against a 100/hr quota, verified untouched)
 # and is what hosted runners have always used.
-mkdir -p .ci-artifacts/docker-config
-printf '{}' > .ci-artifacts/docker-config/config.json
-export DOCKER_CONFIG="$PWD/.ci-artifacts/docker-config"
+#
+# macOS ONLY, as of 2026-08-31. On Linux this override also threw away the
+# `docker login` the workflow performs, so the authenticated pull quota could
+# never take effect — the gate discarded the credentials it had just been
+# given. The keychain hang is a macOS credential-helper problem; Linux runners
+# have no credsStore and want the login to survive.
+if [ "$(uname -s)" = "Darwin" ]; then
+  mkdir -p .ci-artifacts/docker-config
+  printf '{}' > .ci-artifacts/docker-config/config.json
+  export DOCKER_CONFIG="$PWD/.ci-artifacts/docker-config"
+fi
 
 HADOLINT_IMAGE="hadolint/hadolint:v2.12.0"   # matches hadolint-action@v3.3.0's default
 TRIVY_IMAGE="ghcr.io/aquasecurity/trivy:0.69.3"  # matches the former trivy-action `version:`; Docker Hub's copy lives under `aquasec/`, GHCR under the org name
@@ -102,82 +110,32 @@ CVE-2026-27135
 CVE-2026-29111
 # openssl DoS via NULL pointer — Debian base image, pending 3.5.5-1 patch
 CVE-2026-28390
-# libcap TOCTOU privilege escalation in cap_set_file — container is
-# single-user, no other process calls cap_set_file, race not reachable.
-# No upstream fix yet; re-eval 2026-06-30.
-CVE-2026-4878
-# GnuTLS DTLS zero-length fragment DoS — we don't use DTLS in any
-# code path (TLS only over httpx/AsyncHTTPClient). No upstream fix
-# yet in Debian 13; re-eval 2026-06-30.
-CVE-2026-33845
-# GnuTLS DTLS handshake heap overflow — same DTLS surface as above;
-# we never initiate or accept DTLS. No upstream fix; re-eval 2026-06-30.
-CVE-2026-33846
-# GnuTLS nameConstraints case-sensitive policy bypass — we use httpx's
-# default cert verification against well-known CAs, no custom
-# nameConstraints. No upstream fix; re-eval 2026-06-30.
-CVE-2026-3833
-# libssh2 vuln — pulled in transitively by base image; no SSH client
-# ever invoked from application code (no paramiko/asyncssh/system ssh).
-# No upstream fix; re-eval 2026-06-30.
-CVE-2026-7598
-# libssh2 out-of-bounds write via unchecked length (libssh2-1t64 1.11.1-1) —
-# same unused-SSH-surface rationale as CVE-2026-7598. No upstream fix in
-# Debian 13; re-eval 2026-06-30.
-CVE-2026-55200
-# GnuTLS authentication bypass via NUL character — we don't perform
-# certificate subject-name matching against attacker-controlled input.
-# No upstream fix; re-eval 2026-06-30.
-CVE-2026-42010
-# GnuTLS security bypass via incorrect name handling — same surface
-# as CVE-2026-42010; we don't process attacker-controlled cert names.
-# No upstream fix; re-eval 2026-06-30.
-CVE-2026-42011
-# curl/libcurl: wrong file transfer via SMB connection reuse. We
-# never speak SMB from inside the container (httpx is HTTP/HTTPS
-# only). Debian 13 base; no fix as of 2026-05-16. Re-eval: 2026-06-30.
-CVE-2026-5773
-# curl/libcurl: cookie leak when reusing connections. Httpx doesn't
-# share connection pools across hosts or reuse cookies cross-origin.
-# Debian 13 base; no fix as of 2026-05-16. Re-eval: 2026-06-30.
-CVE-2026-6276
-# MIT Kerberos 5 DoS via integer underflow — affects libgssapi-krb5-2,
-# libk5crypto3, libkrb5-3, libkrb5support0. Container does not initiate
-# GSSAPI/Kerberos handshakes (httpx-only HTTP/HTTPS). No upstream
-# fix in Debian 13 as of 2026-05-23. Re-eval: 2026-07-31.
-CVE-2026-40356
 # perl-base Archive::Tar symlink — pulled into Debian base layer.
 # We never invoke perl from application code (no Archive::Tar calls,
 # no perl scripts in container). Trivy flags it transitively. No
-# upstream fix in Debian 13 yet. Re-eval 2026-07-31.
+# upstream fix in Debian 13 yet. Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-42496
 # perl-base heap buffer overflow during compilation — same surface
 # as CVE-2026-42496; perl interpreter never executes in container.
-# No upstream fix; re-eval 2026-07-31.
+# No upstream fix; Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-8376
 # perl-base Archive::Tar memory exhaustion (HIGH) — same surface;
 # no Archive::Tar usage from application code. No upstream fix;
-# re-eval 2026-07-31.
+# Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-9538
 # perl-base Archive::Tar hardlink — companion to CVE-2026-42496 (which
 # was the symlink variant). Same suppression rationale; no Archive::Tar
-# usage from application code. No upstream fix; re-eval 2026-07-31.
+# usage from application code. No upstream fix; Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-42497
 # perl-base perl-IO-Compress arbitrary code execution (HIGH) — same
 # perl-base surface as the entries above; the perl interpreter never
 # executes in the container (no perl scripts, no IO::Compress usage
 # from application code). No upstream fix in Debian 13 yet.
-# Re-eval 2026-07-31.
+# Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-48962
-# OpenSSL heap use-after-free in PKCS7_verify() (libssl3t64/openssl/
-# openssl-provider-legacy). Application code never verifies
-# PKCS7/S-MIME signatures — openssl is only exercised for TLS via
-# httpx. No fixed version in Debian 13 as of 2026-06-10.
-# Re-eval 2026-06-30.
-CVE-2026-45447
 # perl-base IO::Uncompress::Unzip CPU exhaustion on crafted zip —
 # same never-executes-perl surface as the entries above. No upstream
-# fix in Debian 13 as of 2026-06-10. Re-eval 2026-06-30.
+# fix in Debian 13 as of 2026-06-10. Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
 CVE-2026-48959
 # chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
 # the collections endpoint. Not reachable — trust_remote_code is set

@@ -3,7 +3,12 @@ services:
   # Always start via scripts/start-cerid.sh which provides this flag.
   neo4j:
     container_name: ai-companion-neo4j
-    image: neo4j:5.26.21-community
+    # Aligned with the unified root docker-compose.yml on 2026-08-31. Both
+    # startup paths mount the SAME store (stacks/infrastructure/data/neo4j),
+    # so a version split here is not cosmetic: starting the legacy path
+    # would point a 5.26 binary at a store the unified path wrote with
+    # 2026.04, and that migration is one-way.
+    image: neo4j:2026.04.0-community
     ports:
       - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
       - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
@@ -34,7 +39,12 @@ services:
 
   chromadb:
     container_name: ai-companion-chroma
-    image: chromadb/chroma:0.5.23
+    # Aligned with the root compose. The client moved to 1.x when the server
+    # pin was lifted (chromadb migration Phase 3 — see src/mcp/requirements.txt),
+    # and a 1.x client cannot speak to a 0.5.x server, so this path was
+    # already broken for anyone using it, before the shared data dir is even
+    # considered.
+    image: chromadb/chroma:1.5.9
     ports:
       - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
     volumes:

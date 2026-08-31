@@ -39,19 +39,8 @@ PY="${PYTHON:-.venv/bin/python}"
 PYTHON_IMAGE="python:3.12-slim"
 PIP_AUDIT_VERSION="2.10.0"
 
-# CVE-2026-3219       pip concatenated tar+ZIP confusion — no upstream fix; we install only from
-#                     pinned hashes in requirements.lock, so no poly-glot archive reaches the
-#                     install path. CI runner's preinstalled pip only. Re-eval 2026-09-30 (pip cadence).
-# CVE-2026-6357       pip self-update ran after installing wheels. Production installs from pinned
-#                     hashes with self-update disabled; CI runner pip only.
-#                                                                      Re-eval 2026-08-31 (pip 26.1 on hosted runners).
-# PYSEC-2025-183      pyjwt weak-encryption — disputed upstream (WONTFIX). Requires the consumer to
-#                     pass a short HMAC key; ours is the operator-supplied CERID_JWT_SECRET, and the
-#                     JWT path is gated behind CERID_MULTI_USER=true.  Re-eval 2026-08-31.
 # CVE-2026-45829      Pre-auth code injection in chromadb via trust_remote_code=true. Never set
-#                     anywhere (grep-verified); Chroma binds loopback. Re-eval 2026-09-30.
-# PYSEC-2026-196      pip writes console_scripts outside the resolved install dir. CI runner pip
-#                     only; we author no malicious entry-point names.  Re-eval 2026-08-31 (pip 26.1.2).
+#                     anywhere (grep-verified); Chroma binds loopback. Re-eval 2026-11-30 (verified still firing 2026-08-31).
 # PYSEC-2026-3624     lightning RCE via attacker-crafted checkpoint in load_from_checkpoint.
 #                     Our only path into lightning's checkpoint loader is pyannote's
 #                     pyannote/speaker-diarization-3.1, pulled from HF with the operator's token
@@ -85,16 +74,12 @@ PIP_AUDIT_VERSION="2.10.0"
 #                     trust_remote_code=true on collection update. Same mechanism as CVE-2026-45829
 #                     above and the same basis: trust_remote_code is never set anywhere
 #                     (grep-verified), and the UPDATE_COLLECTION permission it requires only exists
-#                     under an authz provider we do not configure.     Re-eval 2026-09-30.
+#                     under an authz provider we do not configure.     Re-eval 2026-11-30 (verified still firing 2026-08-31).
 IGNORES=(
-  CVE-2026-3219
-  CVE-2026-6357
-  PYSEC-2025-183
   CVE-2026-45829
   CVE-2026-45830
   CVE-2026-45831
   CVE-2026-45833
-  PYSEC-2026-196
   PYSEC-2026-3624
 )
 
