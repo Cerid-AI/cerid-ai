@@ -15,10 +15,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    ignore:
-      # Server pin (ChromaDB 0.5.23) dictates client version — no bumps
-      # until server upgrade is scheduled.
-      - dependency-name: "chromadb"
+    # The chromadb `ignore` here was removed on 2026-08-31: its stated reason
+    # — "server pin (ChromaDB 0.5.23) dictates client version" — stopped being
+    # true when the server moved to 1.5.9 and requirements.txt recorded the pin
+    # as lifted in migration Phase 3. The rule outlived its reason and was
+    # quietly excluding a core dependency from every update cycle.
     commit-message:
       prefix: "deps(py):"
 
@@ -38,10 +39,12 @@ updates:
           - "minor"
           - "patch"
     ignore:
-      # ESLint 10 is blocked on eslint-plugin-react-hooks: its latest stable
-      # (v7.x) peer-requires eslint <=9. Only canary releases support
-      # ESLint 10. Revisit once a stable react-hooks plugin ships with
-      # `eslint: ^10` peer support.
+      # Covers both `eslint` and `@eslint/js`, which move together.
+      # The original blocker HAS CLEARED: eslint-plugin-react-hooks@7.1.1 is
+      # stable and peers `^10.0.0` (registry-verified 2026-08-31), and
+      # eslint@10.9.1 is released. The ignore stays only because ESLint 9 -> 10
+      # is a scheduled upgrade, not because anything prevents it.
+      # Re-eval 2026-11-30.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@eslint/js"
@@ -105,6 +108,8 @@ updates:
     # and get their own dedicated PR (3.11 -> 3.12 first, not the jump to
     # 3.14 dependabot keeps proposing). Ignore major + minor base-image bumps
     # until scheduled; patch bumps (security) still land.
+    #
+    # Still accurate 2026-08-31: every python pin is 3.12. Re-eval 2026-11-30.
     ignore:
       - dependency-name: "python"
         update-types:
@@ -144,3 +149,65 @@ updates:
       interval: monthly
     commit-message:
       prefix: "deps(docker):"
+
+  # ---------------------------------------------------------------------------
+  # Added 2026-08-31 so scripts/lint-dependency-currency.py passes here too.
+  # Six directories held a manifest that no entry watched, so their pins could
+  # age indefinitely with nothing reporting. The root compose is the important
+  # one: neo4j, redis and chroma were watched by nothing at all.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  - package-ecosystem: docker
+    directory: /stacks/connectors
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  - package-ecosystem: docker
+    directory: /stacks/langfuse
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  - package-ecosystem: npm
+    directory: /packages/extension
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      extension-npm-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "deps(npm):"
+
+  - package-ecosystem: npm
+    directory: /tests/beta/e2e
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      e2e-npm-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "deps(npm):"
+
+  - package-ecosystem: pip
+    directory: /packages/sdk/python/examples/telegram-capture
+    schedule:
+      interval: monthly
+    groups:
+      example-py-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "deps(py):"
