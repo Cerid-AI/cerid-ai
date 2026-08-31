@@ -5,5 +5,5 @@
 #   python3 -m venv .venv
 #   .venv/bin/pip install -r requirements.txt
 
-python-telegram-bot==21.9
+python-telegram-bot==22.8
 httpx>=0.27,<1.0
