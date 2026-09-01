@@ -58,6 +58,22 @@ docker run --rm -i "$HADOLINT_IMAGE" hadolint --ignore DL3008 --ignore DL3013 --
 docker run --rm -i "$HADOLINT_IMAGE" hadolint --ignore DL3008 --ignore DL3018 --ignore DL3059 - < src/web/Dockerfile
 echo "::endgroup::"
 
+# The widget bundle must be IN the mcp image, not merely built on the host.
+# app/routers/widget.py serves /widget/script from /app/static/cerid-widget.js,
+# and until 2026-08-31 nothing put it there: `packages` was excluded wholesale
+# by .dockerignore, so the endpoint 404'd in every containerised deployment
+# while the host build looked fine. Asserted against the running image because
+# that is the only place the claim is true or false.
+assert_widget_in_image() {
+  local img="$1"
+  if ! docker run --rm --entrypoint sh "$img" -c 'test -s /app/static/cerid-widget.js'; then
+    echo "::error::/app/static/cerid-widget.js missing from $img — /widget/script will 404."
+    echo "  Check the COPY in src/mcp/Dockerfile and the !packages/widget/dist exception in .dockerignore."
+    return 1
+  fi
+  echo "  widget bundle present in $img ($(docker run --rm --entrypoint sh "$img" -c 'wc -c < /app/static/cerid-widget.js') bytes)"
+}
+
 echo "::group::docker build"
 # --pull --no-cache: the gate must measure a FRESH build. Both Dockerfiles run
 # `apt-get upgrade`, so on a caching self-hosted daemon a stale apt layer
@@ -76,6 +92,7 @@ build_with_retry() {
 }
 build_with_retry --pull --no-cache -t "$MCP_IMG" -f src/mcp/Dockerfile .
 build_with_retry --pull --no-cache -t "$WEB_IMG" src/web/
+assert_widget_in_image "$MCP_IMG"
 echo "::endgroup::"
 
 # The ignore list stays curated here (one place, both paths). Unfixed

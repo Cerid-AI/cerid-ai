@@ -48,6 +48,13 @@ SCAN_ROOT = REPO_ROOT / "src" / "mcp"
 # walk cannot sweep in one-off reads from unrelated code.
 _PROJECT_PREFIX = "CERID_"
 _THIRD_PARTY_ALLOWLIST = frozenset({
+    # The two variables that ACTUALLY gate error reporting. Neither starts with
+    # the project prefix, so both were invisible to this generator — meanwhile
+    # ENABLE_SENTRY, which is in the internal-flag allowlist below, was the one
+    # Sentry name an operator could find in .env.example, and it was inert.
+    # A knob that does nothing, documented; three that do, hidden.
+    "SENTRY_DSN_MCP",
+    "SENTRY_DSN",
     "HF_TOKEN",
     "OPENROUTER_API_KEY",
     "OPENAI_API_KEY",

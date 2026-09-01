@@ -8,7 +8,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["chrome"],
+    // `types` is a RESTRICTION, not an addition: listing only "chrome" hid
+    // @types/node, so tests/page-capture.spec.ts could not see `node:path`
+    // or `__dirname` and this typecheck has been red for as long as that
+    // file has existed. Nothing ran it, so nothing said so.
+    "types": ["chrome", "node"],
     "lib": ["ES2020", "DOM"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

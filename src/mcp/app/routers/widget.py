@@ -28,6 +28,13 @@ _WIDGET_ENABLED = os.getenv("CERID_WIDGET_ENABLED", "true").lower() in (
 # Path to the built widget JS bundle.  In production this is expected at
 # ``packages/widget/dist/cerid-widget.js`` relative to the repo root.  The
 # Docker image copies this to ``/app/static/cerid-widget.js``.
+#
+# That sentence was ASPIRATIONAL until 2026-08-31 — `packages` was excluded
+# wholesale by .dockerignore, so nothing carried the bundle in and this
+# endpoint 404'd in every containerised deployment. src/mcp/Dockerfile now
+# performs the copy and scripts/ci/docker-gate.sh asserts the file exists in
+# the built image, so the comment describes what happens rather than what was
+# intended.
 _STATIC_DIR = Path(os.getenv(
     "CERID_WIDGET_STATIC_DIR",
     str(Path("/app/static")),

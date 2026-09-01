@@ -95,8 +95,66 @@ done
 
 echo "── safe-push: ✓ validated — pushing ──"
 
-if [ "$#" -gt 0 ]; then
-  git push "$@"
+# WHY THIS DOES NOT END AT `git push`
+#
+# Validation passing and the push landing are different events, and this script
+# used to report only the first. `git push` can die at the TRANSPORT after the
+# hook returns — SIGPIPE, exit 141 — and the run then reads as "validated,
+# pushing" with nothing on the remote. That happened twice on 2026-08-31 and
+# once on the v1.0.3-desktop tag, where it went unnoticed until `git ls-remote`
+# was checked by hand and the release build never fired.
+#
+# So: retry once, then VERIFY the remote actually moved. The retry is cheap in
+# a way it would not have been before — the record is already written, so the
+# hook returns in seconds instead of re-running the full gate.
+_push() {
+  if [ "$#" -gt 0 ]; then
+    git push "$@"
+  else
+    git push origin "$(git rev-parse --abbrev-ref HEAD)"
+  fi
+}
+
+if ! _push "$@"; then
+  rc=$?
+  echo "── safe-push: ⚠ push exited $rc — retrying once ──"
+  echo "   (141 is SIGPIPE: the transport dropped, not a rejected push. The"
+  echo "    validation record still stands, so this retry is seconds, not minutes.)"
+  if ! _push "$@"; then
+    echo "── safe-push: ✗ push failed twice — nothing landed ──" >&2
+    exit 1
+  fi
+fi
+
+# Verify rather than assume. Only for the shapes whose target ref is
+# unambiguous: no arguments (current branch) or `<remote> <ref>` with no
+# refspec colon. Anything else — multiple refs, --delete, an explicit
+# src:dst — is reported as unverified rather than guessed at, because a
+# confident wrong answer here is worse than none.
+_remote=""; _ref=""
+if [ "$#" -eq 0 ]; then
+  _remote="origin"; _ref="$(git rev-parse --abbrev-ref HEAD)"
+elif [ "$#" -eq 2 ] && [ "${2#-}" = "$2" ] && [ "${2#*:}" = "$2" ]; then
+  _remote="$1"; _ref="$2"
+elif [ "$#" -eq 3 ] && [ "${2#-}" = "$2" ] && [ "${2#*:}" = "$2" ]; then
+  # e.g. `origin branch --force-with-lease`
+  _remote="$1"; _ref="$2"
+fi
+
+if [ -n "$_ref" ]; then
+  _local="$(git rev-parse "$_ref" 2>/dev/null || true)"
+  _remote_sha="$(git ls-remote "$_remote" "$_ref" 2>/dev/null | grep -v '\^{}' | head -1 | cut -f1)"
+  if [ -z "$_remote_sha" ]; then
+    echo "── safe-push: ✗ $_ref is NOT on $_remote after a push that reported success ──" >&2
+    exit 1
+  fi
+  if [ "$_local" != "$_remote_sha" ]; then
+    echo "── safe-push: ✗ $_remote/$_ref is $(printf '%.12s' "$_remote_sha"), expected $(printf '%.12s' "$_local") ──" >&2
+    echo "   The push reported success but the remote does not match. Re-run." >&2
+    exit 1
+  fi
+  echo "── safe-push: ✓ verified $_remote/$_ref = $(printf '%.12s' "$_remote_sha") ──"
 else
-  git push origin "$(git rev-parse --abbrev-ref HEAD)"
+  echo "── safe-push: ⚠ pushed, but the target ref could not be determined from"
+  echo "   these arguments, so the remote was NOT verified. Check with git ls-remote."
 fi

@@ -1289,19 +1289,25 @@ async def get_egress_report():
         "setting_key": "CERID_PRELOAD_MODELS",
     })
 
-    # error_reporting — app/observability/sentry_init.py::init_sentry() gates
-    # solely on SENTRY_DSN_MCP/SENTRY_DSN being set; config.ENABLE_SENTRY is
-    # NOT read anywhere in the init path (verified: no other reference to
-    # ENABLE_SENTRY exists in src/mcp/). Reporting status from ENABLE_SENTRY
-    # alone would misreport a DSN-configured, ENABLE_SENTRY=false deployment
-    # as "off" while it is actually sending events.
+    # error_reporting — mirrors init_sentry() exactly, which is the point of
+    # this panel: it must report what the process DOES, not what a setting
+    # suggests.
+    #
+    # The note that used to live here said ENABLE_SENTRY was read nowhere and
+    # that reporting from it would misreport a DSN-configured deployment as
+    # "off" while it was actually sending. That was true and is now fixed at
+    # the source: init_sentry() honours an EXPLICIT false as a kill switch, so
+    # the two conditions below are the two the init path applies, in the same
+    # order. If one moves, the other must.
+    _enable = os.getenv("ENABLE_SENTRY")
+    _killed = _enable is not None and _enable.strip().lower() in ("false", "0", "no", "off")
     sentry_dsn = os.getenv("SENTRY_DSN_MCP") or os.getenv("SENTRY_DSN")
     rows.append({
         "channel": "error_reporting",
         "destination": "Sentry (configured DSN target)",
         "trigger": "on unhandled error/exception",
         "payload_class": "error events (PII-scrubbed)",
-        "status": "external_on" if sentry_dsn else "external_off",
+        "status": "external_on" if (sentry_dsn and not _killed) else "external_off",
         "setting_key": "SENTRY_DSN_MCP",
     })
 

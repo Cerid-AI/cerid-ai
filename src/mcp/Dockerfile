@@ -102,6 +102,19 @@ RUN chown -R cerid:cerid /home/cerid/.cache
 WORKDIR /app
 COPY --chown=cerid:cerid src/mcp/ /app/
 
+# The widget bundle app/routers/widget.py serves at /widget/script. Without
+# this the endpoint 404s with a message telling the operator to run a build
+# whose output nothing would carry into the image — which is what it did in
+# every containerised deployment until 2026-08-31.
+#
+# Served locally rather than from cdn.cerid.ai on purpose: this product runs
+# self-hosted and supports air-gapped installs (see CERID_PRELOAD_MODELS in
+# docker-compose.yml), so an endpoint that needs the public internet to answer
+# would not be one. Serving it here also keeps the widget and the server that
+# hands it out on the same version.
+RUN mkdir -p /app/static
+COPY --chown=cerid:cerid packages/widget/dist/cerid-widget.js /app/static/cerid-widget.js
+
 # Bake the canonical version from pyproject.toml at build time.
 # pyproject.toml is the single source of truth (see core/utils/version.py).
 # The .dockerignore excludes any stale host src/mcp/VERSION, so this RUN

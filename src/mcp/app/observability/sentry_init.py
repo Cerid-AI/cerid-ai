@@ -172,6 +172,22 @@ def init_sentry() -> bool:
     Returns True iff Sentry was actually initialised. No-op when
     SENTRY_DSN is empty — keeps local dev dependency-free and privacy-preserving.
     """
+    # ENABLE_SENTRY is honoured as a KILL SWITCH, not as the enabler.
+    #
+    # Until 2026-08-31 it was read nowhere in this path: config/settings.py
+    # defined it, .env.example shipped `ENABLE_SENTRY=false`, and an operator
+    # who set it false while a DSN was configured went on sending events. The
+    # one Sentry control they could discover was the only one that did nothing.
+    #
+    # Deliberately asymmetric. Treating it as the ENABLER would take every
+    # deployment dark on upgrade, because it defaults to false and DSN presence
+    # is what enables today. Treating an EXPLICIT false as "off" breaks nothing
+    # that was working as its operator believed, and makes the documented
+    # promise true. Unset still means "follow the DSN".
+    _explicit = os.getenv("ENABLE_SENTRY")
+    if _explicit is not None and _explicit.strip().lower() in ("false", "0", "no", "off"):
+        return False
+
     dsn = os.getenv("SENTRY_DSN_MCP") or os.getenv("SENTRY_DSN")
     if not dsn:
         return False

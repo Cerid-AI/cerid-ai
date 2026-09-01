@@ -17,7 +17,11 @@ const $ = <T extends Element>(sel: string) =>
 
 async function getBaseUrl(): Promise<string> {
   const stored = await chrome.storage.local.get(CERID_BASE_KEY)
-  return stored[CERID_BASE_KEY] || DEFAULT_BASE
+  // @types/chrome 0.2.x stopped typing this as `any`, which is correct: what
+  // comes back is whatever a previous version of the extension wrote, and
+  // `|| DEFAULT_BASE` does not make a non-string into a string. Narrow it.
+  const value = stored[CERID_BASE_KEY]
+  return typeof value === "string" && value ? value : DEFAULT_BASE
 }
 
 function showStatus(message: string, kind: "ok" | "err" | "info" = "info") {

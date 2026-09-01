@@ -10,6 +10,12 @@ backups
 stacks
 data
 packages
+# ...except the built widget bundle. app/routers/widget.py serves
+# /widget/script from /app/static/cerid-widget.js, and `packages` being
+# excluded wholesale is why that file never reached the image — the endpoint
+# 404'd in every containerised deployment. ~22 KB; the exclusion above still
+# keeps the rest of packages/ out of the context.
+!packages/widget/dist/cerid-widget.js
 plugins
 docs
 tasks

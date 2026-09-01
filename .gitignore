@@ -160,3 +160,7 @@ src/mcp/tests/eval/out/
 scripts/out/
 .mutation-check.lock
 .ci-artifacts/
+
+# Extension build output (vite). Never tracked; a stray `npm run build`
+# during dependency work put it in a commit once.
+packages/extension/dist/
