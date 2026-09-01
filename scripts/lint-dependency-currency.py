@@ -8,8 +8,17 @@ Two invariants, both about CURRENCY rather than correctness:
 COVERAGE
     Every directory holding a manifest Dependabot understands — a Dockerfile,
     a docker-compose file, a package.json, a requirements.txt — must appear as
-    an entry in ``.github/dependabot.yml``. An uncovered directory never
-    produces an update PR, so its pins age without anything reporting.
+    an entry in ``.github/dependabot.yml`` under the ecosystem that actually
+    reads that manifest. An uncovered directory never produces an update PR,
+    so its pins age without anything reporting.
+
+    The ecosystem matters, not just the directory. ``docker`` reads Dockerfiles
+    (and Kubernetes manifests); compose files belong to ``docker-compose``. The
+    first version of this gate conflated the two, and every compose-only entry
+    it demanded then aborted on each scheduled run with "No Dockerfiles nor
+    Kubernetes YAML found" — coverage on paper, nothing watching in practice.
+    A compose file with no ``image:`` key (every service built from source)
+    has nothing any updater can bump and is not required to be covered.
 
     This was not hypothetical when the gate was written on 2026-08-31. The
     ROOT ``docker-compose.yml`` — neo4j, redis, chroma, the core stack the
@@ -29,6 +38,7 @@ Usage:
     python scripts/lint-dependency-currency.py            # check, non-zero on failure
     python scripts/lint-dependency-currency.py --list     # show what is covered
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,7 +78,7 @@ def _dependabot_dirs() -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for u in cfg.get("updates", []):
         eco = u["package-ecosystem"]
-        for d in ([u["directory"]] if "directory" in u else u.get("directories", [])):
+        for d in [u["directory"]] if "directory" in u else u.get("directories", []):
             out.setdefault(eco, set()).add(d.rstrip("/") or "/")
     return out
 
@@ -88,44 +98,52 @@ def _tracked() -> list[Path]:
     in the repository. What this gate is about is the dependencies the REPO
     declares, so ask git rather than the disk.
     """
-    out = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True, check=True).stdout
     return [REPO / f for f in out.split("\0") if f]
 
 
 def _discover() -> dict[str, set[str]]:
     """Directories that hold a manifest, keyed by the ecosystem Dependabot uses."""
-    found: dict[str, set[str]] = {"docker": set(), "npm": set(), "pip": set()}
+    found: dict[str, set[str]] = {"docker": set(), "docker-compose": set(), "npm": set(), "pip": set()}
     matchers = (
-        ("docker", lambda n: n.startswith("Dockerfile") or (n.startswith("docker-compose") and n.endswith(".yml"))),
-        ("npm", lambda n: n == "package.json"),
-        ("pip", lambda n: n == "requirements.txt"),
+        ("docker", lambda p: p.name.startswith("Dockerfile")),
+        ("docker-compose", lambda p: _is_compose(p) and bool(_IMAGE_RE.search(p.read_text(errors="ignore")))),
+        ("npm", lambda p: p.name == "package.json"),
+        ("pip", lambda p: p.name == "requirements.txt"),
     )
     for p in _tracked():
         rel = p.relative_to(REPO)
         if _skip(rel):
             continue
         for eco, match in matchers:
-            if match(p.name):
+            if match(p):
                 found[eco].add(_dir_of(p))
     return found
 
 
+def _is_compose(p: Path) -> bool:
+    return p.name.startswith("docker-compose") and p.suffix in (".yml", ".yaml")
+
+
 def _floating() -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
-    for pattern, regex in (("docker-compose*.yml", _IMAGE_RE), ("Dockerfile*", _FROM_RE)):
-        for p in REPO.rglob(pattern):
-            if _skip(p.relative_to(REPO)):
+    for p in _tracked():
+        if _skip(p.relative_to(REPO)):
+            continue
+        if _is_compose(p):
+            regex = _IMAGE_RE
+        elif p.name.startswith("Dockerfile"):
+            regex = _FROM_RE
+        else:
+            continue
+        for ref in regex.findall(p.read_text(errors="ignore")):
+            if ref in FLOATING_ALLOWLIST or ref.startswith("$"):
                 continue
-            for ref in regex.findall(p.read_text(errors="ignore")):
-                if ref in FLOATING_ALLOWLIST or ref.startswith("$"):
-                    continue
-                # a multi-stage alias (`FROM builder AS models`) is not an image
-                if ":" not in ref and "/" not in ref:
-                    continue
-                if ref.endswith(":latest") or ":" not in ref.rsplit("/", 1)[-1]:
-                    hits.append((p.relative_to(REPO).as_posix(), ref))
+            # a multi-stage alias (`FROM builder AS models`) is not an image
+            if ":" not in ref and "/" not in ref:
+                continue
+            if ref.endswith(":latest") or ":" not in ref.rsplit("/", 1)[-1]:
+                hits.append((p.relative_to(REPO).as_posix(), ref))
     return hits
 
 

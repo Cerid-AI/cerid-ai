@@ -126,8 +126,28 @@ updates:
     commit-message:
       prefix: "deps(docker):"
 
+  # Compose files are a SEPARATE ecosystem. The `docker` updater reads
+  # Dockerfiles (and Kubernetes manifests) only; pointed at a directory that
+  # holds just a docker-compose.yml it aborts with "No Dockerfiles nor
+  # Kubernetes YAML found". Each directory that carries both files needs
+  # both entries. stacks/connectors has no entry on purpose: its compose
+  # file has no `image:` keys — every service builds from a pinned git tag.
+  - package-ecosystem: docker-compose
+    directory: /src/mcp
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  - package-ecosystem: docker-compose
+    directory: /src/web
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
   # Docker — Infrastructure (Neo4j, ChromaDB, Redis)
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /stacks/infrastructure
     schedule:
       interval: monthly
@@ -135,7 +155,7 @@ updates:
       prefix: "deps(docker):"
 
   # Docker — Gateway (Caddy)
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /stacks/gateway
     schedule:
       interval: monthly
@@ -143,7 +163,7 @@ updates:
       prefix: "deps(docker):"
 
   # Docker — Tunnel (Cloudflare)
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /stacks/tunnel
     schedule:
       interval: monthly
@@ -156,21 +176,14 @@ updates:
   # age indefinitely with nothing reporting. The root compose is the important
   # one: neo4j, redis and chroma were watched by nothing at all.
   # ---------------------------------------------------------------------------
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: monthly
     commit-message:
       prefix: "deps(docker):"
 
-  - package-ecosystem: docker
-    directory: /stacks/connectors
-    schedule:
-      interval: monthly
-    commit-message:
-      prefix: "deps(docker):"
-
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /stacks/langfuse
     schedule:
       interval: monthly

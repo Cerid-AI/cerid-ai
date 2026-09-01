@@ -104,29 +104,15 @@ cat > .ci-artifacts/trivyignore <<'EOF'
 CVE-2026-26013
 CVE-2025-64439
 CVE-2026-27794
-# glibc heap corruption — no fix available in Debian 13 yet
-CVE-2026-0861
 # wheel privilege escalation — build-time only, not exploitable at runtime
 CVE-2026-24049
-# systemd CVE in Debian 13 base — D-Bus RegisterMachine not reachable in container
-CVE-2026-4105
-# libxml2 CVEs in Alpine base — nginx serves static files only, no XML parsing
-CVE-2025-32414
-CVE-2025-32415
-CVE-2025-49794
-CVE-2025-49795
-CVE-2025-49796
-CVE-2025-6021
 # jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
 CVE-2026-23949
-# ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals
+# ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals.
+# Re-eval 2026-11-30 (verified still present in python:3.12.14-slim-trixie, ncurses-bin 6.5+20250216-2, 2026-09-01).
 CVE-2025-69720
 # nghttp2 DoS via malformed HTTP/2 — internal container traffic only, no external exposure
 CVE-2026-27135
-# systemd arbitrary code execution — D-Bus not reachable in container context
-CVE-2026-29111
-# openssl DoS via NULL pointer — Debian base image, pending 3.5.5-1 patch
-CVE-2026-28390
 # perl-base Archive::Tar symlink — pulled into Debian base layer.
 # We never invoke perl from application code (no Archive::Tar calls,
 # no perl scripts in container). Trivy flags it transitively. No

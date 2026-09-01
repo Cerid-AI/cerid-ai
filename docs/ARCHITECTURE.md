@@ -423,9 +423,12 @@ with Save Page → readability extraction → `POST /sdk/v1/ingest`.
 Works on Chrome + Firefox; Edge + Safari deferred.
 
 `packages/desktop/swift/CeridMail/` + `CeridReminders/` are TCC-
-scoped Swift helper binaries. The Python connectors at
-`core/ingest/sources/connectors/apple_mail.py` and `apple_reminders.py`
-subprocess to them. Health-check reports helper-binary availability
+scoped Swift helper binaries. The Python connector at
+`core/ingest/sources/connectors/apple_mail.py` subprocesses to
+`ceridmail`; `ceridreminders` is driven only by the desktop bridge
+(`packages/desktop/.../apple_reminders.ts`) — the backend reminders
+plugin was removed 2026-08-12 because a Linux container can never run
+a macOS binary. Health-check reports helper-binary availability
 on the host's PATH.
 
 ## Pro tier (Cerid v1.0 Phases D-H)
@@ -464,8 +467,8 @@ ConnectorPlugins (`gmail`, `google_calendar`, `outlook`,
 `ceridphotos` (PhotoKit metadata), `ceridreminders` (EventKit
 reminders), `ceridmail` (Mail.app), and `ceridspotlight`
 (CoreSpotlight donor). Python plugins (`src/mcp/plugins/apple_calendar`,
-`src/mcp/plugins/apple_photos`, `src/mcp/plugins/apple_reminders`,
-`src/mcp/plugins/apple_mail`) invoke the first four via
+`src/mcp/plugins/apple_photos`, `src/mcp/plugins/apple_mail`) invoke
+`ceridek`, `ceridphotos` and `ceridmail` via
 `asyncio.subprocess` and parse JSON-over-stdio; `ceridspotlight` is
 driven from the desktop main process instead
 (`packages/desktop/src/main/connectors/spotlight.ts`), because

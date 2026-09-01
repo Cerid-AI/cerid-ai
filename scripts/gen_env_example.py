@@ -186,6 +186,10 @@ COMPOSE_VARS: list[tuple[str, str]] = [
     ("CERID_PORT_NEO4J_BOLT", "7687"),
     ("CERID_PORT_CHROMA", "8001"),
     ("CERID_PORT_REDIS", "6379"),
+    # Read by docker-compose.yml into the cerid-web container, never by
+    # Python, so the AST walk cannot see it — yet RUNBOOK_PRODUCTION.md tells
+    # operators to set it in THIS file. Absent until 2026-09-01.
+    ("VITE_SENTRY_DSN_WEB", ""),
 ]
 
 

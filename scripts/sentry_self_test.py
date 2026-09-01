@@ -7,7 +7,7 @@
 Verifies that the running stack can reach the Sentry org and that an
 intentional synthetic exception lands in the configured projects:
 
-    python3 scripts/sentry_self_test.py [--mcp] [--web] [--marketing]
+    python3 scripts/sentry_self_test.py [--mcp] [--web]
 
 By default, runs all three. Each test drops a single ``test_event``-
 tagged exception so the operator can filter and silence them in the
@@ -104,13 +104,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sentry pipeline self-test")
     parser.add_argument("--mcp", action="store_true", help="Test the cerid-ai-mcp DSN")
     parser.add_argument("--web", action="store_true", help="Test the cerid-ai-web DSN (uses VITE_SENTRY_DSN_WEB)")
-    parser.add_argument(
-        "--marketing", action="store_true", help="Test the cerid-ai-marketing DSN",
-    )
     args = parser.parse_args()
 
-    if not (args.mcp or args.web or args.marketing):
-        args.mcp = args.web = args.marketing = True
+    if not (args.mcp or args.web):
+        args.mcp = args.web = True
 
     rc = 0
     targets = [
@@ -118,8 +115,6 @@ def main() -> int:
     ] if args.mcp else []
     if args.web:
         targets.append(("cerid-ai-web", os.getenv("VITE_SENTRY_DSN_WEB", "")))
-    if args.marketing:
-        targets.append(("cerid-ai-marketing", os.getenv("SENTRY_DSN_MARKETING", "")))
 
     for label, dsn in targets:
         if not dsn:
