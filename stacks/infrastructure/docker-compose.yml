@@ -8,7 +8,7 @@ services:
     # so a version split here is not cosmetic: starting the legacy path
     # would point a 5.26 binary at a store the unified path wrote with
     # 2026.04, and that migration is one-way.
-    image: neo4j:2026.04.0-community
+    image: neo4j:2026.07.1-community
     ports:
       - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
       - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
