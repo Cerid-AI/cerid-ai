@@ -42,7 +42,7 @@ services:
       retries: 12
 
   langfuse:
-    image: langfuse/langfuse:2  # pin to v2; v3 broke self-host backward compat (2025-04)
+    image: langfuse/langfuse:4  # pin to v2; v3 broke self-host backward compat (2025-04)
     container_name: cerid-langfuse
     restart: unless-stopped
     depends_on:
