@@ -103,7 +103,7 @@ quotequail>=0.4,<1
 # optional: bcrypt>=4.0,<6
 
 # Utilities
-cryptography>=50.0.0,<51  # 50.0.0 fixes CVE-2026-69247/69248/69249
+cryptography>=50.0.1,<51  # 50.0.0 fixes CVE-2026-69247/69248/69249
 python-multipart>=0.0.32,<1
 
 # Plugins (Pro tier — system deps: tesseract-ocr, ffmpeg in Dockerfile)

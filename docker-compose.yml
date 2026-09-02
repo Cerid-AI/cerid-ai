@@ -419,7 +419,7 @@ services:
     # (sha256:b36af7984b87191b595bc5301418ed6432c047668a4547ab531a7439b816fac3),
     # so this changes what is GUARANTEED, not what runs. Dependabot now watches
     # this directory and will propose the next one.
-    image: searxng/searxng:2026.8.29-d226b78bc
+    image: searxng/searxng:2026.9.1-ff424745f
     profiles: ["searxng"]
     ports:
       - "127.0.0.1:${CERID_PORT_SEARXNG:-8080}:8080"

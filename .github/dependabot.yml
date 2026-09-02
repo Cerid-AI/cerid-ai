@@ -49,6 +49,11 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@eslint/js"
         update-types: ["version-update:semver-major"]
+      # @vitejs/plugin-react 6.1.1 peers @babel/core@^8, which nothing else in
+      # src/web can satisfy yet; npm ci fails with ERESOLVE. Ignore that ONE
+      # version so the next release is proposed normally. Re-eval 2026-11-30.
+      - dependency-name: "@vitejs/plugin-react"
+        versions: ["6.1.1"]
     commit-message:
       prefix: "deps(npm):"
 
@@ -159,6 +164,15 @@ updates:
     directory: /stacks/gateway
     schedule:
       interval: monthly
+    # Same rule as the /src/mcp Dockerfile: the python runtime moves in a
+    # dedicated, coordinated PR (docs/DEPENDENCY_UPGRADES.md), never by a
+    # Dependabot bump. The gateway sidecar image tracks the server's
+    # python. Re-eval 2026-11-30.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
     commit-message:
       prefix: "deps(docker):"
 
@@ -187,6 +201,18 @@ updates:
     directory: /stacks/langfuse
     schedule:
       interval: monthly
+    ignore:
+      # langfuse/langfuse is pinned to v2 in the compose file itself: v3
+      # broke self-host backward compatibility (2025-04) and v4 has not been
+      # evaluated. A major bump here is a migration, not a dependency
+      # update. Re-eval 2026-11-30.
+      - dependency-name: "langfuse/langfuse"
+        update-types: ["version-update:semver-major"]
+      # postgres backs that langfuse instance; a major bump means a data
+      # directory upgrade and moves together with the langfuse major above,
+      # not on its own. Re-eval 2026-11-30.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps(docker):"
 

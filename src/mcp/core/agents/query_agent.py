@@ -130,6 +130,58 @@ def _format_chroma_result(
         "sheet_name": metadata.get("sheet_name", ""),
         "row_idx": metadata.get("row_idx"),
         "column_headers": metadata.get("column_headers", ""),
+        # Custom ingest metadata, round-tripped. Everything above is a key this
+        # projection owns; everything a CONSUMER supplied at ingest was stored
+        # (``ingest_content`` merges the caller's ``metadata`` into ``base_meta``)
+        # and then silently dropped here, because this dict is a fixed whitelist.
+        # So custom metadata was write-only from the SDK's read side: a consumer
+        # could stamp ``repo_sig`` or ``importance`` onto a document, have it
+        # persisted, and never get it back out of any endpoint. Nested under its
+        # own key rather than merged flat, so a consumer key can never shadow one
+        # of ours and the canonical shape above is unchanged for every existing
+        # reader. Empty dict when the document carried nothing custom.
+        "metadata": _custom_metadata(metadata),
+    }
+
+
+# Keys ``_format_chroma_result`` already projects, plus the ones ingestion and
+# the two-store writer stamp for their own bookkeeping. Anything outside this
+# set, and outside the reserved prefixes below, came from the consumer.
+#
+# Measured against a live corpus rather than derived from the ingest path: a
+# first cut of this filter leaked ``cerid_state``, ``cerid_pending_at``,
+# ``cerid_recovery_correlation_key``, ``embedding_model``,
+# ``embedding_model_version`` and ``title_derived`` to every consumer. None is a
+# secret, but all six are internal bookkeeping, and a response key is a contract
+# the moment someone reads it. Whitelist what is ours and return the complement.
+_PROJECTED_METADATA_KEYS = frozenset({
+    "artifact_id", "filename", "domain", "chunk_index", "chunk_id",
+    "source_type", "created_at", "ingested_at", "pack_id", "sub_category",
+    "tags_json", "tags", "keywords", "memory_type", "chunk_level",
+    "parent_chunk_id", "window_text", "sheet_name", "row_idx",
+    "column_headers", "summary", "quality_score", "tenant_id",
+    "embedding_model", "embedding_model_version", "title_derived",
+})
+
+# Internal namespaces. ``cerid_`` is the two-store commit protocol's own state
+# (``cerid_state``, ``cerid_pending_at``, ``cerid_recovery_correlation_key``);
+# a prefix rather than three names, because that protocol adds fields and a
+# list of three would leak the fourth the day it lands.
+_RESERVED_METADATA_PREFIXES = ("cerid_", "_")
+
+
+def _custom_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """The consumer-supplied metadata on a chunk, minus everything we own.
+
+    Chroma stores only primitives (``_coerce_chroma_meta`` JSON-encodes lists
+    and dicts at ingest), so what comes back is already flat and safe to hand
+    to a JSON response.
+    """
+    return {
+        k: v
+        for k, v in metadata.items()
+        if k not in _PROJECTED_METADATA_KEYS
+        and not k.startswith(_RESERVED_METADATA_PREFIXES)
     }
 
 
@@ -1830,6 +1882,12 @@ def assemble_context(
             "source_type": result.get("source_type", "kb"),
             "created_at": result.get("created_at"),
             "pack_id": result.get("pack_id", ""),
+            # Custom ingest metadata onto citations too. ``sources`` is what
+            # ``/sdk/v1/search`` returns, and a consumer reading that route
+            # must not see a strictly poorer projection than ``results`` for
+            # its own metadata. Absent (not ``{}``) when the document carried
+            # nothing custom, matching the table-fields rule beside it.
+            **({"metadata": result["metadata"]} if result.get("metadata") else {}),
             # AF-059 — tabular provenance onto citations; absent (not
             # defaulted) for non-tabular sources so the shape stays honest.
             **table_fields,
