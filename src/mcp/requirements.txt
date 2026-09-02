@@ -17,7 +17,7 @@ jinja2>=3.1.6,<4  # 3.1.6 floor — CVE-2025-27516 (sandbox |attr filter bypass)
 # Databases
 chromadb>=1,<2      # client on 1.x; server image pin lifted in chromadb migration Phase 3 (data-volume migration)
 neo4j>=6.3.0,<7         # driver 6.x is the current latest line (no 7.x on PyPI as of 2026-05-08). Audit verified clean: all sessions use `with`, Result.summary→consume already done, no read_transaction/write_transaction, no Transaction.sync. Server-side Neo4j 5→7 + GDS plugin install lands as a separate phase due to one-way data-volume migration.
-redis>=4.0,<8
+redis>=8.1.0,<9
 
 # GraphRAG retrieval scaffolding (Workstream E Phase 4a) — wraps neo4j-driver
 # 6.x against Neo4j 2026.04 calver server; pure-python wheel, no compile.
