@@ -146,7 +146,7 @@ services:
   redis:
     container_name: ai-companion-redis
     logging: *default-logging
-    image: redis:7.4.8-alpine
+    image: redis:8.10.1-alpine
     ports:
       - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
     volumes:
