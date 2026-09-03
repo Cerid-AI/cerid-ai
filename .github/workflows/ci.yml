@@ -100,7 +100,16 @@ jobs:
     # executed AFTER a PR was already merged into main — the branch that ships
     # was where regressions were discovered. A unit-test suite is not the
     # high-cost class rule 7 defers to merge time; `docker` is.
-    if: needs.changes.outputs.code == 'true'
+    #
+    # Rule 6: a dependency bump does not need the behavioural suite at PR time.
+    # It opts in with the `dependabot-full-ci` label, and the merge queue and
+    # push:main run it regardless — the filter is scoped to pull_request so a
+    # dependabot PR entering the queue cannot skip a gate ci-ok enforces.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -130,7 +139,8 @@ jobs:
           fail_ci_if_error: false
 
   security:
-    # Runs on every event. Secret detection, bandit and pip-audit are the gates
+    # No dependabot filter (rule 6: security audits always run — a bump is
+    # exactly when pip-audit matters most). Runs on every event. Secret detection, bandit and pip-audit are the gates
     # that most need to fire BEFORE a commit reaches main, and they were the
     # ones skipped on pull_request.
     if: needs.changes.outputs.code == 'true'
@@ -282,7 +292,12 @@ jobs:
     needs: [changes, lint, typecheck]
     # eslint + tsc + vitest + vite build. Same reasoning as `test`: a PR that
     # breaks the web build must go red on the PR, not on main.
-    if: needs.changes.outputs.code == 'true'
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # No job-level working-directory: scripts/ci/frontend.sh runs from the repo
@@ -318,7 +333,12 @@ jobs:
   # ---------------------------------------------------------------------------
   sdk-contract:
     needs: [changes, lint, typecheck]
-    if: needs.changes.outputs.code == 'true'
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -354,7 +374,12 @@ jobs:
   # ---------------------------------------------------------------------------
   packages:
     needs: [changes, lint, typecheck]
-    if: needs.changes.outputs.code == 'true'
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -441,6 +466,7 @@ jobs:
     # Rule 7: high-cost gate — two image builds plus two Trivy scans. Merge-time
     # only, which now means the merge QUEUE as well as push:main; before
     # merge_group existed this job could only ever report after the merge.
+    # No dependabot filter: this job never runs on pull_request anyway.
     if: >-
       needs.changes.outputs.code == 'true'
       && (github.event_name == 'merge_group'
