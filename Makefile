@@ -185,11 +185,7 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	@echo "[drift] product-story"
 	.venv/bin/python scripts/lint-product-story.py
 	@echo "[drift] web-reachability"
-	@if [ -f scripts/web_reachability_allowlist.txt ]; then \
-	  .venv/bin/python scripts/lint-web-reachability.py --check; \
-	else \
-	  echo "  (internal-only allowlist — not present in this checkout, skipped)"; \
-	fi
+	.venv/bin/python scripts/lint-web-reachability.py --check
 	@echo "[drift] env-has-reader"
 	.venv/bin/python scripts/lint-env-has-reader.py --check
 	@echo "[drift] success-status-literal"
@@ -197,11 +193,7 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	@echo "[drift] key-contract"
 	.venv/bin/python scripts/lint-key-contract.py --check
 	@echo "[drift] route-has-client"
-	@if [ -f scripts/route_has_client_allowlist.txt ]; then \
-	  .venv/bin/python scripts/lint-route-has-client.py --check; \
-	else \
-	  echo "  (internal-only allowlist — not present in this checkout, skipped)"; \
-	fi
+	.venv/bin/python scripts/lint-route-has-client.py --check
 	@echo "[drift] real-fixture"
 	@if [ -f scripts/lint-real-fixture.py ]; then \
 	  .venv/bin/python scripts/lint-real-fixture.py --check; \
@@ -220,6 +212,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-no-design-drift.py --root src/web/src --allow-file scripts/design_drift_allowlist.txt
 	@echo "[drift] ci-required-gates"
 	.venv/bin/python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
+	@echo "[drift] http-singleton-thread-guard"
+	.venv/bin/python scripts/lint-http-singleton-thread-guard.py --strict src/mcp/
 	@echo "[drift] ✓ drift + lint gates passed"
 
 security-local: ## The remote `security` job, minus nothing (detect-secrets + bandit + pip-audit + dlint)

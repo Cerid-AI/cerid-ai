@@ -104,6 +104,26 @@ jobs:
         # skipped gate reads as a passing one. Static half; the runtime half
         # runs in `ci-ok` itself.
         run: python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
+      # The three gates below are stdlib-only by design, so they run here on a
+      # bare interpreter rather than waiting for the dependency install in
+      # `typecheck` or `test`.
+      - name: lint / web-reachability
+        # An exported module no production code imports. Skipped in this repo
+        # until 2026-09-03 because the Makefile guarded it on an allowlist that
+        # only existed on the other side of the mirror — a gate whose absent
+        # input made it a silent no-op.
+        run: python scripts/lint-web-reachability.py --check
+      - name: lint / route-has-client
+        # A FastAPI route nothing under the client surfaces ever calls. Same
+        # allowlist-guard history as web-reachability; the companion gate that
+        # stops a route being laundered through a dead client file.
+        run: python scripts/lint-route-has-client.py --check
+      - name: lint / http-singleton-thread-guard
+        # Module-level httpx client singletons bind to whichever event loop
+        # first touches them — the 2026-04-22 "Event loop is closed" incident.
+        # Zero violations today, so it goes in strict: a warn-only gate that
+        # cannot fail is not a gate.
+        run: python scripts/lint-http-singleton-thread-guard.py --strict src/mcp/
 
   typecheck:
     needs: [changes]
