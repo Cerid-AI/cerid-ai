@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.detect.outputs.code }}
+      web: ${{ steps.detect.outputs.web }}
+      mcp: ${{ steps.detect.outputs.mcp }}
+      packages: ${{ steps.detect.outputs.packages }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,9 +56,32 @@ jobs:
           if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
             code=false
           fi
+          # Per-area scoping (policy rule 3): a web-only change should not pay
+          # for the pytest suite, and a backend-only change should not pay for
+          # npm. Same fail-safe as `code` — an empty or unreadable diff yields
+          # true for every area, so a detector bug over-runs CI rather than
+          # silently skipping a gate. Every pattern includes this workflow file
+          # so a CI change re-runs the jobs it edits.
+          #
+          # These gate STEPS, never jobs. A job skipped by a path filter reports
+          # as skipped, and ci-ok's --enforce-ran (merge_group and push:main)
+          # reads a skip as a gate that did not run. Keeping the job and
+          # skipping its work keeps both properties: no wasted minutes, and no
+          # grey check standing in for a green one.
+          area() {
+            if [ -z "$files" ]; then echo true; return; fi
+            if printf '%s\n' "$files" | grep -qE "$1"; then echo true; else echo false; fi
+          }
+          web=$(area '^(src/web/|scripts/ci/frontend|scripts/check-bundle-size\.sh$|\.github/workflows/ci\.yml$)')
+          mcp=$(area '^(src/mcp/|scripts/|pyproject\.toml$|\.github/workflows/ci\.yml$)')
+          packages=$(area '^(packages/|scripts/ci/packages\.sh$|\.github/workflows/ci\.yml$)')
           echo "changed files:"; printf '%s\n' "$files"
-          echo "code=$code"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          {
+            echo "code=$code"
+            echo "web=$web"
+            echo "mcp=$mcp"
+            echo "packages=$packages"
+          } | tee -a "$GITHUB_OUTPUT"
 
   # Python backend
   lint:
@@ -119,20 +145,24 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
-      - run: pip install -r src/mcp/requirements.txt
-      - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
+      - if: needs.changes.outputs.mcp == 'true'
+        run: pip install -r src/mcp/requirements.txt
+      - if: needs.changes.outputs.mcp == 'true'
+        run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
+        if: needs.changes.outputs.mcp == 'true'
         # `not integration` deselects tests that require live external services
         # (Redis, MCP HTTP server). Those tests run under the preservation gate
         # which boots the full stack; running them here would fail with
         # connection-refused on the bare ubuntu runner.
         run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Gate probes (scripts/tests)
+        if: needs.changes.outputs.mcp == 'true'
         # These prove the drift/lint gates can actually fail. Nothing ran them
         # until 2026-08-04.
         run: python -m pytest scripts/tests/ -q
       - name: Upload coverage to Codecov
-        if: success()
+        if: success() && needs.changes.outputs.mcp == 'true'
         uses: codecov/codecov-action@v7
         with:
           files: src/mcp/coverage.xml
@@ -316,7 +346,8 @@ jobs:
       # blocking-production / advisory-dev npm audit split all live in the
       # script. The dev-toolchain audit stays advisory INSIDE it; do not
       # "simplify" it to a bare command under `set -e`.
-      - run: bash scripts/ci/frontend.sh
+      - if: needs.changes.outputs.web == 'true'
+        run: bash scripts/ci/frontend.sh
 
   # ---------------------------------------------------------------------------
   # SDK contract. packages/sdk/python and packages/sdk/typescript are PUBLISHED
@@ -392,7 +423,8 @@ jobs:
             packages/widget/package-lock.json
             packages/sdk/typescript/package-lock.json
             packages/extension/package-lock.json
-      - run: bash scripts/ci/packages.sh
+      - if: needs.changes.outputs.packages == 'true'
+        run: bash scripts/ci/packages.sh
 
   # ---------------------------------------------------------------------------
   # License denylist. Replaces the two inline `--fail-on` / `--failOn` audits
