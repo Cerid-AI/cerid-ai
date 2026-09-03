@@ -205,10 +205,10 @@ jobs:
           fail_ci_if_error: false
 
   security:
-    # No dependabot filter (rule 6: security audits always run — a bump is
-    # exactly when pip-audit matters most). Runs on every event. Secret detection, bandit and pip-audit are the gates
-    # that most need to fire BEFORE a commit reaches main, and they were the
-    # ones skipped on pull_request.
+    # Runs on every event. Secret detection, bandit and pip-audit are the gates
+    # that most need to fire BEFORE a commit reaches main, and they were among
+    # the ones skipped on pull_request. No dependabot filter either (rule 6:
+    # a bump is exactly when a dependency audit matters most).
     if: needs.changes.outputs.code == 'true'
     needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
