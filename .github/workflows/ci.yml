@@ -189,10 +189,10 @@ jobs:
           fail_ci_if_error: false
 
   security:
-    # No dependabot filter (rule 6: security audits always run — a bump is
-    # exactly when pip-audit matters most). Runs on every event. Secret detection, bandit and pip-audit are the gates
-    # that most need to fire BEFORE a commit reaches main, and they were the
-    # ones skipped on pull_request.
+    # Runs on every event. Secret detection, bandit and pip-audit are the gates
+    # that most need to fire BEFORE a commit reaches main, and they were among
+    # the ones skipped on pull_request. No dependabot filter either (rule 6:
+    # a bump is exactly when a dependency audit matters most).
     if: needs.changes.outputs.code == 'true'
     needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
@@ -545,8 +545,8 @@ jobs:
         # /app/static/cerid-widget.js. Until 2026-08-31 nothing put it there —
         # `packages` was excluded wholesale by .dockerignore — so the route
         # 404'd in every containerised deployment while the host build looked
-        # fine. Asserted against the built image, the only place the claim is
-        # true or false. The only place this was asserted was
+        # fine. Asserted against the built image, which is the only place the
+        # claim is true or false. Until now the assertion lived solely in
         # scripts/ci/docker-gate.sh, which this repo's CI never invokes.
         run: |
           if ! docker run --rm --entrypoint sh cerid-mcp-test -c 'test -s /app/static/cerid-widget.js'; then
