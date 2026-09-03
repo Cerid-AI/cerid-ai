@@ -49,9 +49,13 @@ make preservation-check                            # preservation harness of int
 
 ### CI gates
 
-CI runs 10 jobs: `changes`, `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `license-scan`, `docker`, and `ci-ok`. All are blocking.
+CI runs 12 jobs: `changes`, `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `license-scan`, `sdk-contract`, `packages`, `docker`, and `ci-ok`. All are blocking, and all of them run on the pull request.
 
-The single **required** status check is `ci-ok`, an aggregator that passes when the real jobs succeeded *or* were skipped. Docs-only PRs (changes confined to `docs/**`, `tasks/**`, or `*.md`) skip the code jobs via the `changes` gate, so `ci-ok` goes green without running the full suite — they merge without burning code CI.
+The single **required** status check is `ci / all-required-gates-ran` (the `ci-ok` job), an aggregator over every other job. Docs-only PRs (changes confined to `docs/**`, `tasks/**`, or `*.md`) skip the code jobs via the `changes` gate, so `ci-ok` goes green without running the full suite — they merge without burning code CI. On a code change it passes `--enforce-ran`, which turns a *skipped* job red: a gate skipped behind a failed dependency renders as a grey check, not a red one, and that is how `docker` went eight consecutive main runs without executing.
+
+**Everything gates before the merge, not at merge time.** The CI cost policy defers the highest-cost jobs to "merge time via the merge queue". That mechanism is not available here: a merge queue on a private repository requires GitHub Enterprise Cloud and this org is on GitHub Team, where the API refuses the rule outright (`422 Invalid rule 'merge_queue'`), and no queue is configured on this public repository either. A job scheduled onto `merge_group` therefore runs nowhere — not before the merge and not after it. `ci.yml` keeps the `merge_group` trigger because it is harmless, and `scripts/lint-ci-gate-shape.py` fails any job that is reachable *only* through it.
+
+So the cost rules are honoured with the levers that do work: `cancel-in-progress` (a ten-push branch pays once), the `changes` job's path filters, and the `dependabot-full-ci` opt-in label for bot PRs. Add the `dependabot-full-ci` label to a Dependabot PR to run the full behavioural matrix on it.
 
 ## Project layout
 
