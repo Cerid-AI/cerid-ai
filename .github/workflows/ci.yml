@@ -11,6 +11,12 @@ on:
     # which leaves required checks "expected, never reported" → PR blocked
     # forever. The `changes` job below skips the real work on docs-only PRs, so
     # cost is preserved without the deadlock.
+  # Merge-queue entry. Rule 7 ("high-cost gates are merge-only") only means
+  # something if a merge-TIME run exists: without this trigger `push: main`
+  # fires after the merge has already landed, so `docker` reported on a branch
+  # that was already broken. The queue re-runs the full set against the merged
+  # result before it lands.
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,8 +41,13 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags --depth=200 origin "${{ github.base_ref }}" >/dev/null 2>&1 || true
             files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>/dev/null || true)
-          else
+          elif [ "${{ github.event_name }}" = "push" ]; then
             files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          else
+            # merge_group: the queue branch has no stable base to diff against,
+            # and merge time is exactly when narrowing the run is wrong. An
+            # empty list means "run everything" below.
+            files=""
           fi
           # code=false ONLY when we got a non-empty list AND every file is docs.
           if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
@@ -84,8 +95,12 @@ jobs:
 
   test:
     needs: [changes, lint, typecheck]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Runs on pull_request, merge_group and push:main. This guard used to read
+    # `github.event_name != 'pull_request'`, so the entire pytest suite first
+    # executed AFTER a PR was already merged into main — the branch that ships
+    # was where regressions were discovered. A unit-test suite is not the
+    # high-cost class rule 7 defers to merge time; `docker` is.
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -115,8 +130,10 @@ jobs:
           fail_ci_if_error: false
 
   security:
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Runs on every event. Secret detection, bandit and pip-audit are the gates
+    # that most need to fire BEFORE a commit reaches main, and they were the
+    # ones skipped on pull_request.
+    if: needs.changes.outputs.code == 'true'
     needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -263,8 +280,9 @@ jobs:
   # Frontend
   frontend:
     needs: [changes, lint, typecheck]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # eslint + tsc + vitest + vite build. Same reasoning as `test`: a PR that
+    # breaks the web build must go red on the PR, not on main.
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # No job-level working-directory: scripts/ci/frontend.sh runs from the repo
@@ -354,8 +372,13 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Rule 7: high-cost gate — two image builds plus two Trivy scans. Merge-time
+    # only, which now means the merge QUEUE as well as push:main; before
+    # merge_group existed this job could only ever report after the merge.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name == 'merge_group'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -536,7 +559,9 @@ jobs:
   # red one. `docker` sat skipped for eight consecutive main runs on
   # 2026-08-03 behind a failing `security` job, accumulating Trivy drift with
   # no red signal. So `--enforce-ran` is passed for exactly that case:
-  # push + main + changes.code == 'true'.
+  # (push + main, or merge_group) + changes.code == 'true'. merge_group is the
+  # one that blocks a bad merge rather than reporting one — without it here,
+  # a job skipped inside the queue would still let the entry through.
   #
   # The old inline form collapsed results with join(needs.*.result), which lost
   # the job NAMES — its error read "a required CI job failed", with no way to
@@ -558,4 +583,4 @@ jobs:
         run: |
           python scripts/lint-ci-required-gates.py \
             --needs "$NEEDS_JSON" \
-            ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
+            ${{ ((github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
