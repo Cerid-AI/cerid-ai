@@ -120,7 +120,7 @@ MCP Server (:8888) — FastAPI + specialist agents + hybrid retrieval
 ChromaDB (vectors) + Neo4j (graph) + Redis (cache + audit)
 ```
 
-Core is cleanly separated from app layer (Phase C architecture). A preservation harness of integration invariants guards every capability at merge time (push to main + merge queue).
+Core is cleanly separated from app layer (Phase C architecture). A preservation harness of integration invariants guards every capability, and CI blocks on the pull request as well as on push to main.
 
 ---
 

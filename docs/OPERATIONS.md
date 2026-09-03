@@ -365,26 +365,75 @@ Set `TRUSTED_PROXIES` (comma-separated CIDRs) to extract real client IP from `X-
 
 ## Branch Protection
 
-Branch protection is configured via **GitHub UI** (not checked into the repository).
+Branch protection is repository configuration, not code, so it is not checked
+in. This is the exact state `main` is meant to be in, as a command rather than
+a description — it is idempotent, so running it is also how you verify it.
 
-### Recommended Settings for `main`
+### Two required checks, and no merge queue
 
-- **Require pull request reviews:** At least 1 approval
-- **Require status checks to pass:** All 6 CI jobs (lint, test, security, lock-sync, frontend, docker)
-- **Require branches to be up to date:** Enabled
-- **Require linear history:** Recommended (prevents merge commits)
-- **Do not allow bypassing:** Even for admins
+`main` requires exactly two contexts:
 
-### Required CI Checks
+| Context | Workflow | Covers |
+|---------|----------|--------|
+| `ci / all-required-gates-ran` | `ci.yml` (`ci-ok`) | every one of the 12 CI jobs — see [CONTRIBUTING.md](../CONTRIBUTING.md#ci-gates) |
+| `no AI-authored commits` | `supply-chain-guard.yml` | commit-trailer and IOC scan |
 
-| Job | What It Checks |
-|-----|----------------|
-| `lint` | Ruff Python linting |
-| `test` | ~1941 pytest tests, 70% coverage minimum |
-| `security` | Bandit SAST + pip-audit dependency scan |
-| `lock-sync` | Lock file freshness (pip-compile) |
-| `frontend` | TypeScript types + ESLint + vitest + build + bundle size (<800KB) + npm audit |
-| `docker` | Docker image build + Trivy CRITICAL/HIGH vulnerability scan |
+The individual CI jobs are deliberately **not** required contexts. A required
+context that never reports blocks the pull request forever, which is what
+happens the moment a job is skipped by a path filter — so `ci-ok` aggregates
+them all into one check that always reports, and fails when a gate was skipped
+on a code change.
+
+There is no merge queue and there cannot be one on this account: a merge queue
+on a private repository requires GitHub Enterprise Cloud and this org is on
+GitHub Team, where the API rejects the rule with `422 Invalid rule
+'merge_queue'`. Do not add `merge_group`-only gates on the strength of the
+trigger existing in `ci.yml` — the event never fires. CI blocks on the pull
+request instead; `scripts/lint-ci-gate-shape.py` enforces that.
+
+### Apply it
+
+```bash
+gh api -X PUT repos/Cerid-AI/cerid-ai/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "checks": [
+      { "context": "ci / all-required-gates-ran" },
+      { "context": "no AI-authored commits" }
+    ]
+  },
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false
+  },
+  "enforce_admins": false,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true
+}
+JSON
+
+# verify
+gh api repos/Cerid-AI/cerid-ai/branches/main/protection \
+  --jq '{checks: [.required_status_checks.checks[].context], strict: .required_status_checks.strict, reviews: .required_pull_request_reviews.required_approving_review_count, admins: .enforce_admins}'
+gh api repos/Cerid-AI/cerid-ai/rulesets   # expected: []  (no merge queue)
+```
+
+Two settings are counter-intuitive and deliberate:
+
+- **`required_approving_review_count: 0`.** The org has one seat, and GitHub
+  does not let an author approve their own pull request. Requiring an approval
+  would make every merge an admin bypass, which is a worse gate than none.
+  Raise it to `1` the day a second maintainer exists.
+- **`enforce_admins: false`.** `main` also takes direct pushes from the
+  internal-tree mirror sync, which never opens a pull request. Enforcing
+  protection on admins blocks that path entirely. This is why the heavy CI jobs
+  still run on `push: main` as well as on the pull request — the sync commits
+  are gated on the other side, and `ci-ok` passes `--enforce-ran` there.
 
 ---
 

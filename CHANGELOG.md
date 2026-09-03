@@ -152,12 +152,13 @@ the merge queue" — but there was no merge queue. `test`, `security`, `frontend
 with it. The sharp edge showed up in this very release: the pull request that
 FIXED a red `security` job ran with `security: skipping`.
 
-There is a merge queue now, and the heavy tier runs in it. The obvious way to do
-that costs double — `merge_group` and the follow-on `push: main` both fire for
-one change — so `MERGE_QUEUE_ENABLED=1` suppresses the post-merge repeat. It is
-a variable rather than a hardcoded condition so the thing fails safe: clear it
-and the gates go straight back to running on `push: main`. There is no state in
-which they run nowhere.
+The first fix here claimed a merge queue and a `MERGE_QUEUE_ENABLED=1` variable
+to suppress the post-merge repeat. That was wrong and is corrected below in
+"The heavy gates gate now, on the other side of the merge": a merge queue is not
+available on this plan at all, so the heavy tier moved to `pull_request`
+instead. The paragraph is left in place rather than rewritten because the wrong
+turn is the useful part — `merge_group` triggers look like they work right up
+until you check whether the event ever fires.
 
 **Two gates had not run at all since 2026-08-17.** `preservation` and
 `benchmark-slo` were routed by `vars.LIVESTACK_RUNNER`, set to the self-hosted

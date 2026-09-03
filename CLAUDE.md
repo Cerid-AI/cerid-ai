@@ -116,6 +116,11 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - New env var → `settings.py` + `.env.example`
 - Python deps → `requirements.txt` then `make lock-python`
 
-## CI (10 jobs)
+## CI (12 jobs)
 
-changes, lint, typecheck, test (20% coverage floor), security, lock-sync, frontend, license-scan, docker, ci-ok.
+changes, lint, typecheck, test (20% coverage floor), security, lock-sync, frontend, license-scan, sdk-contract, packages, docker, ci-ok.
+
+All run on `pull_request` and on `push: main`. There is no merge queue on this
+account, so nothing may be scheduled onto `merge_group` alone —
+`scripts/lint-ci-gate-shape.py` fails a job that is reachable only that way,
+and pins the rest of the workflow's shape. See `CONTRIBUTING.md` (CI gates).

@@ -11,11 +11,26 @@ on:
     # which leaves required checks "expected, never reported" → PR blocked
     # forever. The `changes` job below skips the real work on docs-only PRs, so
     # cost is preserved without the deadlock.
-  # Merge-queue entry. Rule 7 ("high-cost gates are merge-only") only means
-  # something if a merge-TIME run exists: without this trigger `push: main`
-  # fires after the merge has already landed, so `docker` reported on a branch
-  # that was already broken. The queue re-runs the full set against the merged
-  # result before it lands.
+  # LATENT trigger — kept because it is harmless, not because it fires.
+  #
+  # Rule 7 ("high-cost gates are merge-only, gated at merge time via the merge
+  # queue") describes a mechanism this account does not have. On the canonical
+  # private repo the API refuses the rule outright — `422 Invalid rule
+  # 'merge_queue'`, because a merge queue on a private repository requires
+  # GitHub Enterprise Cloud and this org is on Team — and no queue is
+  # configured on this public mirror either (`gh api
+  # repos/Cerid-AI/cerid-ai/rulesets` returns `[]`). So a gate scheduled onto
+  # merge_group runs NOWHERE: not before the merge, and not after it.
+  #
+  # Rule 7 is therefore reconciled on the other side of the merge instead. The
+  # heavy gates run on `pull_request`, where `ci / all-required-gates-ran` is
+  # the required check, and still on `push: main`, which is how this mirror is
+  # actually written. Cost is held down by path filters, the rule-6 dependabot
+  # filter and `cancel-in-progress`, not by declining to run.
+  #
+  # Nothing here may DEPEND on this event: scripts/lint-ci-gate-shape.py fails
+  # any job reachable only through merge_group. If a queue ever becomes
+  # available, the gates already accept the event and nothing needs changing.
   merge_group:
 
 concurrency:
@@ -64,7 +79,7 @@ jobs:
           # so a CI change re-runs the jobs it edits.
           #
           # These gate STEPS, never jobs. A job skipped by a path filter reports
-          # as skipped, and ci-ok's --enforce-ran (merge_group and push:main)
+          # as skipped, and ci-ok's --enforce-ran (pull_request and push:main)
           # reads a skip as a gate that did not run. Keeping the job and
           # skipping its work keeps both properties: no wasted minutes, and no
           # grey check standing in for a green one.
@@ -154,16 +169,15 @@ jobs:
 
   test:
     needs: [changes, lint, typecheck]
-    # Runs on pull_request, merge_group and push:main. This guard used to read
+    # Runs on every event that can reach main. This guard used to read
     # `github.event_name != 'pull_request'`, so the entire pytest suite first
     # executed AFTER a PR was already merged into main — the branch that ships
-    # was where regressions were discovered. A unit-test suite is not the
-    # high-cost class rule 7 defers to merge time; `docker` is.
+    # was where regressions were discovered.
     #
     # Rule 6: a dependency bump does not need the behavioural suite at PR time.
-    # It opts in with the `dependabot-full-ci` label, and the merge queue and
-    # push:main run it regardless — the filter is scoped to pull_request so a
-    # dependabot PR entering the queue cannot skip a gate ci-ok enforces.
+    # It opts in with the `dependabot-full-ci` label. The filter is scoped to
+    # pull_request, so the push:main run — the one a mirror sync goes through —
+    # still runs it regardless and ci-ok still enforces it there.
     if: >-
       needs.changes.outputs.code == 'true'
       && (github.event_name != 'pull_request'
@@ -528,14 +542,28 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan]
-    # Rule 7: high-cost gate — two image builds plus two Trivy scans. Merge-time
-    # only, which now means the merge QUEUE as well as push:main; before
-    # merge_group existed this job could only ever report after the merge.
-    # No dependabot filter: this job never runs on pull_request anyway.
+    # Rule 7, reconciled with what this account offers. This is the repository's
+    # single highest-cost gate — two image builds plus two Trivy scans — and
+    # rule 7 defers that class to merge time via the merge queue. There is no
+    # merge queue (see the `merge_group` note at the top of this file), so
+    # "merge-only" meant `push: main`, which is AFTER the merge: the job could
+    # report a broken image but never stop one. It also meant the widget-in-image
+    # assertion below could not fail a pull request.
+    #
+    # So it moves in front of the merge and stays behind it as well. On
+    # pull_request it blocks; on push:main it still covers the direct
+    # mirror-sync commits that never open one. Cost, in order of effect:
+    # `cancel-in-progress` at the top of this file kills superseded runs, so an
+    # eight-push branch pays once, not eight times; `changes.code` skips it
+    # entirely on docs-only work; and the rule-6 dependabot filter (which this
+    # job could omit while it never saw a pull request) keeps bot bumps off it
+    # unless they are labelled. The remainder is the deliberate cost of a gate
+    # that can actually fail before the merge.
     if: >-
       needs.changes.outputs.code == 'true'
-      && (github.event_name == 'merge_group'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -726,14 +754,18 @@ jobs:
   # the `changes` gate and must still get a green required check (otherwise the
   # required check never reports and the PR is blocked forever).
   #
-  # But on a CODE push to main, a skip means a dependency failed and the gate
-  # behind it never executed — and GitHub renders that as a grey check, not a
-  # red one. `docker` sat skipped for eight consecutive main runs on
-  # 2026-08-03 behind a failing `security` job, accumulating Trivy drift with
-  # no red signal. So `--enforce-ran` is passed for exactly that case:
-  # (push + main, or merge_group) + changes.code == 'true'. merge_group is the
-  # one that blocks a bad merge rather than reporting one — without it here,
-  # a job skipped inside the queue would still let the entry through.
+  # But on a CODE change, a skip means a dependency failed and the gate behind
+  # it never executed — and GitHub renders that as a grey check, not a red one.
+  # `docker` sat skipped for eight consecutive main runs on 2026-08-03 behind a
+  # failing `security` job, accumulating Trivy drift with no red signal. So
+  # `--enforce-ran` is passed whenever changes.code == 'true' and the run is one
+  # of: a human pull request, push:main, or (latently) merge_group.
+  #
+  # pull_request is in that list because PR-time is now the merge gate — this
+  # is the run that has to be exhaustive, and every job is required to be able
+  # to run there (scripts/lint-ci-gate-shape.py asserts exactly that). Bot PRs
+  # are excluded because rule 6 lets them skip the expensive jobs by design;
+  # their push:main run is still enforced.
   #
   # The old inline form collapsed results with join(needs.*.result), which lost
   # the job NAMES — its error read "a required CI job failed", with no way to
@@ -755,4 +787,4 @@ jobs:
         run: |
           python scripts/lint-ci-required-gates.py \
             --needs "$NEEDS_JSON" \
-            ${{ ((github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
+            ${{ (((github.event_name == 'pull_request' && github.actor != 'dependabot[bot]') || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
