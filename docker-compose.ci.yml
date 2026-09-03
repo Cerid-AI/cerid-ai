@@ -1,21 +1,29 @@
 # Copyright 2024-2026 Cerid AI — Licensed under the Functional Source License 1.1
 # with an Apache-2.0 future license (FSL-1.1-ALv2). See LICENSE.
 #
-# CI-only overrides for docker-compose.yml. Two purposes:
+# Throwaway-stack overrides for docker-compose.yml. Two purposes:
 #
-# 1. RESOURCE FIT — GitHub Actions ubuntu runners have 2 CPUs; the root
-#    compose's neo4j cpus: '4.0' (and heap+pagecache) hard-fail there with
-#    "range of CPUs is from 0.01 to 2.00". Shrink to fit the runner.
+# 1. RESOURCE FIT — a 2-CPU box (a GitHub Actions ubuntu runner, or a laptop
+#    you do not want to hand four cores) cannot take the root compose's neo4j
+#    cpus: '4.0' and heap+pagecache; it hard-fails with "range of CPUs is from
+#    0.01 to 2.00". Shrink to fit.
 #
-# 2. ISOLATION — the live-stack CI jobs (preservation, benchmark-slo) run on a
-#    SELF-HOSTED Mac Pro runner SHARED with a developer's dev stack. The root
-#    compose hardcodes container_name: ai-companion-* and joins the shared
-#    external `llm-network`, so a CI `docker compose up`/`down -v` would clobber
-#    the dev stack's containers (the 2026-06-07 incident). This overlay suffixes
-#    every container with -ci and runs on its own bridge (with aliases so the
-#    canonical hostnames still resolve INSIDE the CI stack). The jobs also offset
-#    published ports via CERID_PORT_* and set COMPOSE_PROJECT_NAME=cerid-ci, so
-#    the CI stack and a dev stack coexist on one host without touching each other.
+# 2. ISOLATION — the root compose hardcodes container_name: ai-companion-* and
+#    joins the shared external `llm-network`, so bringing a second stack up (or
+#    running `down -v` on it) clobbers the dev stack's containers and volumes:
+#    the 2026-06-07 incident. This overlay suffixes every container with -ci and
+#    runs on its own bridge, with aliases so the canonical hostnames still
+#    resolve INSIDE the throwaway stack. Offset the published ports via
+#    CERID_PORT_* and set COMPOSE_PROJECT_NAME=cerid-ci and the two stacks
+#    coexist on one host without touching each other.
+#
+# NO WORKFLOW IN THIS REPO USES THIS FILE. Its consumers are docs/SANDBOX_TESTING.md
+# (recipe 3) and anyone booting a second stack by hand. The live-stack jobs the
+# isolation rules were written for — preservation, benchmark-slo, and their
+# self-hosted runner — belong to the internal development pipeline and are not
+# part of the public CI; do not read this header as documentation that they run
+# here. scripts/lint-ci-compose-namespacing.py keeps the overrides honest
+# against the root compose either way.
 #
 # Layered via: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
 
