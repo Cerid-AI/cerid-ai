@@ -124,6 +124,19 @@ jobs:
         # Zero violations today, so it goes in strict: a warn-only gate that
         # cannot fail is not a gate.
         run: python scripts/lint-http-singleton-thread-guard.py --strict src/mcp/
+      # Last in the job because it is the only lint gate that needs a
+      # dependency: the assertions read the PARSED workflow, and a substring
+      # check against the file text passes on a gate that survives only inside
+      # a comment. Everything above still runs on the bare interpreter.
+      - name: lint / ci-gate-shape
+        # `ci-required-gates` asks whether the jobs that exist are aggregated.
+        # This asks whether the jobs that must exist do, and whether their
+        # `if:` still lets them run before the merge — deleting a job together
+        # with its `ci-ok.needs` entry satisfies the first check and fails this
+        # one.
+        run: |
+          pip install -q pyyaml
+          python scripts/lint-ci-gate-shape.py --workflow .github/workflows/ci.yml
 
   typecheck:
     needs: [changes]
