@@ -304,6 +304,72 @@ jobs:
       - run: bash scripts/ci/frontend.sh
 
   # ---------------------------------------------------------------------------
+  # SDK contract. packages/sdk/python and packages/sdk/typescript are PUBLISHED
+  # artifacts, and six documents (both SDK READMEs shipped to PyPI/npm,
+  # docs/SDK_PUBLISHING.md, src/mcp/app/routers/sdk_version.py,
+  # packages/sdk/python/src/cerid/__version__.py and release-sdk-python.yml)
+  # tell consumers a `sdk-contract` / `sdk-openapi-drift` gate enforces the
+  # contract. Until now that gate existed on this repo only as two scripts
+  # nothing invoked and a Makefile target a developer had to remember.
+  #
+  # The drift step is the reason the job installs the runtime stack:
+  # gen_sdk_openapi.py imports the real MCP app so the committed baseline
+  # matches what the server publishes at /sdk/v1/openapi.json byte-for-byte.
+  # ---------------------------------------------------------------------------
+  sdk-contract:
+    needs: [changes, lint, typecheck]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/mcp/requirements.lock
+      - name: Python SDK contract tests
+        run: bash scripts/ci/sdk-contract-python.sh
+      - name: sdk-openapi-drift
+        # The name six documents promise. Needs the MCP runtime, not just the
+        # SDK: the spec is rendered from the live FastAPI routes.
+        run: |
+          pip install -r src/mcp/requirements.txt
+          python scripts/gen_sdk_openapi.py --check
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/sdk/typescript/package-lock.json
+      - name: TypeScript SDK contract tests
+        run: bash scripts/ci/sdk-contract-ts.sh
+
+  # ---------------------------------------------------------------------------
+  # Distributed npm artifacts: the embeddable widget, the TypeScript SDK and
+  # the browser extension. `npm run build` is the point, not an extra — the
+  # widget's committed CDN bundle was broken from 2026-06-08 and no check
+  # reported it, because nothing in CI ever built these packages. The script
+  # re-hashes packages/widget/dist around a fresh build so a stale committed
+  # bundle goes red.
+  # ---------------------------------------------------------------------------
+  packages:
+    needs: [changes, lint, typecheck]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            packages/widget/package-lock.json
+            packages/sdk/typescript/package-lock.json
+            packages/extension/package-lock.json
+      - run: bash scripts/ci/packages.sh
+
+  # ---------------------------------------------------------------------------
   # License denylist. Replaces the two inline `--fail-on` / `--failOn` audits
   # that used to live in `test` and `frontend`.
   #
@@ -568,7 +634,7 @@ jobs:
   # tell which. The script names every offender.
   ci-ok:
     name: ci / all-required-gates-ran
-    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan, docker]
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan, sdk-contract, packages, docker]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

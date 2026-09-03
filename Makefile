@@ -4,7 +4,7 @@
        test test-all test-eval eval-live-retrieval eval-chat-faithfulness \
        eval-verdict bench-nli-aggrefact \
        ci-local drift-check prepush smoke slo help \
-       security-local sdk-contract-local lock-check license-local frontend-full
+       security-local sdk-contract-local packages-local lock-check license-local frontend-full
 
 # -- Python deps --
 lock-python:
@@ -248,6 +248,10 @@ sdk-contract-local: ## The remote `sdk-contract` job (Python + TypeScript contra
 	cd packages/sdk/typescript && npm ci --no-audit --no-fund \
 	  && npm run typecheck && npm test
 
+packages-local: ## The remote `packages` job (widget + TS SDK + extension build/typecheck/test)
+	@echo "[packages] widget + sdk/typescript + extension"
+	bash scripts/ci/packages.sh
+
 license-local: ## The remote `license-scan` job's python half (~2s; lock-resolved via PyPI)
 	@echo "[license-local] python license scan (lock-resolved)"
 	@PATH="$(CURDIR)/.venv/bin:$$PATH" bash scripts/ci/license-scan-python.sh
@@ -298,7 +302,7 @@ frontend-full: ## The remote `frontend` + `frontend-desktop` jobs (build, bundle
 #   docker (hadolint + image build + Trivy)          → merge-time only
 #   license-scan's npm half (4x npm ci)              → merge-time only
 #   frontend-a11y (axe sweep rides frontend-full's vitest run)
-prepush: ci-local drift-check security-local sdk-contract-local lock-check license-local frontend-full ## FULL pre-push parity with remote CI (run before every push)
+prepush: ci-local drift-check security-local sdk-contract-local packages-local lock-check license-local frontend-full ## FULL pre-push parity with remote CI (run before every push)
 	@echo "[prepush] ✓ complete — safe to push"
 
 mutation-check: ## Do the tests DETECT faults? (injects real defect classes; survivors = blind spots)
