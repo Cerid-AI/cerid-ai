@@ -212,6 +212,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-no-design-drift.py --root src/web/src --allow-file scripts/design_drift_allowlist.txt
 	@echo "[drift] ci-required-gates"
 	.venv/bin/python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
+	@echo "[drift] ci-gate-shape"
+	.venv/bin/python scripts/lint-ci-gate-shape.py --workflow .github/workflows/ci.yml
 	@echo "[drift] http-singleton-thread-guard"
 	.venv/bin/python scripts/lint-http-singleton-thread-guard.py --strict src/mcp/
 	@echo "[drift] ✓ drift + lint gates passed"
