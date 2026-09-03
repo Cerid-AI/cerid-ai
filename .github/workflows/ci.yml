@@ -462,6 +462,21 @@ jobs:
           ignore: DL3008,DL3018,DL3059
       - run: docker build -t cerid-mcp-test -f src/mcp/Dockerfile .
       - run: docker build -t cerid-web-test src/web/
+      - name: Widget bundle is in the image
+        # app/routers/widget.py serves GET /widget.js from
+        # /app/static/cerid-widget.js. Until 2026-08-31 nothing put it there —
+        # `packages` was excluded wholesale by .dockerignore — so the route
+        # 404'd in every containerised deployment while the host build looked
+        # fine. Asserted against the built image, the only place the claim is
+        # true or false. The only place this was asserted was
+        # scripts/ci/docker-gate.sh, which this repo's CI never invokes.
+        run: |
+          if ! docker run --rm --entrypoint sh cerid-mcp-test -c 'test -s /app/static/cerid-widget.js'; then
+            echo "::error::/app/static/cerid-widget.js missing from cerid-mcp-test — GET /widget.js will 404."
+            echo "  Check the COPY in src/mcp/Dockerfile and the !packages/widget/dist exception in .dockerignore."
+            exit 1
+          fi
+          echo "widget bundle present ($(docker run --rm --entrypoint sh cerid-mcp-test -c 'wc -c < /app/static/cerid-widget.js') bytes)"
       - name: Create Trivy ignore file
         run: |
           cat > .trivyignore <<'EOF'

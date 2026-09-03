@@ -12,6 +12,13 @@
 # could never run on the macOS runner; running the same pinned images by hand
 # behaves identically on both.
 #
+# NOT INVOKED BY THIS REPO'S ci.yml. The public pipeline has no self-hosted
+# runner, so its `docker` job runs the hosted hadolint/Trivy actions inline
+# with its own (larger, current) suppression list; the widget-in-image
+# assertion below is mirrored there as a step. The file stays because
+# scripts/lint-suppression-expiry.py tracks the expiry dates of the CVE
+# entries in it.
+#
 # SHARED-DAEMON DISCIPLINE (the self-hosted runners share one Docker daemon
 # with each other and with the dev stack):
 #   * Image tags are namespaced by run id, so two runners building
@@ -59,7 +66,7 @@ docker run --rm -i "$HADOLINT_IMAGE" hadolint --ignore DL3008 --ignore DL3018 --
 echo "::endgroup::"
 
 # The widget bundle must be IN the mcp image, not merely built on the host.
-# app/routers/widget.py serves /widget/script from /app/static/cerid-widget.js,
+# app/routers/widget.py serves GET /widget.js from /app/static/cerid-widget.js,
 # and until 2026-08-31 nothing put it there: `packages` was excluded wholesale
 # by .dockerignore, so the endpoint 404'd in every containerised deployment
 # while the host build looked fine. Asserted against the running image because
@@ -67,7 +74,7 @@ echo "::endgroup::"
 assert_widget_in_image() {
   local img="$1"
   if ! docker run --rm --entrypoint sh "$img" -c 'test -s /app/static/cerid-widget.js'; then
-    echo "::error::/app/static/cerid-widget.js missing from $img — /widget/script will 404."
+    echo "::error::/app/static/cerid-widget.js missing from $img — GET /widget.js will 404."
     echo "  Check the COPY in src/mcp/Dockerfile and the !packages/widget/dist exception in .dockerignore."
     return 1
   fi
