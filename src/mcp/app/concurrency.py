@@ -30,6 +30,10 @@ from dataclasses import dataclass, field
 logger = logging.getLogger("ai-companion.concurrency")
 
 
+class PoolTimeout(Exception):
+    """Raised when ``AsyncPool.acquire`` exceeds its timeout without a slot."""
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if not raw:
@@ -54,10 +58,18 @@ class AsyncPool:
         self._sem = asyncio.Semaphore(self.capacity)
 
     @contextlib.asynccontextmanager
-    async def acquire(self):
+    async def acquire(self, timeout: float | None = None):
         self._waiting += 1
         try:
-            await self._sem.acquire()
+            if timeout is None:
+                await self._sem.acquire()
+            else:
+                try:
+                    await asyncio.wait_for(self._sem.acquire(), timeout=timeout)
+                except TimeoutError as exc:
+                    raise PoolTimeout(
+                        f"{self.name} pool acquire timed out after {timeout}s"
+                    ) from exc
         finally:
             self._waiting -= 1
         self._in_use += 1

@@ -264,4 +264,21 @@ describe("useKBContext", () => {
     // "ab" is not > 2 characters after trim, so no query is set
     expect(mockQueryKB).not.toHaveBeenCalled()
   })
+
+  it("does not query when enabled is false even for long messages", () => {
+    const wrapper = createWrapper()
+    renderHook(() => useKBContext("how does auth work", undefined, { enabled: false }), { wrapper })
+    expect(mockQueryKB).not.toHaveBeenCalled()
+  })
+
+  it("still runs a manual search when auto-enabled is false", async () => {
+    const wrapper = createWrapper()
+    const { result } = renderHook(
+      () => useKBContext("how does auth work", undefined, { enabled: false }),
+      { wrapper },
+    )
+    act(() => { result.current.setManualQuery("manual lookup please") })
+    act(() => { result.current.executeManualSearch() })
+    await waitFor(() => expect(mockQueryKB).toHaveBeenCalled())
+  })
 })

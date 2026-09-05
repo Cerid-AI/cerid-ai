@@ -68,11 +68,13 @@ export function useOrchestratedQuery(
   ragMode: RagMode,
   recentMessages?: Pick<ChatMessage, "role" | "content">[],
   contextSources?: ContextSources,
+  opts?: { enabled?: boolean },
 ): UseOrchestratedQueryReturn {
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set())
   const [manualQuery, setManualQuery] = useState("")
   const [activeManualQuery, setActiveManualQuery] = useState("")
   const { injectedContext, injectResult, removeInjected, clearInjected } = useKBInjection()
+  const autoEnabled = opts?.enabled ?? true
 
   // Source gates driven by parent (useContextSources hook) — not local state
   const kbEnabled = contextSources?.kb ?? true
@@ -113,7 +115,11 @@ export function useOrchestratedQuery(
         contextSources,
         { signal },
       ),
-    enabled: !!effectiveQuery && effectiveQuery.length > 2,
+    // `enabled` gates only the auto latestUserMessage query. Manual search
+    // (activeManualQuery) still fires when auto is suppressed.
+    enabled:
+      (autoEnabled && !!effectiveQuery && effectiveQuery.length > 2) ||
+      (!!activeManualQuery && activeManualQuery.length > 2),
     staleTime: 15_000,
     retry: 1,
     retryDelay: 2000,

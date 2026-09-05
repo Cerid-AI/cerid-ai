@@ -58,6 +58,7 @@ export interface UseKBContextReturn {
 export function useKBContext(
   latestUserMessage: string,
   recentMessages?: Pick<ChatMessage, "role" | "content">[],
+  opts?: { enabled?: boolean },
 ): UseKBContextReturn {
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set())
   const [activeTags, setActiveTags] = useState<string[]>([])
@@ -68,6 +69,7 @@ export function useKBContext(
 
   // The effective query: manual overrides auto
   const effectiveQuery = activeManualQuery || latestUserMessage
+  const autoEnabled = opts?.enabled ?? true
 
   const domainKey = useMemo(
     () => [...activeDomains].sort().join(","),
@@ -87,7 +89,12 @@ export function useKBContext(
         recentMessages,
         { signal },
       ),
-    enabled: !!effectiveQuery && effectiveQuery.length > 2,
+    // `enabled` gates only the auto latestUserMessage query. Manual search
+    // (activeManualQuery) still fires when auto is suppressed — Knowledge
+    // console / inject path in smart mode.
+    enabled:
+      (autoEnabled && !!effectiveQuery && effectiveQuery.length > 2) ||
+      (!!activeManualQuery && activeManualQuery.length > 2),
     staleTime: 15_000,
     retry: 1,
   })

@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 import config
-from app.concurrency import KB_POOL
+from app.concurrency import KB_POOL, PoolTimeout
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 from app.services.private_mode import private_blocks, saves_blocked
@@ -355,13 +355,43 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         }
     # Heavy RAG path is gated by KB_POOL so /health, /observability, and
     # other lightweight routes served by HEALTH_POOL are never starved by
-    # concurrent KB queries (audit RC-C, smoke Test G).
-    async with KB_POOL.acquire():
-        return await _agent_query_inner(req, request)
+    # concurrent KB queries (audit RC-C, smoke Test G). A full pool fails
+    # open after 2s with a distinct queued reason — not the 20s budget copy.
+    try:
+        async with KB_POOL.acquire(timeout=2.0):
+            return await _agent_query_inner(req, request)
+    except PoolTimeout:
+        logger.warning(
+            "agent query pool acquire timed out (pool=%s timeout=%.1fs)",
+            KB_POOL.name,
+            2.0,
+        )
+        from core.models.query_envelope import QueryEnvelope
+        env = QueryEnvelope()
+        env.budget_seconds = 2.0
+        env.degraded_reason = (
+            "Retrieval is queued behind other knowledge queries. Retry in a moment."
+        )
+        return env.to_dict()
+
+
+def _empty_agent_query_envelope() -> dict[str, Any]:
+    return {
+        "context": "",
+        "sources": [],
+        "results": [],
+        "domains_searched": [],
+        "total_results": 0,
+        "confidence": 0.0,
+    }
 
 
 async def _agent_query_inner(req: AgentQueryRequest, request: Request):
     try:
+        if await request.is_disconnected():
+            logger.info("agent query client disconnected before retrieval — releasing KB_POOL")
+            return _empty_agent_query_envelope()
+
         # ── Scope expansion ─────────────────────────────────────────────
         # Expand query_scope into individual flags (only sets defaults;
         # explicit per-field values always win).
@@ -419,6 +449,10 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 # ``X-Cache: HIT`` so dashboards/smoke harnesses can distinguish
                 # warm from cold without timing the call (audit RC-G).
                 return cached
+
+        if await request.is_disconnected():
+            logger.info("agent query client disconnected before retrieval — releasing KB_POOL")
+            return _empty_agent_query_envelope()
 
         # Workstream E Phase 0: per-request header overrides the default;
         # absent header → ENABLE_STEP_TIMING env (default true) so production
@@ -555,6 +589,8 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         if not has_context and not req.skip_cache and not degraded and not _c1_scoped:
             set_cached(req.query, domain_key, req.top_k, result, context_hint=c1_hint)
         return result
+    except asyncio.CancelledError:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -352,9 +352,17 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     return userMsgs.length > 0 ? userMsgs : undefined
   }, [messages])
 
-  const kbContext = useKBContext(latestUserMessage, recentMessages)
+  const kbContext = useKBContext(latestUserMessage, recentMessages, {
+    enabled: ragMode === "off",
+  })
   const { sources: contextSources, toggleSource } = useContextSources()
-  const orchestratedContext = useOrchestratedQuery(latestUserMessage, ragMode, recentMessages, contextSources)
+  const orchestratedContext = useOrchestratedQuery(
+    latestUserMessage,
+    ragMode,
+    recentMessages,
+    contextSources,
+    { enabled: ragMode !== "off" },
+  )
   const { injectedContext, clearInjected } = kbContext
 
   // Merge orchestrated results into KB results pool for auto-inject.

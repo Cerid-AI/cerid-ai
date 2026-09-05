@@ -420,6 +420,67 @@ async def test_503_exhausts_retries_raises(monkeypatch):
     assert fake_client.post.await_count == 4
 
 
+@pytest.mark.asyncio
+async def test_503_no_slot_does_not_retry(monkeypatch):
+    """Empty QF slot returns 503 with NO Retry-After. That is misconfig, not
+    overload — retrying 3× amplifies a permanent miss and trips the breaker
+    as if the daemon were dying."""
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(
+        return_value=_resp_with_status(
+            503,
+            json_data={"error": "no rerank slot configured. Check `quenchforge doctor` for status."},
+        ),
+    )
+    fake_breaker = MagicMock()
+
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            with pytest.raises(Exception):
+                await quenchforge_client.quenchforge_embed(["hello"])
+    assert fake_client.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_503_with_retry_after_still_retries(monkeypatch):
+    """Regression: backoff 503 (Retry-After present) must still retry.
+    Slice 1 must not collapse the two 503 classes."""
+    monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "test-embed")
+    import config.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "EMBEDDING_DIMENSIONS", 3)
+    from utils import quenchforge_client
+
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(side_effect=[
+        _resp_with_status(503, retry_after="0"),
+        _resp_with_status(200, json_data={
+            "data": [{"index": 0, "embedding": [1.0, 1.0, 1.0]}],
+        }),
+    ])
+    fake_breaker = MagicMock()
+
+    async def _passthrough(coro_fn):
+        return await coro_fn()
+
+    fake_breaker.call = _passthrough
+
+    with patch.object(quenchforge_client, "_get_client", AsyncMock(return_value=fake_client)):
+        with patch.object(quenchforge_client, "get_breaker", return_value=fake_breaker):
+            result = await quenchforge_client.quenchforge_embed(["hello"])
+    assert result == [[1.0, 1.0, 1.0]]
+    assert fake_client.post.await_count == 2
+
+
 async def test_502_propagates_to_breaker(monkeypatch):
     """502 Bad Gateway = slot dead. Must propagate to the breaker so
     the breaker can open + the embedding chain falls through. The

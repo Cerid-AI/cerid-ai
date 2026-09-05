@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
@@ -89,5 +89,35 @@ describe("useOrchestratedQuery — error propagation", () => {
     )
     await waitFor(() => expect(result.current.hasQueried).toBe(true))
     expect(result.current.results.map((r) => r.artifact_id)).toEqual(["hot", "warm"])
+  })
+
+  it("does not query when enabled is false even for long messages", () => {
+    mockOrchestrated.mockResolvedValue({
+      results: [],
+      confidence: 0,
+      total_results: 0,
+      execution_time_ms: 0,
+    })
+    renderHook(
+      () => useOrchestratedQuery("how does auth work", "smart", undefined, undefined, { enabled: false }),
+      { wrapper: createWrapper() },
+    )
+    expect(mockOrchestrated).not.toHaveBeenCalled()
+  })
+
+  it("still runs a manual search when auto-enabled is false", async () => {
+    mockOrchestrated.mockResolvedValue({
+      results: [],
+      confidence: 0,
+      total_results: 0,
+      execution_time_ms: 0,
+    })
+    const { result } = renderHook(
+      () => useOrchestratedQuery("how does auth work", "smart", undefined, undefined, { enabled: false }),
+      { wrapper: createWrapper() },
+    )
+    act(() => { result.current.setManualQuery("manual lookup please") })
+    act(() => { result.current.executeManualSearch() })
+    await waitFor(() => expect(mockOrchestrated).toHaveBeenCalled())
   })
 })

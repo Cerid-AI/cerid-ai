@@ -877,9 +877,10 @@ async def lightweight_kb_query(
     context assembly.  Returns raw ranked results suitable for
     claim verification where only semantic similarity matters.
     """
-    results = await multi_domain_query(
-        query, domains=domains, top_k=top_k, chroma_client=chroma_client,
-    )
+    async with _VERIFY_KB_SEM:
+        results = await multi_domain_query(
+            query, domains=domains, top_k=top_k, chroma_client=chroma_client,
+        )
     results = deduplicate_results(results)
     # Filter out noise — verification operates on these results directly
     # and low-relevance hits degrade claim verification accuracy.
@@ -1337,6 +1338,13 @@ async def _rerank_cross_encoder(
 # harnesses still need their own PACE_S because the semaphore protects the
 # daemon, not batch etiquette.
 _RERANK_QUENCHFORGE_SEM = asyncio.Semaphore(1)
+# Verification's lightweight_kb_query is off KB_POOL (HARM to pin slots while
+# waiting on OpenRouter). Cap the Chroma/BM25 hop only; NLI runs after release.
+_VERIFY_KB_SEM = asyncio.Semaphore(int(config.VERIFY_KB_MAX_CONCURRENT))
+# Once-per-process: RERANK_PROVIDER=quenchforge with no loaded slot used to
+# 503 on every query. Warn on the first miss so operators see it; do not
+# retry here — fall-through to sidecar/ONNX is the recovery path.
+_QUENCHFORGE_RERANK_FAIL_WARNED = False
 
 
 async def _maybe_rerank_via_quenchforge(
@@ -1371,6 +1379,15 @@ async def _maybe_rerank_via_quenchforge(
         return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
     except Exception as exc:  # noqa: BLE001 — fall through to sidecar / local ONNX
         log_swallowed_error("core.agents.query_agent.quenchforge_rerank", exc)
+        global _QUENCHFORGE_RERANK_FAIL_WARNED
+        if not _QUENCHFORGE_RERANK_FAIL_WARNED:
+            _QUENCHFORGE_RERANK_FAIL_WARNED = True
+            logger.warning(
+                "Quenchforge rerank slot missing or unreachable; falling "
+                "through to sidecar/ONNX. Set RERANK_PROVIDER=sidecar (or "
+                "load a rerank slot) to stop calling /v1/rerank. detail=%s",
+                exc,
+            )
         # Configured for quenchforge GPU rerank but it failed — the chain will
         # serve from the sidecar or local ONNX. Record the degradation so
         # /health.inference_routing.rerank reports it instead of advertising a

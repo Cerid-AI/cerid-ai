@@ -70,11 +70,14 @@ class _Spy:
 
 
 class _FakeRequest:
-    """Minimal stand-in for a Starlette Request — only ``.headers.get`` is used
-    by the handlers under test."""
+    """Minimal stand-in for a Starlette Request — ``.headers.get`` and
+    ``is_disconnected`` are used by ``_agent_query_inner``."""
 
     def __init__(self, headers: dict | None = None):
         self.headers = headers or {}
+
+    async def is_disconnected(self) -> bool:
+        return False
 
 
 def _install(monkeypatch, *, level: int | None) -> tuple[_Spy, _Spy]:

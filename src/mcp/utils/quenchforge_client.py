@@ -135,6 +135,18 @@ _MAX_503_RETRIES = 3
 _MAX_RETRY_AFTER_SECONDS = 5.0
 
 
+def _is_retryable_unavailable(resp) -> bool:
+    """True only for overload 503 (Retry-After present).
+
+    Quenchforge uses 503 for two different facts:
+    - no slot configured (permanent; no Retry-After) — fail fast
+    - auto-backoff (transient; Retry-After: 2) — retry
+    """
+    if resp.status_code != HTTPStatus.SERVICE_UNAVAILABLE:
+        return False
+    return _parse_retry_after(resp.headers.get("Retry-After")) is not None
+
+
 async def _post_with_retry_after(
     client: httpx.AsyncClient,
     url: str,
@@ -142,13 +154,17 @@ async def _post_with_retry_after(
 ) -> dict:
     """POST with 503/Retry-After awareness.
 
-    Differentiates two upstream failure modes:
+    Differentiates three upstream failure modes:
 
-    - **503 Service Unavailable** — the gateway is asking us to back off
+    - **503 with Retry-After** — the gateway is asking us to back off
       (quenchforge's auto-backoff fires here when slot latency p99 goes
       critical). The slot is alive; we sleep ``Retry-After`` seconds and
       retry up to ``_MAX_503_RETRIES`` times. The breaker never sees the
       503 — back-pressure is not a failure signal.
+
+    - **503 without Retry-After** — permanent misconfig (e.g. no slot
+      loaded). Fail fast on the first POST so we do not amplify a
+      permanent miss into four breaker-visible failures.
 
     - **Everything else** (502, 500, non-2xx) — the slot is genuinely
       broken. Propagate to the breaker.
@@ -160,19 +176,18 @@ async def _post_with_retry_after(
     (different model than quenchforge serves) → ChromaDB ends up with a
     mixed vector space → retrieval quality collapses.
 
-    The fix narrows the failure-trip surface so 503 (transient overload)
-    triggers retries instead of fallthrough. 502 still trips the breaker
-    so genuinely-dead slots get bypassed.
+    The fix narrows the failure-trip surface so overload 503 (Retry-After
+    present) triggers retries instead of fallthrough, while no-slot 503
+    fails immediately. 502 still trips the breaker so genuinely-dead
+    slots get bypassed.
     """
     for attempt in range(_MAX_503_RETRIES + 1):
         resp = await client.post(url, json=json_body)
-        if resp.status_code != HTTPStatus.SERVICE_UNAVAILABLE or attempt == _MAX_503_RETRIES:
+        if not _is_retryable_unavailable(resp) or attempt == _MAX_503_RETRIES:
             resp.raise_for_status()
             return resp.json()
         # Server asked us to back off. Sleep for Retry-After (clamped).
-        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
-        if retry_after is None:
-            retry_after = 1.0
+        retry_after = _parse_retry_after(resp.headers.get("Retry-After")) or 1.0
         await asyncio.sleep(min(retry_after, _MAX_RETRY_AFTER_SECONDS))
     # unreachable — the loop body returns or raises on every path
     raise RuntimeError("_post_with_retry_after: exhausted retries without return")

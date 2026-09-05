@@ -52,6 +52,9 @@ class _FakeRequest:
     def __init__(self, headers: dict | None = None):
         self.headers = headers or {}
 
+    async def is_disconnected(self) -> bool:
+        return False
+
 
 class _Spy:
     """Async seam stand-in recording the kwargs it was called with."""

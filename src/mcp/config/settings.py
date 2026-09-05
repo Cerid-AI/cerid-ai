@@ -660,8 +660,11 @@ EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT",
 # Max concurrent claim verifications (KB search + reranking + external LLM).
 # Each verification loads BM25 indices and runs ONNX cross-encoder inference,
 # which is memory-intensive.  With 10+ claims, unbounded parallelism can OOM
-# a 2 GB container.  Default 5 keeps peak memory manageable on most setups.
-VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "8"))
+# a 2 GB container.  Default 3 keeps peak memory manageable on most setups.
+VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "3"))
+# Concurrent lightweight_kb_query → multi_domain_query children. Wraps only
+# the retrieval hop so verification cannot stampede Chroma/BM25.
+VERIFY_KB_MAX_CONCURRENT = int(os.getenv("VERIFY_KB_MAX_CONCURRENT", "2"))
 # Minimum available container memory (MB) before allowing a new claim verification.
 # Uses cgroup v2 files — no-op when running outside a memory-limited container.
 VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))
