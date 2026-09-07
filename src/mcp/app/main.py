@@ -995,6 +995,20 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             log_swallowed_error("app.main.prewarm_ollama_client", e)
 
+    # Measure real local chat-model throughput off the request path: once now
+    # (after the local-model resolver above) and again on every
+    # INFERENCE_RECHECK_INTERVAL pass. utils.inference_config's detection only
+    # knows a local backend is reachable, never how fast it actually responds —
+    # both coroutines no-op internally when no local provider is configured.
+    try:
+        from utils.inference_config import _inference_recheck_loop, probe_local_throughput
+        _inference_probe_task = asyncio.create_task(probe_local_throughput())
+        app.state.inference_probe_task = _inference_probe_task
+        _inference_recheck_task = asyncio.create_task(_inference_recheck_loop())
+        app.state.inference_recheck_task = _inference_recheck_task
+    except Exception as e:
+        log_swallowed_error("app.main.local_throughput_probe_start", e)
+
     # Pre-warm reranker ONNX model (avoids 2-3s delay on first query).
     # run_in_executor keeps the event loop (and uvicorn) responsive while ONNX
     # loads — without this the loop blocks for several seconds on cold start.
@@ -1168,6 +1182,24 @@ async def lifespan(app: FastAPI):
     try:
         app.state.invariants_refresh_task.cancel()
         await app.state.invariants_refresh_task
+    except (asyncio.CancelledError, AttributeError):
+        pass
+
+    # Cancel the background local-inference recheck loop (Task 1,
+    # env-profiles) — it's a perpetual `while True` task like the invariants
+    # loop above and needs the same explicit cancel+await, or it leaks past
+    # lifespan exit.
+    try:
+        app.state.inference_recheck_task.cancel()
+        await app.state.inference_recheck_task
+    except (asyncio.CancelledError, AttributeError):
+        pass
+
+    # The boot-time probe (same task family, run once at startup) needs the
+    # same treatment — otherwise it leaks past lifespan exit too.
+    try:
+        app.state.inference_probe_task.cancel()
+        await app.state.inference_probe_task
     except (asyncio.CancelledError, AttributeError):
         pass
 

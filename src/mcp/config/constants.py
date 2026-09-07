@@ -110,6 +110,13 @@ TRUST_SCORE_CACHE_TTL_S = 60
 # probe's Chroma gets), decoupled from the ~54s median /health rebuild gap.
 INVARIANTS_REFRESH_S = 600
 
+# Hard ceiling for utils.inference_config.probe_local_throughput()'s one
+# 64-token completion against the local backend. Bounds a background task,
+# never a request path — 90s covers a cold/loaded 7B CPU slot (measured
+# 28-64s per call under load) without hanging the recheck loop forever if
+# the backend never answers.
+LOCAL_THROUGHPUT_PROBE_TIMEOUT_S = 90
+
 __all__ = [
     "MAX_ARTIFACT_LIST",
     "MAX_UPLOAD_SIZE_BYTES",
@@ -139,4 +146,5 @@ __all__ = [
     "HEALTH_STATUS_CACHE_TTL_S",
     "TRUST_SCORE_CACHE_TTL_S",
     "INVARIANTS_REFRESH_S",
+    "LOCAL_THROUGHPUT_PROBE_TIMEOUT_S",
 ]

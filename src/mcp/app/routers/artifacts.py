@@ -160,12 +160,15 @@ def recategorize(
     except Exception as exc:  # noqa: BLE001 — lexical reconcile is best-effort
         log_swallowed_error("app.routers.artifacts.recategorize_lexical", exc)
 
-    # Bust query-result caches so re-ranked/rewritten results don't keep serving
-    # the artifact under its stale old domain.
+    # Bust query-result caches for BOTH domains the artifact touched — a cached
+    # result for old_domain may have included it, one for new_domain may now be
+    # missing it — so re-ranked/rewritten results don't keep serving it stale.
     try:
         from utils.query_cache import invalidate_query_caches
 
-        invalidate_query_caches(trigger="artifacts.recategorize", redis=get_redis())
+        redis_client = get_redis()
+        invalidate_query_caches(trigger="artifacts.recategorize", redis=redis_client, domain=old_domain)
+        invalidate_query_caches(trigger="artifacts.recategorize", redis=redis_client, domain=new_domain)
     except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
         log_swallowed_error("app.routers.artifacts.recategorize_cache", exc)
 
@@ -383,11 +386,15 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
             )
 
         # Bust query-result caches so re-ranked (quality-weighted) results aren't
-        # served stale after the score change (AF-064/099).
+        # served stale after the score change (AF-064/099). Scoped to the
+        # artifact's own domain — already fetched above, no extra store read.
         try:
             from utils.query_cache import invalidate_query_caches
 
-            invalidate_query_caches(trigger="artifacts.feedback", redis=get_redis())
+            invalidate_query_caches(
+                trigger="artifacts.feedback", redis=get_redis(),
+                domain=artifact.get("domain") or None,
+            )
         except Exception as exc:  # noqa: BLE001 — cache bust is best-effort
             log_swallowed_error("app.routers.artifacts.feedback_cache", exc)
 

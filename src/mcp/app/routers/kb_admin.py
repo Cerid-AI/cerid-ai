@@ -30,7 +30,7 @@ from core.retrieval.semantic_cache import invalidate_cache as invalidate_semanti
 from core.utils import audit_log
 from core.utils.swallowed import log_swallowed_error
 from utils.encryption import decrypt_field
-from utils.query_cache import invalidate_cache_non_blocking
+from utils.query_cache import invalidate_cache_non_blocking, invalidate_query_caches
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -79,6 +79,20 @@ def _invalidate_semantic_cache_safe(trigger: str) -> None:
         invalidate_semantic_cache(get_redis(), trigger=trigger)
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error("app.routers.kb_admin.semantic_cache_invalidate", e)
+
+
+def _invalidate_scoped_safe(trigger: str, domain: str | None) -> None:
+    """Best-effort domain-scoped query-cache invalidation (C1+C2), mirroring
+    ``_invalidate_semantic_cache_safe``. The mutation this follows has
+    already succeeded (artifacts deleted, collection repaired, ...); an
+    unguarded ``get_redis()`` here previously let a redis blip raise past
+    the mutation and turn a successful admin call into a reported 500,
+    including skipping the audit-log line that should always follow it.
+    """
+    try:
+        invalidate_query_caches(trigger=trigger, redis=get_redis(), domain=domain)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.kb_admin.invalidate_scoped", e)
 
 
 # ---------------------------------------------------------------------------
@@ -337,8 +351,9 @@ async def reingest_artifact(artifact_id: str):
             sub_category=target.get("sub_category", ""),
         )
 
-        await invalidate_cache_non_blocking()
-        _invalidate_semantic_cache_safe("kb_admin.reingest_artifact")
+        # Single artifact, known domain — scope both caches instead of the
+        # full flush, matching the ingest routes' domain-scoped contract.
+        _invalidate_scoped_safe("kb_admin.reingest_artifact", domain or None)
 
         return ReingestResponse(
             status=result.get("status", "success"),
@@ -439,9 +454,11 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
             )
 
     # Per-artifact re-ingest already invalidates the semantic cache; invalidate
-    # the flat query cache once for the batch to match the other admin mutators.
-    await invalidate_cache_non_blocking()
-    _invalidate_semantic_cache_safe("kb_admin.reindex_corpus")
+    # once more for the batch to match the other admin mutators. Scoped to
+    # domain_filter when the caller gave one (every artifact in the batch
+    # shares it); None (no filter — a batch can span any domain) keeps the
+    # full-flush contract, same as before this batch invalidation was scoped.
+    _invalidate_scoped_safe("kb_admin.reindex_corpus", domain_filter)
 
     next_offset = offset + limit if len(artifacts) == limit else None
     return ReindexCorpusResponse(
@@ -760,8 +777,9 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
             log_swallowed_error('app.routers.kb_admin', e)
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
-        await invalidate_cache_non_blocking()
-        _invalidate_semantic_cache_safe("kb_admin.clear_domain")
+        # Every artifact removed was in `domain` — scope both caches to it
+        # instead of flushing every domain's cached results.
+        _invalidate_scoped_safe("kb_admin.clear_domain", domain)
 
         audit_log.audit(
             "kb.clear_domain",
@@ -1044,8 +1062,9 @@ async def repair_collection(req: CollectionRepairRequest):
             detail=f"Backup replay failed (collection was dropped — restore from {backup_path}): {e}",
         )
 
-    await invalidate_cache_non_blocking()
-    _invalidate_semantic_cache_safe("kb_admin.repair_collection")
+    # The collection name maps to exactly one domain (validated above) — scope
+    # both caches to it instead of flushing every domain's cached results.
+    _invalidate_scoped_safe("kb_admin.repair_collection", domain)
 
     return CollectionRepairResponse(
         status="repaired",

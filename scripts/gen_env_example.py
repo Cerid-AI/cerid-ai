@@ -193,6 +193,32 @@ COMPOSE_VARS: list[tuple[str, str]] = [
 ]
 
 
+# Per-variable explanatory comments, emitted above the assignment. Reserved
+# for knobs whose VALUE SET is not self-evident from the name and default —
+# an operator reading .env.example cannot otherwise know that
+# CERID_ENVIRONMENT_PROFILE takes exactly three words.
+VAR_COMMENTS: dict[str, tuple[str, ...]] = {
+    "CERID_ENVIRONMENT_PROFILE": (
+        "Environment profile: a named bundle of the knobs below, applied as",
+        "DEFAULTS only where you have not set a value yourself (your pins win).",
+        "Empty = no preset. One of:",
+        "  cloud-first  interactive and background stages off-box on the cheap tier",
+        "  hybrid       interactive stages off-box on the cheap tier; the background",
+        "               tail stays local on INTERNAL_LLM_MODEL_BACKGROUND",
+        "  local-only   everything local, lower concurrency and refresh caps",
+        "hybrid and local-only default INTERNAL_LLM_PROVIDER to the detected local",
+        "backend (HOST_RECOMMENDED_LOCAL_BACKEND), since the shipped default is",
+        "openrouter. No profile re-points an eval stage or a HARD/FRONTIER stage to",
+        "the cheap tier — those keep the model the tier registry assigns them.",
+        "cloud-first and hybrid degrade to local-only when OPENROUTER_API_KEY is",
+        "unset or Private Mode is L1+ — read from CERID_PRIVATE_MODE at BOOT, since",
+        "the live level lives in Redis; a runtime change is reported by",
+        "/setup/system-check.active_profile but does not re-apply the preset.",
+        "Table: src/mcp/config/environment_profiles.py",
+    ),
+}
+
+
 def render_env_example(entries: list[tuple[str, str | None]]) -> str:
     lines = [
         "# .env.example — auto-generated from src/mcp/config/settings.py",
@@ -201,6 +227,7 @@ def render_env_example(entries: list[tuple[str, str | None]]) -> str:
         "",
     ]
     for name, default in entries:
+        lines.extend(f"# {c}" for c in VAR_COMMENTS.get(name, ()))
         if default is COMPUTED_DEFAULT:
             # Commented ON PURPOSE. `NAME=` would set the empty string and
             # defeat the default computed in code.

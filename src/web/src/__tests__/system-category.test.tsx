@@ -63,6 +63,25 @@ const mockSystemCheck = {
   cpu_cores: 8, gpu: "Apple M1 GPU", gpu_acceleration: "Metal",
 }
 
+const mockSystemCheckMeasured = {
+  ...mockSystemCheck,
+  local_throughput: {
+    prompt_tok_s: 120.5,
+    gen_tok_s: 42.3,
+    probe_at: 1735689600,
+    expectations: {
+      memory_extract: { seconds: 45.7, basis: "measured" },
+      entity_extraction: { seconds: 12.3, basis: "measured" },
+      wiki_summary: { seconds: 30.1, basis: "measured" },
+      claim_extraction: { seconds: 20.0, basis: "measured" },
+      topic_extraction: { seconds: 15.0, basis: "measured" },
+      chat_turn_tail_s: 58.0,
+    },
+  },
+  suggested_profile: "hybrid",
+  active_profile: "cloud-first",
+}
+
 const mockStorage = {
   chromadb: { disk_mb: 10, collections: 2, chunks: 150 },
   neo4j: { disk_mb: 5, nodes: 100, relationships: 50 },
@@ -184,6 +203,28 @@ describe("SystemCategory — platform capabilities", () => {
     await screen.findByText("Platform")
     // "Apple M1" appears in both CPU and GPU spans; getAllByText handles duplicates
     expect((await screen.findAllByText("Apple M1")).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("renders the Expectations row with numbers and profiles when measured", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/setup/system-check")) return ok(mockSystemCheckMeasured)
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    expect(await screen.findByText("Expectations")).toBeInTheDocument()
+    expect(screen.getByText(/42 tok\/s/)).toBeInTheDocument()
+    expect(screen.getByText(/12s/)).toBeInTheDocument()
+    expect(screen.getByText(/45\.7s/)).toBeInTheDocument()
+    expect(screen.getByText(/cloud-first/)).toBeInTheDocument()
+    expect(screen.getByText(/hybrid/)).toBeInTheDocument()
+  })
+
+  it("hides the Expectations row when unmeasured", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    expect(screen.queryByText("Expectations")).not.toBeInTheDocument()
   })
 })
 

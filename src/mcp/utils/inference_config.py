@@ -20,16 +20,29 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
 import shutil
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from http import HTTPStatus
+from typing import Any
 
+import httpx
+
+import config
+from config.constants import LOCAL_THROUGHPUT_PROBE_TIMEOUT_S
+from core.utils.internal_llm import (
+    _get_ollama_client,
+    _get_pacing_gate,
+    _served_models_url,
+    effective_local_model_async,
+)
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion")
@@ -68,6 +81,11 @@ class InferenceConfig:
     rerank_latency_ms: float = 0.0
     message: str = ""
     detected_at: float = 0.0
+    # Measured local chat-model throughput (probe_local_throughput). None
+    # until the first successful probe — never inferred from tier/hardware.
+    local_prompt_tok_s: float | None = None
+    local_gen_tok_s: float | None = None
+    local_probe_at: float | None = None
 
 
 # Module-level singleton
@@ -297,10 +315,11 @@ async def _inference_recheck_loop() -> None:
     """Background coroutine that re-checks inference providers periodically.
 
     Detects upgrades (e.g. Ollama started mid-session) and downgrades
-    (e.g. sidecar stopped). Logs tier changes.
+    (e.g. sidecar stopped). Logs tier changes. Also re-runs
+    ``probe_local_throughput`` on every pass so measured tok/s tracks a
+    local backend that gets faster/slower (model swap, contention) between
+    boot and now, not just at startup.
     """
-    import asyncio
-
     interval = int(os.getenv("INFERENCE_RECHECK_INTERVAL", "300"))
     if interval <= 0:
         logger.info("Inference recheck disabled (INFERENCE_RECHECK_INTERVAL=0)")
@@ -314,7 +333,16 @@ async def _inference_recheck_loop() -> None:
             old_provider = old.provider
             old_tier = old.tier
 
-            new = detect_embedding_provider()
+            # detect_embedding_provider() is synchronous (subprocess GPU
+            # probes with 5s timeouts, three httpx.get calls with 2s
+            # timeouts) — run it off the event loop.
+            new = await asyncio.to_thread(detect_embedding_provider)
+            # It also builds and installs a brand new InferenceConfig, which
+            # would otherwise null out the measured rates below until the
+            # re-probe (which can itself fail) fills them back in.
+            new.local_prompt_tok_s = old.local_prompt_tok_s
+            new.local_gen_tok_s = old.local_gen_tok_s
+            new.local_probe_at = old.local_probe_at
 
             if new.provider != old_provider or new.tier != old_tier:
                 direction = "upgrade" if _tier_rank(new.tier) > _tier_rank(old_tier) else "downgrade"
@@ -324,6 +352,8 @@ async def _inference_recheck_loop() -> None:
                 )
             else:
                 logger.debug("Inference recheck: no change (%s/%s)", new.provider, new.tier.value)
+
+            await probe_local_throughput()
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error(
                 "utils.inference_config.recheck_loop",
@@ -341,6 +371,198 @@ def _tier_rank(tier: InferenceTier) -> int:
     }.get(tier, 0)
 
 
+# ── Local chat-model throughput probe ──────────────────────────────────────
+# Detection above answers "is a local backend available"; it says nothing
+# about how fast a real completion runs there. probe_local_throughput()
+# answers that with one small measured completion, off the request path, so
+# expectations_for() can report real per-function seconds instead of a
+# hardware-tier guess.
+
+_PROBE_PROMPT_TOKENS = 256
+_PROBE_GEN_TOKENS = 64
+
+
+def _probe_prompt() -> str:
+    """Build the probe prompt fresh on every call.
+
+    A fixed prompt string measured a cache hit, not a completion: live
+    against quenchforge's gateway, an identical repeated prompt collapsed
+    to ``prompt_n: 1, cached_tokens: 34`` (llama-server's prompt-prefix
+    cache), corrupting ``prompt_tok_s``. The leading nonce defeats the
+    cache so the prompt phase is genuinely reprocessed each probe.
+    """
+    nonce = uuid.uuid4().hex
+    words = [nonce, *(["probe"] * (_PROBE_PROMPT_TOKENS - 1))]
+    return " ".join(words)
+
+
+# (prompt_tokens, output_tokens) per pipeline stage — fixed shapes, not
+# measured; only the tok/s rate is measured. Values from
+# tasks/2026-09-07-hardware-limited-client-configs.md §1/§4a.
+STAGE_TOKEN_SHAPES: dict[str, tuple[int, int]] = {
+    "memory_extract": (1000, 300),
+    "entity_extraction": (1600, 400),
+    "wiki_summary": (900, 500),
+    "claim_extraction": (800, 200),
+    "topic_extraction": (700, 100),
+}
+
+
+def _ollama_generate_rate(count: int | None, duration_ns: int | None) -> float | None:
+    """tokens/second from an Ollama ``/api/generate`` count+duration pair.
+
+    Durations are nanoseconds; a missing or zero duration can't derive a
+    rate, so it reports "no data" rather than dividing by zero.
+    """
+    if not count or not duration_ns:
+        return None
+    return count / (duration_ns / 1_000_000_000)
+
+
+async def probe_local_throughput() -> None:
+    """Measure real local chat-model throughput with one small completion.
+
+    Runs off the request path — the lifespan startup hook and every
+    ``_inference_recheck_loop`` pass — never on a request. Skipped entirely
+    when the configured provider isn't a local one (``ollama``/
+    ``quenchforge``). On timeout or failure the rate fields are left as
+    they were (``None`` until a probe actually succeeds) and exactly one
+    INFO line explains why.
+    """
+    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    if provider not in ("ollama", "quenchforge"):
+        return
+
+    base_url = _served_models_url()
+    try:
+        client = await _get_ollama_client()
+        async with asyncio.timeout(LOCAL_THROUGHPUT_PROBE_TIMEOUT_S):
+            model = await effective_local_model_async()
+            prompt = _probe_prompt()
+            if provider == "quenchforge":
+                # The gateway does NOT expose llama-server's native
+                # /completion route (404 live: quenchforge's routes are
+                # /api/chat, /api/generate, /v1/chat/completions,
+                # /v1/embeddings, /v1/rerank) — it proxies the
+                # OpenAI-compatible /v1/chat/completions instead, which
+                # carries llama-server's `timings` alongside `usage`.
+                # Acquired as a BACKGROUND-class caller on the same
+                # priority gate _call_ollama uses: the probe must queue
+                # behind INTERNAL_LLM_MAX_CONCURRENCY like any other
+                # non-interactive stage, never land as an extra permit on
+                # top of it or displace an interactive caller.
+                async with _get_pacing_gate().slot(interactive=False):
+                    # Measured from here, not gate acquisition, so the
+                    # wall-clock fallback below times only the HTTP call.
+                    start = time.monotonic()
+                    resp = await client.post(
+                        f"{base_url}/v1/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": _PROBE_GEN_TOKENS,
+                            "temperature": 0,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                timings = data.get("timings") or {}
+                prompt_n = timings.get("prompt_n")
+                if prompt_n is not None and prompt_n < _PROBE_PROMPT_TOKENS // 2:
+                    # The server processed far fewer prompt tokens than we
+                    # sent: a prefix-cache hit despite the nonce. The rate
+                    # it reports measured almost nothing, and storing it
+                    # would leak into every expectation as "measured".
+                    logger.info(
+                        "Local throughput probe discarded: prompt_n=%s of %s sent (cache hit)",
+                        prompt_n, _PROBE_PROMPT_TOKENS,
+                    )
+                    return
+                prompt_tok_s = timings.get("prompt_per_second")
+                gen_tok_s = timings.get("predicted_per_second")
+            else:
+                async with _get_pacing_gate().slot(interactive=False):
+                    # Measured from here, not gate acquisition, so the
+                    # wall-clock fallback below times only the HTTP call.
+                    start = time.monotonic()
+                    resp = await client.post(
+                        f"{base_url}/api/generate",
+                        json={
+                            "model": model,
+                            "prompt": prompt,
+                            "stream": False,
+                            "options": {"num_predict": _PROBE_GEN_TOKENS, "temperature": 0},
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                prompt_tok_s = _ollama_generate_rate(
+                    data.get("prompt_eval_count"), data.get("prompt_eval_duration"),
+                )
+                gen_tok_s = _ollama_generate_rate(data.get("eval_count"), data.get("eval_duration"))
+
+            if prompt_tok_s is None or gen_tok_s is None:
+                # Neither shape reported per-phase timing (an older
+                # llama-server build, or a stripped Ollama response) —
+                # approximate from the whole round trip instead of
+                # discarding a perfectly good completion. Coarse: it
+                # ignores the prompt/generation split, but a rough number
+                # beats none.
+                elapsed = time.monotonic() - start
+                if elapsed > 0:
+                    if prompt_tok_s is None:
+                        prompt_tok_s = _PROBE_PROMPT_TOKENS / elapsed
+                    if gen_tok_s is None:
+                        gen_tok_s = _PROBE_GEN_TOKENS / elapsed
+    except (TimeoutError, httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.info("Local throughput probe failed or timed out: %s: %s", type(exc).__name__, exc)
+        return
+
+    if prompt_tok_s is None or gen_tok_s is None:
+        logger.info("Local throughput probe returned no usable timing data")
+        return
+
+    cfg = get_inference_config()
+    cfg.local_prompt_tok_s = prompt_tok_s
+    cfg.local_gen_tok_s = gen_tok_s
+    cfg.local_probe_at = time.time()
+
+
+def expectations_for(cfg: InferenceConfig) -> dict:
+    """Derive per-function latency expectations from cfg's measured rates.
+
+    Pure — reads only ``cfg.local_prompt_tok_s`` / ``cfg.local_gen_tok_s``,
+    never triggers a probe. Each ``STAGE_TOKEN_SHAPES`` entry reports its
+    projected ``seconds`` (rounded to 1 decimal) and a ``basis`` of
+    "measured" or "unmeasured"; ``chat_turn_tail_s`` sums memory_extract +
+    entity_extraction — the two stages every chat turn pays for.
+    """
+    prompt_tok_s = cfg.local_prompt_tok_s
+    gen_tok_s = cfg.local_gen_tok_s
+    measured = bool(prompt_tok_s) and bool(gen_tok_s)
+
+    result: dict[str, Any] = {}
+    memory_extract_seconds: float | None = None
+    entity_extraction_seconds: float | None = None
+    for stage, (prompt_tokens, output_tokens) in STAGE_TOKEN_SHAPES.items():
+        if measured and prompt_tok_s is not None and gen_tok_s is not None:
+            seconds = round(prompt_tokens / prompt_tok_s + output_tokens / gen_tok_s, 1)
+            result[stage] = {"seconds": seconds, "basis": "measured"}
+            if stage == "memory_extract":
+                memory_extract_seconds = seconds
+            elif stage == "entity_extraction":
+                entity_extraction_seconds = seconds
+        else:
+            result[stage] = {"basis": "unmeasured"}
+
+    result["chat_turn_tail_s"] = (
+        round(memory_extract_seconds + entity_extraction_seconds, 1)
+        if memory_extract_seconds is not None and entity_extraction_seconds is not None
+        else None
+    )
+    return result
+
+
 def inference_health_payload() -> dict:
     """Return inference status for the /health endpoint."""
     cfg = get_inference_config()
@@ -356,4 +578,5 @@ def inference_health_payload() -> dict:
         "embed_latency_ms": round(cfg.embed_latency_ms, 2),
         "rerank_latency_ms": round(cfg.rerank_latency_ms, 2),
         "message": cfg.message,
+        "expectations": expectations_for(cfg),
     }

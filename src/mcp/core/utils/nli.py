@@ -25,11 +25,11 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 import sentry_sdk
-from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
 from core.observability.span_helpers import span
+from core.utils.hf_cache import resolve_hf_file
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.nli")
@@ -67,16 +67,11 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         onnx_file = config.NLI_ONNX_FILENAME
         cache = config.NLI_MODEL_CACHE_DIR or None
 
-        logger.info("Downloading NLI model: %s/%s", repo, onnx_file)
         try:
-            model_path = hf_hub_download(
-                repo_id=repo, filename=onnx_file, cache_dir=cache,
-            )
-            tok_path = hf_hub_download(
-                repo_id=repo, filename="tokenizer.json", cache_dir=cache,
-            )
+            model_path = resolve_hf_file(repo, onnx_file, cache, logger=logger)
+            tok_path = resolve_hf_file(repo, "tokenizer.json", cache, logger=logger)
         except Exception:
-            logger.exception("Failed to download NLI model from HuggingFace")
+            logger.exception("Failed to load NLI model")
             raise
 
         sess_opts = ort.SessionOptions()

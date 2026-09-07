@@ -3,11 +3,13 @@
 
 """Tests for utils/embeddings.py and deps._EmbeddingAwareClient."""
 
+import logging
 import math
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from huggingface_hub.errors import LocalEntryNotFoundError
 
 # ---------------------------------------------------------------------------
 # OnnxEmbeddingFunction unit tests
@@ -45,7 +47,7 @@ class TestOnnxEmbeddingFunction:
         ef = OnnxEmbeddingFunction(model_id="test-model")
         assert ef([]) == []
 
-    @patch("core.utils.embeddings.hf_hub_download")
+    @patch("core.utils.embeddings.resolve_hf_file")
     @patch("core.utils.embeddings.ort.InferenceSession")
     @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_mean_pooling_and_normalization(self, mock_tok_cls, mock_session_cls, mock_dl):
@@ -86,7 +88,7 @@ class TestOnnxEmbeddingFunction:
         assert abs(np.linalg.norm(vec) - 1.0) < 1e-5, "Output should be L2-normalized"
         assert vec[3] == pytest.approx(0.0, abs=1e-5), "Fourth dim should be ~0"
 
-    @patch("core.utils.embeddings.hf_hub_download")
+    @patch("core.utils.embeddings.resolve_hf_file")
     @patch("core.utils.embeddings.ort.InferenceSession")
     @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_matryoshka_truncation(self, mock_tok_cls, mock_session_cls, mock_dl):
@@ -116,6 +118,66 @@ class TestOnnxEmbeddingFunction:
 
         assert len(result[0]) == 4, "Should truncate to 4 dims"
         assert abs(np.linalg.norm(result[0]) - 1.0) < 1e-5, "Re-normalized after truncation"
+
+
+class TestOnnxEmbeddingFunctionCacheFirstLoad:
+    """_load() must resolve the model + tokenizer files cache-first through
+    the shared core.utils.hf_cache helper — a cached model never touches
+    the network, and an uncached one falls back to exactly one download
+    per file."""
+
+    def test_cached_files_resolve_local_only_with_no_network_call(self):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        calls: list[dict] = []
+
+        def fake_hf_hub_download(**kwargs):
+            calls.append(kwargs)
+            return "/fake/model.onnx"
+
+        with patch(
+            "core.utils.hf_cache.hf_hub_download", side_effect=fake_hf_hub_download,
+        ), patch(
+            "core.utils.embeddings.ort.InferenceSession", return_value=MagicMock(),
+        ), patch(
+            "core.utils.embeddings.Tokenizer.from_file", return_value=MagicMock(),
+        ):
+            ef = OnnxEmbeddingFunction(model_id="test-model")
+            ef._load()
+
+        assert len(calls) == 2, "One local_files_only call per file (model + tokenizer)"
+        assert all(c["local_files_only"] is True for c in calls)
+
+    def test_uncached_files_fall_back_to_one_network_call_each(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        calls: list[dict] = []
+
+        def fake_hf_hub_download(**kwargs):
+            calls.append(kwargs)
+            if kwargs.get("local_files_only"):
+                raise LocalEntryNotFoundError("not cached")
+            return "/fake/model.onnx"
+
+        with patch(
+            "core.utils.hf_cache.hf_hub_download", side_effect=fake_hf_hub_download,
+        ), patch(
+            "core.utils.embeddings.ort.InferenceSession", return_value=MagicMock(),
+        ), patch(
+            "core.utils.embeddings.Tokenizer.from_file", return_value=MagicMock(),
+        ), caplog.at_level(logging.INFO):
+            ef = OnnxEmbeddingFunction(model_id="test-model")
+            ef._load()
+
+        # 2 files, each attempted local_files_only first then one network fallback.
+        assert len(calls) == 4
+        local_calls = [c for c in calls if c.get("local_files_only")]
+        network_calls = [c for c in calls if not c.get("local_files_only")]
+        assert len(local_calls) == 2
+        assert len(network_calls) == 2
+        assert any("downloading" in rec.message.lower() for rec in caplog.records)
 
 
 # ---------------------------------------------------------------------------

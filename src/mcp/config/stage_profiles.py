@@ -150,8 +150,69 @@ STAGE_PROFILES: dict[str, tuple[TaskType, Hardness]] = {
 }
 
 
-def _normalize_stage(stage: str) -> str:
-    """``"faithfulness/decompose"`` → ``"FAITHFULNESS_DECOMPOSE"``."""
+# Stages a user is actively blocked on. On the pre-priority FIFO pacing gate
+# these queued behind the ingest tail (``wiki_summary``, ``entity_extraction``,
+# ``community_*``, briefs, …) and exhausted their budgets at p50 28 s per busy
+# call — tasks/2026-09-06-chat-verify-performance-root-cause.md §2a. MCP tool
+# stages are equally user-blocking (an MCP client is waiting synchronously on
+# the tool call), but they are recognised by the ``mcp_`` PREFIX at runtime —
+# an MCP stage need not be in STAGE_PROFILES to be interactive — so they are
+# kept in their own set rather than folded in here.
+INTERACTIVE_STAGES = frozenset({
+    "claim_extraction",
+    "hallucination_topic",
+    "memory_extract",
+    "memory_consolidation",
+    "memory_conflict_resolve",
+    "query_decompose",
+    "rerank_llm",
+})
+
+MCP_STAGE_PREFIX = "mcp_"
+MCP_STAGES = frozenset(s for s in STAGE_PROFILES if s.startswith(MCP_STAGE_PREFIX))
+
+# Background work whose stage name never reached STAGE_PROFILES. Listed by
+# name because the complement below can only see classified stages — these
+# route through PIPELINE_PROVIDERS or the plain INTERNAL_LLM_MODEL default,
+# not through a hardness tier:
+#   topic_extraction            utils/metadata.py (the ai_categorize call site)
+#   session_summary             core/agents/session_summary.py
+#   entity_merge_adjudication   core/agents/entity_resolution.py
+_UNCLASSIFIED_BACKGROUND_STAGES = frozenset({
+    "topic_extraction",
+    "session_summary",
+    "entity_merge_adjudication",
+})
+
+# Everything else a classified stage can be: the enrichment tail nobody is
+# waiting on. Defined once, here, as the complement — a stage added to
+# STAGE_PROFILES lands in exactly one of the two sets without a second edit.
+BACKGROUND_STAGES = (
+    (frozenset(STAGE_PROFILES) | _UNCLASSIFIED_BACKGROUND_STAGES)
+    - INTERACTIVE_STAGES
+    - MCP_STAGES
+)
+
+
+def is_background_stage(stage: str | None) -> bool:
+    """True when *stage* belongs to the background (enrichment) set.
+
+    Sub-stage names resolve to their parent the same way :func:`_profile_for`
+    does, so ``"brief/daily"`` is classified with ``"brief"``.
+    """
+    if not stage:
+        return False
+    if stage in BACKGROUND_STAGES:
+        return True
+    return "/" in stage and stage.split("/", 1)[0] in BACKGROUND_STAGES
+
+
+def normalize_stage(stage: str) -> str:
+    """``"faithfulness/decompose"`` → ``"FAITHFULNESS_DECOMPOSE"``.
+
+    The env-var spelling of a stage name: ``PROVIDER_STAGE_<NORMALIZED>`` and
+    ``PROVIDER_STAGE_<NORMALIZED>_MODEL``.
+    """
     return stage.upper().replace("/", "_").replace("-", "_")
 
 
@@ -164,7 +225,7 @@ def env_pin_for(stage: str) -> str | None:
     """
     if not stage:
         return None
-    pinned = os.environ.get(f"PROVIDER_STAGE_{_normalize_stage(stage)}_MODEL")
+    pinned = os.environ.get(f"PROVIDER_STAGE_{normalize_stage(stage)}_MODEL")
     return pinned or None
 
 

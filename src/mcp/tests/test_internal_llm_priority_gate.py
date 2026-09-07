@@ -352,3 +352,35 @@ async def test_release_survives_a_second_cancellation(monkeypatch):
     await _wait_until(lambda: "AFTER" in started)
     holds["AFTER"].set()
     assert await after == "ok"
+
+
+def test_mcp_tool_stage_classifies_interactive():
+    assert mod._is_interactive("mcp_answer_with_citations", False) is True
+
+
+def test_unknown_mcp_stage_classifies_interactive():
+    """The prefix rule covers a stage nobody enumerated, by design."""
+    assert mod._is_interactive("mcp_future_stage", False) is True
+
+
+def test_wiki_summary_still_classifies_background():
+    assert mod._is_interactive("wiki_summary", False) is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_call_takes_the_free_permit_ahead_of_background(monkeypatch):
+    """An MCP tool-stage call arriving while a background call holds a permit
+    proceeds immediately instead of queueing, per the mcp_* prefix rule."""
+    started: list[str] = []
+    holds = {t: asyncio.Event() for t in ("B", "M")}
+    _wire_backend(monkeypatch, _blocking_post(started, holds))
+
+    background = asyncio.create_task(_call("B", stage="wiki_summary"))
+    await _wait_until(lambda: started == ["B"])
+    mcp_call = asyncio.create_task(_call("M", stage="mcp_answer_with_citations"))
+    await _wait_until(lambda: "M" in started)
+    assert not background.done()
+
+    for event in holds.values():
+        event.set()
+    await asyncio.gather(background, mcp_call)

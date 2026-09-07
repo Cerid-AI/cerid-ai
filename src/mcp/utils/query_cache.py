@@ -245,9 +245,10 @@ def invalidate_query_caches(trigger: str, redis: Any | None = None, domain: str 
     ``domain`` (Task 7) scopes both caches' eviction to entries whose result
     touched that domain, instead of flushing everything — an ingest into one
     domain previously busted every cached result regardless of domain,
-    pinning ``cache_hit_rate`` at 0.0. Callers that don't know a single
-    domain (``domain=None`` — every non-ingestion trigger) keep the
-    full-flush contract unchanged.
+    pinning ``cache_hit_rate`` at 0.0. Callers with no single domain to scope
+    to (``domain=None`` — truly global mutations such as
+    ``maintenance.purge_artifacts`` / ``memory.archive_old_memories``) keep
+    the full-flush contract unchanged.
     """
     # Lazy import: keep this app-layer util free of a module-load-time core dep.
     from core.retrieval.semantic_cache import invalidate_cache

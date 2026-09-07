@@ -20,11 +20,11 @@ from typing import Any
 
 import numpy as np
 import onnxruntime as ort
-from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
 from core.utils.embedding_cache import get_embedding_cache
+from core.utils.hf_cache import resolve_hf_file
 from core.utils.onnx_providers import resolve_providers
 
 logger = logging.getLogger("ai-companion.embeddings")
@@ -115,16 +115,11 @@ class OnnxEmbeddingFunction:
             if self._session is not None and self._tokenizer is not None:
                 return self._session, self._tokenizer
 
-            logger.info("Downloading embedding model: %s/%s", self._model_id, self._onnx_filename)
-            model_path = hf_hub_download(
-                repo_id=self._model_id,
-                filename=self._onnx_filename,
-                cache_dir=self._cache_dir,
+            model_path = resolve_hf_file(
+                self._model_id, self._onnx_filename, self._cache_dir, logger=logger,
             )
-            tok_path = hf_hub_download(
-                repo_id=self._model_id,
-                filename="tokenizer.json",
-                cache_dir=self._cache_dir,
+            tok_path = resolve_hf_file(
+                self._model_id, "tokenizer.json", self._cache_dir, logger=logger,
             )
 
             opts = ort.SessionOptions()

@@ -35,6 +35,12 @@ from typing import Any
 import httpx
 
 import config
+from config.stage_profiles import (
+    INTERACTIVE_STAGES,
+    MCP_STAGE_PREFIX,
+    is_background_stage,
+    normalize_stage,
+)
 from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 from core.utils.swallowed import log_swallowed_error
 
@@ -128,19 +134,12 @@ async def close_ollama_client() -> None:
 # first use — same hazard as the shared httpx client above); the cooldown
 # clock is process-wide because the backend saturation it models is.
 
-# Stages a user is actively blocked on. On the pre-priority FIFO gate these
-# queued behind the ingest tail (``wiki_summary``, ``entity_extraction``,
-# ``community_*``, briefs, …) and exhausted their budgets at p50 28 s per busy
-# call — tasks/2026-09-06-chat-verify-performance-root-cause.md §2a.
-_INTERACTIVE_STAGES = frozenset({
-    "claim_extraction",
-    "hallucination_topic",
-    "memory_extract",
-    "memory_consolidation",
-    "memory_conflict_resolve",
-    "query_decompose",
-    "rerank_llm",
-})
+# The blocking-stage set lives in config.stage_profiles alongside the
+# classification it complements (BACKGROUND_STAGES), so the two cannot drift.
+# MCP tool stages are interactive by PREFIX — an MCP client (e.g. Claude Code
+# via cerid-kb) is waiting synchronously on the tool call, whether or not that
+# stage is classified — see docs/superpowers/plans/2026-09-06-chat-verify-followups.md
+# Task 1.
 
 _pacing_guard = threading.Lock()
 
@@ -256,7 +255,7 @@ _interactive_demand_at: float = 0.0
 
 
 def _pacing_max_concurrency() -> int:
-    return max(1, int(os.environ.get("INTERNAL_LLM_MAX_CONCURRENCY", "2")))
+    return max(1, int(getattr(config, "INTERNAL_LLM_MAX_CONCURRENCY", 2)))
 
 
 def _get_pacing_gate() -> _PriorityGate:
@@ -274,7 +273,11 @@ def _cooldown_for(interactive: bool) -> _Cooldown:
 
 
 def _is_interactive(stage: str | None, interactive: bool) -> bool:
-    return interactive or stage in _INTERACTIVE_STAGES
+    return (
+        interactive
+        or stage in INTERACTIVE_STAGES
+        or (stage is not None and stage.startswith(MCP_STAGE_PREFIX))
+    )
 
 
 def _note_interactive_demand() -> None:
@@ -375,8 +378,7 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     """
     if not stage:
         return default_provider
-    normalized = stage.upper().replace("/", "_").replace("-", "_")
-    env_override = os.environ.get(f"PROVIDER_STAGE_{normalized}")
+    env_override = os.environ.get(f"PROVIDER_STAGE_{normalize_stage(stage)}")
     if env_override:
         return env_override
     pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
@@ -508,6 +510,8 @@ _effective_local_model_cache: str | None = None
 # computed against — lets a served-list refresh trigger a re-resolution
 # without re-resolving (and re-logging) on every call.
 _effective_local_model_resolved_ts: float | None = None
+# Last model background stages resolved to — see _note_background_resolution.
+_background_model_resolution: str | None = None
 
 
 def is_embedding_or_rerank_model(name: str) -> bool:
@@ -691,6 +695,52 @@ async def effective_local_model_async() -> str:
     return _apply_resolution(served, ts)
 
 
+async def _local_model_for_stage(stage: str | None) -> str:
+    """Resolve the local model name for *stage*.
+
+    Background stages (``config.stage_profiles.BACKGROUND_STAGES``) prefer the
+    second, smaller slot ``INTERNAL_LLM_MODEL_BACKGROUND`` — on class-A
+    hardware a 3B answers an extraction prompt 2.5x faster than the 7B chat
+    slot at equal recall, and nobody is waiting on those calls. The preference
+    holds only when the gateway actually SERVES that name: an unserved name is
+    silently rerouted by today's gateway and 400s on a pending build, so an
+    unconfigured second slot must fall back to the chat model rather than fail
+    every background call.
+    """
+    default_model = await effective_local_model_async()
+    background_model = getattr(config, "INTERNAL_LLM_MODEL_BACKGROUND", "")
+    if not background_model or not is_background_stage(stage):
+        return default_model
+    served, _ts = await _fetch_served_models_async()
+    resolved = (
+        background_model
+        if served is not None and background_model in served
+        else default_model
+    )
+    _note_background_resolution(background_model, resolved)
+    return resolved
+
+
+def _note_background_resolution(configured: str, resolved: str) -> None:
+    """Log one INFO per resolution CHANGE — the served list refreshes every
+    ``_SERVED_MODELS_TTL_S``, so logging per call would repeat the same
+    unchanged fact ~288 times a day (the lesson :func:`_resolve_effective_local_model`
+    already learned for its own WARNING)."""
+    global _background_model_resolution
+    with _effective_local_model_guard:
+        if _background_model_resolution == resolved:
+            return
+        _background_model_resolution = resolved
+    if resolved == configured:
+        logger.info("background stages resolved to local model %r", resolved)
+    else:
+        logger.info(
+            "background model %r is not served by the gateway; background "
+            "stages use %r instead",
+            configured, resolved,
+        )
+
+
 def is_local_model_name(name: str) -> bool:
     """True when *name* names a local chat model.
 
@@ -713,9 +763,11 @@ def reset_effective_local_model_cache() -> None:
     """Test hook: forget the cached served list and resolved model."""
     global _effective_local_model_cache, _effective_local_model_resolved_ts
     global _served_models_cache, _served_models_cache_ts
+    global _background_model_resolution
     with _effective_local_model_guard:
         _effective_local_model_cache = None
         _effective_local_model_resolved_ts = None
+        _background_model_resolution = None
     with _served_models_guard:
         _served_models_cache = None
         _served_models_cache_ts = None
@@ -759,7 +811,7 @@ async def call_internal_llm(
         registry does, and the operator can override per stage via env
         (``PROVIDER_STAGE_<NAME>_MODEL``) or per tier via the registry.
       - pacing priority on the local backend: stages in
-        ``_INTERACTIVE_STAGES`` (or any call passing *interactive*) take
+        ``INTERACTIVE_STAGES`` (or any call passing *interactive*) take
         precedence over background enrichment at the concurrency gate.
     """
     default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
@@ -844,12 +896,13 @@ async def _call_ollama(
     # model (a bare id like "llama3.1-8b"). A tier id ("openrouter/...", carries a
     # "/") can't be served by the local daemon, so use the resolved local
     # default there — validated against what the gateway actually serves
-    # (Task 6), not just the raw INTERNAL_LLM_MODEL config value. The async
-    # resolver is required here: a cache-miss/refresh fetch must never block
-    # this coroutine's event loop the way the sync `effective_local_model()`
-    # (used by health/pricing) would.
+    # (Task 6), and for a background stage against the second slot
+    # (INTERNAL_LLM_MODEL_BACKGROUND) first. The async resolver is required
+    # here: a cache-miss/refresh fetch must never block this coroutine's event
+    # loop the way the sync `effective_local_model()` (used by health/pricing)
+    # would.
     local_model = (
-        model if (model and "/" not in model) else await effective_local_model_async()
+        model if (model and "/" not in model) else await _local_model_for_stage(stage)
     )
     # Breaker key is provider- AND workload-specific. Pre-v0.93.9 both providers
     # shared the "ollama" breaker; v0.93.9 split by provider. The chat path now

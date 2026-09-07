@@ -860,6 +860,8 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
               onChange={(s) => dispatch({ type: "SET_OLLAMA", state: s })}
               hardwareGpu={state.systemCheck?.gpu ?? null}
               hardwareGpuAcceleration={state.systemCheck?.gpu_acceleration ?? null}
+              localThroughput={state.systemCheck?.local_throughput ?? null}
+              suggestedProfile={state.systemCheck?.suggested_profile ?? null}
             />
           )}
 

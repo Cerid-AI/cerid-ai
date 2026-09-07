@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive, Copy, Zap } from "lucide-react"
 import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
 import { isModelInstalled } from "@/lib/model-alias"
-import type { RecommendedLocalBackend } from "@/lib/types"
+import { isLocalThroughputMeasured } from "@/lib/types"
+import type { EnvironmentProfile, LocalThroughput, RecommendedLocalBackend } from "@/lib/types"
 
 interface OllamaState {
   detected: boolean
@@ -28,6 +29,33 @@ interface LocalLLMStepProps {
   /** Hardware detected by the system check; used to gate the CPU-only warning. */
   hardwareGpu?: string | null
   hardwareGpuAcceleration?: string | null
+  /** Boot-time local throughput probe result; null/unmeasured keeps the CPU-only sentence. */
+  localThroughput?: LocalThroughput | null
+  suggestedProfile?: EnvironmentProfile | null
+}
+
+const PROFILE_REASONS: Record<EnvironmentProfile, string> = {
+  hybrid: "interactive on cloud, background on a small local model",
+  "cloud-first": "all stages on cloud",
+  "local-only": "everything local; web-verified claims unavailable",
+}
+
+/** Shared by every backend UX that can show local-model timing — renders
+    unconditionally on measured, independent of any GPU-acceleration gate. */
+function buildMeasuredLine(
+  localThroughput: LocalThroughput | null | undefined,
+  suggestedProfile: EnvironmentProfile | null | undefined,
+): string | null {
+  if (!isLocalThroughputMeasured(localThroughput)) return null
+  const expectations = localThroughput.expectations
+  return (
+    `Local model measured at ${Math.round(localThroughput.gen_tok_s as number)} tok/s — background ` +
+    `enrichment ~${Math.round(expectations.entity_extraction.seconds ?? 0)}s per document, memory ` +
+    `extraction ${expectations.memory_extract.seconds ?? 0}s per chat turn.` +
+    (suggestedProfile
+      ? ` Suggested profile: ${suggestedProfile} (${PROFILE_REASONS[suggestedProfile]}).`
+      : "")
+  )
 }
 
 const RECOMMENDED_MODEL = "llama3.2:3b"
@@ -68,6 +96,8 @@ export function LocalLLMStep({
   onChange,
   hardwareGpu,
   hardwareGpuAcceleration,
+  localThroughput,
+  suggestedProfile,
 }: LocalLLMStepProps) {
   const backend: RecommendedLocalBackend = inferenceBackend ?? "ollama"
 
@@ -82,6 +112,8 @@ export function LocalLLMStep({
         onChange={onChange}
         hardwareGpu={hardwareGpu}
         hardwareGpuAcceleration={hardwareGpuAcceleration}
+        localThroughput={localThroughput}
+        suggestedProfile={suggestedProfile}
       />
     )
   }
@@ -93,6 +125,8 @@ export function LocalLLMStep({
       onChange={onChange}
       hardwareGpu={hardwareGpu}
       hardwareGpuAcceleration={hardwareGpuAcceleration}
+      localThroughput={localThroughput}
+      suggestedProfile={suggestedProfile}
     />
   )
 }
@@ -155,14 +189,19 @@ function QuenchforgeBackendStep({
   onChange,
   hardwareGpu,
   hardwareGpuAcceleration,
+  localThroughput,
+  suggestedProfile,
 }: {
   ollamaDetected: boolean
   state: OllamaState
   onChange: (state: OllamaState) => void
   hardwareGpu?: string | null
   hardwareGpuAcceleration?: string | null
+  localThroughput?: LocalThroughput | null
+  suggestedProfile?: EnvironmentProfile | null
 }) {
   const gpuAccelerated = gpuLooksAccelerated(hardwareGpu, hardwareGpuAcceleration)
+  const measuredLine = buildMeasuredLine(localThroughput, suggestedProfile)
 
   return (
     <>
@@ -200,6 +239,10 @@ function QuenchforgeBackendStep({
             </Badge>
           )}
         </div>
+
+        {measuredLine && (
+          <p className="text-center text-label-xxs text-muted-foreground">{measuredLine}</p>
+        )}
 
         {gpuAccelerated && (
           <div className="flex items-center justify-center gap-1.5">
@@ -297,6 +340,8 @@ function OllamaBackendStep({
   onChange,
   hardwareGpu,
   hardwareGpuAcceleration,
+  localThroughput,
+  suggestedProfile,
 }: {
   ollamaDetected: boolean
   ollamaModels: string[]
@@ -304,6 +349,8 @@ function OllamaBackendStep({
   onChange: (state: OllamaState) => void
   hardwareGpu?: string | null
   hardwareGpuAcceleration?: string | null
+  localThroughput?: LocalThroughput | null
+  suggestedProfile?: EnvironmentProfile | null
 }) {
   const [pullProgress, setPullProgress] = useState<string | null>(null)
   const [pullError, setPullError] = useState<string | null>(null)
@@ -354,6 +401,8 @@ function OllamaBackendStep({
   const showCpuOnlyWarning =
     hardware !== null && !gpuLooksAccelerated(hardware.gpu ?? hardwareGpu, hardwareGpuAcceleration)
 
+  const measuredLine = buildMeasuredLine(localThroughput, suggestedProfile)
+
   return (
     <>
       <div className="mb-2 flex items-center justify-center">
@@ -384,6 +433,10 @@ function OllamaBackendStep({
           )}
         </div>
 
+        {measuredLine && (
+          <p className="text-center text-label-xxs text-muted-foreground">{measuredLine}</p>
+        )}
+
         {ollamaDetected ? (
           <>
             {/* Hardware info card */}
@@ -407,7 +460,7 @@ function OllamaBackendStep({
                     <p className="font-medium truncate">{hardware.gpu || "—"}</p>
                   </div>
                 </div>
-                {showCpuOnlyWarning && (
+                {showCpuOnlyWarning && !measuredLine && (
                   <p className="mt-2 text-label-xxs text-yellow-600 dark:text-yellow-400">
                     CPU-only detected &mdash; inference will be slower. GPU acceleration available with Apple Silicon, NVIDIA, or AMD via Quenchforge.
                   </p>

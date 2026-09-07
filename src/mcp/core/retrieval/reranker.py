@@ -16,10 +16,10 @@ from typing import Any
 
 import numpy as np
 import onnxruntime as ort
-from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
+from core.utils.hf_cache import resolve_hf_file
 from core.utils.onnx_providers import resolve_providers
 
 logger = logging.getLogger("ai-companion.reranker")
@@ -47,9 +47,8 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         onnx_file = config.RERANK_ONNX_FILENAME
         cache = config.RERANK_MODEL_CACHE_DIR or None  # empty → huggingface default
 
-        logger.info("Downloading cross-encoder model: %s/%s", repo, onnx_file)
-        model_path = hf_hub_download(repo_id=repo, filename=onnx_file, cache_dir=cache)
-        tok_path = hf_hub_download(repo_id=repo, filename="tokenizer.json", cache_dir=cache)
+        model_path = resolve_hf_file(repo, onnx_file, cache, logger=logger)
+        tok_path = resolve_hf_file(repo, "tokenizer.json", cache, logger=logger)
 
         sess_opts = ort.SessionOptions()
         sess_opts.inter_op_num_threads = 1

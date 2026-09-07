@@ -155,6 +155,45 @@ REDIS_URL = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
+# Environment profile
+# ---------------------------------------------------------------------------
+# A named bundle of knobs already declared further down this file — see
+# config/environment_profiles.py for the table and the measurements behind it.
+# Applied HERE, above every knob it covers, as os.environ defaults, so an
+# operator pin already present in the environment always wins and the per-stage
+# PROVIDER_STAGE_* overrides (read from os.environ at call time by
+# core.utils.internal_llm) see the same values the module constants below do.
+CERID_ENVIRONMENT_PROFILE = os.getenv("CERID_ENVIRONMENT_PROFILE", "")
+
+
+def _apply_environment_profile_defaults() -> None:
+    from config.environment_profiles import apply_environment_profile, classify_hardware
+    from utils.host_info import get_host_hardware
+
+    # Private Mode's live level lives in Redis and is not knowable at import,
+    # so the boot posture (the same env pair PRIVATE_MODE_ENABLED /
+    # PRIVATE_MODE_LEVEL read further down) stands in for it here.
+    # /setup/system-check recomputes the active profile against the live level.
+    boot_private_level = (
+        int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))
+        if os.getenv("CERID_PRIVATE_MODE", "false").lower() == "true"
+        else 0
+    )
+    hardware = get_host_hardware()
+    defaults = apply_environment_profile(
+        CERID_ENVIRONMENT_PROFILE,
+        classify_hardware(hardware),
+        bool(OPENROUTER_API_KEY),
+        boot_private_level,
+        hardware.recommended_local_backend,
+    )
+    for key, value in defaults.items():
+        os.environ.setdefault(key, value)
+
+
+_apply_environment_profile_defaults()
+
+# ---------------------------------------------------------------------------
 # Temporal Awareness
 # ---------------------------------------------------------------------------
 TEMPORAL_HALF_LIFE_DAYS = 30         # exponential decay half-life for recency boost
@@ -1137,6 +1176,12 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 #   or a specific model ID
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
+# Second local slot for the background (enrichment) tail — a smaller model
+# than the chat slot. On class-A hardware a 3B is ~2.5x faster than the 7B at
+# equal extraction recall, and nobody is waiting on these calls. Applies only
+# to config.stage_profiles.BACKGROUND_STAGES, and only when the local gateway
+# actually serves the name; empty = use the same model as everything else.
+INTERNAL_LLM_MODEL_BACKGROUND = os.getenv("INTERNAL_LLM_MODEL_BACKGROUND", "")
 # Display default surfaced by /providers when INTERNAL_LLM_MODEL is unset
 # (Slice 2.2 — model ids live in config, never as call-site literals).
 INTERNAL_LLM_MODEL_DEFAULT = os.getenv(
@@ -1163,6 +1208,13 @@ CHAT_FALLBACK_POOL = [
 # Quenchforge fall-through rate observed during sustained-load ablations.
 INTERNAL_LLM_MAX_RETRIES = int(os.getenv("INTERNAL_LLM_MAX_RETRIES", "3"))
 INTERNAL_LLM_RETRY_BACKOFF = float(os.getenv("INTERNAL_LLM_RETRY_BACKOFF", "0.5"))
+
+# Bounded concurrency on non-streaming LOCAL calls — the pacing gate in
+# core.utils.internal_llm. A local chat slot serves 1-2 sequences; beyond that
+# every extra request queues server-side until the client's timeout fires.
+# Declared here (rather than read from bare os.environ at the gate, as it was
+# through 2026-09-06) so it reaches .env.example and the profile table.
+INTERNAL_LLM_MAX_CONCURRENCY = int(os.getenv("INTERNAL_LLM_MAX_CONCURRENCY", "2"))
 
 # Per-stage provider override pattern: setting
 # PROVIDER_STAGE_<NORMALIZED_STAGE> (e.g.

@@ -21,6 +21,9 @@ import httpx
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
+import config
+from app.services.private_mode import get_private_mode_level
+from config.environment_profiles import classify_hardware, resolve_profile, suggest_profile
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -809,6 +812,38 @@ async def system_check(response: Response) -> dict:
     if not recommended_local_backend:
         recommended_local_backend = _recommend_backend_from_hw(hw)
 
+    # Measured local chat-model throughput (utils.inference_config's boot-time
+    # probe) plus the per-function expectations derived from it — replaces the
+    # wizard's "CPU-only detected — inference will be slower" guess with a
+    # real number once one exists.
+    from utils.inference_config import expectations_for, get_inference_config
+
+    inference_cfg = get_inference_config()
+    local_throughput = {
+        "prompt_tok_s": inference_cfg.local_prompt_tok_s,
+        "gen_tok_s": inference_cfg.local_gen_tok_s,
+        "probe_at": inference_cfg.local_probe_at,
+        "expectations": expectations_for(inference_cfg),
+    }
+
+    # Which environment profile this host should run, and which one is in
+    # force. Recomputed here rather than read off settings: the Private Mode
+    # level that degrades a cloud profile lives in Redis and is mutable at
+    # runtime, so settings.py's import-time resolution goes stale the moment
+    # the operator flips the toolbar.
+    hardware_class = classify_hardware(hw)
+    private_mode_level = get_private_mode_level()
+    has_cloud_key = bool(os.getenv("OPENROUTER_API_KEY"))
+    suggested_profile = suggest_profile(
+        hardware_class, has_cloud_key, private_mode_level,
+    )
+    active_profile, _profile_reason = resolve_profile(
+        getattr(config, "CERID_ENVIRONMENT_PROFILE", ""),
+        hardware_class,
+        has_cloud_key,
+        private_mode_level,
+    )
+
     return {
         "ram_gb": hw.ram_gb,
         "os": hw.os,
@@ -827,6 +862,9 @@ async def system_check(response: Response) -> dict:
         "lightweight_recommended": lightweight_recommended,
         "archive_path_exists": Path(archive_path).exists(),
         "default_archive_path": default_archive,
+        "local_throughput": local_throughput,
+        "suggested_profile": suggested_profile,
+        "active_profile": active_profile,
     }
 
 

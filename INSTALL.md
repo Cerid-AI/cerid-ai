@@ -37,6 +37,23 @@ all containers, and verifies every service is healthy.
 | RAM | 8 GB | 16 GB |
 | Disk Space | 15 GB free | 25 GB free |
 
+### Local-model hardware classes
+
+The requirements above start the stack. What the local LLM can do for you
+once it's running depends on your GPU and RAM — see
+[`docs/ENVIRONMENT_PROFILES.md`](docs/ENVIRONMENT_PROFILES.md) for the full
+table, the measured reference numbers, and how to set
+`CERID_ENVIRONMENT_PROFILE`.
+
+| Class | Hardware | Expect |
+|---|---|---|
+| **A — CPU-bound** | AMD-Mac Metal, Intel Macs, no-CUDA Linux, 8 GB laptops | A 7B local model at 5–10 tok/s; enrichment/extraction calls run 20–60 s each unless routed to the cloud or a smaller local model. |
+| **B — GPU-accelerated** | Apple Silicon 16 GB+, NVIDIA 12 GB+ VRAM | A 7–8B local model at 25–60 tok/s; local is the fast path for every stage. |
+
+Cerid AI measures your actual throughput at boot rather than guessing from
+the GPU alone — the setup wizard and Settings → System show the measured
+number once the first probe completes.
+
 ---
 
 ## macOS Installation

@@ -260,6 +260,41 @@ export interface InferenceStatus {
   embed_latency_ms: number
   rerank_latency_ms: number
   message: string
+  expectations?: LocalExpectations
+}
+
+/** Per-function latency projection from the boot-time local throughput probe. */
+export interface StageExpectation {
+  seconds?: number
+  basis: "measured" | "unmeasured"
+}
+
+/** `utils.inference_config.expectations_for` — same shape on /setup/system-check
+    and /health/status.inference.expectations. */
+export interface LocalExpectations {
+  memory_extract: StageExpectation
+  entity_extraction: StageExpectation
+  wiki_summary: StageExpectation
+  claim_extraction: StageExpectation
+  topic_extraction: StageExpectation
+  chat_turn_tail_s: number | null
+}
+
+export interface LocalThroughput {
+  prompt_tok_s: number | null
+  gen_tok_s: number | null
+  probe_at: number | null
+  expectations: LocalExpectations
+}
+
+export type EnvironmentProfile = "cloud-first" | "hybrid" | "local-only"
+
+/** "Measured" means the boot probe produced a real generation rate — the only
+    field `expectations_for` derives every per-stage `basis` from. */
+export function isLocalThroughputMeasured(
+  throughput: LocalThroughput | null | undefined,
+): throughput is LocalThroughput {
+  return typeof throughput?.gen_tok_s === "number" && throughput.gen_tok_s > 0
 }
 
 /** Extended health from GET /health/status — includes degradation + pipeline routing. */
@@ -1260,6 +1295,10 @@ export interface SystemCheckResponse {
    * else that supports a local model; ``"cloud"`` when no local path is viable.
    */
   recommended_local_backend?: RecommendedLocalBackend
+  /** Boot-time local throughput probe result, absent when the probe never ran. */
+  local_throughput?: LocalThroughput | null
+  suggested_profile?: EnvironmentProfile
+  active_profile?: EnvironmentProfile | ""
 }
 
 export interface SetupServiceHealth {

@@ -20,6 +20,7 @@ import {
   SettingRow, AdvancedDisclosure, ConfirmActionButton, ReadOnlyEnvHint,
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
+import { isLocalThroughputMeasured } from "@/lib/types"
 import { useEntitlements } from "@/hooks/use-entitlements"
 import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import {
@@ -194,6 +195,11 @@ function PlatformSection() {
     ...(data.recommended_local_backend ? [{ label: "Recommended backend", value: data.recommended_local_backend }] : []),
   ]
 
+  const throughput = data.local_throughput
+  const measured = isLocalThroughputMeasured(throughput)
+  const expectations = measured ? throughput.expectations : null
+  const expectationsDef = getDef("system.capabilities.expectations")!
+
   return (
     <SectionCard title="Platform">
       <SettingRow def={def}>
@@ -217,6 +223,19 @@ function PlatformSection() {
           </Tooltip>
         ))}
       </div>
+      {measured && expectations && (
+        <SettingRow def={expectationsDef}>
+          <div className="text-right text-label-xs text-muted-foreground">
+            <p>{Math.round(throughput.gen_tok_s ?? 0)} tok/s local model</p>
+            <p>{Math.round(expectations.entity_extraction.seconds ?? 0)}s background enrichment / document</p>
+            <p>{expectations.memory_extract.seconds ?? 0}s memory extraction / chat turn</p>
+            <p>
+              Active: <span className="font-mono">{data.active_profile || "none"}</span> · Suggested:{" "}
+              <span className="font-mono">{data.suggested_profile ?? "—"}</span>
+            </p>
+          </div>
+        </SettingRow>
+      )}
     </SectionCard>
   )
 }

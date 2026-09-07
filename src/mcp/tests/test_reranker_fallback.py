@@ -85,7 +85,7 @@ def test_tokenizer_truncation_uses_configured_max_length(max_length):
     with patch.object(reranker, "_session", None), patch.object(
         reranker, "_tokenizer", None,
     ), patch.object(reranker.config, "RERANK_MAX_LENGTH", max_length), patch(
-        "core.retrieval.reranker.hf_hub_download", return_value="/tmp/fake",
+        "core.retrieval.reranker.resolve_hf_file", return_value="/tmp/fake",
     ), patch(
         "core.retrieval.reranker.ort.InferenceSession", return_value=MagicMock(),
     ), patch(
@@ -94,6 +94,37 @@ def test_tokenizer_truncation_uses_configured_max_length(max_length):
         reranker._load_model()
 
     fake_tokenizer.enable_truncation.assert_called_once_with(max_length=max_length)
+
+
+def test_load_model_resolves_files_cache_first_via_shared_helper():
+    """_load_model must resolve both the ONNX model and the tokenizer file
+    through the shared ``resolve_hf_file`` helper (not a direct, network-first
+    ``hf_hub_download`` call) so a cached model never touches the network."""
+    from core.retrieval import reranker
+
+    fake_tokenizer = MagicMock()
+    resolved: list[tuple[str, str]] = []
+
+    def fake_resolve(repo_id, filename, cache_dir, *, logger):
+        resolved.append((repo_id, filename))
+        return "/tmp/fake"
+
+    with patch.object(reranker, "_session", None), patch.object(
+        reranker, "_tokenizer", None,
+    ), patch(
+        "core.retrieval.reranker.resolve_hf_file", side_effect=fake_resolve,
+    ) as mock_resolve, patch(
+        "core.retrieval.reranker.ort.InferenceSession", return_value=MagicMock(),
+    ), patch(
+        "core.retrieval.reranker.Tokenizer.from_file", return_value=fake_tokenizer,
+    ):
+        reranker._load_model()
+
+    assert mock_resolve.call_count == 2
+    assert resolved == [
+        (reranker.config.RERANK_CROSS_ENCODER_MODEL, reranker.config.RERANK_ONNX_FILENAME),
+        (reranker.config.RERANK_CROSS_ENCODER_MODEL, "tokenizer.json"),
+    ]
 
 
 def _fake_encoding(ids: list[int], overflowing: bool) -> SimpleNamespace:

@@ -167,7 +167,7 @@ class RemovalResult:
 # Cache invalidation (query-result caches C1+C2 via the unified contract; the
 # graph serving cache C3 via a direct pattern bust — C3's job-ownership stays CL-6).
 # --------------------------------------------------------------------------- #
-def invalidate_caches(trigger: str, redis: Any | None = None) -> None:
+def invalidate_caches(trigger: str, redis: Any | None = None, domain: str | None = None) -> None:
     """Best-effort bust of the query-result caches (C1+C2) and the graph serving
     cache (C3).
 
@@ -175,6 +175,12 @@ def invalidate_caches(trigger: str, redis: Any | None = None) -> None:
     :func:`remove_content` (e.g. ``session_wipe._delete_verified_memory``,
     which deletes a verified-memory Chroma doc + ``:Memory`` node directly
     since neither carries ``chunk_ids`` for the fan-out path — AF-096).
+
+    ``domain`` scopes the C1+C2 eviction to entries whose result touched that
+    domain, instead of flushing everything — callers that know the mutation's
+    single domain (``remove_content``, ``remove_orphan_chunks``) pass it;
+    callers that don't (``hide_content``, ``session_wipe``) leave it ``None``
+    and keep the full-flush contract.
 
     Cache invalidation is freshness, not correctness: the removal that calls this
     has ALREADY dropped the node + chunks from the stores, so a redis outage here
@@ -197,7 +203,7 @@ def invalidate_caches(trigger: str, redis: Any | None = None) -> None:
         # re-ingest path (ingestion.py) uses the threaded variant for exactly
         # this reason; deletes were left on the blocking one.
         from utils.query_cache import invalidate_query_caches_threaded
-        invalidate_query_caches_threaded(trigger=trigger, redis=client)  # C1 + C2
+        invalidate_query_caches_threaded(trigger=trigger, redis=client, domain=domain)  # C1 + C2
     except Exception as exc:  # noqa: BLE001 — query-cache bust is best-effort freshness
         log_swallowed_error("content_lifecycle.query_cache_bust", exc)
 
@@ -246,7 +252,7 @@ def remove_content(
 
     # Stores are now clean — the delete has succeeded. The cache bust below is
     # best-effort freshness and cannot fail this result (see invalidate_caches).
-    invalidate_caches(trigger=f"lifecycle.remove:{artifact_id}", redis=redis)
+    invalidate_caches(trigger=f"lifecycle.remove:{artifact_id}", redis=redis, domain=domain or None)
 
     return RemovalResult(
         found=True, artifact_id=artifact_id, domain=domain,
@@ -280,7 +286,9 @@ def remove_orphan_chunks(
     removed = _fan_out_removal(chunk_ids, domain, chroma)
 
     if bust_caches:
-        invalidate_caches(trigger="lifecycle.rollback_orphan_chunks", redis=redis)
+        invalidate_caches(
+            trigger="lifecycle.rollback_orphan_chunks", redis=redis, domain=domain or None,
+        )
 
     return RemovalResult(found=True, domain=domain, chunk_ids=list(chunk_ids), removed=removed)
 
@@ -314,5 +322,7 @@ def hide_content(
     if ok:
         # Node is flagged — the hide has succeeded. The cache bust is best-effort
         # freshness and cannot fail this result (see invalidate_caches).
+        # ``set_archived`` returns only a bool, not the artifact's domain — scoping
+        # this would need an extra Neo4j read, so it stays a full flush.
         invalidate_caches(trigger=f"lifecycle.hide:{artifact_id}", redis=redis)
     return ok

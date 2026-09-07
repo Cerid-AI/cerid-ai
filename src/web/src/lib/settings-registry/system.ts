@@ -57,6 +57,18 @@ export const SYSTEM_DEFS: SettingDef[] = [
     type: "display",
     writer: { kind: "readonly", endpoint: "/settings" },
   },
+  {
+    id: "system.capabilities.expectations",
+    category: "system",
+    group: "capabilities",
+    level: "core",
+    label: "Expectations",
+    helpText: "Per-function latency projected from the boot-time local model throughput probe, plus the suggested and active environment profile. Hidden until the probe has measured a real generation rate.",
+    scopeOfEffect: { scope: "server", display: "Applies to this server instance — all sessions." },
+    keywords: ["expectations", "throughput", "tok/s", "latency", "profile", "hybrid", "cloud-first", "local-only", "System"],
+    type: "display",
+    writer: { kind: "readonly", endpoint: "/settings" },
+  },
   // ── macOS Permissions (desktop app only) ───────────────────────────────────
   {
     id: "system.permissions",

@@ -172,6 +172,45 @@ class TestNliScore:
         assert nli_mod._MODEL_LOADED is False
 
 
+class TestNliLoadModel:
+    """_load_model() must resolve files cache-first via the shared helper."""
+
+    def setup_method(self):
+        import core.utils.nli as nli_mod
+        nli_mod._session = None
+        nli_mod._tokenizer = None
+        nli_mod._MODEL_LOADED = False
+
+    def test_load_model_resolves_files_cache_first_via_shared_helper(self):
+        """_load_model must resolve both the ONNX model and the tokenizer
+        file through the shared ``resolve_hf_file`` helper (not a direct,
+        network-first ``hf_hub_download`` call) so a cached model never
+        touches the network."""
+        import core.utils.nli as nli_mod
+
+        fake_tokenizer = MagicMock()
+        resolved: list[tuple[str, str]] = []
+
+        def fake_resolve(repo_id, filename, cache_dir, *, logger):
+            resolved.append((repo_id, filename))
+            return "/tmp/fake"
+
+        with patch(
+            "core.utils.nli.resolve_hf_file", side_effect=fake_resolve,
+        ) as mock_resolve, patch(
+            "core.utils.nli.ort.InferenceSession", return_value=MagicMock(),
+        ), patch(
+            "core.utils.nli.Tokenizer.from_file", return_value=fake_tokenizer,
+        ):
+            nli_mod._load_model()
+
+        assert mock_resolve.call_count == 2
+        assert resolved == [
+            (nli_mod.config.NLI_MODEL, nli_mod.config.NLI_ONNX_FILENAME),
+            (nli_mod.config.NLI_MODEL, "tokenizer.json"),
+        ]
+
+
 # ---------------------------------------------------------------------------
 # Async-batched NLI (v0.93.10)
 # ---------------------------------------------------------------------------

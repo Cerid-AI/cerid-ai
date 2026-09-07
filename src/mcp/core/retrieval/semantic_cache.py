@@ -659,9 +659,10 @@ def invalidate_cache(redis_client: Any, trigger: str = "unspecified", domain: st
     that domain (via the per-domain index populated by :func:`cache_store`),
     so an ingest into one domain no longer flushes every cached result —
     the prior behavior left ``cache_hit_rate`` pinned at 0.0 since every
-    conversation ingest busted the whole cache. ``domain=None`` (every
-    non-ingestion caller, e.g. ``kb_admin.clear_domain``) keeps the full-flush
-    contract unchanged. The first domain-scoped call falls back to a full
+    conversation ingest busted the whole cache. ``domain=None`` (a truly
+    global mutation with no single domain to scope to, e.g.
+    ``kb_admin.rebuild_indexes`` / ``kb_admin.purge_test_residue``) keeps the
+    full-flush contract unchanged. The first domain-scoped call falls back to a full
     flush to retire entries written before the domain index existed (no
     recorded domain set); every entry stored after that ships is
     domain-indexed, so this fallback never repeats.

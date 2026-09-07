@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -106,10 +106,7 @@ class TestRepairEndpointApply:
                 "app.services.ingestion.ingest_content",
                 return_value={"status": "success", "chunks": 1},
             ) as mock_ingest,
-            patch(
-                "app.routers.kb_admin.invalidate_cache_non_blocking",
-                new_callable=AsyncMock,
-            ),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
         ):
             res = tc.post(
                 "/admin/collections/repair",
@@ -180,10 +177,7 @@ class TestRepairEndpointDecryptsSummaryForReplay:
                         "app.services.ingestion.ingest_content",
                         return_value={"status": "success", "chunks": 1},
                     ) as mock_ingest,
-                    patch(
-                        "app.routers.kb_admin.invalidate_cache_non_blocking",
-                        new_callable=AsyncMock,
-                    ),
+                    patch("app.routers.kb_admin._invalidate_scoped_safe"),
                 ):
                     res = tc.post(
                         "/admin/collections/repair",
@@ -211,10 +205,7 @@ class TestRepairEndpointBackupFormat:
                 "app.services.ingestion.ingest_content",
                 return_value={"status": "success", "chunks": 1},
             ),
-            patch(
-                "app.routers.kb_admin.invalidate_cache_non_blocking",
-                new_callable=AsyncMock,
-            ),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
         ):
             res = tc.post(
                 "/admin/collections/repair",

@@ -13,6 +13,7 @@ vi.mock("@/lib/api", () => ({
 }))
 
 import { LocalLLMStep } from "@/components/setup/local-llm-step"
+import type { LocalThroughput } from "@/lib/types"
 
 const DEFAULT_STATE = {
   detected: false,
@@ -29,6 +30,37 @@ interface OllamaState {
 }
 
 const onChange = vi.fn<(state: OllamaState) => void>()
+
+const MEASURED_THROUGHPUT: LocalThroughput = {
+  prompt_tok_s: 120.5,
+  gen_tok_s: 42.3,
+  probe_at: 1735689600,
+  expectations: {
+    memory_extract: { seconds: 45.7, basis: "measured" },
+    entity_extraction: { seconds: 12.3, basis: "measured" },
+    wiki_summary: { seconds: 30.1, basis: "measured" },
+    claim_extraction: { seconds: 20.0, basis: "measured" },
+    topic_extraction: { seconds: 15.0, basis: "measured" },
+    chat_turn_tail_s: 58.0,
+  },
+}
+
+const UNMEASURED_THROUGHPUT: LocalThroughput = {
+  prompt_tok_s: null,
+  gen_tok_s: null,
+  probe_at: null,
+  expectations: {
+    memory_extract: { basis: "unmeasured" },
+    entity_extraction: { basis: "unmeasured" },
+    wiki_summary: { basis: "unmeasured" },
+    claim_extraction: { basis: "unmeasured" },
+    topic_extraction: { basis: "unmeasured" },
+    chat_turn_tail_s: null,
+  },
+}
+
+const UNACCELERATED_HARDWARE = { ram_gb: 16, cpu: "Intel i7-9700", gpu: "Intel UHD 630" }
+const ACCELERATED_HARDWARE = { ram_gb: 32, cpu: "Intel Core i9", gpu: "AMD Radeon Pro Vega II" }
 
 beforeEach(() => {
   onChange.mockClear()
@@ -167,6 +199,89 @@ describe("LocalLLMStep — Ollama backend (default)", () => {
       />,
     )
     expect(screen.queryByText("All platforms")).not.toBeInTheDocument()
+  })
+})
+
+// ---- Measured local-model expectations (Task 3) ----
+
+describe("LocalLLMStep — measured local-model expectations", () => {
+  it("renders the measured line with the fixture numbers instead of the CPU-only sentence", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({ hardware: UNACCELERATED_HARDWARE, models: [] })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+        localThroughput={MEASURED_THROUGHPUT}
+        suggestedProfile="hybrid"
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
+    expect(screen.getByText(/42 tok\/s/)).toBeInTheDocument()
+    expect(screen.getByText(/12s per document/)).toBeInTheDocument()
+    expect(screen.getByText(/45\.7s per chat turn/)).toBeInTheDocument()
+    expect(screen.getByText(/hybrid/)).toBeInTheDocument()
+    expect(screen.getByText(/interactive on cloud, background on a small local model/)).toBeInTheDocument()
+    expect(screen.queryByText(/CPU-only detected/i)).not.toBeInTheDocument()
+  })
+
+  it("renders the measured line even when hardware reports GPU acceleration (Fix round 1)", async () => {
+    // Regression test: showCpuOnlyWarning is false here (GPU string looks
+    // accelerated), but quenchforge measured the model running on CPU on
+    // this exact host class — the line must not be gated on that heuristic.
+    fetchOllamaRecommendations.mockResolvedValue({ hardware: ACCELERATED_HARDWARE, models: [] })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+        localThroughput={MEASURED_THROUGHPUT}
+        suggestedProfile="hybrid"
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
+    expect(screen.getByText(/42 tok\/s/)).toBeInTheDocument()
+    expect(screen.queryByText(/CPU-only detected/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps the existing CPU-only sentence when local_throughput is null", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({ hardware: UNACCELERATED_HARDWARE, models: [] })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+        localThroughput={null}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
+    expect(
+      screen.getByText(
+        /CPU-only detected — inference will be slower\. GPU acceleration available with Apple Silicon, NVIDIA, or AMD via Quenchforge\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the existing CPU-only sentence when local_throughput is unmeasured", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({ hardware: UNACCELERATED_HARDWARE, models: [] })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+        localThroughput={UNMEASURED_THROUGHPUT}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
+    expect(screen.getByText(/CPU-only detected/i)).toBeInTheDocument()
   })
 })
 

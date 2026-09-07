@@ -17,6 +17,40 @@
 
 ---
 
+## Status (2026-09-07)
+
+This is a design document; parts of it now exist in code, under different
+names than the design used. See `docs/ENVIRONMENT_PROFILES.md` for the
+current operator-facing reference (hardware classes, measured numbers,
+profile knobs) — this note only maps design section → implementation.
+
+- **Local throughput probe + per-function expectations** (§4.3, §5.3 below):
+  `src/mcp/utils/inference_config.py::probe_local_throughput` and
+  `expectations_for`, exposed at `/health/status.inference.expectations` and
+  `/setup/system-check.local_throughput`.
+- **Environment profiles** (not designed here — added by a later branch):
+  `src/mcp/config/environment_profiles.py`
+  (`CERID_ENVIRONMENT_PROFILE` = `cloud-first` / `hybrid` / `local-only`),
+  wired into `src/mcp/config/settings.py::_apply_environment_profile_defaults`.
+- **Background model slot**: `INTERNAL_LLM_MODEL_BACKGROUND`
+  (`src/mcp/config/settings.py`), resolved per-stage by
+  `src/mcp/core/utils/internal_llm.py::_local_model_for_stage`.
+  Selects a smaller local model for `config/stage_profiles.py::
+  BACKGROUND_STAGES` — the "smart-router"-adjacent idea this document leaves
+  as future work in §5 is now class-A hardware's biggest lever.
+- **UI surface**: setup wizard local-LLM step
+  (`src/web/src/components/setup/local-llm-step.tsx`) and Settings → System
+  (`src/web/src/components/settings/categories/system.tsx`) render the
+  measured tok/s and per-function seconds — see §4.3 and §5.3 below for what
+  they replace.
+
+§4.3 and §5.3 are marked superseded inline where the numbers they show are
+now measured rather than estimated. The rest of this document (provider
+decision tree, sidecar, degraded-mode messaging, implementation phases) is
+still the design record and has not been re-verified against current code.
+
+---
+
 ## 1. Provider Decision Tree
 
 At startup the system probes the host environment and selects the best available inference provider for each workload class. The decision tree runs once during `main.py` initialization and again on periodic re-check.
@@ -432,6 +466,17 @@ These are controlled by `INTERNAL_LLM_PROVIDER` and the per-stage `PIPELINE_PROV
 
 ### 4.3 Expected Performance Summary
 
+> **Superseded for functions 3-10** (the LLM pipeline stages). These were
+> design-time estimates in milliseconds; `utils/inference_config.py::
+> probe_local_throughput` now measures actual per-function latency in
+> seconds from a live completion, not a guess from hardware tier. See
+> `docs/ENVIRONMENT_PROFILES.md` §2-3 for the measured reference numbers
+> (e.g. entity extraction ≈ 64 s on the reference class-A host, not the
+> 50-150ms this table estimates — the gap is this document's ms-scale
+> per-token-batch estimate vs. a full extraction call's real token budget).
+> Functions 1-2 (ONNX embedding/reranking latency) are a different
+> measurement path and are not superseded by this branch.
+
 | Function | Docker CPU | Ollama GPU (M1) | Sidecar GPU | Speedup |
 |----------|-----------|-----------------|-------------|---------|
 | Embedding (batch 10) | ~15-25ms | ~3ms | ~3-5ms | **5-8x** |
@@ -558,6 +603,13 @@ Auto-switch rules:
 ```
 
 ### 5.3 Settings UI — Current Inference Mode
+
+> **Superseded.** The mockup below was never built as drawn. The shipped
+> surface is Settings → System (`src/web/src/components/settings/
+> categories/system.tsx`): it shows measured tok/s, projected background
+> enrichment and memory-extraction seconds, and an "Active: *X* · Suggested:
+> *Y*" environment-profile line, rather than the embed/rerank-latency panel
+> below. See `docs/ENVIRONMENT_PROFILES.md` §3.
 
 The Settings > Essentials page shows the current inference configuration:
 

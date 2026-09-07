@@ -152,7 +152,7 @@ class TestClearDomain:
                 "app.routers.kb_admin.delete_artifacts_by_domain",
                 return_value={"deleted": 2, "chunks": 4},
             ) as mock_delete_domain,
-            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
             patch("app.routers.kb_admin.get_chroma"),
             patch("app.routers.kb_admin.get_neo4j"),
         ):
@@ -167,6 +167,29 @@ class TestClearDomain:
         assert data["chunks_removed"] == 4
         assert data["domain"] == "code"
         mock_delete_domain.assert_called_once()
+
+    def test_clear_domain_survives_redis_unavailable(self, client: TestClient, monkeypatch):
+        """A redis blip in the scoped cache-bust must not turn a successful
+        domain delete into a reported failure, and the audit line that
+        follows it must still run."""
+        monkeypatch.setattr("app.routers.kb_admin.config.DOMAINS", ["code", "finance"])
+        with (
+            patch(
+                "app.routers.kb_admin.delete_artifacts_by_domain",
+                return_value={"deleted": 2, "chunks": 4},
+            ),
+            patch("app.routers.kb_admin.get_redis", side_effect=RuntimeError("redis down")),
+            patch("app.routers.kb_admin.get_chroma"),
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.routers.kb_admin.audit_log.audit") as mock_audit,
+        ):
+            res = client.post(
+                "/admin/kb/clear-domain/code",
+                json={"confirm": True},
+            )
+
+        assert res.status_code == 200, res.text
+        mock_audit.assert_called_once()
 
 
 class TestDeleteArtifact:
@@ -270,23 +293,23 @@ class TestSemanticCacheInvalidationHook:
 
 
     def test_clear_domain_invalidates_semantic_cache(self, client: TestClient, monkeypatch):
+        # Now goes through the unified _invalidate_scoped_safe (C1+C2 in one
+        # call, scoped to the cleared domain) rather than a separate
+        # invalidate_semantic_cache call.
         monkeypatch.setattr("app.routers.kb_admin.config.DOMAINS", ["code", "finance"])
         with (
             patch(
                 "app.routers.kb_admin.delete_artifacts_by_domain",
                 return_value={"deleted": 1, "chunks": 0},
             ),
-            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("app.routers.kb_admin.invalidate_semantic_cache") as mock_sem_invalidate,
+            patch("app.routers.kb_admin._invalidate_scoped_safe") as mock_bust,
             patch("app.routers.kb_admin.get_chroma"),
             patch("app.routers.kb_admin.get_neo4j"),
         ):
             res = client.post("/admin/kb/clear-domain/code", json={"confirm": True})
 
         assert res.status_code == 200
-        mock_sem_invalidate.assert_called_once()
-        _, kwargs = mock_sem_invalidate.call_args
-        assert kwargs.get("trigger") == "kb_admin.clear_domain"
+        mock_bust.assert_called_once_with("kb_admin.clear_domain", "code")
 
     def test_rebuild_indexes_invalidates_semantic_cache(self, client: TestClient):
         with (
@@ -400,10 +423,7 @@ class TestReindexCorpus:
                 new_callable=AsyncMock,
                 return_value={"status": "updated"},
             ) as mock_ingest,
-            patch(
-                "app.routers.kb_admin.invalidate_cache_non_blocking",
-                new_callable=AsyncMock,
-            ),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
         ):
             res = client.post("/admin/kb/reindex", json={"limit": 3})
 
@@ -424,10 +444,7 @@ class TestReindexCorpus:
         with (
             patch("app.routers.kb_admin.list_artifacts", return_value=artifacts),
             patch("app.routers.kb_admin._resolve_archive_source", return_value=None),
-            patch(
-                "app.routers.kb_admin.invalidate_cache_non_blocking",
-                new_callable=AsyncMock,
-            ),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
         ):
             res = client.post("/admin/kb/reindex", json={"limit": 25})
         assert res.status_code == 200
@@ -460,10 +477,7 @@ class TestReindexCorpus:
                 new_callable=AsyncMock,
                 side_effect=_ingest,
             ),
-            patch(
-                "app.routers.kb_admin.invalidate_cache_non_blocking",
-                new_callable=AsyncMock,
-            ),
+            patch("app.routers.kb_admin._invalidate_scoped_safe"),
         ):
             res = client.post("/admin/kb/reindex", json={"limit": 2})
 

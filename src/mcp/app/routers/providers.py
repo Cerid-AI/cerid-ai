@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from http import HTTPStatus
 from typing import Any
@@ -325,6 +326,21 @@ async def disable_ollama():
     return {"status": "disabled", "provider": "openrouter"}
 
 
+_PARAM_COUNT_RE = re.compile(r"(\d+(?:\.\d+)?)b(?=\D|$)", re.IGNORECASE)
+
+
+def _extract_param_billions(name: str) -> float | None:
+    """Parse a model's parameter count (in billions) from its name.
+
+    Both the catalog ids below (``llama3.1:8b``) and a served local model
+    name (``qwen2.5-7b``) encode size as a trailing ``<N>b`` token — the
+    only handle available to scale one measured generation rate across
+    models the probe never ran against.
+    """
+    matches = _PARAM_COUNT_RE.findall(name)
+    return float(matches[-1]) if matches else None
+
+
 @router.get("/ollama/recommendations", response_model=GetOllamaRecommendationsResponse)
 async def get_ollama_recommendations():
     """Return hardware-aware model recommendations for the setup wizard.
@@ -409,11 +425,38 @@ async def get_ollama_recommendations():
         },
     ]
 
+    # Measured generation rate for whatever model is actually served locally,
+    # scaled across the rest of the catalog by parameter count. Only resolve
+    # the served model name when a rate exists — an unmeasured/cloud-only
+    # config has nothing to scale and skips the extra gateway round trip.
+    from utils.inference_config import get_inference_config
+
+    gen_tok_s = get_inference_config().local_gen_tok_s
+    served_model: str | None = None
+    served_params: float | None = None
+    if gen_tok_s:
+        from core.utils.internal_llm import effective_local_model_async
+        served_model = await effective_local_model_async()
+        served_params = _extract_param_billions(served_model)
+
     models = []
     for m in _MODELS:
         min_ram: int = m["min_ram_gb"]  # type: ignore[assignment]
         compatible = ram_gb >= min_ram
-        models.append({**m, "compatible": compatible, "recommended": False})
+        expected_tokens_per_sec: float | None = None
+        if gen_tok_s and served_params:
+            if m["id"] == served_model:
+                expected_tokens_per_sec = round(gen_tok_s, 1)
+            else:
+                candidate_params = _extract_param_billions(str(m["id"]))
+                if candidate_params:
+                    expected_tokens_per_sec = round(gen_tok_s * served_params / candidate_params, 1)
+        models.append({
+            **m,
+            "compatible": compatible,
+            "recommended": False,
+            "expected_tokens_per_sec": expected_tokens_per_sec,
+        })
 
     # Pick the best compatible model as recommended
     recommended_id = "llama3.2:3b"  # fallback
