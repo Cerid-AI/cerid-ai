@@ -21,6 +21,7 @@ from core.agents.entity_extraction import (
     is_codec_alias_shaped,
     is_junk_entity,
     is_junk_entity_name,
+    is_junk_quantity_name,
     is_shouty_acronym_shaped,
 )
 
@@ -370,6 +371,161 @@ class TestJunkNameGate:
             llm_caller=caller,
         )
         assert [e.name for e in result] == ["NASA", "gpt-4"]
+
+
+# ---------------------------------------------------------------------------
+# is_junk_quantity_name — type-aware quantity/date gate (2026-09-07)
+# ---------------------------------------------------------------------------
+# Strings below are pulled verbatim from .extract-eval-readonly/results.json,
+# the qwen2.5-3b-vs-7b eval that measured a 4x junk rate on the small model.
+
+
+class TestJunkQuantityGate:
+    """Bare quantities, leaked markdown headings, and content-free DATEs."""
+
+    # -- rejects: bare quantities (observed junk, various types) -------------
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("900 seconds", "DATE"),
+        ("15 minutes", "OTHER"),
+        ("2 minutes", "OTHER"),
+        ("5 grams", "OTHER"),
+        ("75°C", "OTHER"),
+        ("3 minutes", "DATE"),
+        ("42 tokens per second", "OTHER"),
+        ("120 tokens", "OTHER"),
+        ("10 percent", "OTHER"),
+        ("50ms", "OTHER"),
+        ("120 to 200 requests", "OTHER"),
+        ("250 milliseconds", "OTHER"),
+        ("5 retries", "OTHER"),
+        ("25 Mbps", "OTHER"),
+        ("3 weeks", "ORG"),
+    ])
+    def test_rejects_bare_quantities(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is True
+
+    # -- rejects: leaked markdown heading markers -----------------------------
+
+    @pytest.mark.parametrize("name", [
+        "# Authentication — Token Lifetimes",
+        "# Aurora In-Memory Cache — Eviction Policy",
+        "# Zephyr API Gateway — Rate Limiter",
+        "# Zephyr Client",
+        "# Green Tea — Steeping Notes",
+        "# Iceland Trip — Packing List",
+        "# Project Nimbus — Ledger Datastore Decision",
+        "# Project Orion — Budget",
+        "# Project Orion",
+        "# Team Cadence — Daily Standup",
+        "# Project Vega — Launch Timeline",
+    ])
+    def test_rejects_markdown_heading_fragments(self, name):
+        assert is_junk_quantity_name(name, "OTHER") is True
+
+    def test_rejects_punctuation_only_name(self):
+        assert is_junk_quantity_name("---", "OTHER") is True
+
+    # -- rejects: DATE-typed names with no date content -----------------------
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("5 retries", "DATE"),
+        ("250 milliseconds", "DATE"),
+        ("9:30am", "DATE"),
+        ("25 Mbps", "DATE"),
+    ])
+    def test_rejects_non_date_content_typed_as_date(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is True
+
+    # -- admits: real DATE entities -------------------------------------------
+
+    @pytest.mark.parametrize("name", ["March 2026", "2025-11-03", "next Friday"])
+    def test_admits_real_dates(self, name):
+        assert is_junk_quantity_name(name, "DATE") is False
+
+    # -- admits: digit-bearing real entities ----------------------------------
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("Qwen2.5-7B", "ASSET"),
+        ("10.7.0.0/24 subnet", "OTHER"),
+        ("Windows 11", "ASSET"),
+        ("Boeing 747", "ASSET"),
+        ("VLAN 20", "OTHER"),
+        ("HTTP 429", "OTHER"),
+        ("$85,000", "ASSET"),
+    ])
+    def test_admits_real_digit_bearing_entities(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is False
+
+    # -- end-to-end through the extraction pipeline ---------------------------
+
+    @pytest.mark.asyncio
+    async def test_extraction_drops_quantity_junk_keeps_valid(self):
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": "# Project Orion — Budget", "type": "OTHER", "confidence": 0.9},
+                {"name": "900 seconds", "type": "DATE", "confidence": 0.9},
+                {"name": "Qwen2.5-7B", "type": "ASSET", "confidence": 0.9},
+            ]
+        })
+        result = await extract_entities_from_text(
+            "# Project Orion — Budget\nThe cache TTL is 900 seconds, run on Qwen2.5-7B.",
+            llm_caller=caller,
+        )
+        assert [e.name for e in result] == ["Qwen2.5-7B"]
+
+
+# ---------------------------------------------------------------------------
+# Malformed-JSON retry (2026-09-07)
+# ---------------------------------------------------------------------------
+# qwen2.5-3b eval: response_format=json_object still produced unquoted enum
+# values ("type": DATE) and runaway-repetition truncation on 3/18 fixtures.
+
+
+@pytest.mark.asyncio
+class TestMalformedJsonRetry:
+    async def test_retry_succeeds_on_second_valid_reply(self, caplog):
+        replies = [
+            '{"entities": [{"type": DATE, "name": "bad"}]',  # unquoted enum
+            json.dumps({"entities": [{"name": "Zephyr", "type": "ORG", "confidence": 0.9}]}),
+        ]
+        calls: list[list[dict]] = []
+
+        async def caller(messages):
+            calls.append(messages)
+            return replies[len(calls) - 1]
+
+        with caplog.at_level("INFO", logger="ai-companion.entity_extraction"):
+            result = await extract_entities_from_text(
+                "Zephyr shipped the update.", llm_caller=caller,
+            )
+
+        assert [e.name for e in result] == ["Zephyr"]
+        assert len(calls) == 2
+        # Retry call = original messages + one extra user message.
+        assert len(calls[1]) == len(calls[0]) + 1
+        assert calls[1][-1]["role"] == "user"
+        assert "not valid JSON" in calls[1][-1]["content"]
+
+        retry_lines = [
+            r.getMessage() for r in caplog.records
+            if r.getMessage().startswith("entity_extraction.json_retry")
+        ]
+        assert retry_lines == ["entity_extraction.json_retry attempted=True succeeded=True"]
+
+    async def test_both_malformed_returns_empty_and_warns(self, caplog):
+        async def caller(messages):  # noqa: ARG001
+            return "not json at all { incomplete"
+
+        with caplog.at_level("DEBUG", logger="ai-companion.entity_extraction"):
+            result = await extract_entities_from_text(
+                "test", llm_caller=caller,
+            )
+
+        assert result == []
+        messages = [r.getMessage() for r in caplog.records]
+        assert "entity_extraction.json_retry attempted=True succeeded=False" in messages
+        assert any(m.startswith("entity_extraction.json_parse_failed") for m in messages)
 
 
 # ---------------------------------------------------------------------------

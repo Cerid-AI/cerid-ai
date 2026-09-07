@@ -93,3 +93,12 @@ CVE-2026-45447
 # in the container runs perl, let alone on untrusted archives. No fixed
 # version published as of 2026-06-10. Re-evaluate: 2026-06-30.
 CVE-2026-48959
+
+# PyTorch Lightning RCE via checkpoint `_instantiator` hyperparameters
+# (GHSA-qqmf-gpg7-g8gw). The advisory's patched version is "2022.6.15", a
+# calendar-versioned line older than every 2.x release, so Trivy flags the
+# newest release (2.6.5) and no PyPI release carries the fix commit d710d68.
+# lightning is present only transitively via pyannote-audio; nothing in
+# src/mcp calls LightningModule.load_from_checkpoint or loads checkpoints.
+# Re-evaluate: 2026-10-15 (consume the first release that includes d710d68).
+CVE-2026-58659

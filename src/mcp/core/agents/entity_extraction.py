@@ -243,6 +243,102 @@ def is_junk_entity(name: str, *, entity_type_unknown: bool = False) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Quantity / date-content gate (type-aware)
+# ---------------------------------------------------------------------------
+# qwen2.5-3b eval (2026-09-07, 18 fixtures) ran 4x junkier than the 7B
+# baseline on the identical prompt: bare measurements ("900 seconds", "5
+# grams", "75°C") and leaked ATX heading markers ("# Project Orion — Budget")
+# get typed as real entities. Neither shape is a proper noun, so both are
+# rejected here — after the type is known, so a DATE can additionally be
+# required to carry actual date content.
+
+_QUANTITY_UNIT_WORDS: frozenset[str] = frozenset((
+    "ms", "s", "sec", "second", "seconds", "millisecond", "milliseconds",
+    "min", "minute", "minutes", "hour", "hours", "day", "days", "week",
+    "weeks", "percent", "%", "tokens", "requests", "retries", "entries",
+    "items", "per", "mb", "gb", "kb", "mbps", "kbps", "gbps", "x", "°c",
+    "celsius", "fahrenheit", "grams", "g", "kg", "ml", "l",
+))
+
+# Leading digit (or leading "#digit" for a numbered-heading leak), digits/
+# separators, an optional " to <number>" range, then whatever's left.
+_QUANTITY_NUMBER_RE = re.compile(
+    r"^#?\s*\d[\d.,\-–]*(?:\s+to\s+\d[\d.,\-–]*)?(?P<rest>.*)$",
+    re.IGNORECASE,
+)
+
+_HEADING_MARKER_RE = re.compile(r"^#{1,6}\s")
+
+_MONTH_NAMES: frozenset[str] = frozenset((
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+))
+_WEEKDAY_NAMES: frozenset[str] = frozenset((
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+))
+_RELATIVE_DATE_WORDS: frozenset[str] = frozenset((
+    "today", "yesterday", "tomorrow", "next", "last", "q1", "q2", "q3", "q4",
+))
+_YEAR_RE = re.compile(r"\b\d{4}\b")
+
+
+def _is_bare_quantity(name: str) -> bool:
+    """True for a number glued/paired with 1-3 unit words and nothing else.
+
+    A trailing unit word is required — a standalone number ("2024", "747")
+    is never a bare quantity on its own; that's what could make it a real
+    year, model number, or ID, and is left to the DATE-content check.
+    """
+    match = _QUANTITY_NUMBER_RE.match(name)
+    if not match:
+        return False
+    rest = match.group("rest").strip()
+    if not rest:
+        return False
+    words = rest.split()
+    if not words or len(words) > 3:
+        return False
+    return all(w.lower() in _QUANTITY_UNIT_WORDS for w in words)
+
+
+def _is_punctuation_only(name: str) -> bool:
+    """True when the name carries no letters or digits at all."""
+    return not any(ch.isalnum() for ch in name)
+
+
+def _has_date_content(name: str) -> bool:
+    """True when the name contains a year, month, weekday, or relative-date word."""
+    if _YEAR_RE.search(name):
+        return True
+    tokens = re.split(r"[^a-z0-9]+", name.lower())
+    return any(
+        tok in _MONTH_NAMES or tok in _WEEKDAY_NAMES or tok in _RELATIVE_DATE_WORDS
+        for tok in tokens
+    )
+
+
+def is_junk_quantity_name(name: str, entity_type: str) -> bool:
+    """Type-aware sibling to :func:`is_junk_entity_name`.
+
+    Rejects bare quantities ("900 seconds", "75°C"), names that are only
+    punctuation or a leaked markdown heading marker ("# Project Orion"),
+    and DATE-typed names with no actual date content ("5 retries",
+    "9:30am"). Called from :func:`_normalise_entities` once the type has
+    been validated.
+    """
+    stripped = name.strip()
+    if not stripped:
+        return True
+    if _HEADING_MARKER_RE.match(stripped):
+        return True
+    if _is_punctuation_only(stripped):
+        return True
+    if _is_bare_quantity(stripped):
+        return True
+    return entity_type == "DATE" and not _has_date_content(stripped)
+
+
+# ---------------------------------------------------------------------------
 # Prompt + extraction
 # ---------------------------------------------------------------------------
 
@@ -309,6 +405,21 @@ def _build_messages(text: str) -> list[dict[str, str]]:
     ]
 
 
+_JSON_RETRY_INSTRUCTION = (
+    "Your previous reply was not valid JSON. Reply with only the JSON "
+    'object described above; every entry needs "name", "type" and '
+    '"confidence".'
+)
+
+
+def _parse_llm_json_strict(raw: str) -> Any:
+    """``parse_llm_json`` plus a shape check: caller treats both as failure."""
+    parsed = parse_llm_json(raw)
+    if not isinstance(parsed, (dict, list)):
+        raise ValueError(f"parsed JSON is not an object or array: {type(parsed).__name__}")
+    return parsed
+
+
 async def extract_entities_from_text(
     text: str,
     *,
@@ -342,16 +453,28 @@ async def extract_entities_from_text(
         return []
 
     try:
-        parsed = parse_llm_json(raw)
-    except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('core.agents.entity_extraction', exc)
-        logger.warning(
-            "entity_extraction.json_parse_failed (returning [] for this chunk); "
-            "first 200 chars: %r",
-            raw[:200] if raw else "",
-        )
-        return []
+        parsed = _parse_llm_json_strict(raw)
+    except Exception:
+        retry_messages = [*messages, {"role": "user", "content": _JSON_RETRY_INSTRUCTION}]
+        try:
+            retry_raw = await llm_caller(retry_messages)
+        except Exception as retry_call_exc:  # noqa: BLE001 — observability boundary; fall through to []
+            logger.exception("entity_extraction.llm_call_failed: %s", retry_call_exc)
+            logger.info("entity_extraction.json_retry attempted=True succeeded=False")
+            return []
+        try:
+            parsed = _parse_llm_json_strict(retry_raw)
+        except Exception as retry_parse_exc:
+            logger.info("entity_extraction.json_retry attempted=True succeeded=False")
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.entity_extraction', retry_parse_exc)
+            logger.warning(
+                "entity_extraction.json_parse_failed (returning [] for this chunk); "
+                "first 200 chars: %r",
+                retry_raw[:200] if retry_raw else "",
+            )
+            return []
+        logger.info("entity_extraction.json_retry attempted=True succeeded=True")
 
     supported = _drop_unsupported(
         list(_normalise_entities(parsed, min_confidence=min_confidence)),
@@ -520,6 +643,12 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
             continue
         ent_type = str(raw.get("type") or "").strip().upper()
         if ent_type not in _VALID_TYPES:
+            continue
+        if is_junk_quantity_name(name, ent_type):
+            logger.debug(
+                "entity_extraction.rejected_junk_quantity name=%r type=%s",
+                name, ent_type,
+            )
             continue
         total += 1
         if "confidence" not in raw:
