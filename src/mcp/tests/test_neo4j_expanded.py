@@ -6,6 +6,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from neo4j.exceptions import TransientError
 
 from app.db.neo4j.artifacts import (
     create_artifact,
@@ -36,11 +37,18 @@ from app.db.neo4j.taxonomy import (
 # ---------------------------------------------------------------------------
 
 def _mock_driver():
-    """Create a mock Neo4j driver with session context manager."""
+    """Create a mock Neo4j driver with session context manager.
+
+    ``execute_write`` is wired to invoke the transaction function with the
+    session standing in for the ``ManagedTransaction`` argument, so
+    ``tx.run(...)`` calls inside a transaction function land on the same
+    ``session.run`` mock callers already assert against.
+    """
     driver = MagicMock()
     session = MagicMock()
     driver.session.return_value.__enter__ = MagicMock(return_value=session)
     driver.session.return_value.__exit__ = MagicMock(return_value=False)
+    session.execute_write.side_effect = lambda fn, *a, **kw: fn(session, *a, **kw)
     return driver, session
 
 
@@ -188,6 +196,116 @@ class TestCreateArtifact:
         calls = [str(c) for c in session.run.call_args_list]
         tag_calls = [c for c in calls if "TAGGED_WITH" in c]
         assert len(tag_calls) == 1  # Only "valid" creates a tag
+
+    def test_tags_are_sorted_before_unwind(self):
+        # Concurrent writers must acquire :Tag locks in the same order
+        # regardless of the tags' order in the artifact's own tags_json,
+        # or they deadlock against each other (and against the
+        # re-categorisation DELETE in taxonomy.py).
+        driver, session = _mock_driver()
+        record = _mock_record(id="art-1")
+        session.run.return_value.single.return_value = record
+
+        create_artifact(driver, "art-1", "f.py", "coding", "[]", "", 1, "[]",
+                        tags_json='["zebra", "apple", "mango"]')
+        tag_call = next(
+            c for c in session.run.call_args_list if "UNWIND $tags" in str(c)
+        )
+        assert tag_call.kwargs["tags"] == ["apple", "mango", "zebra"]
+
+    def test_runs_in_a_managed_write_transaction(self):
+        # create_artifact must use session.execute_write (managed
+        # transaction with the driver's built-in TransientError retry)
+        # instead of bare session.run calls.
+        driver, session = _mock_driver()
+        record = _mock_record(id="art-1")
+        session.run.return_value.single.return_value = record
+
+        create_artifact(driver, "art-1", "f.py", "coding", "[]", "", 1, "[]")
+        session.execute_write.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: create_artifact retries a transient deadlock
+# ---------------------------------------------------------------------------
+
+class _FakeTxResult:
+    """Minimal ``tx.run(...)`` result double: dict rows + ``.single()``."""
+
+    def __init__(self, query: str, params: dict):
+        self._query = query
+        self._params = params
+
+    def single(self):
+        if "RETURN a.id AS id" in self._query:
+            return {"id": self._params.get("artifact_id")}
+        return None
+
+
+class _FlakySession:
+    """Fake session whose ``execute_write`` reproduces the neo4j driver's
+    managed-transaction retry: it re-invokes the transaction function once
+    if the function raises ``TransientError``, exactly as
+    ``Session.execute_write`` does against the real deadlock the
+    ``UNWIND $tags ... MERGE (t:Tag)`` statement can hit.
+
+    ``tx.run`` raises ``TransientError`` on its first Tag-merge call only
+    (modelling the reported ``Neo.TransientError.Transaction.DeadlockDetected``),
+    so the fake proves the whole transaction function re-runs, not just the
+    failing statement.
+    """
+
+    def __init__(self):
+        self.run_calls: list[tuple[str, dict]] = []
+        self.execute_write_calls = 0
+        self._tag_merge_attempts = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute_write(self, fn, **kwargs):
+        self.execute_write_calls += 1
+        try:
+            return fn(self, **kwargs)
+        except TransientError:
+            return fn(self, **kwargs)
+
+    def run(self, query: str, **params):
+        self.run_calls.append((query, params))
+        if "UNWIND $tags" in query:
+            self._tag_merge_attempts += 1
+            if self._tag_merge_attempts == 1:
+                raise TransientError(
+                    "Neo.TransientError.Transaction.DeadlockDetected"
+                )
+        return _FakeTxResult(query, params)
+
+
+class TestCreateArtifactRetriesOnDeadlock:
+    def test_retries_once_and_succeeds_with_sorted_tags(self):
+        driver = MagicMock()
+        session = _FlakySession()
+        driver.session.return_value = session
+
+        result = create_artifact(
+            driver, "art-1", "f.py", "coding", "[]", "", 1, "[]",
+            tags_json='["zebra", "apple", "mango"]',
+        )
+
+        assert result == "art-1"
+        # execute_write itself is called once by create_artifact; the
+        # driver's retry machinery (modeled by the fake) is what re-runs
+        # the transaction function — one retry observed.
+        assert session.execute_write_calls == 1
+        tag_calls = [
+            (q, p) for q, p in session.run_calls if "UNWIND $tags" in q
+        ]
+        assert len(tag_calls) == 2  # failed attempt + the retry
+        for _, params in tag_calls:
+            assert params["tags"] == ["apple", "mango", "zebra"]
 
 
 # ---------------------------------------------------------------------------

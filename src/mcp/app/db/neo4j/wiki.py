@@ -422,7 +422,11 @@ def write_entity_summary(
                     // ingest-triggered path, would keep the stale attempt
                     // stamp and stay blocked from the nightly sweep for the
                     // whole backoff window despite being healthy.
-                    e.summary_attempted_at = NULL
+                    e.summary_attempted_at = NULL,
+                    // Same for a deferral marker: the refresh this entity was
+                    // waiting for has now happened, so it must stop
+                    // re-qualifying for the nightly sweep on that flag alone.
+                    e.summary_refresh_due  = NULL
                 """,
                 slug=slug,
                 summary=summary,

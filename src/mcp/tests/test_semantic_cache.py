@@ -558,6 +558,238 @@ class TestStaleHitDetection:
 # Tests: size-bound enforcement (Phase 2.2 — max_entries was a dead knob)
 # ---------------------------------------------------------------------------
 
+class TestDomainScopedInvalidation:
+    """Task 7: an ingest into domain D must evict only entries whose result
+    touched D, not the whole cache (the ``cache_hit_rate 0.0`` bug — every
+    ingest previously called ``invalidate_cache`` with no domain and flushed
+    everything)."""
+
+    @staticmethod
+    def _warm_legacy_sentinel(redis: Any) -> None:
+        """Consume the one-time legacy-sweep fallback on an empty cache so a
+        test can exercise the steady-state domain-indexed eviction path."""
+        invalidate_cache(redis, domain="_warmup_")
+
+    def test_ingest_domain_evicts_matching_entry(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb = _random_embedding(seed=40)
+        cache_store(
+            "finance query", emb,
+            {"answer": "f", "sources": [{"filename": "f.md"}]},
+            redis, ttl=300, domains=["finance"], domains_searched=["finance"],
+        )
+
+        count = invalidate_cache(redis, trigger="ingestion.ingest_content", domain="finance")
+
+        assert count == 1
+        assert cache_lookup(emb, redis, threshold=0.9, domains=["finance"]) is None
+
+    def test_ingest_domain_keeps_entry_that_searched_other_domain(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb_finance = _random_embedding(seed=41)
+        emb_coding = _random_embedding(seed=42)
+        cache_store(
+            "finance query", emb_finance,
+            {"answer": "f", "sources": [{"filename": "f.md"}]},
+            redis, ttl=300, domains=["finance"], domains_searched=["finance"],
+        )
+        cache_store(
+            "coding query", emb_coding,
+            {"answer": "c", "sources": [{"filename": "c.md"}]},
+            redis, ttl=300, domains=["coding"], domains_searched=["coding"],
+        )
+
+        invalidate_cache(redis, domain="finance")
+
+        assert cache_lookup(emb_finance, redis, threshold=0.9, domains=["finance"]) is None
+        hit = cache_lookup(emb_coding, redis, threshold=0.9, domains=["coding"])
+        assert hit is not None and hit["answer"] == "c"
+
+    def test_legacy_entry_without_domains_evicted_on_any_invalidation(self, _reset_backend):
+        """An entry stored without ``domains_searched`` (written before this
+        feature shipped) carries no domain-index membership and can't be
+        found selectively — the first domain-scoped invalidation after
+        deploy falls back to a full flush specifically to retire these, then
+        never needs to again."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb = _random_embedding(seed=43)
+        cache_store(
+            "legacy query", emb, {"answer": "l", "sources": [{"filename": "l.md"}]},
+            redis, ttl=300, domains=["finance"],
+        )
+
+        # Domain-scoped invalidation for an UNRELATED domain still evicts it.
+        # (count includes the full flush's other bookkeeping keys, e.g. the
+        # age index — mirrors TestInvalidateCache's `count >= 1` convention.)
+        count = invalidate_cache(redis, domain="coding")
+
+        assert count >= 1
+        assert cache_lookup(emb, redis, threshold=0.9, domains=["finance"]) is None
+
+    def test_domain_invalidation_is_o_of_entries_touching_domain(self, _reset_backend):
+        """A domain-scoped invalidation must not touch entries in other
+        domains' indexes — assert via the domain-index membership left
+        behind, not just via cache_lookup."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb_a = _random_embedding(seed=44)
+        emb_b = _random_embedding(seed=45)
+        cache_store(
+            "a", emb_a, {"answer": "a", "sources": [{"filename": "a.md"}]},
+            redis, ttl=300, domains=["finance"], domains_searched=["finance"],
+        )
+        cache_store(
+            "b", emb_b, {"answer": "b", "sources": [{"filename": "b.md"}]},
+            redis, ttl=300, domains=["coding"], domains_searched=["coding"],
+        )
+
+        invalidate_cache(redis, domain="finance")
+
+        assert redis.scard("semcache:domain_index:finance") == 0
+        assert redis.scard("semcache:domain_index:coding") == 1
+
+    def test_unrestricted_entry_evicted_by_ingest_into_any_searched_domain(self, _reset_backend):
+        """An entry computed with no domain restriction records
+        ``domains_searched`` as every configured domain (the
+        ``list(config.DOMAINS)`` fallback in ``query_agent.py``) — an ingest
+        into any ONE of those domains must still evict it."""
+        import config
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb = _random_embedding(seed=46)
+        cache_store(
+            "unrestricted query", emb,
+            {"answer": "u", "sources": [{"filename": "u.md"}]},
+            redis, ttl=300, domains_searched=list(config.DOMAINS),
+        )
+
+        picked_domain = config.DOMAINS[len(config.DOMAINS) // 2]
+        invalidate_cache(redis, domain=picked_domain)
+
+        assert cache_lookup(emb, redis, threshold=0.9) is None
+
+
+class TestDomainIndexEvictionBounds:
+    """Fix round 1 — the per-domain index must not grow without bound: FIFO
+    eviction and domain-scoped invalidation must both prune the id out of
+    every domain index it was registered under, not just leave dangling
+    members behind for a domain that's queried but rarely ingested into."""
+
+    @staticmethod
+    def _warm_legacy_sentinel(redis: Any) -> None:
+        invalidate_cache(redis, domain="_warmup_")
+
+    def test_fifo_eviction_prunes_domain_index(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        emb0 = _random_embedding(seed=210)
+        emb1 = _random_embedding(seed=211)
+
+        cache_store(
+            "bound q0", emb0, {"answer": "0", "sources": [{"filename": "0.md"}]},
+            redis, ttl=300, domains_searched=["finance"], max_entries=1,
+        )
+        cache_store(
+            "bound q1", emb1, {"answer": "1", "sources": [{"filename": "1.md"}]},
+            redis, ttl=300, domains_searched=["finance"], max_entries=1,
+        )
+
+        # q0 was FIFO-evicted to stay within max_entries=1 — its id must be
+        # gone from the domain index too, not just the payload/backend.
+        assert _reset_backend.count() == 1
+        assert redis.scard("semcache:domain_index:finance") == 1
+
+    def test_dangling_member_pruned_and_not_double_counted(self, _reset_backend):
+        """A member whose payload already TTL-expired is dangling — a domain
+        invalidation must drop it from the index but not report it as a
+        fresh eviction (it was already gone)."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb_dead = _random_embedding(seed=212)
+        emb_live = _random_embedding(seed=213)
+
+        cache_store(
+            "dead q", emb_dead, {"answer": "d", "sources": [{"filename": "d.md"}]},
+            redis, ttl=300, domains_searched=["finance"],
+        )
+        cache_store(
+            "live q", emb_live, {"answer": "l", "sources": [{"filename": "l.md"}]},
+            redis, ttl=300, domains_searched=["finance"],
+        )
+        assert redis.scard("semcache:domain_index:finance") == 2
+
+        # Simulate the "dead" entry's own TTL expiring — its Redis payload is
+        # gone but the domain-index membership (a plain SET member, no
+        # per-member TTL) is still there until something prunes it.
+        dead_id = None
+        for m in redis.smembers("semcache:domain_index:finance"):
+            payload_raw = redis.get(f"semcache:entry:{m}")
+            if payload_raw and json.loads(payload_raw)["result"]["answer"] == "d":
+                dead_id = m
+        assert dead_id is not None
+        redis.delete(f"semcache:entry:{dead_id}")
+
+        count = invalidate_cache(redis, domain="finance")
+
+        assert count == 1, "only the live entry should count as a fresh eviction"
+        assert redis.scard("semcache:domain_index:finance") == 0
+
+    def test_multi_domain_entry_pruned_from_other_domain_index_too(self, _reset_backend):
+        """An entry indexed under two domains, evicted via ONE of them, must
+        not leave a dangling reference in the other domain's index."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self._warm_legacy_sentinel(redis)
+        emb = _random_embedding(seed=214)
+        cache_store(
+            "multi q", emb, {"answer": "m", "sources": [{"filename": "m.md"}]},
+            redis, ttl=300, domains_searched=["finance", "coding"],
+        )
+        assert redis.scard("semcache:domain_index:coding") == 1
+
+        invalidate_cache(redis, domain="finance")
+
+        assert redis.scard("semcache:domain_index:finance") == 0
+        assert redis.scard("semcache:domain_index:coding") == 0
+
+
+class TestConcurrentLegacySweep:
+    """Fix round 1 — the legacy-sweep sentinel must be claimed atomically
+    (SET NX), not via a GET-then-SET race where two concurrent first-ever
+    domain-scoped invalidations could both run a full flush."""
+
+    def test_two_racing_callers_produce_exactly_one_full_flush(self, _reset_backend):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        barrier = threading.Barrier(2)
+        call_count = {"n": 0}
+        lock = threading.Lock()
+
+        import core.retrieval.semantic_cache as semantic_cache_module
+        real_full_flush = semantic_cache_module._full_flush
+
+        def _counting_full_flush(redis_client):
+            with lock:
+                call_count["n"] += 1
+            return real_full_flush(redis_client)
+
+        def _race(domain: str) -> None:
+            barrier.wait(timeout=5)
+            invalidate_cache(redis, domain=domain)
+
+        with patch.object(semantic_cache_module, "_full_flush", side_effect=_counting_full_flush):
+            threads = [
+                threading.Thread(target=_race, args=("finance",)),
+                threading.Thread(target=_race, args=("coding",)),
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=5)
+
+        assert call_count["n"] == 1, "exactly one caller should perform the legacy sweep"
+
+
 class TestSizeBoundEviction:
     def test_fifo_eviction_when_over_bound(self, _reset_backend):
         redis = fakeredis.FakeRedis(decode_responses=True)

@@ -51,9 +51,26 @@ _AGE_INDEX_KEY = _CACHE_PREFIX + "age_index"
 _LAST_INVALIDATED_KEY = "semcache_meta:last_invalidated_at"
 _LAST_INVALIDATED_TTL_SECONDS = 7 * 24 * 60 * 60  # outlives any single entry's TTL
 
+#: Redis set of entry_ids per domain (Task 7) — lets an ingest into domain D
+#: evict exactly the entries whose result touched D, in O(entries touching D),
+#: instead of the full SCAN+deserialize every ingest previously paid for.
+_DOMAIN_INDEX_PREFIX = _CACHE_PREFIX + "domain_index:"
+
+#: One-time marker, deliberately OUTSIDE the ``semcache:`` prefix (same
+#: reasoning as ``_LAST_INVALIDATED_KEY``) so a full flush never wipes it.
+#: Entries written before this domain index existed carry no membership in
+#: any domain-index set and can only be found by a full scan; the first
+#: domain-scoped invalidation pays that cost once to retire them, then never
+#: needs to again — every entry stored after this ships is domain-indexed.
+_LEGACY_SWEPT_KEY = "semcache_meta:legacy_swept"
+
 
 def _entry_key(entry_id: str) -> str:
     return _CACHE_PREFIX + "entry:" + entry_id
+
+
+def _domain_index_key(domain: str) -> str:
+    return _DOMAIN_INDEX_PREFIX + domain
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +346,7 @@ def cache_store(
     allowed_domains: list[str] | None = None,
     *,
     memory_enabled: bool = True,
+    domains_searched: list[str] | None = None,
 ) -> None:
     """Store a query result in the semantic cache.
 
@@ -337,6 +355,13 @@ def cache_store(
     The entry is keyed and scope-tagged by ``domains``, the consumer's
     ``allowed_domains`` wall, and ``memory_enabled`` so lookups never cross
     domain filters, consumer isolation, or Memory ON/OFF (CR-001 / R16).
+
+    ``domains_searched`` (Task 7) is the envelope's actual post-filtering
+    domain set — distinct from ``domains`` (the raw request filter used for
+    the lookup scope token): it drives the per-domain invalidation index so
+    an ingest into one domain evicts only entries whose result could be
+    stale for it. Deliberately independent of the scope token so changing it
+    can never turn a store/lookup pair into a scope mismatch.
     """
     backend = _get_backend()
     if backend is None:
@@ -361,7 +386,14 @@ def cache_store(
             _entry_key(entry_id),
             cache_ttl,
             json.dumps(
-                {"domain_scope": scope, "result": result, "stored_at": now},
+                {
+                    "domain_scope": scope, "result": result, "stored_at": now,
+                    # Task 7 fix round 1: the full domain list this entry is
+                    # indexed under, so any eviction path (FIFO, domain-scoped
+                    # invalidation) can SREM it out of every domain index it
+                    # touches, not just the one being processed right now.
+                    "domains_searched": domains_searched or [],
+                },
                 default=str,
             ),
         )
@@ -394,6 +426,18 @@ def cache_store(
     except Exception as exc:
         log_swallowed_error("core.retrieval.semantic_cache.age_index", exc)
 
+    # Domain index (Task 7) — own try/except: a bookkeeping failure here must
+    # not make this call report the entry as unstored when the redis/chroma
+    # writes above already succeeded.
+    if domains_searched:
+        try:
+            for d in domains_searched:
+                idx_key = _domain_index_key(d)
+                redis_client.sadd(idx_key, entry_id)
+                redis_client.expire(idx_key, cache_ttl)
+        except Exception as exc:
+            log_swallowed_error("core.retrieval.semantic_cache.domain_index", exc)
+
 
 def _evict_oldest_if_over_bound(redis_client: Any, backend: _CacheBackend, bound: int) -> None:
     """FIFO-evict the oldest entries once the age index passes ``bound``.
@@ -411,6 +455,25 @@ def _evict_oldest_if_over_bound(redis_client: Any, backend: _CacheBackend, bound
     if not oldest:
         return
     stale_ids = [eid.decode() if isinstance(eid, bytes) else eid for eid in oldest]
+
+    # Task 7 fix round 1: FIFO eviction previously deleted the payload/backend/
+    # age-index entries but never removed the id from its domain-index sets,
+    # so a domain that's queried often but rarely ingested into accumulated
+    # dangling members forever. Read each payload's own domain list (before
+    # deleting it) and SREM the id out of every domain it was indexed under.
+    try:
+        payloads = redis_client.mget([_entry_key(eid) for eid in stale_ids])
+        for eid, raw in zip(stale_ids, payloads):
+            if not raw:
+                continue
+            try:
+                domains = json.loads(raw).get("domains_searched") or []
+            except (ValueError, TypeError):
+                domains = []
+            for d in domains:
+                redis_client.srem(_domain_index_key(d), eid)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.evict_domain_index", exc)
 
     redis_client.delete(*(_entry_key(eid) for eid in stale_ids))
     redis_client.zrem(_AGE_INDEX_KEY, *stale_ids)
@@ -435,8 +498,155 @@ def flush_cache(redis_client: Any) -> None:
     return None
 
 
-def invalidate_cache(redis_client: Any, trigger: str = "unspecified") -> int:
-    """Clear all semantic cache entries (Redis payloads + index).
+def _claim_legacy_sweep(redis_client: Any) -> bool:
+    """Atomically claim the one-time legacy-sweep fallback.
+
+    Task 7 fix round 1: the previous GET-then-SET was two round trips, so two
+    concurrent first-ever domain-scoped invalidations could both observe the
+    sentinel absent and both run a full flush. ``SET ... NX`` is a single
+    atomic operation — it returns True for exactly one caller (the sentinel
+    didn't exist yet, and this call created it) and False for every other
+    caller (concurrent or later), so exactly one full flush ever happens.
+    """
+    try:
+        return bool(redis_client.set(_LEGACY_SWEPT_KEY, "1", nx=True))
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.legacy_swept_claim", exc)
+        return False
+
+
+def _mark_legacy_swept(redis_client: Any) -> None:
+    try:
+        redis_client.set(_LEGACY_SWEPT_KEY, "1")
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.legacy_swept_mark", exc)
+
+
+def _write_invalidation_watermark(redis_client: Any) -> None:
+    """Stamp the stale-hit watermark for :func:`cache_lookup`'s
+    ``_check_stale_hit``. Only called after a FULL flush — a domain-scoped
+    evict deliberately leaves other domains' entries in place, and bumping
+    this global watermark would falsely flag every one of them as stale
+    (CR-046) on its very next lookup. Deliberately outside the ``semcache:``
+    prefix so it survives the SCAN in :func:`_full_flush`.
+    """
+    try:
+        redis_client.setex(
+            _LAST_INVALIDATED_KEY, _LAST_INVALIDATED_TTL_SECONDS, str(time.time()),
+        )
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.watermark_write", exc)
+
+
+def _full_flush(redis_client: Any) -> int:
+    """Clear every semantic-cache entry (Redis payloads + embedding index).
+
+    Used for the unscoped (``domain=None``) invalidation contract, and as the
+    one-time fallback a domain-scoped call takes before the legacy sweep has
+    run (Task 7) — entries written before the domain index existed have no
+    index membership and can only be found this way.
+    """
+    count = 0
+    cursor = 0
+    while True:
+        cursor, keys = redis_client.scan(cursor, match=_CACHE_PREFIX + "*", count=100)
+        if keys:
+            redis_client.delete(*keys)
+            count += len(keys)
+        if cursor == 0:
+            break
+
+    backend = _get_backend()
+    if backend is not None:
+        try:
+            # chromadb 1.x rejects an empty `where` ("Expected where to have
+            # exactly one operator") — the 0.5-era clear-all idiom used here
+            # threw on every mutation, so the embedding index was never
+            # actually cleared. Delete by id instead.
+            existing = backend.get() or {}
+            ids = [str(i) for i in (existing.get("ids") or [])]
+            if ids:
+                backend.delete(ids=ids)
+        except Exception as exc:
+            log_swallowed_error(
+                "core.retrieval.semantic_cache.backend_clear", exc, redis_client=redis_client,
+            )
+    return count
+
+
+def _evict_domain(redis_client: Any, domain: str) -> int:
+    """Evict exactly the entries whose result touched ``domain`` — O(entries
+    touching that domain) via the per-domain index (Task 7), instead of the
+    full SCAN+deserialize :func:`_full_flush` performs.
+
+    Task 7 fix round 1: a member whose payload no longer exists (TTL already
+    expired it) is dangling — it's dropped from this domain's index below but
+    not counted as a fresh eviction. A member whose payload IS still live is
+    also pruned out of every *other* domain index it was registered under
+    (read from the payload's own ``domains_searched``), so a multi-domain
+    result doesn't leave dangling references behind in domains this
+    invalidation never touches.
+    """
+    idx_key = _domain_index_key(domain)
+    try:
+        members = redis_client.smembers(idx_key)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.domain_index_read", exc)
+        return 0
+    if not members:
+        return 0
+    entry_ids = [m.decode() if isinstance(m, bytes) else m for m in members]
+
+    live_ids: list[str] = []
+    try:
+        payloads = redis_client.mget([_entry_key(eid) for eid in entry_ids])
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.domain_evict_payload_read", exc)
+        payloads = [None] * len(entry_ids)
+
+    for eid, raw in zip(entry_ids, payloads):
+        if not raw:
+            continue  # already TTL-expired — dangling, not a fresh eviction
+        live_ids.append(eid)
+        try:
+            entry_domains = json.loads(raw).get("domains_searched") or []
+        except (ValueError, TypeError):
+            entry_domains = []
+        for d in entry_domains:
+            if d == domain:
+                continue
+            try:
+                redis_client.srem(_domain_index_key(d), eid)
+            except Exception as exc:
+                log_swallowed_error("core.retrieval.semantic_cache.domain_evict_cross_prune", exc)
+
+    if live_ids:
+        try:
+            redis_client.delete(*(_entry_key(eid) for eid in live_ids))
+        except Exception as exc:
+            log_swallowed_error("core.retrieval.semantic_cache.domain_evict_entries", exc)
+        try:
+            redis_client.zrem(_AGE_INDEX_KEY, *live_ids)
+        except Exception as exc:
+            log_swallowed_error("core.retrieval.semantic_cache.domain_evict_age_index", exc)
+
+        backend = _get_backend()
+        if backend is not None:
+            try:
+                backend.delete(ids=live_ids)
+            except Exception as exc:
+                log_swallowed_error("core.retrieval.semantic_cache.domain_evict_backend", exc)
+
+    try:
+        redis_client.delete(idx_key)
+    except Exception as exc:
+        log_swallowed_error("core.retrieval.semantic_cache.domain_index_clear", exc)
+
+    return len(live_ids)
+
+
+def invalidate_cache(redis_client: Any, trigger: str = "unspecified", domain: str | None = None) -> int:
+    """Clear semantic cache entries (Redis payloads + index).
 
     ``trigger`` names the caller (e.g. ``"ingestion.ingest_content"``,
     ``"kb_admin.clear_domain"``) and is recorded on the
@@ -444,52 +654,37 @@ def invalidate_cache(redis_client: Any, trigger: str = "unspecified") -> int:
     paths drive cache churn (Phase 2.2 — this function previously had no
     production caller at all, leaving up to a full TTL of stale results
     served after any corpus mutation).
+
+    ``domain`` (Task 7) scopes the eviction to entries whose result touched
+    that domain (via the per-domain index populated by :func:`cache_store`),
+    so an ingest into one domain no longer flushes every cached result —
+    the prior behavior left ``cache_hit_rate`` pinned at 0.0 since every
+    conversation ingest busted the whole cache. ``domain=None`` (every
+    non-ingestion caller, e.g. ``kb_admin.clear_domain``) keeps the full-flush
+    contract unchanged. The first domain-scoped call falls back to a full
+    flush to retire entries written before the domain index existed (no
+    recorded domain set); every entry stored after that ships is
+    domain-indexed, so this fallback never repeats.
     """
     try:
-        count = 0
-        cursor = 0
-        while True:
-            cursor, keys = redis_client.scan(
-                cursor, match=_CACHE_PREFIX + "*", count=100
-            )
-            if keys:
-                redis_client.delete(*keys)
-                count += len(keys)
-            if cursor == 0:
-                break
-
-        backend = _get_backend()
-        if backend is not None:
-            try:
-                # chromadb 1.x rejects an empty `where` ("Expected where to have
-                # exactly one operator") — the 0.5-era clear-all idiom used here
-                # threw on every mutation, so the embedding index was never
-                # actually cleared. Delete by id instead.
-                existing = backend.get() or {}
-                ids = [str(i) for i in (existing.get("ids") or [])]
-                if ids:
-                    backend.delete(ids=ids)
-            except Exception as exc:
-                log_swallowed_error(
-                    "core.retrieval.semantic_cache.backend_clear",
-                    exc,
-                    redis_client=redis_client,
-                )
-
-        # Watermark for cache_lookup's stale-hit check — deliberately
-        # outside the semcache: prefix so the SCAN above never sweeps it.
-        try:
-            redis_client.setex(
-                _LAST_INVALIDATED_KEY, _LAST_INVALIDATED_TTL_SECONDS, str(time.time()),
-            )
-        except Exception as exc:
-            log_swallowed_error("core.retrieval.semantic_cache.watermark_write", exc)
+        if domain is None:
+            count = _full_flush(redis_client)
+            _mark_legacy_swept(redis_client)
+            _write_invalidation_watermark(redis_client)
+        elif _claim_legacy_sweep(redis_client):
+            # We won the atomic NX claim — we're the one caller (of however
+            # many raced in concurrently) that performs the one-time flush.
+            count = _full_flush(redis_client)
+            _write_invalidation_watermark(redis_client)
+        else:
+            count = _evict_domain(redis_client, domain)
 
         _record_cache_invalidation(redis_client, count, trigger)
 
         if count:
             logger.info(
-                "Semantic cache invalidated: %d keys (trigger=%s)", count, trigger,
+                "Semantic cache invalidated: %d keys (trigger=%s, domain=%s)",
+                count, trigger, domain or "*",
             )
         return count
     except Exception as e:

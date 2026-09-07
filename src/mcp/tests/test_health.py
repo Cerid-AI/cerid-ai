@@ -133,8 +133,8 @@ class TestHealthEndpoints:
         nli._MODEL_LOADED = True
         # Reset the /health cache so the new invariants block is computed.
         import app.routers.health as h
-        h._health_cache = {}
-        h._health_cache_ts = 0.0
+        h._health_payload_cache.value = {}
+        h._health_payload_cache.updated_at = 0.0
         try:
             client = TestClient(_make_app())
             resp = client.get("/health")
@@ -147,3 +147,36 @@ class TestHealthEndpoints:
         assert "redis" in data["services"]
         # Task 14: invariants block is additive to the existing response.
         assert "invariants" in data
+
+
+class TestOllamaEffectiveLocalModel:
+    """Task 6: the ollama health block surfaces the resolved local chat
+    model name, so an operator can see what the gateway is actually
+    serving without cross-referencing INTERNAL_LLM_MODEL by hand."""
+
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
+    def test_ollama_block_includes_effective_local_model(
+        self, mock_chroma, mock_neo4j, mock_redis, monkeypatch,
+    ):
+        mock_chroma.return_value = MagicMock()
+        mock_neo4j.return_value = None
+        mock_redis.return_value = MagicMock()
+        monkeypatch.setenv("OLLAMA_ENABLED", "true")
+        monkeypatch.setenv("OLLAMA_URL", "http://fake-quenchforge:11434")
+
+        import app.routers.health as h
+        h._ollama_probe_cache = None
+        h._ollama_probe_cache_ts = 0.0
+        monkeypatch.setattr(
+            "httpx.get",
+            lambda url, timeout: MagicMock(
+                status_code=200, json=lambda: {"models": [{"name": "qwen2.5-7b-instruct-q4_k_m"}]}
+            ),
+        )
+        monkeypatch.setattr(h, "effective_local_model", lambda: "qwen2.5-7b-instruct-q4_k_m")
+
+        result = health_check()
+
+        assert result["ollama"]["effective_local_model"] == "qwen2.5-7b-instruct-q4_k_m"

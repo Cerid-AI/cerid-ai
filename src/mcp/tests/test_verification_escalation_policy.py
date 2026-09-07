@@ -27,6 +27,7 @@ from core.agents.hallucination.escalation import (
 )
 from core.agents.hallucination.verification import (
     _SUPPORTED_MIN_CONFIDENCE,
+    _compute_adjusted_confidence,
     _parse_verification_verdict,
     _score_kb_grounding,
     verify_claim,
@@ -244,3 +245,61 @@ class TestNliPremiseCeiling:
         # evidence (up to NLI_PREMISE_CHAR_LIMIT) reaches the tokenizer.
         assert len(captured["premise"]) > 512
         assert captured["premise"].startswith("the knowledge base evidence")
+
+
+# ---------------------------------------------------------------------------
+# Graph-corroboration boost runs off the event-loop thread
+# ---------------------------------------------------------------------------
+class TestGraphBoostOffLoop:
+    @pytest.mark.asyncio
+    async def test_graph_boost_runs_off_loop_and_applies_at_two_neighbors(self):
+        """The Neo4j session/run/single call in the graph-corroboration boost
+        must run off the event-loop thread (it is a blocking driver call sitting
+        inside the per-claim verification hot path), and the boost must still
+        apply once >=2 verified neighbours are reported."""
+        import threading
+
+        loop_thread_id = threading.get_ident()
+        call_thread_ids: list[int] = []
+
+        class _FakeResult:
+            def single(self):
+                call_thread_ids.append(threading.get_ident())
+                return {"verified_neighbors": 2}
+
+        class _FakeSession:
+            def run(self, *args, **kwargs):
+                call_thread_ids.append(threading.get_ident())
+                return _FakeResult()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class _FakeDriver:
+            def session(self):
+                call_thread_ids.append(threading.get_ident())
+                return _FakeSession()
+
+        top = {"relevance": 0.8, "content": "evidence", "artifact_id": "art-1"}
+
+        async def _nli(premise, hypothesis):
+            return {"entailment": 0.9, "contradiction": 0.0, "neutral": 0.1, "label": "entailment"}
+
+        with (
+            patch("config.GRAPH_VERIFICATION_BOOST", 0.05),
+            patch("core.utils.nli.nli_score_async", side_effect=_nli),
+        ):
+            similarity, details, _nli_result = await _score_kb_grounding(
+                "some claim", [top], top, 0.8, _FakeDriver()
+            )
+
+        assert call_thread_ids, "Neo4j session/run/single were never called"
+        assert all(tid != loop_thread_id for tid in call_thread_ids), (
+            "Neo4j graph-boost query ran on the event-loop thread"
+        )
+        assert details["graph_verified_neighbors"] == 2
+        baseline = _compute_adjusted_confidence("some claim", [top], 0.8)
+        assert similarity == pytest.approx(min(1.0, baseline + 0.05), abs=1e-9)

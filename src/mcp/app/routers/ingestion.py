@@ -269,11 +269,6 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     async with _ingest_semaphore:
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     _record_connector_ingest(client_source, result)
-    try:
-        from utils.query_cache import invalidate_cache_non_blocking
-        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-    except Exception as e:
-        log_swallowed_error("routers.ingestion.ingest_cache_invalidate", e)
     return result
 
 
@@ -379,11 +374,6 @@ async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Requ
     async with _ingest_semaphore:
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     _record_connector_ingest(client_source, result)
-    try:
-        from utils.query_cache import invalidate_cache_non_blocking
-        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-    except Exception as e:
-        log_swallowed_error("routers.ingestion.ingest_structured_cache_invalidate", e)
     return result
 
 
@@ -431,11 +421,6 @@ async def ingest_url_endpoint(req: IngestUrlRequest):
         result = await asyncio.to_thread(
             ingest_content, text, req.domain, metadata, enrich=True,
         )
-    try:
-        from utils.query_cache import invalidate_cache_non_blocking
-        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-    except Exception as e:
-        log_swallowed_error("routers.ingestion.ingest_url_cache_invalidate", e)
     return result
 
 
@@ -454,11 +439,6 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
                 client_source=request.headers.get("X-Client-ID", ""),
             )
         _complete_job(filename)
-        try:
-            from utils.query_cache import invalidate_all
-            invalidate_all()
-        except Exception as e:
-            log_swallowed_error("routers.ingestion.ingest_file_cache_invalidate", e)
         return result
     except FileNotFoundError as e:
         _complete_job(filename, error=str(e))
@@ -513,12 +493,6 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
 
         for fn in filenames:
             _complete_job(fn)
-
-        try:
-            from utils.query_cache import invalidate_all
-            invalidate_all()
-        except Exception as e:
-            log_swallowed_error("routers.ingestion.ingest_batch_cache_invalidate", e)
 
         return result
     except ValueError as e:

@@ -20,6 +20,7 @@ import httpx
 import numpy as np
 
 import config
+from config.constants import COLLECTION_COUNT_CACHE_TTL_S
 from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
 from core.observability.span_helpers import breadcrumb, span
@@ -516,6 +517,57 @@ def _exclude_pending(where: dict | None) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Per-collection document-count cache
+# ---------------------------------------------------------------------------
+#
+# 12 of 23 domains carry an empty Chroma collection in a typical install, yet
+# multi_domain_query paid a full embed + Chroma query + BM25 hop for each of
+# them on every request. count() is cheap relative to that, but not cheap
+# enough to redo on every query — cache it per collection name for
+# COLLECTION_COUNT_CACHE_TTL_S, and let ingestion invalidate the entry for a
+# domain the moment it writes to it (see invalidate_collection_count_cache).
+
+_collection_count_cache: dict[str, tuple[float, int | None]] = {}
+
+
+async def _collection_doc_count(collection: Any, col_name: str) -> int | None:
+    """Cached ``collection.count()`` for ``col_name``, refreshed after TTL.
+
+    Returns ``None`` when ``count()`` fails or is unsupported — the caller
+    must treat that as "unknown, do not skip" rather than "empty". A count
+    failure (HTTP error, timeout, a test double missing ``count``) is not
+    evidence the collection is empty, and skipping on it would silently
+    blank retrieval for the domain.
+
+    A failure is cached as ``None`` for the same TTL as a real count, so a
+    persistently broken collection is re-checked (and re-logged) at most
+    once per TTL window instead of on every query that touches it.
+    """
+    cached = _collection_count_cache.get(col_name)
+    now = time.monotonic()
+    if cached is not None and (now - cached[0]) < COLLECTION_COUNT_CACHE_TTL_S:
+        return cached[1]
+    try:
+        count = await asyncio.to_thread(collection.count)
+    except Exception as exc:
+        log_swallowed_error("core.agents.query_agent.collection_count", exc)
+        _collection_count_cache[col_name] = (now, None)
+        return None
+    _collection_count_cache[col_name] = (now, count)
+    return count
+
+
+def invalidate_collection_count_cache(domain: str) -> None:
+    """Drop the cached document count for ``domain``.
+
+    Called from the ingest-side cache-invalidation hook so a collection that
+    just received its first chunk is re-checked on the next query instead of
+    reporting empty for up to COLLECTION_COUNT_CACHE_TTL_S more seconds.
+    """
+    _collection_count_cache.pop(config.collection_name(domain), None)
+
+
+# ---------------------------------------------------------------------------
 # Multi-domain retrieval
 # ---------------------------------------------------------------------------
 
@@ -525,8 +577,14 @@ async def multi_domain_query(
     top_k: int = 10,
     chroma_client: Any | None = None,
     metadata_filter: dict | None = None,
+    skipped_empty_out: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Query multiple ChromaDB collections in parallel and aggregate results."""
+    """Query multiple ChromaDB collections in parallel and aggregate results.
+
+    ``skipped_empty_out``, when given, collects the names of requested
+    domains whose collection exists but currently holds zero documents —
+    the caller surfaces this as informational (``domains_skipped_empty``).
+    """
     if domains is None:
         domains = config.DOMAINS
 
@@ -562,6 +620,12 @@ async def multi_domain_query(
             return []  # Skip missing collections without HTTP round-trip
         try:
             collection = chroma_client.get_collection(name=col_name)
+
+            doc_count = await _collection_doc_count(collection, col_name)
+            if doc_count == 0:
+                if skipped_empty_out is not None:
+                    skipped_empty_out.add(domain)
+                return []  # Skip empty collections before embedding/query/BM25
 
             # Phase O.1: exclude pending (un-committed) chunks from retrieval.
             # Order matters: with_tenant_scope MUST see the raw caller filter
@@ -2579,6 +2643,10 @@ async def _agent_query_impl(
 
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
+    # Domains whose collection exists but held zero documents at query time —
+    # informational for the envelope (domains_skipped_empty), shared across
+    # both retrieval branches below since both search effective_domains.
+    domains_skipped_empty: set[str] = set()
     with timer.step("vector_search"):
         if ENABLE_QUERY_DECOMPOSITION:
             # Force LLM decomposition for *implicit* multi-hop analytical queries
@@ -2601,6 +2669,7 @@ async def _agent_query_impl(
                             query=sq, domains=effective_domains,
                             top_k=effective_top_k, chroma_client=chroma_client,
                             metadata_filter=metadata_filter,
+                            skipped_empty_out=domains_skipped_empty,
                         )
 
                     results = await parallel_retrieve(sub_queries, _retrieve_sub)
@@ -2614,6 +2683,7 @@ async def _agent_query_impl(
                     top_k=effective_top_k,
                     chroma_client=chroma_client,
                     metadata_filter=metadata_filter,
+                    skipped_empty_out=domains_skipped_empty,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
 
@@ -2983,6 +3053,9 @@ async def _agent_query_impl(
         # follow-up cap, and consumer allow-listing), not the raw requested set
         # (CR-074).
         "domains_searched": list(effective_domains) if effective_domains else list(config.DOMAINS),
+        # Requested domains whose collection existed but held zero documents
+        # at query time — skipped before any embedding/Chroma/BM25 work.
+        "domains_skipped_empty": sorted(domains_skipped_empty),
         "total_results": len(results),
         "token_budget_used": char_count,
         "graph_results": graph_results_added,
@@ -3005,6 +3078,11 @@ async def _agent_query_impl(
                 query, _query_embedding, result_dict, redis_client,
                 domains=_cache_domains, allowed_domains=allowed_domains,
                 memory_enabled=memory_enabled,
+                # Task 7: the domains the result actually touched (post
+                # follow-up/consumer narrowing), not the raw request filter —
+                # drives per-domain invalidation so an ingest into one domain
+                # doesn't have to flush the whole semantic cache.
+                domains_searched=result_dict["domains_searched"],
             )
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error(

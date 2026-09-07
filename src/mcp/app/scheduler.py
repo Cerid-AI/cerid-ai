@@ -103,17 +103,21 @@ async def _enqueue_periodic(queue: Any, job: Any, job_name: str, start: float) -
 
 
 # AF-013: compute_entity_embeddings -> compute_umap_3d -> compute_trust_state ->
-# derive_domains are scheduled back-to-back at fixed cron offsets (15/30/31/32
-# past the hour) on the assumption each predecessor has drained by the time the
-# next one's cron tick fires. _enqueue_periodic never confirmed that — it logs
-# "enqueued" and returns, so a predecessor that overruns its window produces no
-# signal at all; the successor just runs (build_similarity_edges' AF-013 fix
-# addressed its own worst case — purging edges before checking data existed —
-# but the sequencing gap upstream of it was untouched). These four stages poll
-# the processor queue's own completion record instead of returning at enqueue
-# time, so a stage that is still running/failed/missing when its allotted
-# window elapses is logged as "timeout"/"error" rather than silently as
-# "enqueued". Bounded so a stuck job can never hang the scheduler loop.
+# derive_domains used to be scheduled back-to-back at fixed cron offsets
+# (15/30/31/32 past the hour) on the assumption each predecessor had drained
+# by the time the next one's cron tick fired. _enqueue_periodic never
+# confirmed that — it logs "enqueued" and returns, so a predecessor that
+# overran its window produced no signal at all; the successor just ran
+# (build_similarity_edges' AF-013 fix addressed its own worst case — purging
+# edges before checking data existed — but the sequencing gap upstream of it
+# was untouched). Task 9 replaced the fixed-cron chain with
+# _run_graph_pipeline_chain, which awaits each stage in turn instead of
+# racing independent crons — but a stage can still stall or fail, so these
+# stages poll the processor queue's own completion record instead of
+# returning at enqueue time: a stage that is still running/failed/missing
+# when its allotted window elapses is logged as "timeout"/"error" rather than
+# silently as "enqueued". Bounded so a stuck job can never hang the scheduler
+# loop or block the chain's next stage indefinitely.
 _STAGE_COMPLETION_TIMEOUT_S = float(os.getenv("SCHEDULER_STAGE_COMPLETION_TIMEOUT_S", "600"))
 _STAGE_COMPLETION_POLL_S = float(os.getenv("SCHEDULER_STAGE_COMPLETION_POLL_S", "5"))
 
@@ -1015,7 +1019,11 @@ async def _run_wiki_stale_sweep() -> None:
                     MATCH (e:Entity)
                     WHERE (e.summary IS NULL
                        OR e.summary_updated_at IS NULL
-                       OR e.summary_updated_at < $cutoff)
+                       OR e.summary_updated_at < $cutoff
+                       // Raised by a live refresh that deferred to this sweep
+                       // (WikiRefreshJob._mark_stale_for_sweep); cleared by the
+                       // summary write that eventually lands.
+                       OR e.summary_refresh_due = true)
                       AND NOT (
                         e.summary_edited_by = 'user'
                         AND e.summary_updated_at >= $human_edit_cutoff
@@ -1067,7 +1075,21 @@ async def _run_wiki_stale_sweep() -> None:
         slugs = await asyncio.to_thread(_scan_with_cutoff)
         enqueued = 0
         enqueue_failed = 0
-        for slug in slugs:
+        skipped_budget = 0
+        wall_clock_s = config.WIKI_STALE_SWEEP_WALL_CLOCK_S
+        for index, slug in enumerate(slugs):
+            # Task 9: up to WIKI_STALE_SWEEP_LIMIT (100) candidates enqueued
+            # with no wall-clock cap could run unbounded. Stop before
+            # enqueueing more once the budget elapses — the un-enqueued
+            # slugs' summary state is untouched, so they re-qualify tomorrow.
+            if time.time() - start >= wall_clock_s:
+                skipped_budget = len(slugs) - index
+                logger.warning(
+                    "wiki_stale_sweep: wall-clock budget %.0fs exceeded — "
+                    "skipping %d remaining candidate(s)",
+                    wall_clock_s, skipped_budget,
+                )
+                break
             # Force=False so per-entity debounce still applies; if the
             # subscriber already enqueued for this slug in the last
             # WIKI_REFRESH_DEBOUNCE_TTL seconds, the sweep skips it.
@@ -1075,8 +1097,11 @@ async def _run_wiki_stale_sweep() -> None:
             # catch per-slug so one bad slug doesn't abort the rest of the
             # sweep the way the old swallow-and-continue behavior did, but
             # count it so the run's own status reflects it.
+            # origin="sweep" (Task 3) exempts the resulting job from the
+            # interactive-demand deferral and the live rolling-hour rate
+            # limit — this IS the catch-up path those defer to.
             try:
-                if enqueue_refresh(slug, force=False):
+                if enqueue_refresh(slug, force=False, origin="sweep"):
                     enqueued += 1
             except Exception as exc:  # noqa: BLE001 — one bad slug must not abort the batch
                 enqueue_failed += 1
@@ -1087,7 +1112,10 @@ async def _run_wiki_stale_sweep() -> None:
                 )
 
         duration = time.time() - start
-        detail = f"candidates={len(slugs)} enqueued={enqueued} failed={enqueue_failed} limit={limit}"
+        detail = (
+            f"candidates={len(slugs)} enqueued={enqueued} failed={enqueue_failed} "
+            f"skipped_budget={skipped_budget} limit={limit}"
+        )
         if enqueue_failed:
             _log_execution("wiki_stale_sweep", "error", duration, detail)
             logger.error("wiki_stale_sweep: %s in %.1fs", detail, duration)
@@ -1356,11 +1384,12 @@ async def _run_community_refresh() -> None:
 async def _run_compute_entity_embeddings() -> None:
     """Nightly per-entity embedding compute (mean-pool mention chunk vectors).
 
-    Runs BEFORE compute_umap_3d so semantic kNN edges and layout both pick up
-    fresh embeddings. Gated via SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS. AF-013:
+    First stage of the AF-013 graph pipeline (_run_graph_pipeline_chain) so
+    semantic kNN edges and layout both pick up fresh embeddings. Also
+    registered standalone, paused, for manual per-stage triggers (Task 9). AF-013:
     when queued, blocks on the job's own completion (bounded by
     _STAGE_COMPLETION_TIMEOUT_S) so a stall or failure is logged instead of
-    silently outliving the window before compute_umap_3d's cron tick.
+    silently outliving the window before the chain's next stage starts.
     """
     start = time.time()
     try:
@@ -1396,11 +1425,12 @@ async def _run_compute_entity_embeddings() -> None:
 async def _run_build_similarity_edges() -> None:
     """Nightly SIMILAR_TO kNN edge materialisation.
 
-    Runs AFTER compute_entity_embeddings and BEFORE compute_umap_3d so the
-    force layout springs pick up fresh semantic edges.  Gated via both
-    SEMANTIC_EDGE_ENABLED and SCHEDULE_BUILD_SIMILARITY_EDGES; empty string
-    or False disables.  Best-effort — failure is logged but does not block
-    compute_umap_3d.
+    Second stage of the AF-013 graph pipeline (_run_graph_pipeline_chain),
+    between compute_entity_embeddings and compute_umap_3d, so the force
+    layout springs pick up fresh semantic edges. Gated via SEMANTIC_EDGE_ENABLED
+    (SCHEDULE_BUILD_SIMILARITY_EDGES only gates its standalone, paused,
+    manual-trigger registration — Task 9). Best-effort — failure is logged
+    but does not block compute_umap_3d.
     """
     if not config.SEMANTIC_EDGE_ENABLED:
         _log_execution("build_similarity_edges", "skipped", 0.0, "disabled")
@@ -1441,9 +1471,10 @@ async def _run_compute_umap_3d() -> None:
     Enqueues ComputeUmap3DJob via the processor queue when available, else runs
     it directly (mirrors _run_ingest_recovery). Emits the deterministic fallback
     layout today (no umap dependency); coords key off community_id so the
-    Constellation/atlas view renders. Gated via SCHEDULE_COMPUTE_UMAP_3D.
-    AF-013: when queued, blocks on the job's own completion so a stall/failure
-    is logged before compute_trust_state's cron tick fires one minute later.
+    Constellation/atlas view renders. Third stage of the AF-013 graph pipeline
+    (_run_graph_pipeline_chain). AF-013: when queued, blocks on the job's own
+    completion so a stall/failure is logged before the chain's next stage
+    (compute_trust_state) starts.
     """
     start = time.time()
     try:
@@ -1474,10 +1505,10 @@ async def _run_compute_umap_3d() -> None:
 async def _run_compute_trust_state() -> None:
     """Nightly Entity.trust_state derivation from VerificationReport evidence.
 
-    Runs 1 minute after compute_umap_3d (default 4:31 AM) so trust_state
-    is fresh when Constellation renders.  Gated via SCHEDULE_COMPUTE_TRUST_STATE.
+    Fourth stage of the AF-013 graph pipeline (_run_graph_pipeline_chain),
+    after compute_umap_3d, so trust_state is fresh when Constellation renders.
     AF-013: when queued, blocks on the job's own completion so a stall/failure
-    is logged before derive_domains' cron tick fires one minute later.
+    is logged before the chain's next stage (derive_domains) starts.
     """
     start = time.time()
     try:
@@ -1514,11 +1545,14 @@ async def _run_compute_trust_state() -> None:
 async def _run_derive_domains() -> None:
     """Nightly Entity.primary_domain derivation from artifact MENTIONS.
 
-    Runs 1 minute after compute_trust_state (default 3:32 AM) so
-    primary_domain is fresh when graph surfaces render. Independent of
-    umap — runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
-    Gated via SCHEDULE_DERIVE_DOMAINS. AF-013: when queued, blocks on the
-    job's own completion so a stall/failure is logged rather than silent.
+    Fifth and final stage of the AF-013 graph pipeline
+    (_run_graph_pipeline_chain), after compute_trust_state, so
+    primary_domain is fresh when graph surfaces render. (Task 9: previously
+    ran standalone even when SCHEDULE_COMPUTE_UMAP_3D was empty — now runs
+    as part of the chain regardless of the other stages' own SCHEDULE_*
+    settings, which gate only their standalone manual-trigger registration.)
+    AF-013: when queued, blocks on the job's own completion so a stall/failure
+    is logged rather than silent.
     """
     start = time.time()
     try:
@@ -1555,6 +1589,47 @@ async def _run_derive_domains() -> None:
         duration = time.time() - start
         _log_execution("derive_domains", "error", duration, str(e))
         logger.error("derive_domains scheduled job failed: %s", e)
+
+
+# Task 9: the five stages above used to be registered on their own fixed
+# crons (15/22/30/31/32 past the hour), racing each predecessor's completion
+# whenever it overran its window (compute_umap_3d's serial community-summary
+# batch, see COMMUNITY_SUMMARY_WALL_CLOCK_S, was the worst offender — 40min-3h
+# on this host against a 600s stage window). Each _run_* function above
+# already blocks on its own terminal state (_enqueue_and_await_completion) or
+# runs synchronously in-process (build_similarity_edges), so simply awaiting
+# them in order is sufficient: stage N+1 can never start before stage N
+# reaches a terminal state or its own _STAGE_COMPLETION_TIMEOUT_S fires.
+# Registered once, on the first stage's cron — see start_scheduler().
+#
+# Each stage keeps its own SCHEDULE_* setting as its on/off switch: the cron
+# expression no longer decides WHEN a chained stage runs, but an empty value
+# still means "disabled", the same contract every other scheduled job honours.
+# (job id, SCHEDULE_* setting, default cron, coroutine)
+_GRAPH_PIPELINE_STAGES = (
+    ("compute_entity_embeddings", "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *",
+     _run_compute_entity_embeddings),
+    ("build_similarity_edges", "SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *",
+     _run_build_similarity_edges),
+    ("compute_umap_3d", "SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *",
+     _run_compute_umap_3d),
+    ("compute_trust_state", "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *",
+     _run_compute_trust_state),
+    ("derive_domains", "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *",
+     _run_derive_domains),
+)
+
+
+async def _run_graph_pipeline_chain() -> None:
+    """Run the AF-013 graph-pipeline stages back-to-back, in order, skipping
+    any stage whose own SCHEDULE_* setting an operator has emptied."""
+    for job_name, setting, default, stage in _GRAPH_PIPELINE_STAGES:
+        if not getattr(config, setting, default):
+            logger.info(
+                "graph_pipeline: %s disabled (%s is empty) — skipping", job_name, setting,
+            )
+            continue
+        await stage()
 
 
 async def _run_backfill_enrichment() -> None:
@@ -2401,9 +2476,32 @@ def start_scheduler() -> AsyncIOScheduler:
             max_instances=1,
         )
 
-    # Per-entity embeddings — nightly, 15 min before compute_umap_3d so semantic
-    # kNN edges and layout both pick up fresh embeddings. Gated via
-    # SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS; empty string disables.
+    # Task 9: compute_entity_embeddings -> build_similarity_edges ->
+    # compute_umap_3d -> compute_trust_state -> derive_domains now run as one
+    # chain (_run_graph_pipeline_chain), triggered once on the first stage's
+    # cron, instead of five independent crons racing each predecessor's
+    # completion. Each stage below stays registered individually — paused
+    # (next_run_time=None disables its OWN automatic firing without removing
+    # it from the job store) — so the manual per-stage trigger endpoint and
+    # the cache-invalidation registry (_JOB_CACHE_PATTERNS, _QUEUE_BACKED_JOBS)
+    # keep resolving them exactly as before.
+    if getattr(config, "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *"):
+        _scheduler.add_job(
+            _run_graph_pipeline_chain,
+            CronTrigger.from_crontab(
+                getattr(config, "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *"),
+            ),
+            id="graph_pipeline",
+            name=(
+                "Nightly graph pipeline (entity embeddings -> similarity "
+                "edges -> umap -> trust state -> domains)"
+            ),
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Per-entity embeddings. Gated via SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS;
+    # empty string disables (also skips registering the chain above).
     if getattr(config, "SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *"):
         _scheduler.add_job(
             _run_compute_entity_embeddings,
@@ -2414,12 +2512,12 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Per-entity embedding compute (mean-pooled mention chunks)",
             replace_existing=True,
             max_instances=1,
+            next_run_time=None,
         )
 
-    # Semantic kNN edge materialisation — nightly, between entity-embeddings (3:15)
-    # and compute_umap_3d (3:30) so the layout picks up fresh SIMILAR_TO edges.
-    # Also gated by SEMANTIC_EDGE_ENABLED; empty SCHEDULE_BUILD_SIMILARITY_EDGES
-    # disables cron independently (flag takes precedence in the job body).
+    # Semantic kNN edge materialisation. Also gated by SEMANTIC_EDGE_ENABLED;
+    # empty SCHEDULE_BUILD_SIMILARITY_EDGES disables registration independently
+    # (flag takes precedence in the job body).
     if getattr(config, "SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *"):
         _scheduler.add_job(
             _run_build_similarity_edges,
@@ -2430,10 +2528,11 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Semantic kNN edge materialisation (SIMILAR_TO)",
             replace_existing=True,
             max_instances=1,
+            next_run_time=None,
         )
 
-    # Constellation 3D coords — nightly. Gated; empty SCHEDULE_COMPUTE_UMAP_3D
-    # disables. Fallback layout today (no umap dep); keyed off community_id.
+    # Constellation 3D coords. Gated; empty SCHEDULE_COMPUTE_UMAP_3D disables
+    # registration. Fallback layout today (no umap dep); keyed off community_id.
     if getattr(config, "SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *"):
         _scheduler.add_job(
             _run_compute_umap_3d,
@@ -2444,10 +2543,11 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Constellation 3D coordinate compute",
             replace_existing=True,
             max_instances=1,
+            next_run_time=None,
         )
 
-    # Entity trust_state derivation — nightly, 1 min after compute_umap_3d.
-    # Gated; empty SCHEDULE_COMPUTE_TRUST_STATE disables.
+    # Entity trust_state derivation. Gated; empty SCHEDULE_COMPUTE_TRUST_STATE
+    # disables registration.
     if getattr(config, "SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *"):
         _scheduler.add_job(
             _run_compute_trust_state,
@@ -2458,11 +2558,12 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Entity trust_state derivation",
             replace_existing=True,
             max_instances=1,
+            next_run_time=None,
         )
 
-    # Domain backbone derivation — nightly, 1 min after compute_trust_state.
-    # Gated; empty SCHEDULE_DERIVE_DOMAINS disables. Runs standalone even
-    # when umap is disabled (SCHEDULE_COMPUTE_UMAP_3D empty).
+    # Domain backbone derivation. Gated; empty SCHEDULE_DERIVE_DOMAINS disables
+    # registration. Now runs as part of the chain above regardless of
+    # SCHEDULE_COMPUTE_UMAP_3D (previously ran standalone when umap was empty).
     if getattr(config, "SCHEDULE_DERIVE_DOMAINS", "32 3 * * *"):
         _scheduler.add_job(
             _run_derive_domains,
@@ -2473,6 +2574,7 @@ def start_scheduler() -> AsyncIOScheduler:
             name="Entity domain derivation",
             replace_existing=True,
             max_instances=1,
+            next_run_time=None,
         )
 
     # Memory archival sweep — weekly, SAFE (archival only, no LLM). Gated;

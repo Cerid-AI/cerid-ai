@@ -766,10 +766,22 @@ def _reingest_artifact(
     # through the unified contract (the flat cache C1 was previously left stale).
     try:
         from utils.query_cache import invalidate_query_caches_threaded
-        invalidate_query_caches_threaded(trigger="ingestion.reingest_artifact", redis=get_redis())
+        invalidate_query_caches_threaded(
+            trigger="ingestion.reingest_artifact", redis=get_redis(), domain=domain,
+        )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
             "app.services.ingestion.query_cache_invalidate_reingest", e,
+        )
+    # multi_domain_query's per-collection doc-count cache also needs busting —
+    # a domain that was empty before this re-ingest must be re-checked on the
+    # very next query rather than reporting empty for up to the TTL.
+    try:
+        from core.agents.query_agent import invalidate_collection_count_cache
+        invalidate_collection_count_cache(domain)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.collection_count_cache_invalidate_reingest", e,
         )
 
     return {
@@ -1703,10 +1715,22 @@ def ingest_content(
     # caches through the unified contract.
     try:
         from utils.query_cache import invalidate_query_caches_threaded
-        invalidate_query_caches_threaded(trigger="ingestion.ingest_content", redis=get_redis())
+        invalidate_query_caches_threaded(
+            trigger="ingestion.ingest_content", redis=get_redis(), domain=domain,
+        )
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
             "app.services.ingestion.query_cache_invalidate", e,
+        )
+    # multi_domain_query's per-collection doc-count cache also needs busting —
+    # a domain that was empty before this ingest must be re-checked on the
+    # very next query rather than reporting empty for up to the TTL.
+    try:
+        from core.agents.query_agent import invalidate_collection_count_cache
+        invalidate_collection_count_cache(domain)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.collection_count_cache_invalidate", e,
         )
 
     return result

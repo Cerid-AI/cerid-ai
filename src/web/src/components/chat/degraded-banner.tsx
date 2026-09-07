@@ -31,7 +31,11 @@ export function DegradedBanner({ reason, className }: Props) {
     >
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0">
-        <div className="font-medium">Retrieval budget exceeded — answer is ungrounded.</div>
+        <div className="font-medium">
+          {/queued behind/i.test(reason)
+            ? "Retrieval is waiting on other knowledge queries."
+            : "Retrieval budget exceeded — answer is ungrounded."}
+        </div>
         <div className="opacity-80">{reason}</div>
       </div>
     </div>

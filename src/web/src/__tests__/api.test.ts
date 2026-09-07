@@ -266,6 +266,14 @@ describe("queryKB", () => {
     )
   })
 
+  it("forwards budget_seconds when provided", async () => {
+    vi.stubGlobal("fetch", mockFetch({ results: [], confidence: 0, total_results: 0, execution_time_ms: 0 }))
+    await queryKB("test query", undefined, 3, undefined, { budgetSeconds: 2, useReranking: false })
+    const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body)
+    expect(body.budget_seconds).toBe(2)
+    expect(body.use_reranking).toBe(false)
+  })
+
   it("sends null domains when none specified", async () => {
     vi.stubGlobal("fetch", mockFetch({ results: [], confidence: 0, total_results: 0, execution_time_ms: 0 }))
 

@@ -51,6 +51,9 @@ export interface QueryOpts {
   contextSources?: ContextSources
   /** AbortSignal to cancel the request (frees browser connection slot). */
   signal?: AbortSignal
+  /** Per-request retrieval wall-clock budget (seconds). Typeahead must pass a
+   *  small value — the server default is 20s and will occupy KB_POOL that long. */
+  budgetSeconds?: number
 }
 
 export async function queryKB(
@@ -77,6 +80,7 @@ export async function queryKB(
       ...(opts?.metadataFilter != null && { metadata_filter: opts.metadataFilter }),
       ...(opts?.excludePacks != null && { exclude_packs: opts.excludePacks }),
       ...(opts?.contextSources != null && { context_sources: opts.contextSources }),
+      ...(opts?.budgetSeconds != null && { budget_seconds: opts.budgetSeconds }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))

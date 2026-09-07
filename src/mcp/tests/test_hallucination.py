@@ -554,6 +554,45 @@ class TestQueryMemories:
         assert results[0]["domain"] == "conversations"
 
     @pytest.mark.asyncio
+    async def test_query_runs_off_event_loop_thread(self):
+        """The Chroma get_collection + query pair must run via asyncio.to_thread,
+        not synchronously on the event loop — they are blocking network/disk
+        calls sitting inside the per-claim verification hot path."""
+        import threading
+
+        loop_thread_id = threading.get_ident()
+        call_thread_ids: list[int] = []
+
+        collection = MagicMock()
+
+        def fake_query(**kwargs):
+            call_thread_ids.append(threading.get_ident())
+            return {
+                "ids": [["chunk1"]],
+                "distances": [[0.3]],
+                "documents": [["Python was created in 1991"]],
+                "metadatas": [[{"artifact_id": "art1", "filename": "fact1.txt", "memory_type": "fact"}]],
+            }
+
+        collection.query.side_effect = fake_query
+
+        chroma = MagicMock()
+
+        def fake_get_collection(**kwargs):
+            call_thread_ids.append(threading.get_ident())
+            return collection
+
+        chroma.get_collection.side_effect = fake_get_collection
+
+        results = await _query_memories("Python creation", chroma, top_k=1)
+
+        assert len(results) == 1
+        assert call_thread_ids, "get_collection/query were never called"
+        assert all(tid != loop_thread_id for tid in call_thread_ids), (
+            "Chroma get_collection/query ran on the event-loop thread"
+        )
+
+    @pytest.mark.asyncio
     async def test_handles_empty_collection(self, mock_chroma):
         """Should return empty list when no memories match."""
         collection = mock_chroma[1]

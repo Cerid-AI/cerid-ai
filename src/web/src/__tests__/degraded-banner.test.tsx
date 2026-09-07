@@ -16,4 +16,12 @@ describe("DegradedBanner", () => {
     expect(screen.getByText(/retrieval budget exceeded/i)).toBeInTheDocument()
     expect(screen.getByText(/longer than the configured budget/i)).toBeInTheDocument()
   })
+
+  it("does not label a pool-wait as a budget miss", () => {
+    render(
+      <DegradedBanner reason="Retrieval is queued behind other knowledge queries. Retry in a moment." />,
+    )
+    expect(screen.queryByText(/retrieval budget exceeded/i)).toBeNull()
+    expect(screen.getByText(/waiting on other knowledge queries/i)).toBeInTheDocument()
+  })
 })

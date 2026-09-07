@@ -6,6 +6,10 @@ import { queryKB } from "@/lib/api"
 import type { KBQueryResult } from "@/lib/types"
 
 const MIN_SUGGESTION_LENGTH = 10
+/** Typeahead must not run a full 20s agent_query — that saturates KB_POOL
+ *  while the user is still typing and makes the subsequent send look like an
+ *  instant retrieval-budget failure. */
+const SUGGESTION_BUDGET_SECONDS = 2
 // E1 R3 / CR-010 tail: post-rerank relevance is ordinal — absolute 0.4 emptied
 // suggestions on real hits. Gate relative to the top score (same semantics as
 // use-chat-send auto-inject). 0.4 means "≥ 40% of the best hit".
@@ -21,7 +25,7 @@ interface UseSmartSuggestionsOptions {
 export function useSmartSuggestions({
   enabled,
   injectedArtifactIds,
-  debounceMs = 500,
+  debounceMs = 1000,
   maxSuggestions = 3,
 }: UseSmartSuggestionsOptions) {
   const [suggestions, setSuggestions] = useState<KBQueryResult[]>([])
@@ -29,6 +33,7 @@ export function useSmartSuggestions({
   const [loading, setLoading] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastQueryRef = useRef("")
+  const abortRef = useRef<AbortController | null>(null)
   // Use refs to avoid stale closures without re-creating the search callback
   const injectedRef = useRef(injectedArtifactIds)
   const enabledRef = useRef(enabled)
@@ -51,12 +56,19 @@ export function useSmartSuggestions({
       if (text === lastQueryRef.current) return
       lastQueryRef.current = text
 
+      abortRef.current?.abort()
+      const ac = new AbortController()
+      abortRef.current = ac
       const gen = ++generationRef.current
       setLoading(true)
       try {
         const ids = injectedRef.current
         const max = maxRef.current
-        const result = await queryKB(text, undefined, max + ids.length)
+        const result = await queryKB(text, undefined, max + ids.length, undefined, {
+          signal: ac.signal,
+          useReranking: false,
+          budgetSeconds: SUGGESTION_BUDGET_SECONDS,
+        })
         // Discard if a newer search has started
         if (gen !== generationRef.current) return
         const candidates = result.results.filter((r) => !ids.includes(r.artifact_id))
@@ -88,6 +100,7 @@ export function useSmartSuggestions({
     const gen = generationRef
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
+      abortRef.current?.abort()
       // Invalidate any in-flight requests
       gen.current++
     }
@@ -110,6 +123,7 @@ export function useSmartSuggestions({
   }, [])
 
   const clear = useCallback(() => {
+    abortRef.current?.abort()
     setSuggestions([])
     lastQueryRef.current = ""
   }, [])

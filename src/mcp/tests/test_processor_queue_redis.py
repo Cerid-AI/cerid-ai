@@ -551,6 +551,45 @@ def test_enqueue_job_if_absent_empty_payload_is_type_level(redis_client):
     assert redis_client.llen("cerid:proc:queue:low") == 1
 
 
+def test_enqueue_job_if_absent_dedupe_payload_collapses_on_identity(redis_client):
+    """``dedupe_payload`` narrows equivalence to the identity fields, so two
+    enqueues differing only in a bookkeeping field collapse onto one job."""
+    first = enqueue_job_if_absent(
+        _StubPeriodicJob(),
+        payload={"entity_slug": "ada-lovelace", "origin": "sweep"},
+        dedupe_payload={"entity_slug": "ada-lovelace"},
+        redis_client=redis_client,
+    )
+    assert first is not None
+
+    second = enqueue_job_if_absent(
+        _StubPeriodicJob(),
+        payload={"entity_slug": "ada-lovelace", "origin": "live"},
+        dedupe_payload={"entity_slug": "ada-lovelace"},
+        redis_client=redis_client,
+    )
+    assert second is None
+    assert redis_client.llen("cerid:proc:queue:low") == 1
+
+
+def test_enqueue_job_if_absent_dedupe_payload_keeps_identities_apart(redis_client):
+    """A subset match must not collapse genuinely different jobs."""
+    enqueue_job_if_absent(
+        _StubPeriodicJob(),
+        payload={"entity_slug": "ada-lovelace", "origin": "sweep"},
+        dedupe_payload={"entity_slug": "ada-lovelace"},
+        redis_client=redis_client,
+    )
+    other = enqueue_job_if_absent(
+        _StubPeriodicJob(),
+        payload={"entity_slug": "alan-turing", "origin": "live"},
+        dedupe_payload={"entity_slug": "alan-turing"},
+        redis_client=redis_client,
+    )
+    assert other is not None
+    assert redis_client.llen("cerid:proc:queue:low") == 2
+
+
 def test_find_active_job_id_fails_open_on_broken_client():
     """A broken Redis client must read as 'no duplicate' — the dedupe check
     can never be allowed to block real work."""

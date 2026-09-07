@@ -450,7 +450,9 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     clearInjected,
     privateModeLevel,
     memoryEnabled: contextSources.memory !== false,
-    degradedReason: orchestratedContext.degradedReason,
+    // Do not stamp the previous turn's orchestrated degradation onto this
+    // send — that made every follow-up show an instant "budget exceeded"
+    // banner. handleSend still records degradation from a THIS-turn query.
     onBeforeSend: () => setVerificationRecBanner(null),
   })
 

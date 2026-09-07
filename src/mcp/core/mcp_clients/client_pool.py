@@ -61,7 +61,11 @@ class _ConnectorState:
         self.failures += 1
         if self.failures >= _FAILURE_THRESHOLD:
             self.opened_at = time.monotonic()
-            logger.warning(
+            # One INFO line per open episode (fires exactly once — while open,
+            # call_tool short-circuits before ever reaching record_failure
+            # again). query_all relies on this being the only log for the
+            # whole episode; it skips silently on every subsequent query.
+            logger.info(
                 "Circuit breaker OPEN for MCP connector %s after %d failures",
                 self.client.connector_name, self.failures,
             )
@@ -115,6 +119,15 @@ class MCPClientPool:
 
     def is_registered(self, connector_name: str) -> bool:
         return connector_name in self._connectors
+
+    def is_open(self, connector_name: str) -> bool:
+        """Whether ``connector_name``'s circuit breaker is currently open.
+
+        An unregistered connector reports closed — callers use this to skip
+        a guaranteed-failing MCP call, not to gate on registration.
+        """
+        state = self._connectors.get(connector_name)
+        return state is not None and state.is_open()
 
     def list_connectors(self) -> list[dict[str, Any]]:
         """Operator-facing health snapshot — surface via /health.connectors."""

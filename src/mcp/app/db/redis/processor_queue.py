@@ -262,6 +262,7 @@ def find_active_job_id(
     job_type: str,
     *,
     payload: dict[str, Any] | None = None,
+    dedupe_payload: dict[str, Any] | None = None,
 ) -> str | None:
     """Return the id of a pending-or-running job matching ``job_type``.
 
@@ -271,6 +272,12 @@ def find_active_job_id(
     layout (pending priority lists + running set) — the same convention
     the knowledge-pack install and digest-run collapse paths use — so no
     parallel bookkeeping can drift from the queue.
+
+    ``dedupe_payload`` replaces that equality with a subset match on the
+    fields it names, for job types whose payload carries bookkeeping the
+    identity does not depend on (``WikiRefreshJob``'s ``origin``: a live and
+    a sweep refresh of the same slug do the same work, so stacking both only
+    grows the queue). It takes precedence over ``payload``.
 
     A matching PENDING marker older than ``PROCESSOR_PENDING_STALE_TTL_S``
     is not returned: it is pruned (marked failed, removed from its list) and
@@ -300,7 +307,8 @@ def find_active_job_id(
             )
             if stored_type is None or _s(stored_type) != job_type:
                 continue
-            if payload is not None:
+            match_on = dedupe_payload if dedupe_payload is not None else payload
+            if match_on is not None:
                 try:
                     stored_payload = (
                         json.loads(_s(stored_payload_raw)) if stored_payload_raw else {}
@@ -310,7 +318,10 @@ def find_active_job_id(
                         "processor.redis_queue.find_active", exc, context={"job_id": job_id}
                     )
                     continue
-                if stored_payload != payload:
+                if dedupe_payload is not None:
+                    if any(stored_payload.get(k) != v for k, v in dedupe_payload.items()):
+                        continue
+                elif stored_payload != payload:
                     continue
             if list_key is not None and _is_stale_pending(stored_enqueued_at):
                 _prune_stale_pending(redis_client, job_id, list_key)
@@ -327,13 +338,17 @@ def enqueue_job_if_absent(
     job: Any,
     *,
     payload: dict[str, Any] | None = None,
+    dedupe_payload: dict[str, Any] | None = None,
     redis_client: Any | None = None,
 ) -> str | None:
     """Enqueue like :func:`enqueue_job` unless an equivalent job is already
     pending or running.
 
     Equivalence = same ``job_type`` AND equal payload (the payload the
-    worker re-instantiates from). Duplicate collapse for recurring enqueue
+    worker re-instantiates from), or — when ``dedupe_payload`` is given —
+    same ``job_type`` AND a payload carrying those identity fields, so a
+    field that only steers the job's own behaviour does not split the
+    collapse group. Duplicate collapse for recurring enqueue
     sites (schedulers, ingest-event subscribers): a pending duplicate would
     scan the same state as the original, so stacking it only grows the
     queue — observed live 2026-07-13 when the 60 s ``ingest_recovery`` cron
@@ -346,7 +361,9 @@ def enqueue_job_if_absent(
     if redis_client is None:
         from app.deps import get_redis  # noqa: PLC0415
         redis_client = get_redis()
-    existing = find_active_job_id(redis_client, job.job_type, payload=payload or {})
+    existing = find_active_job_id(
+        redis_client, job.job_type, payload=payload or {}, dedupe_payload=dedupe_payload,
+    )
     if existing is not None:
         return None
     return enqueue_job(job, payload=payload, redis_client=redis_client)

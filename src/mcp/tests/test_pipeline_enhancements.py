@@ -782,6 +782,45 @@ class TestAuthoritativeVerification:
         assert result["authoritative_sources"] == []
         assert "No authoritative sources" in result["evidence_summary"]
 
+    def test_nli_calls_use_async_batched_scorer(self):
+        """Both NLI call sites (per-source entailment + KB-vs-external
+        cross-validation) must await the async coalescing scorer used
+        elsewhere in verification, not the sync `nli_score` that blocks
+        the event loop."""
+        from core.agents.hallucination.authoritative_verify import verify_claim_authoritatively
+
+        mock_reg = MagicMock()
+        mock_reg.query_all = AsyncMock(return_value=[
+            {"source": "Wikipedia", "content": "Aspirin has a molar mass of 180.16 g/mol",
+             "source_url": "https://en.wikipedia.org/x"},
+        ])
+
+        async_calls: list[tuple[str, str]] = []
+
+        async def fake_async(premise, hypothesis):
+            async_calls.append((premise, hypothesis))
+            return {"entailment": 0.9, "contradiction": 0.0, "neutral": 0.1, "label": "entailment"}
+
+        sync_mock = MagicMock(side_effect=AssertionError("sync nli_score must not be called"))
+
+        with (
+            patch("config.EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True),
+            patch("core.utils.nli.nli_score_async", side_effect=fake_async),
+            patch("core.utils.nli.nli_score", sync_mock),
+        ):
+            result = _run(verify_claim_authoritatively(
+                "Aspirin has a molecular weight of 180.16 g/mol",
+                kb_results=[{"content": "Aspirin's molar mass is 180.16 g/mol"}],
+                registry=mock_reg,
+            ))
+
+        sync_mock.assert_not_called()
+        # One call per external source (step 2) + one KB-vs-external
+        # cross-validation call (step 3).
+        assert len(async_calls) == 2
+        assert result["authoritative_sources"][0]["nli_entailment"] == 0.9
+        assert result["cross_validation"]["kb_vs_external_agreement"] == 0.9
+
     def test_expert_mode_return_carries_structured_evidence(self):
         """Expert-mode verification must surface authoritative_sources,
         claim_domain, cross_validation and evidence_summary in its return

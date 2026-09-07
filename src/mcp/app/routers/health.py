@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
+from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
 
@@ -16,6 +18,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.deps import get_chroma, get_neo4j, get_redis
+from config.constants import HEALTH_STATUS_CACHE_TTL_S
+from core.utils.internal_llm import effective_local_model
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 from utils.encryption import CHROMA_ENCRYPTED_FIELDS, get_encryptor
@@ -41,46 +45,139 @@ async def health_ping() -> dict:
     return {"ok": True}
 
 
-# In-memory health cache — avoids blocking I/O on every poll
-_health_cache: dict = {}
-_health_cache_ts: float = 0.0
 _HEALTH_CACHE_TTL = 30.0  # seconds
 
-# F-PERF-04: coalesce concurrent cache-miss builds. Without this, a thundering
-# herd of /health requests on cold cache would each spawn its own
-# asyncio.to_thread(_build_health_payload) and saturate the default executor's
-# thread pool — pushing /health p95 to 5-8s under load. The lock-protected
-# in-flight future shares one build across all concurrent waiters.
-_health_build_lock: asyncio.Lock | None = None
-_health_build_inflight: asyncio.Future | None = None
 
+class CachedPayload:
+    """TTL cache with stale-while-revalidate + single-flight coalescing.
 
-def _get_health_build_lock() -> asyncio.Lock:
-    """Lazily construct the lock so it binds to the running event loop."""
-    global _health_build_lock
-    if _health_build_lock is None:
-        _health_build_lock = asyncio.Lock()
-    return _health_build_lock
+    Extracted from the original F-PERF-04 /health pattern so /health,
+    /health/status, and /observability/trust-score share one implementation
+    instead of each hand-rolling it (Task 5).
 
+    On a fresh-enough cache, ``get()`` returns immediately with no I/O. On a
+    stale cache, it serves the stale value and kicks off exactly one
+    background rebuild — concurrent callers share the same in-flight Future
+    rather than each spawning their own ``asyncio.to_thread`` build (which,
+    under a thundering herd, saturates the default executor's thread pool).
+    On a cold cache, callers block on the first build.
 
-async def _refresh_health_cache() -> dict:
-    """Rebuild the cached health payload off the event loop.
-
-    Always runs the build via asyncio.to_thread so blocking I/O lands
-    on the default executor. Updates _health_cache/_health_cache_ts on
-    success. Failures are swallowed (with breadcrumb) — the previous
-    stale payload remains in cache, which is strictly better than
-    returning an empty response.
+    A stale-refresh failure always keeps serving the last good snapshot — a
+    background rebuild's Future is never awaited by its own caller (see
+    ``get()``'s stale branch), so raising there would leak an unretrieved
+    exception. A cold-build failure (no snapshot to fall back to) is
+    swallowed the same way by default; pass ``raise_on_cold_failure=True``
+    for a cache whose caller had a real 500-on-error contract before it was
+    wrapped in this cache (``/health/status``, ``/observability/trust-score``)
+    so that contract still holds when there's nothing to serve instead.
     """
-    global _health_cache, _health_cache_ts
-    try:
-        payload = await asyncio.to_thread(_build_health_payload)
-        _health_cache = payload
-        _health_cache_ts = time.monotonic()
-        return payload
-    except Exception as exc:  # noqa: BLE001 — refresh boundary
-        log_swallowed_error("app.routers.health.refresh_health_cache", exc)
-        return _health_cache or {"services": {}, "invariants": {}}
+
+    def __init__(
+        self,
+        build: Callable[[], dict],
+        ttl: float,
+        empty: dict | None = None,
+        error_tag: str = "app.routers.health.cached_payload_refresh",
+        raise_on_cold_failure: bool = False,
+    ) -> None:
+        self._build = build
+        self._ttl = ttl
+        self._empty = empty if empty is not None else {}
+        self._error_tag = error_tag
+        self._raise_on_cold_failure = raise_on_cold_failure
+        self._now: Callable[[], float] = time.monotonic
+        self.value: dict = {}
+        self.updated_at: float = 0.0
+        self._lock: asyncio.Lock | None = None
+        self._inflight: asyncio.Future | None = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Lazily construct the lock so it binds to the running event loop."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def _refresh(self) -> dict:
+        had_prior_value = bool(self.value)
+        try:
+            payload = await asyncio.to_thread(self._build)
+            self.value = payload
+            self.updated_at = self._now()
+            return payload
+        except Exception as exc:  # noqa: BLE001 — refresh boundary
+            if not had_prior_value and self._raise_on_cold_failure:
+                # No snapshot to fall back to, and this cache's contract is
+                # to 500 rather than silently serve {} — propagate. The
+                # caller awaiting this same Future (get()'s cold branch)
+                # sees it; a stale-branch caller never reaches this case
+                # since had_prior_value is True there.
+                raise
+            log_swallowed_error(self._error_tag, exc)
+            return self.value or self._empty
+
+    async def get(self) -> dict:
+        now = self._now()
+        age = now - self.updated_at if self.value else float("inf")
+        if self.value and age < self._ttl:
+            # Hot path: cache fresh — return immediately, no I/O.
+            return self.value
+        if self.value:
+            # Stale-while-revalidate: serve the stale payload immediately and
+            # kick off a background refresh shared by every concurrent caller.
+            lock = self._get_lock()
+            async with lock:
+                now = self._now()
+                if self.value and (now - self.updated_at) < self._ttl:
+                    pass  # someone else refreshed while we queued
+                elif self._inflight is None or self._inflight.done():
+                    self._inflight = asyncio.ensure_future(self._refresh())
+            return self.value
+        # Cold cache — block on the first build; concurrent callers share it.
+        future_to_await: asyncio.Future | None = None
+        lock = self._get_lock()
+        async with lock:
+            if self.value:
+                pass
+            elif self._inflight is None or self._inflight.done():
+                self._inflight = asyncio.ensure_future(self._refresh())
+            future_to_await = self._inflight
+        if future_to_await is not None and not self.value:
+            await future_to_await
+        return self.value or self._empty
+
+
+# Cached quenchforge /api/tags probe. health_check() runs inside both the
+# /health (30s TTL) and /health/status (15s TTL) cached rebuilds, so without
+# this the probe ran on whichever cadence was faster — up to 14.8k/day.
+# threading.Lock (not asyncio.Lock): health_check() is a plain sync function
+# that can run concurrently on different executor threads via asyncio.to_thread.
+_OLLAMA_PROBE_CACHE_TTL_S = 60.0
+_ollama_probe_lock = threading.Lock()
+_ollama_probe_cache: dict | None = None
+_ollama_probe_cache_ts: float = 0.0
+
+
+def _probe_ollama_tags(ollama_url: str) -> dict:
+    """GET {ollama_url}/api/tags, cached for _OLLAMA_PROBE_CACHE_TTL_S."""
+    global _ollama_probe_cache, _ollama_probe_cache_ts
+    now = time.monotonic()
+    with _ollama_probe_lock:
+        if (
+            _ollama_probe_cache is not None
+            and (now - _ollama_probe_cache_ts) < _OLLAMA_PROBE_CACHE_TTL_S
+        ):
+            return _ollama_probe_cache
+        try:
+            import httpx
+            resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
+            models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == HTTPStatus.OK else []
+            result = {"reachable": True, "models": len(models), "url": ollama_url}
+        except Exception as exc:
+            log_swallowed_error('app.routers.health', exc)
+            result = {"reachable": False, "url": ollama_url}
+        _ollama_probe_cache = result
+        _ollama_probe_cache_ts = now
+        return result
 
 
 def health_check() -> dict:
@@ -139,14 +236,7 @@ def health_check() -> dict:
     ollama_status: dict | None = None
     if ollama_enabled:
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        try:
-            import httpx
-            resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
-            models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == HTTPStatus.OK else []
-            ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
-        except Exception as exc:
-            log_swallowed_error('app.routers.health', exc)
-            ollama_status = {"reachable": False, "url": ollama_url}
+        ollama_status = _probe_ollama_tags(ollama_url)
 
     # Embedding-cache stats — read-only, no side effects. Cheap (single
     # locked dict copy). Lets operators verify the cache is doing work
@@ -198,7 +288,7 @@ def health_check() -> dict:
         "fields_covered": len(CHROMA_ENCRYPTED_FIELDS),
     }
     if ollama_status is not None:
-        result["ollama"] = ollama_status
+        result["ollama"] = {**ollama_status, "effective_local_model": effective_local_model()}
     return result
 
 
@@ -444,7 +534,6 @@ def _invariants_snapshot() -> dict:
     claim it.
     """
     try:
-        from app.startup.invariants import run_invariants
         chroma = None
         redis_client = None
         neo4j_driver = None
@@ -478,7 +567,7 @@ def _invariants_snapshot() -> dict:
             except Exception as exc:
                 log_swallowed_error('app.routers.health', exc)
                 snap["source_ingest_fn_wired"] = False
-            from app.startup.invariants import _probe_chroma, _probe_nli
+            from app.startup.invariants import _probe_chroma, _probe_nli, healthy_from
             try:
                 if chroma is not None:
                     snap.update(_probe_chroma(chroma))
@@ -488,10 +577,22 @@ def _invariants_snapshot() -> dict:
                 if isinstance(errs, list):
                     errs.append(f"chroma: {exc}")
             snap.update(_probe_nli())
-            snap["healthy_invariants"] = bool(snap.get("nli_model_loaded"))
+            snap["healthy_invariants"] = healthy_from(snap)
             snap["mcp"] = _mcp_tool_summary()
             return snap
-        snap = run_invariants(chroma, redis_client, neo4j_driver)
+        # Task 5: run_invariants() (the divergence probe's Chroma gets) runs
+        # on its own background cadence, not inline on the /health request
+        # path — see app.startup.invariants.refresh_invariants_loop. The
+        # cheap nli_model_loaded flag is re-read and healthy_invariants
+        # recomputed on every rebuild below, so a background snapshot frozen
+        # mid-refresh (e.g. a cold model cache at boot) can't pin /health at
+        # 503 for a whole INVARIANTS_REFRESH_S cycle after the model loads.
+        from app.startup.invariants import _probe_nli, get_invariants_snapshot, healthy_from
+        snap = get_invariants_snapshot()
+        pending = snap.get("status") == "pending"
+        snap.update(_probe_nli())
+        if not pending:
+            snap["healthy_invariants"] = healthy_from(snap)
         snap["mcp"] = _mcp_tool_summary()
         return snap
     except Exception as exc:
@@ -873,6 +974,14 @@ def _build_health_payload() -> dict:
     return result
 
 
+_health_payload_cache = CachedPayload(
+    build=_build_health_payload,
+    ttl=_HEALTH_CACHE_TTL,
+    empty={"services": {}, "invariants": {}},
+    error_tag="app.routers.health.refresh_health_cache",
+)
+
+
 @router.get("/health")
 async def health_check_endpoint():
     """Return infrastructure health.
@@ -891,47 +1000,11 @@ async def health_check_endpoint():
     violation flips the endpoint to 503 even when transport connections
     are nominally healthy.
     """
-    global _health_cache, _health_cache_ts, _health_build_inflight
-    now = time.monotonic()
-    cache_age = now - _health_cache_ts if _health_cache else float("inf")
-    if _health_cache and cache_age < _HEALTH_CACHE_TTL:
-        # Hot path: cache fresh — return immediately, no I/O.
-        result = _health_cache
-    elif _health_cache:
-        # F-PERF-04: stale-while-revalidate. Serve the stale payload
-        # immediately and kick off a background refresh. This keeps
-        # /health p95 latency at sub-millisecond regardless of how
-        # cold the underlying infra probes are. The refresh runs via
-        # asyncio.to_thread so it never blocks the event loop, and
-        # the in-flight Future is shared so concurrent stale serves
-        # don't each spawn a refresh.
-        lock = _get_health_build_lock()
-        async with lock:
-            now = time.monotonic()
-            if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
-                pass  # someone else refreshed while we queued
-            elif _health_build_inflight is None or _health_build_inflight.done():
-                _health_build_inflight = asyncio.ensure_future(
-                    _refresh_health_cache()
-                )
-        result = _health_cache
-    else:
-        # Empty cache — block on the first build. With the lifespan
-        # pre-warm wired, this branch only fires if the pre-warm
-        # itself failed at boot.
-        future_to_await: asyncio.Future | None = None
-        lock = _get_health_build_lock()
-        async with lock:
-            if _health_cache:
-                pass
-            elif _health_build_inflight is None or _health_build_inflight.done():
-                _health_build_inflight = asyncio.ensure_future(
-                    _refresh_health_cache()
-                )
-            future_to_await = _health_build_inflight
-        if future_to_await is not None and not _health_cache:
-            await future_to_await
-        result = _health_cache or {"services": {}, "invariants": {}}
+    # F-PERF-04: stale-while-revalidate + single-flight coalescing (Task 5:
+    # extracted into CachedPayload, shared with /health/status and
+    # /observability/trust-score). With the lifespan pre-warm wired, a
+    # genuinely cold cache only happens if the pre-warm itself failed at boot.
+    result = await _health_payload_cache.get()
 
     # A service is "ok" when connected OR intentionally disabled (lightweight neo4j).
     def _ok(v: str) -> bool:
@@ -945,10 +1018,27 @@ async def health_check_endpoint():
     return JSONResponse(content=result, status_code=503)
 
 
+_health_status_cache = CachedPayload(
+    build=degradation_status,
+    ttl=HEALTH_STATUS_CACHE_TTL_S,
+    empty={},
+    error_tag="app.routers.health.refresh_health_status_cache",
+    # degradation_status() 500ed directly before this cache existed —
+    # keep that contract when there's no prior snapshot to fall back to.
+    raise_on_cold_failure=True,
+)
+
+
 @router.get("/health/status")  # response-model-allowed: dynamic response (shape varies)
-def health_status_endpoint():
-    """Extended health check with degradation tier and uptime."""
-    return degradation_status()
+async def health_status_endpoint():
+    """Extended health check with degradation tier and uptime.
+
+    Cached for HEALTH_STATUS_CACHE_TTL_S with the same stale-while-revalidate
+    + single-flight pattern as /health (Task 5) — 14.8k/day polls previously
+    ran a live Neo4j RETURN 1, breaker reads, and a quenchforge /api/tags
+    probe on every call.
+    """
+    return await _health_status_cache.get()
 
 
 @router.get("/collections")  # response-model-allowed: dynamic response (shape varies)

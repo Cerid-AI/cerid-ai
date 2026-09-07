@@ -181,19 +181,66 @@ def _human_edit_protected_slugs(driver: Any, slugs: list[str]) -> set[str]:
     return protected
 
 
-def enqueue_refresh(slug: str, *, force: bool = False) -> bool:
-    """Enqueue a WikiRefreshJob for ``slug`` after debounce check.
+def _is_junk_entity_for_enqueue(slug: str) -> bool:
+    """Pre-enqueue junk gate — reuses the predicate opsrun/purge_junk_entities.py's
+    classify_junk_entity also composes from (core.agents.entity_extraction.is_junk_entity),
+    so a junk-shaped entity ("ALIASES", "euc-jp", doc-path names, ...) never
+    reaches the queue at all: the LLM summary call is skipped, not just the
+    external-enrichment call classify_junk_entity was written to explain.
 
-    Returns True if the job was enqueued, False if debounced out or an
-    equivalent refresh for the same slug is already pending/running.
-    ``force=True`` bypasses the debounce check (for contradiction-
-    triggered refreshes in Phase K2.3) but NOT the queue-level duplicate
-    collapse: a pending refresh for the slug will read the latest state
-    (contradiction included) when it runs, so stacking a second copy is
-    pure queue growth. The nightly stale sweep re-enqueues any slug a
-    running-job collapse skipped.
+    Fails open (not junk) on any lookup failure — same stance as the
+    debounce and human-edit-protection checks in this module: a broken
+    Neo4j must not silently block every enqueue.
+    """
+    try:
+        from app.db.neo4j.wiki import get_entity  # noqa: PLC0415
+        from app.deps import get_neo4j  # noqa: PLC0415
+        from app.services.external_apis.wiki_enrichment import infer_entity_type  # noqa: PLC0415
+        from core.agents.entity_extraction import is_junk_entity  # noqa: PLC0415
+
+        driver = get_neo4j()
+        if driver is None:
+            return False
+        entity = get_entity(driver, slug)
+        if entity is None:
+            return False
+        name = str(entity.get("name") or "")
+        if not name:
+            return False
+        entity_type_unknown = infer_entity_type(name) == "unknown"
+        return is_junk_entity(name, entity_type_unknown=entity_type_unknown)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "processor.subscribers.wiki_refresh.junk_check",
+            exc,
+            context={"slug": slug},
+        )
+        return False
+
+
+def enqueue_refresh(slug: str, *, force: bool = False, origin: str = "live") -> bool:
+    """Enqueue a WikiRefreshJob for ``slug`` after the junk + debounce checks.
+
+    Returns True if the job was enqueued, False if the entity is junk,
+    debounced out, or an equivalent refresh for the same slug is already
+    pending/running. ``force=True`` bypasses the debounce check (for
+    contradiction-triggered refreshes in Phase K2.3) but NOT the junk gate
+    or the queue-level duplicate collapse: a pending refresh for the slug
+    will read the latest state (contradiction included) when it runs, so
+    stacking a second copy is pure queue growth. The nightly stale sweep
+    re-enqueues any slug a running-job collapse skipped.
+
+    ``origin`` identifies who is enqueuing: the nightly
+    ``wiki_stale_sweep`` passes ``"sweep"``; every other caller leaves the
+    default ``"live"``. Serialised into the job payload (Task 3) so
+    ``WikiRefreshJob`` can exempt sweep-originated runs from the
+    interactive-demand deferral and the live rate limit.
     """
     if not slug:
+        return False
+
+    if _is_junk_entity_for_enqueue(slug):
+        logger.debug("wiki_refresh.skip_junk slug=%s", slug)
         return False
 
     if not force and not _try_acquire_debounce(slug):
@@ -210,13 +257,16 @@ def enqueue_refresh(slug: str, *, force: bool = False) -> bool:
     from app.db.redis.processor_queue import enqueue_job_if_absent  # noqa: PLC0415
     from app.processor.jobs.wiki_refresh import WikiRefreshJob  # noqa: PLC0415
 
-    payload = {"entity_slug": slug}
+    payload = {"entity_slug": slug, "origin": origin}
     job = WikiRefreshJob(**payload)
-    job_id = enqueue_job_if_absent(job, payload=payload)
+    # ``origin`` steers the job's own deferral checks; it is not part of the
+    # entity's identity, so a live and a sweep refresh of the same slug must
+    # still collapse onto one job rather than both running the same work.
+    job_id = enqueue_job_if_absent(job, payload=payload, dedupe_payload={"entity_slug": slug})
     if job_id is None:
         logger.debug("wiki_refresh.collapsed slug=%s (already pending/running)", slug)
         return False
-    logger.info("wiki_refresh.enqueued slug=%s force=%s", slug, force)
+    logger.info("wiki_refresh.enqueued slug=%s force=%s origin=%s", slug, force, origin)
     return True
 
 

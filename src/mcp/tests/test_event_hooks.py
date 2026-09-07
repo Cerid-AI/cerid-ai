@@ -499,3 +499,155 @@ class TestConstellationRefreshSubscriber:
         with patch("app.db.redis.processor_queue.enqueue_job_if_absent", mock_enqueue):
             constellation_refresh._on_entities_added({"artifact_id": "a1", "entity_slugs": []})
         mock_enqueue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Junk-entity pre-enqueue filter + origin threading (Task 3, 2026-09-06)
+# ---------------------------------------------------------------------------
+
+
+class TestJunkEntityNeverEnqueues:
+    """enqueue_refresh is the single choke point every producer (ingest hook,
+    contradiction handler, nightly sweep) goes through, so filtering junk
+    there — via the predicate shared with opsrun/purge_junk_entities.py's
+    classify_junk_entity — covers all of them without touching the callers."""
+
+    def test_junk_named_entity_is_never_enqueued(self):
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+        junk_entity = {"name": "library/email.charset.html"}
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=junk_entity),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            result = wiki_refresh.enqueue_refresh("other:library-email-charset-html")
+
+        assert result is False
+        mock_enqueue.assert_not_called()
+        # Junk is rejected before the debounce key is even touched.
+        mock_redis.set.assert_not_called()
+
+    def test_shouty_acronym_entity_is_never_enqueued(self):
+        """The second junk family — never caught by is_junk_entity_name alone
+        — must also be filtered before enqueue, not just before the external
+        enrichment call: it would otherwise still pay the LLM summary."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+        junk_entity = {"name": "ALIASES"}
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=junk_entity),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            result = wiki_refresh.enqueue_refresh("other:aliases")
+
+        assert result is False
+        mock_enqueue.assert_not_called()
+
+    def test_valid_entity_still_enqueues(self):
+        """Regression guard: a real entity name is unaffected by the filter."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+        real_entity = {"name": "Elon Musk"}
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=real_entity),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            result = wiki_refresh.enqueue_refresh("person:elon-musk")
+
+        assert result is True
+        mock_enqueue.assert_called_once()
+
+    def test_missing_entity_fails_open_not_junk(self):
+        """No node found (e.g. race with a not-yet-committed write) must not
+        block the enqueue — fail-open, same stance as the debounce/protection
+        checks in this module."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=MagicMock()),
+            patch("app.db.neo4j.wiki.get_entity", return_value=None),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            result = wiki_refresh.enqueue_refresh("org:brand-new")
+
+        assert result is True
+        mock_enqueue.assert_called_once()
+
+    def test_neo4j_unavailable_fails_open_not_junk(self):
+        """Neo4j down must not block every enqueue — fail-open."""
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", side_effect=RuntimeError("neo4j down")),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            result = wiki_refresh.enqueue_refresh("org:tesla")
+
+        assert result is True
+        mock_enqueue.assert_called_once()
+
+
+class TestOriginThreadedIntoPayload:
+    def test_default_origin_is_live(self):
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            wiki_refresh.enqueue_refresh("org:tesla")
+
+        job, kwargs = mock_enqueue.call_args.args[0], mock_enqueue.call_args.kwargs
+        assert job._origin == "live"
+        assert kwargs["payload"] == {"entity_slug": "org:tesla", "origin": "live"}
+
+    def test_sweep_origin_is_threaded_through(self):
+        from app.processor.subscribers import wiki_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+        mock_enqueue = MagicMock()
+
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.db.redis.processor_queue.enqueue_job", mock_enqueue),
+        ):
+            wiki_refresh.enqueue_refresh("org:tesla", origin="sweep")
+
+        job, kwargs = mock_enqueue.call_args.args[0], mock_enqueue.call_args.kwargs
+        assert job._origin == "sweep"
+        assert kwargs["payload"] == {"entity_slug": "org:tesla", "origin": "sweep"}

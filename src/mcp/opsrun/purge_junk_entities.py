@@ -162,16 +162,14 @@ def classify_junk_entity(name: str) -> JunkClass | None:
        (the same call ``app.processor.jobs.wiki_refresh`` makes before
        invoking ``enrich()``).
     """
-    from app.services.external_apis.wiki_enrichment import (  # noqa: PLC0415
-        _is_codec_alias_shaped,
-        _is_shouty_single_token,
-        infer_entity_type,
-    )
+    from app.services.external_apis.wiki_enrichment import infer_entity_type  # noqa: PLC0415
     from core.agents.entity_extraction import (  # noqa: PLC0415
         _MIN_ENTITY_NAME_CHARS,
         _is_degenerate_email,
         _is_doc_path_like,
         _is_version_token,
+        is_codec_alias_shaped,
+        is_shouty_acronym_shaped,
     )
 
     stripped = name.strip()
@@ -185,9 +183,9 @@ def classify_junk_entity(name: str) -> JunkClass | None:
         return "degenerate_email"
 
     if infer_entity_type(stripped) == "unknown":
-        if _is_shouty_single_token(stripped):
+        if is_shouty_acronym_shaped(stripped):
             return "shouty_acronym"
-        if _is_codec_alias_shaped(stripped):
+        if is_codec_alias_shaped(stripped):
             return "codec_alias"
     return None
 

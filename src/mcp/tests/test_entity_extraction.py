@@ -18,7 +18,10 @@ from core.agents.entity_extraction import (
     Entity,
     canonical_id,
     extract_entities_from_text,
+    is_codec_alias_shaped,
+    is_junk_entity,
     is_junk_entity_name,
+    is_shouty_acronym_shaped,
 )
 
 # ---------------------------------------------------------------------------
@@ -464,3 +467,54 @@ class TestExtractedNamesMustAppearInTheText:
         assert "person:matt-butcher" in ids, "line-broken emphasis must not delete a real person"
         assert "org:azure-kubernetes-service" in ids, "table-split name must survive"
         assert "person:tim-cook" not in ids, "a name sharing no tokens with the text is fabricated"
+
+
+# ---------------------------------------------------------------------------
+# is_junk_entity — combined predicate shared with
+# opsrun/purge_junk_entities.py's classify_junk_entity (Task 3, 2026-09-06)
+# ---------------------------------------------------------------------------
+
+
+class TestShoutyAcronymShaped:
+    """Moved from app.services.external_apis.wiki_enrichment so the purge
+    script and the wiki-refresh pre-enqueue filter share one definition."""
+
+    @pytest.mark.parametrize("name", ["ALIASES", "CHARSETS", "ENCODINGS"])
+    def test_rejects_long_shouty_tokens(self, name):
+        assert is_shouty_acronym_shaped(name) is True
+
+    @pytest.mark.parametrize("name", ["NASA", "IBM", "UNESCO", "COVID-19", "UTF-8"])
+    def test_admits_plausible_acronyms_and_hyphenated_tokens(self, name):
+        assert is_shouty_acronym_shaped(name) is False
+
+
+class TestCodecAliasShaped:
+    @pytest.mark.parametrize("name", ["euc-jp", "iso-2022-jp", "utf-8"])
+    def test_rejects_codec_alias_shapes(self, name):
+        assert is_codec_alias_shaped(name) is True
+
+    @pytest.mark.parametrize("name", ["gpt-4", "scikit-learn"])
+    def test_admits_non_codec_hyphenated_tokens(self, name):
+        assert is_codec_alias_shaped(name) is False
+
+
+class TestIsJunkEntity:
+    """The predicate app.processor.subscribers.wiki_refresh.enqueue_refresh
+    now applies before enqueue — is_junk_entity_name plus the shouty-acronym
+    / codec-alias family, gated on the caller's own unknown-type inference so
+    core never has to import wiki_enrichment.infer_entity_type."""
+
+    def test_junk_name_gate_alone_is_sufficient(self):
+        assert is_junk_entity("library/email.charset.html") is True
+
+    def test_shouty_acronym_only_junk_when_type_unknown(self):
+        assert is_junk_entity("ALIASES", entity_type_unknown=True) is True
+        assert is_junk_entity("ALIASES", entity_type_unknown=False) is False
+
+    def test_codec_alias_only_junk_when_type_unknown(self):
+        assert is_junk_entity("euc-jp", entity_type_unknown=True) is True
+        assert is_junk_entity("euc-jp", entity_type_unknown=False) is False
+
+    def test_real_entity_is_never_junk(self):
+        assert is_junk_entity("Elon Musk", entity_type_unknown=True) is False
+        assert is_junk_entity("NASA", entity_type_unknown=True) is False

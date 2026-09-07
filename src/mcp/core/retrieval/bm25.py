@@ -476,10 +476,44 @@ _indexes: OrderedDict[str, BM25Index] = OrderedDict()
 _indexes_lock = threading.Lock()
 
 
+def _loaded_domain_bound() -> int:
+    """LRU bound for ``_indexes``: never below the configured domain count.
+
+    A multi-domain query touches every domain in ``config.DOMAINS`` in one
+    pass. A bound smaller than that makes each query evict the domains it
+    touched last and cold-reload them (full JSONL parse + tokenise + index,
+    ~0.8s for a 5k-doc domain, serialised under ``_indexes_lock``) on the
+    next query. Evaluated per call because internal bootstrap and knowledge
+    packs extend ``config.DOMAINS`` after import.
+    """
+    return max(
+        BM25_MAX_LOADED_DOMAINS, len(config.DOMAINS), len(_on_disk_domains()),
+    )
+
+
+def _on_disk_domains() -> list[str]:
+    """Domains with a persisted corpus, in ``config.DOMAINS`` order first.
+
+    Knowledge packs and SDK clients ingest into domains that are added to
+    ``config.DOMAINS`` after boot, so the on-disk corpora are the complete
+    set of indexes that are expensive to cold-load.
+    """
+    ordered = list(config.DOMAINS)
+    seen = set(ordered)
+    try:
+        for path in sorted(Path(config.BM25_DATA_DIR).glob("*.jsonl")):
+            if path.stem not in seen:
+                ordered.append(path.stem)
+                seen.add(path.stem)
+    except OSError as exc:
+        log_swallowed_error("core.retrieval.bm25.on_disk_domains", exc)
+    return ordered
+
+
 def get_index(domain: str) -> BM25Index:
     """Get or create a BM25 index for the given domain.
 
-    In-memory index count is bounded by ``BM25_MAX_LOADED_DOMAINS`` via LRU
+    In-memory index count is bounded by :func:`_loaded_domain_bound` via LRU
     eviction. A domain's corpus is always durable on disk (see
     :meth:`BM25Index._append_to_disk` / :meth:`BM25Index._rewrite_disk`),
     so evicting the least-recently-used in-memory index just means the
@@ -493,7 +527,8 @@ def get_index(domain: str) -> BM25Index:
             return idx
         idx = BM25Index(domain, config.BM25_DATA_DIR)
         _indexes[domain] = idx
-        while len(_indexes) > BM25_MAX_LOADED_DOMAINS:
+        bound = _loaded_domain_bound()
+        while len(_indexes) > bound:
             _indexes.popitem(last=False)
         return idx
 
@@ -508,12 +543,12 @@ def warm_indexes(domains: list[str] | None = None) -> dict[str, int]:
     from the app lifespan on a worker thread.
 
     Returns ``{domain: doc_count}`` for the domains warmed. Capped at
-    ``BM25_MAX_LOADED_DOMAINS`` — warming past the LRU bound would evict the
+    :func:`_loaded_domain_bound` — warming past the LRU bound would evict the
     indexes warmed first and accomplish nothing.
     """
-    targets = list(domains if domains is not None else config.DOMAINS)
+    targets = list(domains if domains is not None else _on_disk_domains())
     warmed: dict[str, int] = {}
-    for domain in targets[:BM25_MAX_LOADED_DOMAINS]:
+    for domain in targets[:_loaded_domain_bound()]:
         try:
             warmed[domain] = get_index(domain).size
         except Exception as exc:  # noqa: BLE001 — boot must never wedge

@@ -377,3 +377,124 @@ class TestWikiStaleSweepEnqueueFailure:
         assert final[0] == "wiki_stale_sweep"
         assert final[1] == "success"
         assert "failed=0" in final[3]
+
+
+# ---------------------------------------------------------------------------
+# _run_wiki_stale_sweep — origin="sweep" (Task 3, 2026-09-06)
+# ---------------------------------------------------------------------------
+
+class TestWikiStaleSweepPassesSweepOrigin:
+    @pytest.mark.asyncio
+    async def test_sweep_enqueue_passes_origin_sweep(self, monkeypatch):
+        """The sweep's own enqueue must mark itself origin="sweep" so
+        WikiRefreshJob exempts it from the interactive-demand deferral and
+        the live rolling-hour rate limit (Task 3)."""
+        driver = _mock_driver_with_run_results([{"slug": "some-stale"}])
+        enqueue_refresh = MagicMock(return_value=True)
+
+        with patch("app.deps.get_neo4j", return_value=driver), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.enqueue_refresh",
+                 enqueue_refresh,
+             ), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.HUMAN_EDIT_PROTECT_WINDOW_S",
+                 3600,
+             ):
+            await sched._run_wiki_stale_sweep()
+
+        enqueue_refresh.assert_called_once_with("some-stale", force=False, origin="sweep")
+
+
+class TestWikiStaleSweepSelectsDeferredEntities:
+    @pytest.mark.asyncio
+    async def test_selection_covers_refresh_due_and_keeps_human_edit_protection(self):
+        """A live refresh that deferred raises e.summary_refresh_due instead of
+        destroying summary_updated_at, so the sweep must select on that flag —
+        while still excluding entities a user edited inside the protection
+        window (which the old NULL-timestamp marker silently defeated)."""
+        driver = _mock_driver_with_run_results([])
+
+        with patch("app.deps.get_neo4j", return_value=driver), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.enqueue_refresh",
+                 MagicMock(return_value=True),
+             ):
+            await sched._run_wiki_stale_sweep()
+
+        cypher = driver.session.return_value.__enter__.return_value.run.call_args.args[0]
+        assert "e.summary_refresh_due = true" in cypher
+        assert "e.summary_edited_by = 'user'" in cypher
+
+
+# ---------------------------------------------------------------------------
+# _run_wiki_stale_sweep — WIKI_STALE_SWEEP_WALL_CLOCK_S (Task 9)
+# ---------------------------------------------------------------------------
+
+class TestWikiStaleSweepWallClock:
+    @pytest.mark.asyncio
+    async def test_stops_enqueueing_once_wall_clock_budget_elapses(self, monkeypatch):
+        """100 candidates with no cap could run unbounded; the sweep now
+        stops enqueueing once WIKI_STALE_SWEEP_WALL_CLOCK_S elapses, logging
+        enqueued vs skipped."""
+        log_calls = _capture_log(monkeypatch)
+        monkeypatch.setattr(sched.config, "WIKI_STALE_SWEEP_WALL_CLOCK_S", 10.0)
+
+        driver = _mock_driver_with_run_results(
+            [{"slug": "s1"}, {"slug": "s2"}, {"slug": "s3"}],
+        )
+        enqueue_refresh = MagicMock(return_value=True)
+
+        # start=0.0; budget check before s1=0.0 (proceed); before s2=5.0
+        # (proceed); before s3=12.0 (budget exceeded, s3 skipped); final
+        # duration read=12.0.
+        clock_values = iter([0.0, 0.0, 5.0, 12.0, 12.0])
+
+        def fake_time() -> float:
+            try:
+                return next(clock_values)
+            except StopIteration:
+                return 12.0
+
+        with patch("app.deps.get_neo4j", return_value=driver), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.enqueue_refresh",
+                 enqueue_refresh,
+             ), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.HUMAN_EDIT_PROTECT_WINDOW_S",
+                 3600,
+             ), \
+             patch.object(sched.time, "time", fake_time):
+            await sched._run_wiki_stale_sweep()
+
+        assert enqueue_refresh.call_count == 2  # s1, s2 — s3 skipped by budget
+        final = log_calls[-1]
+        assert final[0] == "wiki_stale_sweep"
+        assert "enqueued=2" in final[3]
+        assert "skipped_budget=1" in final[3]
+
+    @pytest.mark.asyncio
+    async def test_under_budget_enqueues_everything(self, monkeypatch):
+        log_calls = _capture_log(monkeypatch)
+        monkeypatch.setattr(sched.config, "WIKI_STALE_SWEEP_WALL_CLOCK_S", 1800.0)
+
+        driver = _mock_driver_with_run_results(
+            [{"slug": "s1"}, {"slug": "s2"}],
+        )
+        enqueue_refresh = MagicMock(return_value=True)
+
+        with patch("app.deps.get_neo4j", return_value=driver), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.enqueue_refresh",
+                 enqueue_refresh,
+             ), \
+             patch(
+                 "app.processor.subscribers.wiki_refresh.HUMAN_EDIT_PROTECT_WINDOW_S",
+                 3600,
+             ):
+            await sched._run_wiki_stale_sweep()
+
+        assert enqueue_refresh.call_count == 2
+        final = log_calls[-1]
+        assert "skipped_budget=0" in final[3]

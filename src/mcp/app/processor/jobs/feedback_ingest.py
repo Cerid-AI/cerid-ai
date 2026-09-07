@@ -112,12 +112,6 @@ class FeedbackIngestJob(BaseJob):
         except Exception as e:
             log_swallowed_error("processor.jobs.feedback_ingest.audit_log", e)
 
-        try:
-            from utils.query_cache import invalidate_all
-            invalidate_all()
-        except Exception as e:
-            log_swallowed_error("processor.jobs.feedback_ingest.cache_invalidate", e)
-
         # Hallucination check — was fire-and-forget at request time, so
         # it stays best-effort here: a checker failure must not fail (and
         # retry) an already-persisted ingest.

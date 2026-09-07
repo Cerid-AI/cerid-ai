@@ -263,13 +263,13 @@ async def verify_claim_authoritatively(
     # byte-for-byte, so downstream consumers see no change.
     scored_sources: list[dict[str, Any]] = []
     try:
-        from core.utils.nli import nli_score
+        from core.utils.nli import nli_score_async
 
         for ext in external_results:
             content = ext.get("content", "")[:512]
             if not content:
                 continue
-            nli = nli_score(content, claim)
+            nli = await nli_score_async(content, claim)
             scored_sources.append(
                 ExternalEvidence.from_mapping(
                     ext,
@@ -289,12 +289,12 @@ async def verify_claim_authoritatively(
     cross_validation: dict[str, Any] = {}
     if kb_results and scored_sources:
         try:
-            from core.utils.nli import nli_score
+            from core.utils.nli import nli_score_async
 
             kb_text = kb_results[0].get("content", "")[:512] if kb_results else ""
             ext_text = scored_sources[0].get("content", "")[:512] if scored_sources else ""
             if kb_text and ext_text:
-                cross_nli = nli_score(kb_text, ext_text)
+                cross_nli = await nli_score_async(kb_text, ext_text)
                 cross_validation = {
                     "kb_vs_external_agreement": float(cross_nli["entailment"]),
                     "kb_vs_external_contradiction": float(cross_nli["contradiction"]),

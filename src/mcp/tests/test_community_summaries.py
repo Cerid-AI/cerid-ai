@@ -216,6 +216,57 @@ class TestSummarizeCommunities:
         assert out["summarised"] == 3
 
 
+@pytest.mark.asyncio
+class TestSummarizeCommunitiesWallClock:
+    async def test_stops_issuing_new_calls_once_wall_clock_budget_exceeded(self):
+        """Task 9: a wall-clock budget bounds the batch so compute_umap_3d
+        rejoins its own 600s completion window instead of running 40min-3h
+        of serial LLM calls. Each fake LLM call advances a controlled clock
+        by 3s; a 5s budget must allow exactly 2 of 5 targets through."""
+        targets = [
+            {"community_id": f"0:{i}", "level": 0,
+             "entities": [{"name": f"Ent{i}", "entity_type": "ORG", "degree": 1}]}
+            for i in range(5)
+        ]
+        driver = _driver_with_targets(targets)
+        chroma = _chroma_returning({f"Ent{i}": f"snippet {i}" for i in range(5)})
+
+        clock_state = {"t": 0.0}
+
+        def fake_clock() -> float:
+            return clock_state["t"]
+
+        async def caller(messages):  # noqa: ARG001
+            clock_state["t"] += 3.0
+            return "theme"
+
+        out = await summarize_communities(
+            driver, chroma, llm_caller=caller,
+            wall_clock_s=5.0, clock=fake_clock,
+        )
+
+        assert out["summarised"] == 2
+        assert out["remaining"] == 3
+        assert out["summarised"] + out["remaining"] == len(targets)
+
+    async def test_no_budget_runs_all_targets(self):
+        """wall_clock_s=None (the default) preserves today's unbounded batch."""
+        targets = [
+            {"community_id": f"0:{i}", "level": 0,
+             "entities": [{"name": f"Ent{i}", "entity_type": "ORG", "degree": 1}]}
+            for i in range(4)
+        ]
+        driver = _driver_with_targets(targets)
+        chroma = _chroma_returning({f"Ent{i}": f"snippet {i}" for i in range(4)})
+
+        out = await summarize_communities(
+            driver, chroma, llm_caller=_llm_caller_returning("theme"),
+        )
+
+        assert out["summarised"] == 4
+        assert out["remaining"] == 0
+
+
 def _driver_with_named_communities(
     targets: list[dict], named: dict[str, str],
 ) -> tuple[MagicMock, list[dict]]:

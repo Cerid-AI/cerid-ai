@@ -65,6 +65,15 @@ def _strip_openrouter_prefix(model: str) -> str:
     return model
 
 
+def _is_local_model_name(model: str) -> bool:
+    """True when ``model`` is the process's configured or resolved local
+    chat model — imported lazily so this module stays free of
+    ``internal_llm``'s heavier surface (httpx, config) for callers whose
+    model is never local."""
+    from core.utils.internal_llm import is_local_model_name
+    return is_local_model_name(model)
+
+
 class PricingTable:
     """Versioned map from canonical model identifier to per-token pricing.
 
@@ -135,10 +144,19 @@ class PricingTable:
         try:
             return self._rows[normalized]
         except KeyError:
-            raise ValueError(
-                f"Unknown model '{model}' — register it in PricingTable before"
-                " estimating cost."
-            ) from None
+            pass
+
+        # Task 6: local inference has one flat rate regardless of which
+        # model quenchforge happens to be serving — recognize any name the
+        # local resolver produced instead of registering a row per name.
+        local_row = self._rows.get("ollama/local")
+        if local_row is not None and _is_local_model_name(model):
+            return local_row
+
+        raise ValueError(
+            f"Unknown model '{model}' — register it in PricingTable before"
+            " estimating cost."
+        )
 
     def registered_models(self) -> list[str]:
         """Return all registered model identifiers."""

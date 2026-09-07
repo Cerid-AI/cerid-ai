@@ -651,6 +651,69 @@ class TestSemanticCacheInvalidationHook:
         _, kwargs = mock_sem_invalidate.call_args
         assert kwargs.get("trigger") == "ingestion.reingest_artifact"
 
+    @patch("core.agents.query_agent.invalidate_collection_count_cache")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_fresh_ingest_success_invalidates_collection_count_cache(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem_invalidate, mock_count_invalidate,
+    ):
+        """multi_domain_query's empty-collection count cache must be busted
+        beside the query-result cache, or a domain ingested for the first
+        time keeps reporting empty until the TTL expires (Task 1)."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content("fresh content", domain="coding")
+
+        assert result["status"] == "success"
+        mock_count_invalidate.assert_called_once_with("coding")
+
+    @patch("core.agents.query_agent.invalidate_collection_count_cache")
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_reingest_invalidates_collection_count_cache(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_sem_invalidate, mock_count_invalidate,
+    ):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        prev = {"id": "old-artifact-id", "content_hash": "old-hash", "chunk_ids": "[]"}
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = prev
+            mock_graph.update_artifact.return_value = None
+
+            result = ingest_content(
+                "new content that differs from the old hash",
+                domain="coding",
+                metadata={"filename": "existing.txt"},
+            )
+
+        assert result["status"] == "updated"
+        mock_count_invalidate.assert_called_once_with("coding")
+
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")

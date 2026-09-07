@@ -44,6 +44,10 @@ class OutlookCalendarDataSource(DataSource):
     description = "Outlook Calendar events via sibling ms365-mcp"
     requires_api_key = True
     api_key_env_var = "CERID_CONNECTORS_BEARER"  # pragma: allowlist secret
+    # Matches the connector name _call_mcp dispatches through (get_pool()
+    # .call_tool("ms365", ...)) — lets query_all skip this source without
+    # an MCP call while that connector's breaker is OPEN.
+    mcp_connector_name = "ms365"
 
     def is_configured(self) -> bool:
         """True only once the sibling has actually answered a call.

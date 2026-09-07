@@ -502,3 +502,249 @@ class TestSkipMarksAttempt:
 
         cypher = session.run.call_args.args[0]
         assert "e.summary_attempted_at = NULL" in cypher
+
+    def test_successful_write_clears_the_refresh_due_flag(self):
+        """A deferred refresh raises summary_refresh_due; the summary that
+        eventually lands must clear it, or the entity re-qualifies for the
+        sweep every night forever."""
+        from app.db.neo4j import wiki
+
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        wiki.write_entity_summary(driver, "asset:nginx", "a real summary", "2026-08-27T00:00:00+00:00")
+
+        normalised = " ".join(session.run.call_args.args[0].split())
+        assert "e.summary_refresh_due = NULL" in normalised
+
+
+# ---------------------------------------------------------------------------
+# Live-session deferral (Task 3, 2026-09-06) — keep wiki refresh fan-out out
+# of live chat sessions. A WikiRefreshJob dequeued while a chat session is
+# demanding the local LLM slot, or beyond the rolling-hour live cap, must not
+# call the LLM at all: it marks the entity stale for the nightly
+# wiki_stale_sweep and completes with outcome="deferred" so the queue drains
+# instead of holding the job. origin="sweep" (the nightly sweep's own
+# enqueue) bypasses both gates.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_live_refresh_rate_limit():
+    """Every test starts with a clean rolling-hour counter."""
+    from app.processor.jobs.wiki_refresh import reset_live_refresh_rate_limit_for_tests
+
+    reset_live_refresh_rate_limit_for_tests()
+    yield
+    reset_live_refresh_rate_limit_for_tests()
+
+
+class TestOriginDefaultsToLive:
+    def test_default_origin_is_live(self):
+        job = WikiRefreshJob(entity_slug="org:tesla")
+        assert job._origin == "live"
+
+    def test_sweep_origin_is_stored(self):
+        job = WikiRefreshJob(entity_slug="org:tesla", origin="sweep")
+        assert job._origin == "sweep"
+
+
+class TestInteractiveDemandDeferral:
+    @pytest.mark.asyncio
+    async def test_defers_without_calling_the_llm(self):
+        job = _make_job("person:elon-musk")
+        driver = MagicMock()
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch("app.deps.get_neo4j", return_value=driver),
+            patch.object(job, "_run_pipeline", new=AsyncMock()) as mock_pipeline,
+        ):
+            result = await job.run(_noop_progress)
+
+        mock_pipeline.assert_not_called()
+        assert isinstance(result, JobResult)
+        assert result.metadata["outcome"] == "deferred"
+        assert result.metadata["entity_slug"] == "person:elon-musk"
+        assert result.actual_tokens_in == 0
+        assert result.actual_tokens_out == 0
+
+    @pytest.mark.asyncio
+    async def test_marks_the_entity_refresh_due_for_the_sweep(self):
+        """Raises the dedicated summary_refresh_due flag the sweep also
+        selects on, so tonight's sweep re-picks the entity up rather than
+        waiting out the 24h staleness cutoff."""
+        job = _make_job("person:elon-musk")
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch("app.deps.get_neo4j", return_value=driver),
+        ):
+            await job.run(_noop_progress)
+
+        session.run.assert_called_once()
+        cypher, kwargs = session.run.call_args.args, session.run.call_args.kwargs
+        assert "e.summary_refresh_due = true" in cypher[0]
+        assert kwargs.get("slug") == "person:elon-musk"
+
+    @pytest.mark.asyncio
+    async def test_deferral_leaves_the_user_visible_timestamp_alone(self):
+        """summary_updated_at is the user-visible last_updated_at, drives
+        next_refresh_due, counts as a stale-summary health invariant, and keys
+        the 7-day human-edit protection. A deferral is bookkeeping about a run
+        that did not happen — it must not touch any of that, or a user-edited
+        entity silently loses its edit protection."""
+        job = _make_job("person:ada-lovelace")
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch("app.deps.get_neo4j", return_value=driver),
+        ):
+            await job.run(_noop_progress)
+
+        cypher = session.run.call_args.args[0]
+        assert "summary_updated_at" not in cypher
+        assert "summary_edited_by" not in cypher
+
+    @pytest.mark.asyncio
+    async def test_stale_mark_failure_does_not_fail_the_job(self):
+        """Bookkeeping is best-effort — a Neo4j blip must not turn a
+        deferred refresh into a FAILED job; the queue still needs to drain."""
+        job = _make_job()
+        driver = MagicMock()
+        driver.session.side_effect = RuntimeError("neo4j down")
+
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch("app.deps.get_neo4j", return_value=driver),
+        ):
+            result = await job.run(_noop_progress)
+
+        assert result.metadata["outcome"] == "deferred"
+
+    @pytest.mark.asyncio
+    async def test_no_driver_is_a_noop_not_a_failure(self):
+        job = _make_job()
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch("app.deps.get_neo4j", return_value=None),
+        ):
+            result = await job.run(_noop_progress)
+
+        assert result.metadata["outcome"] == "deferred"
+
+
+class TestLiveRefreshRateLimit:
+    @pytest.mark.asyncio
+    async def test_thirteenth_refresh_in_an_hour_defers(self, monkeypatch):
+        monkeypatch.setenv("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "12")
+        driver = MagicMock()
+        pipeline_stats = {"summary_chars": 10, "artifacts_used": 1}
+
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=False),
+            patch("app.deps.get_neo4j", return_value=driver),
+        ):
+            for _ in range(12):
+                job = _make_job()
+                with patch.object(job, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)):
+                    result = await job.run(_noop_progress)
+                assert result.metadata.get("outcome") != "deferred"
+
+            job_13 = _make_job()
+            with patch.object(job_13, "_run_pipeline", new=AsyncMock()) as mock_pipeline_13:
+                result_13 = await job_13.run(_noop_progress)
+
+        mock_pipeline_13.assert_not_called()
+        assert result_13.metadata["outcome"] == "deferred"
+
+    @pytest.mark.asyncio
+    async def test_admitted_again_after_the_window_elapses(self, monkeypatch):
+        monkeypatch.setenv("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "1")
+        driver = MagicMock()
+        pipeline_stats = {"summary_chars": 10, "artifacts_used": 1}
+        clock = {"t": 1_000.0}
+
+        def _fake_monotonic():
+            return clock["t"]
+
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=False),
+            patch("app.deps.get_neo4j", return_value=driver),
+            patch("app.processor.jobs.wiki_refresh.time.monotonic", side_effect=_fake_monotonic),
+        ):
+            job_1 = _make_job()
+            with patch.object(job_1, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)):
+                result_1 = await job_1.run(_noop_progress)
+            assert result_1.metadata.get("outcome") != "deferred"
+
+            job_2 = _make_job()
+            with patch.object(job_2, "_run_pipeline", new=AsyncMock()) as mock_pipeline_2:
+                result_2 = await job_2.run(_noop_progress)
+            mock_pipeline_2.assert_not_called()
+            assert result_2.metadata["outcome"] == "deferred"
+
+            # Advance past the rolling hour — the slot should free up.
+            clock["t"] += 3600.1
+            job_3 = _make_job()
+            with patch.object(job_3, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)):
+                result_3 = await job_3.run(_noop_progress)
+            assert result_3.metadata.get("outcome") != "deferred"
+
+
+class TestSweepOriginBypassesBothGates:
+    @pytest.mark.asyncio
+    async def test_sweep_job_ignores_interactive_demand(self):
+        job = WikiRefreshJob(entity_slug="org:tesla", origin="sweep")
+        pipeline_stats = {"summary_chars": 10, "artifacts_used": 1}
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=True),
+            patch.object(job, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)) as mock_pipeline,
+        ):
+            result = await job.run(_noop_progress)
+
+        mock_pipeline.assert_awaited_once()
+        assert result.metadata.get("outcome") != "deferred"
+
+    @pytest.mark.asyncio
+    async def test_sweep_job_ignores_the_exhausted_rate_limit(self, monkeypatch):
+        monkeypatch.setenv("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "0")
+        job = WikiRefreshJob(entity_slug="org:tesla", origin="sweep")
+        pipeline_stats = {"summary_chars": 10, "artifacts_used": 1}
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=False),
+            patch.object(job, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)) as mock_pipeline,
+        ):
+            result = await job.run(_noop_progress)
+
+        mock_pipeline.assert_awaited_once()
+        assert result.metadata.get("outcome") != "deferred"
+
+    @pytest.mark.asyncio
+    async def test_sweep_job_does_not_consume_the_live_rate_limit(self, monkeypatch):
+        """A sweep-originated run must not spend a slot in the live counter —
+        it is a separate population (Task 9 gives the sweep its own cap)."""
+        monkeypatch.setenv("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "1")
+        pipeline_stats = {"summary_chars": 10, "artifacts_used": 1}
+
+        sweep_job = WikiRefreshJob(entity_slug="org:sweep-target", origin="sweep")
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=False),
+            patch.object(sweep_job, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)),
+        ):
+            await sweep_job.run(_noop_progress)
+
+        live_job = _make_job("org:live-target")
+        with (
+            patch("app.processor.jobs.wiki_refresh.interactive_demand_recent", return_value=False),
+            patch.object(live_job, "_run_pipeline", new=AsyncMock(return_value=pipeline_stats)),
+        ):
+            live_result = await live_job.run(_noop_progress)
+
+        assert live_result.metadata.get("outcome") != "deferred"

@@ -1046,6 +1046,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_swallowed_error("app.main.prewarm_bm25", e)
 
+    # Task 5: background refresh of the divergence-heavy run_invariants()
+    # snapshot. It used to run inline on every /health rebuild (1,317/day,
+    # 200 sampled artifacts each) — now it refreshes on its own
+    # INVARIANTS_REFRESH_S cadence and /health serves the last snapshot
+    # (reporting {"status": "pending"} until the first refresh completes).
+    try:
+        from app.startup.invariants import refresh_invariants_loop
+
+        _invariants_refresh_task = asyncio.create_task(refresh_invariants_loop())
+        app.state.invariants_refresh_task = _invariants_refresh_task
+    except Exception as e:
+        log_swallowed_error("app.main.invariants_refresh_start", e)
+
     # Validate collection embedding dimensions against the configured embedder.
     # Dim-locks inside existing Chroma collections are a silent landmine — we
     # surface them at boot with a remediation pointer rather than blowing up
@@ -1137,9 +1150,7 @@ async def lifespan(app: FastAPI):
     # /agent/query loads compete for the executor's thread pool.
     try:
         import app.routers.health as _health_mod
-        from app.routers.health import _build_health_payload
-        _health_mod._health_cache = await asyncio.to_thread(_build_health_payload)
-        _health_mod._health_cache_ts = time.monotonic()
+        await _health_mod._health_payload_cache.get()
         logger.info("health cache pre-warmed at startup")
     except Exception as exc:
         log_swallowed_error("app.main.lifespan.health_prewarm", exc)
@@ -1150,6 +1161,13 @@ async def lifespan(app: FastAPI):
     try:
         app.state.mcp_reaper_task.cancel()
         await app.state.mcp_reaper_task
+    except (asyncio.CancelledError, AttributeError):
+        pass
+
+    # Cancel the background invariants refresh loop (Task 5).
+    try:
+        app.state.invariants_refresh_task.cancel()
+        await app.state.invariants_refresh_task
     except (asyncio.CancelledError, AttributeError):
         pass
 

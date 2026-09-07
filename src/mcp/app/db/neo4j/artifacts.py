@@ -50,48 +50,12 @@ def create_artifact(
     now = utcnow_iso()
 
     with driver.session() as session:
-        result = session.run(
-            """
-            MERGE (d:Domain {name: $domain})
-            // MERGE (not CREATE) on the content-addressed id makes ingest
-            // idempotent + concurrency-safe: a racing/replayed ingest of
-            // identical content MATCHES the existing node (no a.id-UNIQUE
-            // violation, so no rollback that would delete the other ingest's
-            // upserted chunks). Neo4j locks on the id constraint during MERGE.
-            MERGE (a:Artifact {id: $artifact_id})
-            ON CREATE SET a += {
-                filename: $filename,
-                domain: $domain,
-                sub_category: $sub_category,
-                tags: $tags_json,
-                keywords: $keywords_json,
-                summary: $summary,
-                chunk_count: $chunk_count,
-                chunk_ids: $chunk_ids_json,
-                content_hash: $content_hash,
-                quality_score: $quality_score,
-                client_source: $client_source,
-                ingested_at: $ingested_at,
-                updated_at: $ingested_at
-            }
-            ON MATCH SET
-                a.updated_at = $ingested_at,
-                a.chunk_count = $chunk_count,
-                a.chunk_ids = $chunk_ids_json
-            // external_id / source_kind land on both create and match: a
-            // content-addressed node first written by a filename/upload path
-            // (no external_id) must still gain the identifier when the same
-            // content later arrives from a connector. COALESCE keeps a
-            // previously-set value from being wiped by an empty re-delivery.
-            SET a.external_id = CASE WHEN $external_id <> '' THEN $external_id ELSE a.external_id END,
-                a.source_kind = CASE WHEN $source_kind <> '' THEN $source_kind ELSE a.source_kind END
-            MERGE (a)-[:BELONGS_TO]->(d)
-            RETURN a.id AS id
-            """,
+        return session.execute_write(
+            _create_artifact_tx,
             artifact_id=artifact_id,
             filename=filename,
             domain=domain,
-            sub_category=sub_cat,
+            sub_cat=sub_cat,
             tags_json=tags_json,
             keywords_json=keywords_json,
             summary=summary,
@@ -102,41 +66,127 @@ def create_artifact(
             client_source=client_source,
             external_id=external_id or "",
             source_kind=source_kind or "",
-            ingested_at=now,
+            now=now,
         )
-        record = result.single()
-        aid = record["id"] if record else artifact_id
 
-        # Link to SubCategory node
-        sc_name = f"{domain}/{sub_cat}"
-        session.run(
-            "MATCH (a:Artifact {id: $aid}), (sc:SubCategory {name: $sc_name}) "
-            "MERGE (a)-[:CATEGORIZED_AS]->(sc)",
+
+def _create_artifact_tx(
+    tx,
+    *,
+    artifact_id: str,
+    filename: str,
+    domain: str,
+    sub_cat: str,
+    tags_json: str,
+    keywords_json: str,
+    summary: str,
+    chunk_count: int,
+    chunk_ids_json: str,
+    content_hash: str,
+    quality_score: float,
+    client_source: str,
+    external_id: str,
+    source_kind: str,
+    now: str,
+) -> str:
+    """``create_artifact``'s managed-transaction body — see :func:`create_artifact`.
+
+    Runs as ``session.execute_write(_create_artifact_tx, ...)`` so the neo4j
+    driver retries the whole transaction (with backoff) on a
+    ``TransientError`` — the ``UNWIND $tags ... MERGE (t:Tag)`` statement
+    below takes write locks on shared ``Tag`` nodes and can deadlock against
+    the re-categorisation ``DELETE`` in ``app/db/neo4j/taxonomy.py``.
+    """
+    result = tx.run(
+        """
+        MERGE (d:Domain {name: $domain})
+        // MERGE (not CREATE) on the content-addressed id makes ingest
+        // idempotent + concurrency-safe: a racing/replayed ingest of
+        // identical content MATCHES the existing node (no a.id-UNIQUE
+        // violation, so no rollback that would delete the other ingest's
+        // upserted chunks). Neo4j locks on the id constraint during MERGE.
+        MERGE (a:Artifact {id: $artifact_id})
+        ON CREATE SET a += {
+            filename: $filename,
+            domain: $domain,
+            sub_category: $sub_category,
+            tags: $tags_json,
+            keywords: $keywords_json,
+            summary: $summary,
+            chunk_count: $chunk_count,
+            chunk_ids: $chunk_ids_json,
+            content_hash: $content_hash,
+            quality_score: $quality_score,
+            client_source: $client_source,
+            ingested_at: $ingested_at,
+            updated_at: $ingested_at
+        }
+        ON MATCH SET
+            a.updated_at = $ingested_at,
+            a.chunk_count = $chunk_count,
+            a.chunk_ids = $chunk_ids_json
+        // external_id / source_kind land on both create and match: a
+        // content-addressed node first written by a filename/upload path
+        // (no external_id) must still gain the identifier when the same
+        // content later arrives from a connector. COALESCE keeps a
+        // previously-set value from being wiped by an empty re-delivery.
+        SET a.external_id = CASE WHEN $external_id <> '' THEN $external_id ELSE a.external_id END,
+            a.source_kind = CASE WHEN $source_kind <> '' THEN $source_kind ELSE a.source_kind END
+        MERGE (a)-[:BELONGS_TO]->(d)
+        RETURN a.id AS id
+        """,
+        artifact_id=artifact_id,
+        filename=filename,
+        domain=domain,
+        sub_category=sub_cat,
+        tags_json=tags_json,
+        keywords_json=keywords_json,
+        summary=summary,
+        chunk_count=chunk_count,
+        chunk_ids_json=chunk_ids_json,
+        content_hash=content_hash,
+        quality_score=quality_score,
+        client_source=client_source,
+        external_id=external_id,
+        source_kind=source_kind,
+        ingested_at=now,
+    )
+    record = result.single()
+    aid = record["id"] if record else artifact_id
+
+    # Link to SubCategory node
+    sc_name = f"{domain}/{sub_cat}"
+    tx.run(
+        "MATCH (a:Artifact {id: $aid}), (sc:SubCategory {name: $sc_name}) "
+        "MERGE (a)-[:CATEGORIZED_AS]->(sc)",
+        aid=aid,
+        sc_name=sc_name,
+    )
+
+    # Link to Tag nodes (batched — single query for all tags). Sorted so
+    # concurrent writers acquire :Tag locks in the same order — an
+    # unsorted UNWIND order is what let this statement deadlock against
+    # the re-categorisation DELETE in taxonomy.py.
+    try:
+        tag_list = json.loads(tags_json) if tags_json else []
+    except (json.JSONDecodeError, TypeError):
+        tag_list = []
+    clean_tags = sorted(t.strip().lower() for t in tag_list if t.strip())
+    if clean_tags:
+        tx.run(
+            "UNWIND $tags AS tag_name "
+            "MERGE (t:Tag {name: tag_name}) "
+            "ON CREATE SET t.created_at = $now, t.usage_count = 1 "
+            "ON MATCH SET t.usage_count = t.usage_count + 1 "
+            "WITH t "
+            "MATCH (a:Artifact {id: $aid}) "
+            "MERGE (a)-[:TAGGED_WITH]->(t)",
+            tags=clean_tags,
             aid=aid,
-            sc_name=sc_name,
+            now=now,
         )
 
-        # Link to Tag nodes (batched — single query for all tags)
-        try:
-            tag_list = json.loads(tags_json) if tags_json else []
-        except (json.JSONDecodeError, TypeError):
-            tag_list = []
-        clean_tags = [t.strip().lower() for t in tag_list if t.strip()]
-        if clean_tags:
-            session.run(
-                "UNWIND $tags AS tag_name "
-                "MERGE (t:Tag {name: tag_name}) "
-                "ON CREATE SET t.created_at = $now, t.usage_count = 1 "
-                "ON MATCH SET t.usage_count = t.usage_count + 1 "
-                "WITH t "
-                "MATCH (a:Artifact {id: $aid}) "
-                "MERGE (a)-[:TAGGED_WITH]->(t)",
-                tags=clean_tags,
-                aid=aid,
-                now=now,
-            )
-
-        return aid
+    return aid
 
 
 def set_artifact_properties(

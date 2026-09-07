@@ -213,19 +213,32 @@ SCHEDULE_CONFIG_RECOMMENDER = os.getenv("SCHEDULE_CONFIG_RECOMMENDER", "0 */6 * 
 #  - Constellation 3D coords (fallback layout, no LLM) — nightly 03:30 UTC.
 #  - Memory archival sweep (safe, no LLM re-abstraction) — weekly, Sunday 05:00.
 SCHEDULE_COMMUNITY_REFRESH = os.getenv("SCHEDULE_COMMUNITY_REFRESH", "0 2 * * sun")
-# Per-entity embeddings — 15 min before compute_umap_3d so layout picks up fresh vectors.
+
+# The five graph-pipeline stages below (entity embeddings -> similarity edges
+# -> umap -> trust state -> domains) run as ONE chain, awaited stage by stage
+# (app.scheduler._run_graph_pipeline_chain), not on five independent crons —
+# stacking them minutes apart raced each predecessor's completion whenever it
+# overran. Only SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS' cron still schedules
+# anything: it fires the whole chain. Each remaining value is now purely an
+# on/off switch — set it empty and the chain skips that stage, keeping the
+# "empty disables" contract, while its cron expression is ignored.
 SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS = os.getenv("SCHEDULE_COMPUTE_ENTITY_EMBEDDINGS", "15 3 * * *")
 SCHEDULE_COMPUTE_UMAP_3D = os.getenv("SCHEDULE_COMPUTE_UMAP_3D", "30 3 * * *")
-# Entity trust_state derivation — 1 min after compute_umap_3d.
 SCHEDULE_COMPUTE_TRUST_STATE = os.getenv("SCHEDULE_COMPUTE_TRUST_STATE", "31 3 * * *")
-# Domain backbone derivation — 1 min after compute_trust_state.
-# Independent of umap: runs even when SCHEDULE_COMPUTE_UMAP_3D is empty.
+# Domain backbone derivation — independent of umap: still runs when
+# SCHEDULE_COMPUTE_UMAP_3D is empty.
 SCHEDULE_DERIVE_DOMAINS = os.getenv("SCHEDULE_DERIVE_DOMAINS", "32 3 * * *")
 SCHEDULE_MEMORY_CONSOLIDATION = os.getenv("SCHEDULE_MEMORY_CONSOLIDATION", "0 5 * * sun")
 # Cap LLM summaries generated per community-refresh run so a first run on a
 # large corpus can't issue an unbounded GPU batch. skip-existing already bounds
 # steady state; this bounds the cold-start. 0 / unset = no cap.
 COMMUNITY_SUMMARY_MAX_PER_RUN = int(os.getenv("COMMUNITY_SUMMARY_MAX_PER_RUN", "200"))
+# Wall-clock budget (seconds) for the L1 community-summary batch inside
+# compute_umap_3d — issuing up to COMMUNITY_SUMMARY_MAX_PER_RUN serial local-LLM
+# calls took 40min-3h, well past the stage's own completion window, so the batch
+# now stops issuing new calls once this elapses; whatever's left is picked up
+# on the next nightly run (it's still unsummarised, so selection is unchanged).
+COMMUNITY_SUMMARY_WALL_CLOCK_S = float(os.getenv("COMMUNITY_SUMMARY_WALL_CLOCK_S", "480"))
 
 # Semantic kNN edges (SIMILAR_TO) — Task 3.2.
 # Runs inside the nightly compute_umap_3d cadence after entity embeddings
@@ -236,8 +249,9 @@ SEMANTIC_EDGE_THRESHOLD: float = float(os.getenv("SEMANTIC_EDGE_THRESHOLD", "0.6
 # Down-weight factor applied to SIMILAR_TO edge weights in the force layout so
 # co-mention co-occurrence structure stays dominant over semantic similarity.
 SEMANTIC_EDGE_SPRING_SCALE: float = float(os.getenv("SEMANTIC_EDGE_SPRING_SCALE", "0.6"))
-# Cron schedule for the SIMILAR_TO kNN edge materialisation job (runs between
-# entity-embeddings at 3:15 and compute_umap_3d at 3:30). Empty string disables.
+# SIMILAR_TO kNN edge materialisation — second stage of the graph-pipeline
+# chain above, so it runs after entity embeddings and before umap by
+# construction rather than by cron placement. Empty string disables the stage.
 SCHEDULE_BUILD_SIMILARITY_EDGES = os.getenv("SCHEDULE_BUILD_SIMILARITY_EDGES", "22 3 * * *")
 
 # Webhook-inbox drain: the receiver (POST /sdk/v1/ingest/webhook/{token}) returns
@@ -936,6 +950,11 @@ SCHEDULE_RETENTION_ENFORCE = os.getenv(
 # Wiki refresh crons (Phase K). Empty string disables (matches sibling SCHEDULE_*).
 SCHEDULE_WIKI_STALE_SWEEP = os.getenv("SCHEDULE_WIKI_STALE_SWEEP", "0 3 * * *")
 SCHEDULE_WIKI_DRIFT_LINT = os.getenv("SCHEDULE_WIKI_DRIFT_LINT", "0 4 * * sun")
+# Wall-clock budget (seconds) for wiki_stale_sweep's enqueue loop — up to 100
+# candidates with no cap could run unbounded; the sweep now stops enqueueing
+# once this elapses, logging how many were enqueued vs skipped. Skipped
+# candidates re-qualify on tomorrow's sweep (their summary state is untouched).
+WIKI_STALE_SWEEP_WALL_CLOCK_S = float(os.getenv("WIKI_STALE_SWEEP_WALL_CLOCK_S", "1800"))
 # Hard-delete of quarantine-expired artifacts. Empty string disables.
 SCHEDULE_QUARANTINE_PURGE = os.getenv("SCHEDULE_QUARANTINE_PURGE", "0 3 * * *")
 
@@ -1637,6 +1656,16 @@ PROCESSOR_API_CAP_FALLBACK = os.getenv("PROCESSOR_API_CAP_FALLBACK", "local")  #
 # "already pending" duplicate (SF-2). Must be far below JOB_RECORD_TTL_S.
 PROCESSOR_PENDING_STALE_TTL_S = int(os.getenv("PROCESSOR_PENDING_STALE_TTL_S", "21600"))
 WORKER_LOAD_CEILING = os.getenv("WORKER_LOAD_CEILING", "auto")  # auto | <float>
+
+# Wiki refresh — live-session fan-out cap (Task 3, 2026-09-06). At most this
+# many WikiRefreshJob runs actually call the local LLM per rolling hour
+# outside the nightly wiki_stale_sweep (origin="sweep" is exempt); beyond
+# that, a live-triggered refresh defers to the sweep instead of competing
+# with the next chat turn's verification + memory extraction for the same
+# local chat slot. Read dynamically at its call site
+# (app/processor/jobs/wiki_refresh.py) — this declaration exists so it
+# appears in the generated .env.example.
+WIKI_REFRESH_LIVE_MAX_PER_HOUR = int(os.getenv("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "12"))
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

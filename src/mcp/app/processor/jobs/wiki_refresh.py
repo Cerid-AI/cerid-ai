@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -45,6 +46,7 @@ from core.agents.summary_quality import (
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
+from core.utils.internal_llm import interactive_demand_recent
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -62,6 +64,46 @@ _EST_TOKENS_IN = 3_000
 _EST_TOKENS_OUT = 800
 _MODEL = "ollama/local"
 _MAX_CHARS = 12_000  # concat budget for entity text corpus
+
+# ---------------------------------------------------------------------------
+# Live-session rate limit (Task 3 — keep wiki refresh fan-out out of live
+# sessions). Independent of interactive_demand_recent(): even between chat
+# turns, a burst of newly-mentioned entities must not run more than
+# WIKI_REFRESH_LIVE_MAX_PER_HOUR local-LLM summaries per rolling hour — the
+# nightly sweep (origin="sweep") is exempt and gets its own cap in Task 9.
+# ---------------------------------------------------------------------------
+
+_LIVE_REFRESH_WINDOW_S = 3600.0
+_live_refresh_timestamps: list[float] = []
+
+
+def _live_refresh_max_per_hour() -> int:
+    try:
+        return max(0, int(os.environ.get("WIKI_REFRESH_LIVE_MAX_PER_HOUR", "12")))
+    except (TypeError, ValueError):
+        return 12
+
+
+def _live_refresh_admit() -> bool:
+    """Prune expired entries, then admit-and-record or refuse.
+
+    Recording happens only on admission, so a job that defers for another
+    reason (interactive demand) never spends a slot that a real refresh
+    could have used.
+    """
+    now = time.monotonic()
+    _live_refresh_timestamps[:] = [
+        t for t in _live_refresh_timestamps if now - t < _LIVE_REFRESH_WINDOW_S
+    ]
+    if len(_live_refresh_timestamps) >= _live_refresh_max_per_hour():
+        return False
+    _live_refresh_timestamps.append(now)
+    return True
+
+
+def reset_live_refresh_rate_limit_for_tests() -> None:
+    """Test-only hook: clear the rolling-hour counter between test cases."""
+    _live_refresh_timestamps.clear()
 
 _SUMMARY_PROMPT = """\
 You are summarising a named entity based on excerpts from a knowledge corpus.
@@ -93,12 +135,20 @@ class WikiRefreshJob(BaseJob):
     entity_slug
         The canonical_id of the entity node to summarise
         (e.g. ``"person:elon-musk"``).
+    origin
+        ``"sweep"`` for the nightly ``wiki_stale_sweep`` enqueue
+        (``app.scheduler._run_wiki_stale_sweep``); every other producer
+        (ingest-triggered, contradiction-triggered, manual) leaves this at
+        its default ``"live"``. Sweep-originated jobs bypass both the
+        interactive-demand deferral and the live rolling-hour rate limit
+        (Task 3) — Task 9 gives the sweep its own wall-clock budget instead.
     """
 
     job_type = "wiki_refresh"
 
-    def __init__(self, entity_slug: str) -> None:
+    def __init__(self, entity_slug: str, origin: str = "live") -> None:
         self._entity_slug = entity_slug
+        self._origin = origin
 
     @property
     def priority(self) -> Priority:
@@ -130,7 +180,12 @@ class WikiRefreshJob(BaseJob):
         failure and schedule a retry.
         """
         await progress_cb(0.0)
-        logger.info("wiki_refresh.start entity=%s", self._entity_slug)
+        logger.info("wiki_refresh.start entity=%s origin=%s", self._entity_slug, self._origin)
+
+        if self._origin != "sweep":
+            defer_reason = self._live_session_defer_reason()
+            if defer_reason is not None:
+                return await self._deferred_result(defer_reason)
 
         try:
             stats = await self._run_pipeline(progress_cb)
@@ -166,6 +221,78 @@ class WikiRefreshJob(BaseJob):
                 "external_refs_count": stats.get("external_refs_count", 0),
             },
         )
+
+    def _live_session_defer_reason(self) -> str | None:
+        """Return why a live (non-sweep) refresh should defer, or None to proceed.
+
+        Interactive demand is checked first: deferring for an active chat
+        session costs no rate-limit slot, so a quiet rolling hour is not
+        spent on refreshes that would have deferred anyway.
+        """
+        if interactive_demand_recent():
+            return "interactive_demand"
+        if not _live_refresh_admit():
+            return "live_rate_limited"
+        return None
+
+    async def _deferred_result(self, reason: str) -> JobResult:
+        """Complete successfully without calling the LLM.
+
+        Marks the entity stale for tonight's wiki_stale_sweep and returns
+        outcome="deferred" so the processor queue drains this job instead of
+        holding it against a live chat session's local-LLM demand.
+        """
+        await self._mark_stale_for_sweep()
+        logger.info(
+            "wiki_refresh.deferred entity=%s reason=%s", self._entity_slug, reason,
+        )
+        return JobResult(
+            job_id="",  # filled in by the worker after dequeue
+            actual_tokens_in=0,
+            actual_tokens_out=0,
+            metadata={
+                "entity_slug": self._entity_slug,
+                "outcome": "deferred",
+                "defer_reason": reason,
+            },
+        )
+
+    async def _mark_stale_for_sweep(self) -> None:
+        """Raise ``summary_refresh_due`` — a dedicated marker the nightly
+        sweep also selects on.
+
+        Nulling ``summary_updated_at`` would have reused an existing
+        OR-branch of the sweep's WHERE clause, but that property is not
+        private bookkeeping: it is the user-visible ``last_updated_at``, it
+        drives ``next_refresh_due``, it counts toward the stale-summary health
+        invariant, and it keys the 7-day human-edit protection — so a
+        deferral would have shown the entity as never-summarised and stripped
+        a user's edit protection over a run that never happened.
+
+        Best-effort: this bookkeeping write must never turn a deferred
+        refresh into a FAILED job — draining the queue matters more than the
+        write landing.
+        """
+        try:
+            from app.deps import get_neo4j  # noqa: PLC0415
+
+            driver = get_neo4j()
+            if driver is None:
+                return
+            await asyncio.to_thread(self._set_refresh_due, driver)
+        except Exception as exc:  # noqa: BLE001 — bookkeeping only, see docstring
+            log_swallowed_error(
+                "processor.wiki_refresh.mark_stale",
+                exc,
+                context={"entity_slug": self._entity_slug},
+            )
+
+    def _set_refresh_due(self, driver: Any) -> None:
+        with driver.session() as session:
+            session.run(
+                "MATCH (e:Entity {canonical_id: $slug}) SET e.summary_refresh_due = true",
+                slug=self._entity_slug,
+            )
 
     async def _mark_attempt(self, reason: str) -> None:
         """Stamp ``summary_attempted_at`` so the sweep can back off.

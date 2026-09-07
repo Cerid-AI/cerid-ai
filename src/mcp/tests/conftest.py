@@ -198,6 +198,34 @@ def _reset_llm_client():
         os.environ["OPENROUTER_API_KEY"] = old_key
 
 
+@pytest.fixture(autouse=True)
+def _isolate_local_model_resolution():
+    """Reset the local-chat-model resolver cache around every test.
+
+    ``core.utils.internal_llm`` caches the gateway's served-model list (and
+    the model name resolved from it) in a process-global singleton with a
+    300s TTL, shared by every test in the process. The containerised CI test
+    job runs on a self-hosted runner that can genuinely reach a quenchforge
+    gateway at ``host.docker.internal:11434`` — so any single test elsewhere
+    in the suite that resolves a "/"-bearing model against that real gateway
+    (even one that mocks its OWN ``_get_ollama_client``/``httpx.get``, since
+    a warm cache short-circuits before either is ever called) leaves that
+    real served list cached for up to 5 minutes, silently deciding later
+    tests' fallback instead of their own local wiring. That cross-test
+    leakage — not a live call from within the affected test itself — is
+    what made ``test_local_dispatch_ignores_openrouter_tier_id`` flaky in CI:
+    it got a cached real "qwen2.5-7b-instruct-q4_k_m" instead of the
+    configured "llama3.2:3b". Resetting before and after every test makes
+    resolution start cold each time, so a test's own fetch wiring (or the
+    absence of it) is what decides the outcome, never a neighbour's.
+    """
+    import core.utils.internal_llm as _internal_llm_mod
+
+    _internal_llm_mod.reset_effective_local_model_cache()
+    yield
+    _internal_llm_mod.reset_effective_local_model_cache()
+
+
 @pytest.fixture
 def mock_neo4j():
     """Mock Neo4j driver with session context manager."""

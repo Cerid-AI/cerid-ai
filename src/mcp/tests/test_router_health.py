@@ -23,13 +23,13 @@ class TestHealthEndpoint:
     def setup_method(self):
         """Reset the health cache between tests."""
         import app.routers.health as h
-        h._health_cache = {}
-        h._health_cache_ts = 0.0
+        h._health_payload_cache.value = {}
+        h._health_payload_cache.updated_at = 0.0
 
     @patch("app.routers.health.get_redis")
     @patch("app.routers.health.get_chroma")
     @patch("app.routers.health.get_neo4j")
-    def test_healthy_when_all_connected(self, mock_neo4j, mock_chroma, mock_redis):
+    def test_healthy_when_all_connected(self, mock_neo4j, mock_chroma, mock_redis, monkeypatch):
         driver = MagicMock()
         session = MagicMock()
         driver.session.return_value.__enter__ = MagicMock(return_value=session)
@@ -37,6 +37,14 @@ class TestHealthEndpoint:
         # Task 14: invariants probe runs a count(orphans) Cypher; default its result.
         session.run.return_value.single.return_value = {"orphans": 0}
         mock_neo4j.return_value = driver
+
+        # Task 5: run_invariants() now runs on its own background cadence
+        # rather than inline on the /health request path, so /health serves
+        # get_invariants_snapshot() — simulate a completed background refresh.
+        monkeypatch.setattr(
+            "app.startup.invariants.get_invariants_snapshot",
+            lambda: {"healthy_invariants": True, "computed_at": "2026-09-06T00:00:00+00:00"},
+        )
 
         # Task 14: NLI model must be "loaded" for /health to return 200 —
         # in production the warmup() call sets this; in tests we set it
@@ -59,6 +67,79 @@ class TestHealthEndpoint:
         # Task 14: invariants block is additive to the existing response.
         assert "invariants" in data
         assert data["invariants"]["healthy_invariants"] is True
+
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
+    def test_stale_unhealthy_snapshot_self_heals_from_live_nli_probe(
+        self, mock_neo4j, mock_chroma, mock_redis, monkeypatch
+    ):
+        """A background snapshot frozen while NLI was still loading (cold
+        model cache at CI boot) must not pin /health at 503 for the rest of
+        the INVARIANTS_REFRESH_S cadence once the model finishes loading."""
+        driver = MagicMock()
+        session = MagicMock()
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = {"orphans": 0}
+        mock_neo4j.return_value = driver
+
+        monkeypatch.setattr(
+            "app.startup.invariants.get_invariants_snapshot",
+            lambda: {
+                "healthy_invariants": False,
+                "nli_model_loaded": False,
+                "computed_at": "2026-09-06T00:00:00+00:00",
+            },
+        )
+
+        from core.utils import nli
+        prior_loaded = getattr(nli, "_MODEL_LOADED", False)
+        nli._MODEL_LOADED = True  # the model finished loading after that refresh ran
+        try:
+            client = TestClient(_make_app())
+            response = client.get("/health")
+        finally:
+            nli._MODEL_LOADED = prior_loaded
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["invariants"]["healthy_invariants"] is True
+        assert data["invariants"]["nli_model_loaded"] is True
+
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
+    def test_pending_snapshot_does_not_gate_health(
+        self, mock_neo4j, mock_chroma, mock_redis, monkeypatch
+    ):
+        """Before the first background refresh completes, /health must not
+        503 — it reports status:pending alongside the live NLI flag."""
+        driver = MagicMock()
+        session = MagicMock()
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = {"orphans": 0}
+        mock_neo4j.return_value = driver
+
+        monkeypatch.setattr(
+            "app.startup.invariants.get_invariants_snapshot",
+            lambda: {"status": "pending"},
+        )
+
+        from core.utils import nli
+        prior_loaded = getattr(nli, "_MODEL_LOADED", False)
+        nli._MODEL_LOADED = False  # model hasn't finished loading either
+        try:
+            client = TestClient(_make_app())
+            response = client.get("/health")
+        finally:
+            nli._MODEL_LOADED = prior_loaded
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["invariants"]["status"] == "pending"
+        assert data["invariants"]["nli_model_loaded"] is False
 
     @patch("app.routers.health.get_redis")
     @patch("app.routers.health.get_chroma")

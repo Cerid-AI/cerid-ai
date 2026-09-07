@@ -94,11 +94,13 @@ class _StubSource(DataSource):
     """Minimal concrete DataSource for testing."""
 
     def __init__(self, name: str, results: list[DataSourceResult] | None = None,
-                 exc: Exception | None = None, delay: float = 0.0):
+                 exc: Exception | None = None, delay: float = 0.0,
+                 mcp_connector_name: str = ""):
         self.name = name
         self.description = f"Stub {name}"
         self.requires_api_key = False
         self.domains: list[str] = []
+        self.mcp_connector_name = mcp_connector_name
         self._results = results or []
         self._exc = exc
         self._delay = delay
@@ -138,6 +140,101 @@ async def test_circuit_breaker_wraps_queries():
     assert results == []
     # The source itself should NOT have been called — breaker blocked it
     assert failing_source.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_query_all_skips_open_breaker_without_call(caplog):
+    """A source whose MCP connector breaker is OPEN must be skipped without
+    an MCP call and without a per-query WARNING — gmail/google_calendar sat
+    OPEN for days, logging 160 failed calls/day (3 warnings each) (Task 1)."""
+    import logging
+    import time
+
+    from core.mcp_clients.client_pool import (
+        _FAILURE_THRESHOLD,
+        get_pool,
+        reset_pool_for_tests,
+    )
+
+    reset_pool_for_tests()
+    try:
+        pool = get_pool()
+        pool.register("google_workspace", "http://sibling:8080/mcp")
+        state = pool._connectors["google_workspace"]
+        state.opened_at = time.monotonic()
+        state.failures = _FAILURE_THRESHOLD
+
+        test_registry = DataSourceRegistry()
+        source = _StubSource(
+            "mcp_source",
+            results=[DataSourceResult("T", "C", source_name="mcp_source")],
+            mcp_connector_name="google_workspace",
+        )
+        test_registry.register(source)
+
+        results = await test_registry.query_all("test")
+        assert results == []
+        assert source.call_count == 0
+
+        # A second query while the breaker is still open must not re-log —
+        # the breaker itself already logged once when it opened.
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            results2 = await test_registry.query_all("test")
+        assert results2 == []
+        assert source.call_count == 0
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+    finally:
+        reset_pool_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_query_all_skips_real_gmail_source_when_breaker_open(monkeypatch):
+    """The real GmailDataSource (not a stub) must never reach the MCP
+    connector pool while google_workspace's breaker is OPEN — this is the
+    class that actually produced the 160 failed calls/day evidence."""
+    import time
+
+    from core.mcp_clients.client_pool import (
+        _FAILURE_THRESHOLD,
+        get_pool,
+        reset_pool_for_tests,
+    )
+    from plugins.gmail.data_source import GmailDataSource
+
+    monkeypatch.setenv("CERID_CONNECTORS_BEARER", "tok")  # pragma: allowlist secret
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "id")
+    monkeypatch.setenv("USER_GOOGLE_EMAIL", "someone@example.com")
+
+    reset_pool_for_tests()
+    try:
+        pool = get_pool()
+        pool.register("google_workspace", "http://sibling:8080/mcp")
+        state = pool._connectors["google_workspace"]
+        state.opened_at = time.monotonic()
+        state.failures = _FAILURE_THRESHOLD
+
+        test_registry = DataSourceRegistry()
+        test_registry.register(GmailDataSource())
+
+        with patch.object(pool, "call_tool", new_callable=AsyncMock) as mock_call_tool:
+            results = await test_registry.query_all("hello")
+
+        assert results == []
+        mock_call_tool.assert_not_called()
+    finally:
+        reset_pool_for_tests()
+
+
+def test_query_all_default_timeout_is_external_source_timeout():
+    """query_all's default per-source timeout is the shared external-source
+    budget, not a locally hardcoded 5.0s (Task 1)."""
+    import inspect
+
+    from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+
+    sig = inspect.signature(DataSourceRegistry.query_all)
+    assert sig.parameters["timeout"].default == EXTERNAL_SOURCE_QUERY_TIMEOUT
 
 
 @pytest.mark.asyncio

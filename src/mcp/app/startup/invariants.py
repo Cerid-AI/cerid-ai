@@ -1,7 +1,11 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Startup invariants — run at lifespan start and on each /health poll.
+"""Startup invariants — run at lifespan start and refreshed on a background
+cadence (``refresh_invariants_loop``, every ``INVARIANTS_REFRESH_S``); see
+that function and ``get_invariants_snapshot`` below. ``/health`` no longer
+triggers a rebuild inline on each poll — it serves the last background
+snapshot.
 
 Reports observable facts beyond "connected", derived from the audit
 findings of 2026-04-17:
@@ -20,8 +24,12 @@ Task 2 (historical data cannot be backfilled), but NLI load failure *is*
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
+
+from app.deps import get_chroma, get_neo4j, get_redis
+from config.constants import INVARIANTS_REFRESH_S
 
 logger = logging.getLogger("ai-companion.invariants")
 
@@ -164,6 +172,50 @@ LIMIT $limit
 """
 
 
+def _present_count(chroma: Any, items: list[tuple[str | None, list[str]]]) -> list[int]:
+    """Count how many of each artifact's chunk_ids are COMMITTED-present in
+    Chroma — batched to one ``get()`` per collection instead of one per
+    artifact (200 -> 4 gets on a 4-domain, _DIVERGENCE_SAMPLE_LIMIT=200 sample).
+
+    Restricting to ``cerid_state != pending`` (CL-3) means a stuck-pending
+    artifact — node.chunk_count=N but its chunks never flipped committed
+    after a failed two-store commit — reads as divergence instead of being
+    masked by the pending rows. Chunks with no ``cerid_state`` (pre
+    two-phase legacy) count as present. A brief transient window during a
+    healthy ingest (staged pending → create_artifact → flip committed) can
+    register momentarily; the metric is warn-only + sampled and the
+    recovery job heals real stuck-pending within ~60 s.
+
+    ``items`` is a list of (domain, chunk_ids) pairs, one per sampled
+    artifact, in order. Returns the present-count per artifact, same order.
+    """
+    import config
+
+    ids_by_domain: dict[str, set[str]] = {}
+    for domain, chunk_ids in items:
+        if chunk_ids and domain:
+            ids_by_domain.setdefault(domain, set()).update(chunk_ids)
+
+    present_by_domain: dict[str, set[str]] = {}
+    coll_cache: dict[str, Any] = {}
+    for domain, ids in ids_by_domain.items():
+        name = config.collection_name(domain)
+        coll = coll_cache.get(name)
+        if coll is None:
+            coll = chroma.get_or_create_collection(name=name)
+            coll_cache[name] = coll
+        got = coll.get(ids=list(ids), where={"cerid_state": {"$ne": "pending"}})
+        present_by_domain[domain] = set((got or {}).get("ids") or [])
+
+    counts: list[int] = []
+    for domain, chunk_ids in items:
+        if not chunk_ids or not domain:
+            counts.append(0)
+            continue
+        counts.append(len(present_by_domain.get(domain, set()).intersection(chunk_ids)))
+    return counts
+
+
 def _probe_divergence(chroma: Any, neo4j: Any) -> dict[str, Any]:
     """Probe: sampled cross-store divergence between Neo4j and Chroma.
 
@@ -178,37 +230,12 @@ def _probe_divergence(chroma: Any, neo4j: Any) -> dict[str, Any]:
     """
     import json as _json
 
-    import config
-
     with neo4j.session() as session:
         rows = list(
             session.run(_DIVERGENCE_SAMPLE_CYPHER, limit=_DIVERGENCE_SAMPLE_LIMIT)
         )
 
-    coll_cache: dict[str, Any] = {}
-
-    def _present_count(domain: str | None, chunk_ids: list[str]) -> int:
-        """Count how many of an artifact's chunk_ids are COMMITTED-present in
-        Chroma. Restricting to ``cerid_state != pending`` (CL-3) means a
-        stuck-pending artifact — node.chunk_count=N but its chunks never flipped
-        committed after a failed two-store commit — reads as divergence instead
-        of being masked by the pending rows. Chunks with no ``cerid_state`` (pre
-        two-phase legacy) count as present. A brief transient window during a
-        healthy ingest (staged pending → create_artifact → flip committed) can
-        register momentarily; the metric is warn-only + sampled and the recovery
-        job heals real stuck-pending within ~60 s."""
-        if not chunk_ids or not domain:
-            return 0
-        name = config.collection_name(domain)
-        coll = coll_cache.get(name)
-        if coll is None:
-            coll = chroma.get_or_create_collection(name=name)
-            coll_cache[name] = coll
-        got = coll.get(ids=list(chunk_ids), where={"cerid_state": {"$ne": "pending"}})
-        return len((got or {}).get("ids") or [])
-
-    two_store = 0
-    vector_visible_archived = 0
+    parsed: list[tuple[str | None, list[str], Any, Any]] = []
     for r in rows:
         raw_ids = r.get("chunk_ids") if hasattr(r, "get") else r["chunk_ids"]
         try:
@@ -220,13 +247,17 @@ def _probe_divergence(chroma: Any, neo4j: Any) -> dict[str, Any]:
         if not isinstance(chunk_ids, list):
             chunk_ids = []
         domain = r.get("domain") if hasattr(r, "get") else r["domain"]
-        present = _present_count(domain, chunk_ids)
-
         chunk_count = r.get("chunk_count") if hasattr(r, "get") else r["chunk_count"]
+        archived = r.get("archived") if hasattr(r, "get") else r["archived"]
+        parsed.append((domain, chunk_ids, chunk_count, archived))
+
+    present_counts = _present_count(chroma, [(domain, chunk_ids) for domain, chunk_ids, _, _ in parsed])
+
+    two_store = 0
+    vector_visible_archived = 0
+    for (_domain, _chunk_ids, chunk_count, archived), present in zip(parsed, present_counts, strict=True):
         if isinstance(chunk_count, (int, float)) and int(chunk_count) != present:
             two_store += 1
-
-        archived = r.get("archived") if hasattr(r, "get") else r["archived"]
         if archived and present > 0:
             vector_visible_archived += 1
 
@@ -381,6 +412,19 @@ def _probe_swallowed_errors(redis: Any) -> dict[str, Any]:
         return {"swallowed_errors_last_hour": {}, "swallowed_errors_error": str(exc)}
 
 
+def healthy_from(snapshot: dict[str, Any]) -> bool:
+    """The criticality gate: NLI load failure is the only hard invariant.
+
+    Single source of truth for the ``healthy_invariants`` rule, shared by
+    ``run_invariants`` (the background-refreshed snapshot) and
+    ``app.routers.health._invariants_snapshot`` (which recomputes this on
+    every ``/health`` rebuild against the live ``nli_model_loaded`` probe,
+    so a snapshot frozen mid-refresh can't pin the gate stale for the rest
+    of the ``INVARIANTS_REFRESH_S`` cadence).
+    """
+    return bool(snapshot.get("nli_model_loaded"))
+
+
 def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     """Build a snapshot of observable invariants.
 
@@ -479,8 +523,73 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
         snapshot["swallowed_errors_last_hour"] = {}
 
     # Criticality gate — /health uses this to choose HTTP status.
-    healthy = True
-    if not snapshot.get("nli_model_loaded"):
-        healthy = False
-    snapshot["healthy_invariants"] = healthy
+    snapshot["healthy_invariants"] = healthy_from(snapshot)
     return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — run_invariants() off the /health request path.
+#
+# The divergence probe above samples 200 artifacts and (post-batching) issues
+# one Chroma get() per collection on every call. Run inline on every /health
+# rebuild that was still 1,317 rebuilds/day driving it. A background task
+# (started from the app lifespan, see app/main.py) refreshes the snapshot on
+# its own INVARIANTS_REFRESH_S cadence; /health serves the last snapshot plus
+# its computed_at, reporting {"status": "pending"} before the first refresh.
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, Any] | None = None
+_cache_computed_at: str | None = None
+
+
+def get_invariants_snapshot() -> dict[str, Any]:
+    """The last background-refreshed run_invariants() snapshot.
+
+    Returns ``{"status": "pending"}`` until refresh_invariants_snapshot()
+    has completed at least once (e.g. immediately after boot).
+    """
+    if _cache is None:
+        return {"status": "pending"}
+    snap = dict(_cache)
+    snap["computed_at"] = _cache_computed_at
+    return snap
+
+
+def refresh_invariants_snapshot(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
+    """Compute run_invariants() and cache it with a computed_at timestamp."""
+    global _cache, _cache_computed_at
+    from datetime import datetime, timezone
+
+    _cache = run_invariants(chroma, redis, neo4j)
+    _cache_computed_at = datetime.now(tz=timezone.utc).isoformat()
+    return get_invariants_snapshot()
+
+
+async def refresh_invariants_loop() -> None:
+    """Background refresh of the divergence-heavy run_invariants() snapshot.
+
+    Started from the lifespan next to the BM25 warm-up (app/main.py). Runs
+    an initial refresh immediately, then every INVARIANTS_REFRESH_S —
+    decoupling the sampled-artifact / batched-Chroma-get divergence probe
+    from the ~1,300/day /health rebuild cadence that used to trigger it
+    inline. Never raises out: a failed refresh just leaves the previous
+    snapshot (or the pending state) in place until the next tick.
+    """
+    while True:
+        try:
+            neo4j_driver = get_neo4j()
+            if neo4j_driver is not None:
+                # Lightweight mode (no Neo4j) has nothing to sample — /health's
+                # own lightweight-mode branch builds its snapshot inline.
+                chroma = get_chroma()
+                redis_client = get_redis()
+                await asyncio.to_thread(
+                    refresh_invariants_snapshot, chroma, redis_client, neo4j_driver,
+                )
+            await asyncio.sleep(INVARIANTS_REFRESH_S)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("app.startup.invariants.refresh_loop", exc)
+            await asyncio.sleep(INVARIANTS_REFRESH_S)

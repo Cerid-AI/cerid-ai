@@ -25,7 +25,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
-from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 
 
@@ -271,8 +270,8 @@ async def _execute_ingest(input_data: dict) -> dict:
     E1 CR-091: ``ingest_content`` is a blocking (sync) call; offload it to a
     thread under the ingest semaphore so a large A2A document never blocks the
     event loop for the full embed/chunk/Neo4j-write duration (matching the REST
-    ``/ingest`` path), then invalidate the query cache so the new content is
-    retrievable.
+    ``/ingest`` path). Query-cache invalidation is the service layer's job —
+    ``ingest_content`` fires the domain-scoped hook itself (audit CL-14).
     """
     from app.services.ingestion import _ingest_semaphore, ingest_content
 
@@ -282,11 +281,6 @@ async def _execute_ingest(input_data: dict) -> dict:
             input_data.get("text", input_data.get("content", "")),
             input_data.get("domain", "general"),
         )
-    try:
-        from utils.query_cache import invalidate_cache_non_blocking
-        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-    except Exception as e:
-        log_swallowed_error("routers.a2a.ingest_cache_invalidate", e)
     return result
 
 

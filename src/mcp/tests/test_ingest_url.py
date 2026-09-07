@@ -203,17 +203,20 @@ class TestIngestUrl:
         args, _kwargs = mock_ingest.call_args
         assert args[1] == "research"
 
-    def test_happy_path_invalidates_query_cache(self, client):
+    def test_happy_path_leaves_invalidation_to_the_service_layer(self, client):
         """Same contract as the other content-producing endpoints in this
-        router (ingest_endpoint, ingest_structured_endpoint): a successful
-        ingest schedules a best-effort query-cache invalidation."""
+        router (ingest_endpoint, ingest_structured_endpoint): the route adds no
+        invalidation of its own. ``ingest_content`` fires the domain-scoped
+        hook (audit CL-14); an unscoped flush here would evict every cached
+        result regardless of the ingested domain."""
         with (
             patch("app.routers.ingestion.guarded_get") as mock_guarded_get,
             patch("app.routers.ingestion.ingest_content") as mock_ingest,
+            patch("utils.query_cache.invalidate_all") as mock_flush,
             patch(
                 "utils.query_cache.invalidate_cache_non_blocking",
                 new_callable=AsyncMock,
-            ) as mock_invalidate,
+            ) as mock_flush_async,
         ):
             mock_guarded_get.return_value = _fake_response(_HTML)
             mock_ingest.return_value = {"status": "success", "artifact_id": "art:1"}
@@ -223,4 +226,5 @@ class TestIngestUrl:
             )
 
         assert resp.status_code == 200
-        mock_invalidate.assert_called_once()
+        mock_flush.assert_not_called()
+        mock_flush_async.assert_not_called()

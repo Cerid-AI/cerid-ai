@@ -91,6 +91,10 @@ class GmailDataSource(DataSource):
     description = "Gmail messages via sibling google-workspace-mcp"
     requires_api_key = True
     api_key_env_var = "CERID_CONNECTORS_BEARER"  # pragma: allowlist secret
+    # Matches the connector name _call_mcp dispatches through (get_pool()
+    # .call_tool("google_workspace", ...)) — lets query_all skip this source
+    # without an MCP call while that connector's breaker is OPEN.
+    mcp_connector_name = "google_workspace"
 
     def is_configured(self) -> bool:
         # Configured iff (a) bearer present, (b) Pro-tier gating allows it,

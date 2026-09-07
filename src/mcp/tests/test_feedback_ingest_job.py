@@ -83,7 +83,6 @@ async def test_run_ingests_turn_into_conversations_domain(monkeypatch):
         patch("app.services.ingestion.ingest_content", side_effect=fake_ingest),
         patch("app.deps.get_redis", return_value=MagicMock()),
         patch("core.utils.cache.log_event") as mock_log_event,
-        patch("utils.query_cache.invalidate_all") as mock_invalidate,
     ):
         result = await _job().run(progress_cb=_noop_progress)
 
@@ -95,7 +94,6 @@ async def test_run_ingests_turn_into_conversations_domain(monkeypatch):
     assert result.metadata["artifact_id"] == "art:fb-1"
     assert result.metadata["status"] == "success"
     mock_log_event.assert_called_once()
-    mock_invalidate.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -110,7 +108,6 @@ async def test_run_awaits_hallucination_check_when_enabled(monkeypatch):
         patch("app.deps.get_chroma", return_value=MagicMock()),
         patch("app.deps.get_neo4j", return_value=MagicMock()),
         patch("core.utils.cache.log_event"),
-        patch("utils.query_cache.invalidate_all"),
         patch(
             "core.agents.hallucination.check_hallucinations",
             new_callable=AsyncMock,
@@ -124,9 +121,9 @@ async def test_run_awaits_hallucination_check_when_enabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_best_effort_tail_never_fails_the_job(monkeypatch):
-    """Audit-log / cache-invalidate / hallucination failures are swallowed
-    (with log_swallowed_error) — the persisted ingest must not be retried
-    because a side-channel hiccuped."""
+    """Audit-log / hallucination failures are swallowed (with
+    log_swallowed_error) — the persisted ingest must not be retried because a
+    side-channel hiccuped."""
     monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", True)
     with (
         patch(
@@ -137,7 +134,6 @@ async def test_run_best_effort_tail_never_fails_the_job(monkeypatch):
         patch("app.deps.get_chroma", return_value=MagicMock()),
         patch("app.deps.get_neo4j", return_value=MagicMock()),
         patch("core.utils.cache.log_event", side_effect=RuntimeError("redis down")),
-        patch("utils.query_cache.invalidate_all", side_effect=RuntimeError("cache down")),
         patch(
             "core.agents.hallucination.check_hallucinations",
             new_callable=AsyncMock, side_effect=RuntimeError("nli down"),

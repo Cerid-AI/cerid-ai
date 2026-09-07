@@ -41,6 +41,8 @@ from app.services.external_apis.wikidata import WikidataAdapter
 from app.services.external_apis.wikipedia import WikipediaAdapter
 from app.services.wiki_pages import ExternalReference
 from core.agents.entity_extraction import ends_with_doc_extension, is_junk_entity_name
+from core.agents.entity_extraction import is_codec_alias_shaped as _is_codec_alias_shaped
+from core.agents.entity_extraction import is_shouty_acronym_shaped as _is_shouty_single_token
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.external_apis.wiki_enrichment")
@@ -184,37 +186,10 @@ def is_plausible_wikipedia_title(candidate: str) -> bool:
 # shapes that live logs proved always 404: shouty constant names ("ALIASES",
 # "CHARSETS") and codec aliases ("euc-jp", "iso-2022-jp", "utf-8"). Those two
 # only fire for entity_type "unknown", so entities with a genuine inferred
-# type are never blocked by them.
-
-_MAX_PLAUSIBLE_ACRONYM_LEN = 6  # NASA(4)/IBM(3)/UNESCO(6) pass; ALIASES(7)/CHARSETS(8) fail
-
-_CODEC_ALIAS_FAMILIES = frozenset((
-    "ascii", "big5", "cp", "euc", "gb", "gb2312", "gb18030", "gbk", "hz",
-    "iso", "johab", "koi8", "latin", "mac", "ptcp154", "shift", "tis",
-    "utf", "windows",
-))
-
-
-def _is_shouty_single_token(name: str) -> bool:
-    """ALL-CAPS pure-alpha token too long to be a plausible acronym.
-
-    Pure-alpha keeps hyphen/digit names like "COVID-19" or "UTF-8" out of
-    this check — they are judged by the codec gate or admitted.
-    """
-    if not name.isalpha() or not name.isupper():
-        return False
-    return len(name) > _MAX_PLAUSIBLE_ACRONYM_LEN
-
-
-def _is_codec_alias_shaped(name: str) -> bool:
-    """Lowercase hyphenated token from a known codec family.
-
-    Matches "euc-jp", "iso-2022-jp", "utf-8". Does NOT match "gpt-4" or
-    "scikit-learn" — their first hyphen segment is not a codec family.
-    """
-    if " " in name or "-" not in name or name != name.lower():
-        return False
-    return name.split("-", 1)[0] in _CODEC_ALIAS_FAMILIES
+# type are never blocked by them. The two checks themselves now live in
+# core.agents.entity_extraction (Task 3, 2026-09-06) so this module's junk
+# rule and the wiki-refresh pre-enqueue filter cannot drift apart —
+# imported above as _is_shouty_single_token / _is_codec_alias_shaped.
 
 
 def _passes_adapter_gate(slug: str, entity_name: str, entity_type: EntityType) -> bool:

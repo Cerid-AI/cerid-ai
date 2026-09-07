@@ -16,6 +16,7 @@ to fetch representative chunks. Pure orchestration; no FastAPI.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 import config
@@ -83,6 +84,8 @@ async def summarize_communities(
     max_communities: int | None = None,
     skip_with_existing_summary: bool = True,
     llm_caller: LLMCaller = default_llm_caller,
+    wall_clock_s: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Generate summaries for each Community at the given Leiden level.
 
@@ -90,7 +93,17 @@ async def summarize_communities(
     Set ``skip_with_existing_summary=False`` to force-refresh existing
     summaries (useful after a major corpus update).
 
-    Returns ``{"summarised": int, "skipped_existing": int, "skipped_no_chunks": int}``.
+    ``wall_clock_s`` (Task 9) bounds how long this batch keeps issuing new
+    LLM calls — a corpus with hundreds of un-summarised L1 communities took
+    40min-3h serially, well past compute_umap_3d's stage completion window.
+    Once elapsed time (via ``clock``, injectable for tests) reaches the
+    budget, the loop stops before starting the next target; whatever is left
+    is still unsummarised, so it re-qualifies on the next nightly run with no
+    extra bookkeeping. ``None`` (the default) preserves the unbounded batch.
+
+    Returns ``{"summarised": int, "skipped_existing": int, "skipped_no_chunks": int,
+    "errors": int, "remaining": int}`` — ``remaining`` is the count of targets
+    not attempted because the wall-clock budget ran out (0 otherwise).
     """
     targets = _list_summary_targets(
         driver, level=level, top_k_entities=top_k_entities,
@@ -103,9 +116,18 @@ async def summarize_communities(
     )
 
     stats = {"summarised": 0, "skipped_existing": 0, "skipped_no_chunks": 0,
-             "errors": 0}
+             "errors": 0, "remaining": 0}
 
-    for target in targets:
+    start = clock()
+    for index, target in enumerate(targets):
+        if wall_clock_s is not None and clock() - start >= wall_clock_s:
+            stats["remaining"] = len(targets) - index
+            logger.warning(
+                "Community summarisation: wall-clock budget %.0fs exceeded — "
+                "%d/%d communities left unsummarised, picked up next run",
+                wall_clock_s, stats["remaining"], len(targets),
+            )
+            break
         passages = _fetch_representative_passages(chroma_client, target["entities"])
         if not passages:
             stats["skipped_no_chunks"] += 1

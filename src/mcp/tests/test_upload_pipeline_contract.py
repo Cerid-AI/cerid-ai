@@ -14,9 +14,9 @@ Covers two surfaces that landed/changed most recently:
   ``_recovery_correlation_key`` in ``app/services/ingestion.py``.
 
 The router tests mock the service layer (``ingest_content``), the parser,
-the magic-byte validator, the metadata extractors, and the cache
-invalidator — all of which the endpoint imports lazily inside the handler,
-so they are patched at their canonical source modules.
+the magic-byte validator, and the metadata extractors — all of which the
+endpoint imports lazily inside the handler, so they are patched at their
+canonical source modules.
 """
 from __future__ import annotations
 
@@ -64,9 +64,6 @@ def mocks(monkeypatch):
         m_magic = stack.enter_context(patch("app.parsers.magic_bytes.validate_magic_bytes"))
         m_meta = stack.enter_context(patch("utils.metadata.extract_metadata"))
         m_meta_min = stack.enter_context(patch("utils.metadata.extract_metadata_minimal"))
-        m_inval = stack.enter_context(
-            patch("utils.query_cache.invalidate_cache_non_blocking", new_callable=AsyncMock)
-        )
         # AF-025/AF-026: the handler now calls ai_categorize() for domain
         # auto-detect whenever no domain is supplied — mock it so the default
         # (no domain in the request) test path never makes a real LLM call.
@@ -90,7 +87,6 @@ def mocks(monkeypatch):
             magic=m_magic,
             meta=m_meta,
             meta_min=m_meta_min,
-            inval=m_inval,
             ai_categorize=m_ai_cat,
         )
 

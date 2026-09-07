@@ -243,8 +243,8 @@ class TestHealthInvariantsField:
     def setup_method(self):
         """Reset the health cache between tests."""
         import app.routers.health as h
-        h._health_cache = {}
-        h._health_cache_ts = 0.0
+        h._health_payload_cache.value = {}
+        h._health_payload_cache.updated_at = 0.0
 
     @patch("app.routers.health.get_redis")
     @patch("app.routers.health.get_chroma")

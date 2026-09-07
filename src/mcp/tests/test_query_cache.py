@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import fakeredis
 import pytest
 
 from utils.query_cache import (
@@ -16,7 +18,9 @@ from utils.query_cache import (
     _cache_key,
     get_cached,
     invalidate_all,
+    invalidate_by_domain,
     invalidate_cache_non_blocking,
+    invalidate_query_caches,
     set_cached,
 )
 
@@ -305,6 +309,210 @@ class TestCachedFlag:
         assert out is not None
         # Internal field should be stripped on the way out
         assert "_cache_stored_at" not in out
+
+
+# ---------------------------------------------------------------------------
+# Domain-scoped invalidation (Task 7 — C1 mirrors the semantic cache's rule)
+# ---------------------------------------------------------------------------
+
+
+class TestDomainScopedInvalidation:
+    """An ingest into domain D must evict only C1 entries whose cached result
+    touched D, not the whole cache (mirrors ``core.retrieval.semantic_cache``)."""
+
+    @staticmethod
+    def _warm_legacy_sentinel(redis: Any) -> None:
+        invalidate_by_domain("_warmup_")
+
+    @patch("utils.query_cache.get_redis")
+    def test_ingest_domain_evicts_matching_entry(self, mock_get_redis):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached("finance q", "finance", 10, {"answer": "f"}, domains_searched=["finance"])
+
+        count = invalidate_by_domain("finance")
+
+        assert count == 1
+        assert get_cached("finance q", "finance", 10) is None
+
+    @patch("utils.query_cache.get_redis")
+    def test_ingest_domain_keeps_entry_that_searched_other_domain(self, mock_get_redis):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached("finance q", "finance", 10, {"answer": "f"}, domains_searched=["finance"])
+        set_cached("coding q", "coding", 10, {"answer": "c"}, domains_searched=["coding"])
+
+        invalidate_by_domain("finance")
+
+        assert get_cached("finance q", "finance", 10) is None
+        kept = get_cached("coding q", "coding", 10)
+        assert kept is not None and kept["answer"] == "c"
+
+    @patch("utils.query_cache.get_redis")
+    def test_legacy_entry_without_domains_evicted_on_any_invalidation(self, mock_get_redis):
+        """An entry written without ``domains_searched`` carries no domain-index
+        membership — the first domain-scoped invalidation falls back to a full
+        flush to retire it, then never needs to again."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+
+        set_cached("legacy q", "finance", 10, {"answer": "l"})
+
+        count = invalidate_by_domain("coding")
+
+        assert count == 1
+        assert get_cached("legacy q", "finance", 10) is None
+
+    @patch("utils.query_cache.get_redis")
+    def test_invalidate_query_caches_with_domain_scopes_c1(self, mock_get_redis):
+        """The public ``invalidate_query_caches`` contract threads ``domain``
+        through to the C1 domain-scoped path (not the full flush)."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached("finance q", "finance", 10, {"answer": "f"}, domains_searched=["finance"])
+        set_cached("coding q", "coding", 10, {"answer": "c"}, domains_searched=["coding"])
+
+        with patch("core.retrieval.semantic_cache.invalidate_cache"):
+            invalidate_query_caches(trigger="ingestion.ingest_content", domain="finance")
+
+        assert get_cached("finance q", "finance", 10) is None
+        assert get_cached("coding q", "coding", 10) is not None
+
+    @patch("utils.query_cache.get_redis")
+    def test_invalidate_query_caches_without_domain_still_flushes_all(self, mock_get_redis):
+        """Call sites that never pass ``domain`` (e.g. memory.archive_old_memories)
+        must keep today's full-flush behavior."""
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+
+        set_cached("finance q", "finance", 10, {"answer": "f"}, domains_searched=["finance"])
+        set_cached("coding q", "coding", 10, {"answer": "c"}, domains_searched=["coding"])
+
+        with patch("core.retrieval.semantic_cache.invalidate_cache"):
+            invalidate_query_caches(trigger="memory.archive_old_memories")
+
+        assert get_cached("finance q", "finance", 10) is None
+        assert get_cached("coding q", "coding", 10) is None
+
+    @patch("utils.query_cache.get_redis")
+    def test_unrestricted_entry_evicted_by_ingest_into_any_searched_domain(self, mock_get_redis):
+        """An entry computed with no domain restriction records
+        ``domains_searched`` as every configured domain (the
+        ``list(config.DOMAINS)`` fallback in ``query_agent.py``) — an ingest
+        into any ONE of those domains must still evict it. C1 mirrors C2."""
+        import config
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached(
+            "unrestricted q", "all", 10, {"answer": "u"},
+            domains_searched=list(config.DOMAINS),
+        )
+
+        picked_domain = config.DOMAINS[len(config.DOMAINS) // 2]
+        invalidate_by_domain(picked_domain)
+
+        assert get_cached("unrestricted q", "all", 10) is None
+
+
+class TestDomainIndexEvictionBounds:
+    """Fix round 1 — the per-domain index must not grow without bound: a
+    domain-scoped invalidation must prune an id out of every domain index it
+    was registered under (not just the one being processed), and a member
+    whose payload already TTL-expired (dangling) must be dropped from the
+    index without being double-counted as a fresh eviction. C1 has no FIFO/
+    size-bound eviction path (unlike the semantic cache), so only the
+    dangling-member and cross-domain-pruning cases apply here."""
+
+    @staticmethod
+    def _warm_legacy_sentinel(redis: Any) -> None:
+        invalidate_by_domain("_warmup_")
+
+    @patch("utils.query_cache.get_redis")
+    def test_dangling_member_pruned_and_not_double_counted(self, mock_get_redis):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached("dead q", "finance", 10, {"answer": "d"}, domains_searched=["finance"])
+        set_cached("live q", "finance", 20, {"answer": "l"}, domains_searched=["finance"])
+        assert redis.scard("qcache:domain_index:finance") == 2
+
+        # Simulate the "dead" entry's own TTL expiring — its payload key is
+        # gone but the domain-index membership (a plain SET member, no
+        # per-member TTL) is still there until something prunes it.
+        dead_key = _cache_key("dead q", "finance", 10)
+        redis.delete(dead_key)
+
+        count = invalidate_by_domain("finance")
+
+        assert count == 1, "only the live entry should count as a fresh eviction"
+        assert redis.scard("qcache:domain_index:finance") == 0
+
+    @patch("utils.query_cache.get_redis")
+    def test_multi_domain_entry_pruned_from_other_domain_index_too(self, mock_get_redis):
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        self._warm_legacy_sentinel(redis)
+
+        set_cached(
+            "multi q", "finance,coding", 10, {"answer": "m"},
+            domains_searched=["finance", "coding"],
+        )
+        assert redis.scard("qcache:domain_index:coding") == 1
+
+        invalidate_by_domain("finance")
+
+        assert redis.scard("qcache:domain_index:finance") == 0
+        assert redis.scard("qcache:domain_index:coding") == 0
+
+
+class TestConcurrentLegacySweep:
+    """Fix round 1 — the legacy-sweep sentinel must be claimed atomically
+    (SET NX), not via a GET-then-SET race where two concurrent first-ever
+    domain-scoped invalidations could both run a full flush."""
+
+    @patch("utils.query_cache.get_redis")
+    def test_two_racing_callers_produce_exactly_one_full_flush(self, mock_get_redis):
+        import threading
+
+        import utils.query_cache as query_cache_module
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        mock_get_redis.return_value = redis
+        barrier = threading.Barrier(2)
+        call_count = {"n": 0}
+        lock = threading.Lock()
+        real_full_flush = query_cache_module._full_flush
+
+        def _counting_full_flush(r):
+            with lock:
+                call_count["n"] += 1
+            return real_full_flush(r)
+
+        def _race(domain: str) -> None:
+            barrier.wait(timeout=5)
+            invalidate_by_domain(domain)
+
+        with patch.object(query_cache_module, "_full_flush", side_effect=_counting_full_flush):
+            threads = [
+                threading.Thread(target=_race, args=("finance",)),
+                threading.Thread(target=_race, args=("coding",)),
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=5)
+
+        assert call_count["n"] == 1, "exactly one caller should perform the legacy sweep"
 
 
 # ---------------------------------------------------------------------------

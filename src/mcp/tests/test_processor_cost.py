@@ -137,3 +137,56 @@ class TestOpenRouterAndFreeModelNormalization:
     def test_genuinely_unknown_model_still_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown model"):
             estimate("openrouter/some-vendor/unpriced-model", 100, 100)
+
+
+class TestLocalModelPricing:
+    """Task 6: whatever the local resolver decides to call the chat model,
+    it must price as ``ollama/local`` — no per-name rows for "llama3.1-8b",
+    "qwen2.5-7b-instruct-q4_k_m", or any other name quenchforge happens to
+    serve (the local backend has no per-token cost regardless of model)."""
+
+    @pytest.fixture(autouse=True)
+    def _local_model_config(self, monkeypatch):
+        import core.utils.internal_llm as internal_llm
+
+        self.internal_llm = internal_llm
+        internal_llm.reset_effective_local_model_cache()
+        monkeypatch.setattr(
+            internal_llm.config, "INTERNAL_LLM_MODEL", "llama3.1-8b", raising=False
+        )
+        monkeypatch.setattr(
+            internal_llm.config, "OLLAMA_DEFAULT_MODEL", "llama3.2:3b", raising=False
+        )
+        yield
+        internal_llm.reset_effective_local_model_cache()
+
+    def test_configured_local_model_name_prices_as_ollama_local(self) -> None:
+        result = estimate("llama3.1-8b", 1000, 500)
+        assert result.estimated_usd == Decimal("0.00")
+
+    def test_effective_local_model_prices_as_ollama_local(self, monkeypatch) -> None:
+        class _Resp:
+            status_code = 200
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {
+                    "models": [
+                        {"name": "qwen2.5-7b-instruct-q4_k_m"},
+                        {"name": "nomic-embed-text-v1.5"},
+                    ]
+                }
+
+        monkeypatch.setattr(self.internal_llm.httpx, "get", lambda url, timeout: _Resp())
+
+        resolved = self.internal_llm.effective_local_model()
+        assert resolved == "qwen2.5-7b-instruct-q4_k_m"
+        result = estimate(resolved, 10_000, 5_000)
+        assert result.estimated_usd == Decimal("0.00")
+
+    def test_pricing_table_registers_no_per_name_local_rows(self) -> None:
+        table = PricingTable()
+        assert "llama3.1-8b" not in table.registered_models()
+        assert "qwen2.5-7b-instruct-q4_k_m" not in table.registered_models()

@@ -587,7 +587,13 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             bool(result.get("budget_exceeded")) or not result.get("sources")
         )
         if not has_context and not req.skip_cache and not degraded and not _c1_scoped:
-            set_cached(req.query, domain_key, req.top_k, result, context_hint=c1_hint)
+            # Task 7: record the domains the result actually touched so a
+            # later ingest can evict just this entry instead of the whole C1
+            # cache.
+            set_cached(
+                req.query, domain_key, req.top_k, result, context_hint=c1_hint,
+                domains_searched=result.get("domains_searched") if isinstance(result, dict) else None,
+            )
         return result
     except asyncio.CancelledError:
         raise

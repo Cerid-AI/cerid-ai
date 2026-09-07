@@ -549,6 +549,7 @@ class TestBM25DeferredRebuild:
         import core.retrieval.bm25 as bm25_mod
 
         monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["domain_x", "domain_y"])
         monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
         bm25_mod._indexes.clear()
         try:
@@ -557,12 +558,16 @@ class TestBM25DeferredRebuild:
             bm25_mod.get_index("domain_b")
             assert list(bm25_mod._indexes.keys()) == ["domain_a", "domain_b"]
 
-            # Third distinct domain pushes the dict over the cap; the
-            # least-recently-used entry (domain_a) is evicted from memory.
+            # domain_a now has a corpus on disk, which raises the bound to 3
+            # (configured domains + on-disk corpora). The fourth distinct
+            # domain pushes the dict over it; the least-recently-used entry
+            # (domain_a) is evicted from memory.
             bm25_mod.get_index("domain_c")
-            assert len(bm25_mod._indexes) == 2
+            assert len(bm25_mod._indexes) == 3
+            bm25_mod.get_index("domain_d")
+            assert len(bm25_mod._indexes) == 3
             assert "domain_a" not in bm25_mod._indexes
-            assert set(bm25_mod._indexes.keys()) == {"domain_b", "domain_c"}
+            assert set(bm25_mod._indexes.keys()) == {"domain_b", "domain_c", "domain_d"}
 
             # domain_a's corpus survived on disk — re-fetching reloads it.
             idx_a_reloaded = bm25_mod.get_index("domain_a")
@@ -648,6 +653,7 @@ class TestBM25DeferredRebuild:
         import core.retrieval.bm25 as bm25_mod
 
         monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "DOMAINS", ["domain_x", "domain_y"])
         monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
         bm25_mod._indexes.clear()
         try:
@@ -774,12 +780,86 @@ class TestWarmIndexes:
         import core.retrieval.bm25 as bm25_mod
 
         monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
-        monkeypatch.setattr(config, "DOMAINS", ["d1", "d2", "d3", "d4"])
+        monkeypatch.setattr(config, "DOMAINS", ["d1", "d2"])
         monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
         bm25_mod._indexes.clear()
         try:
-            warmed = bm25_mod.warm_indexes()
+            warmed = bm25_mod.warm_indexes(["d1", "d2", "d3", "d4"])
             assert list(warmed) == ["d1", "d2"]
             assert len(bm25_mod._indexes) == 2
         finally:
             bm25_mod._indexes.clear()
+
+
+def test_get_index_never_evicts_a_configured_domain(tmp_path, monkeypatch):
+    """A multi-domain query touches every configured domain in one pass, so
+    the LRU bound must be at least ``len(config.DOMAINS)``. Below that, each
+    query evicts and cold-reloads (full JSONL parse + tokenise + index) the
+    domains it touched last — the 2026-09-06 live logs showed 150 reloads and
+    433k docs re-tokenised in one hour against a cap of 8 and 23 domains."""
+    import config
+    import core.retrieval.bm25 as bm25_mod
+
+    monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "DOMAINS", ["dom_a", "dom_b", "dom_c"])
+    monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
+    bm25_mod._indexes.clear()
+    try:
+        first = bm25_mod.get_index("dom_a")
+        bm25_mod.get_index("dom_b")
+        bm25_mod.get_index("dom_c")
+        # All three configured domains stay resident despite the cap of 2.
+        assert set(bm25_mod._indexes) == {"dom_a", "dom_b", "dom_c"}
+        assert bm25_mod.get_index("dom_a") is first
+
+        # An off-taxonomy domain still counts against the (raised) bound.
+        bm25_mod.get_index("adhoc")
+        assert len(bm25_mod._indexes) == 3
+        assert "adhoc" in bm25_mod._indexes
+    finally:
+        bm25_mod._indexes.clear()
+
+
+def test_warm_indexes_warms_every_configured_domain(tmp_path, monkeypatch):
+    """Boot warm-up must cover all configured domains, not the first
+    ``BM25_MAX_LOADED_DOMAINS`` of them, or the first query still pays the
+    cold load for the rest."""
+    import config
+    import core.retrieval.bm25 as bm25_mod
+
+    monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "DOMAINS", ["w_a", "w_b", "w_c"])
+    monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 2)
+    bm25_mod._indexes.clear()
+    try:
+        warmed = bm25_mod.warm_indexes()
+        assert set(warmed) == {"w_a", "w_b", "w_c"}
+        assert set(bm25_mod._indexes) == {"w_a", "w_b", "w_c"}
+    finally:
+        bm25_mod._indexes.clear()
+
+
+def test_warm_indexes_includes_on_disk_corpora_outside_domains(tmp_path, monkeypatch):
+    """Knowledge packs and SDK clients ingest into domains that join
+    ``config.DOMAINS`` only after boot warm-up has run, so warm-up must also
+    cover every corpus already on disk — and the LRU bound must hold them."""
+    import json
+
+    import config
+    import core.retrieval.bm25 as bm25_mod
+
+    monkeypatch.setattr(config, "BM25_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "DOMAINS", ["core_a"])
+    monkeypatch.setattr(bm25_mod, "BM25_MAX_LOADED_DOMAINS", 1)
+    for extra in ("pack_x", "pack_y"):
+        (tmp_path / f"{extra}.jsonl").write_text(
+            json.dumps({"id": f"{extra}-1", "text": "alpha text"}) + "\n"
+        )
+    bm25_mod._indexes.clear()
+    try:
+        warmed = bm25_mod.warm_indexes()
+        assert set(warmed) == {"core_a", "pack_x", "pack_y"}
+        assert set(bm25_mod._indexes) == {"core_a", "pack_x", "pack_y"}
+        assert warmed["pack_x"] == 1
+    finally:
+        bm25_mod._indexes.clear()

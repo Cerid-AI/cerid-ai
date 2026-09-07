@@ -377,8 +377,12 @@ class ComputeUmap3DJob(BaseJob):
         # Runs best-effort after all layout passes; does not block cache bust.
         l1_tokens_in = 0
         l1_tokens_out = 0
+        l1_summarised = 0
+        l1_remaining = 0
         try:
-            l1_tokens_in, l1_tokens_out = await self._run_l1_summary_batch(driver)
+            l1_tokens_in, l1_tokens_out, l1_summarised, l1_remaining = (
+                await self._run_l1_summary_batch(driver)
+            )
         except Exception as exc:  # noqa: BLE001 — best-effort, never blocks
             log_swallowed_error("processor.compute_umap_3d.l1_summary_batch", exc)
 
@@ -398,10 +402,15 @@ class ComputeUmap3DJob(BaseJob):
                 "count": len(coords),
                 "method": method,
                 "semantic_method": semantic_method,
+                # Task 9: how much of the L1 batch the wall-clock budget let
+                # through — the remainder is still unsummarised, so it
+                # re-qualifies on tomorrow's run with no extra bookkeeping.
+                "community_summaries_done": l1_summarised,
+                "community_summaries_remaining": l1_remaining,
             },
         )
 
-    async def _run_l1_summary_batch(self, driver: Any) -> tuple[int, int]:
+    async def _run_l1_summary_batch(self, driver: Any) -> tuple[int, int, int, int]:
         """Trigger L1 community summary generation via community_summaries.py.
 
         Generates summaries for level-1 communities (262 total, currently
@@ -409,32 +418,36 @@ class ComputeUmap3DJob(BaseJob):
         Skips communities that already have summaries (skip_with_existing=True).
         Requires the Chroma vector store and LLM to be available.
 
-        Returns ``(tokens_in, tokens_out)`` actually consumed across the batch
-        (AF-100). ``summarize_communities``'s ``llm_caller`` contract
+        Returns ``(tokens_in, tokens_out, summarised, remaining)``. Tokens
+        (AF-100): ``summarize_communities``'s ``llm_caller`` contract
         (``list[dict] -> str``) returns only completion text — ``call_internal_llm``
         carries no token-usage return value to thread through — so a chars/4
         estimate is taken per call, the same heuristic ``folder_scanner.py``
         uses for its own token estimate. That is still a real per-call
         measurement of what was actually sent/received, not a flat constant.
+        ``summarised``/``remaining`` (Task 9): how much of the batch the
+        ``COMMUNITY_SUMMARY_WALL_CLOCK_S`` budget let through before stopping.
         """
         try:
             from app.db.neo4j.community_summaries import summarize_communities  # noqa: PLC0415
             from app.deps import get_chroma  # noqa: PLC0415
         except ImportError as exc:
             log_swallowed_error("compute_umap_3d.l1_summary_batch.import", exc)
-            return 0, 0
+            return 0, 0, 0, 0
 
         try:
             chroma_client = get_chroma()
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("compute_umap_3d.l1_summary_batch.chroma", exc)
-            return 0, 0
+            return 0, 0, 0, 0
 
         if chroma_client is None:
             logger.info("compute_umap_3d.l1_summary_batch: chroma unavailable, skipping")
-            return 0, 0
+            return 0, 0, 0, 0
 
         tokens: dict[str, int] = {"in": 0, "out": 0}
+        summarised = 0
+        remaining = 0
 
         async def _counting_llm_caller(messages: list[dict[str, str]]) -> str:
             from core.utils.internal_llm import call_internal_llm  # noqa: PLC0415
@@ -455,19 +468,23 @@ class ComputeUmap3DJob(BaseJob):
                 level=1,
                 skip_with_existing_summary=True,
                 llm_caller=_counting_llm_caller,
+                wall_clock_s=config.COMMUNITY_SUMMARY_WALL_CLOCK_S,
             )
+            summarised = result.get("summarised", 0)
+            remaining = result.get("remaining", 0)
             logger.info(
                 "compute_umap_3d.l1_summary_batch: done summarised=%d skipped_existing=%d "
-                "tokens_in=%d tokens_out=%d",
-                result.get("summarised", 0),
+                "remaining=%d tokens_in=%d tokens_out=%d",
+                summarised,
                 result.get("skipped_existing", 0),
+                remaining,
                 tokens["in"],
                 tokens["out"],
             )
         except Exception as exc:  # noqa: BLE001
             log_swallowed_error("compute_umap_3d.l1_summary_batch.run", exc)
 
-        return tokens["in"], tokens["out"]
+        return tokens["in"], tokens["out"], summarised, remaining
 
     def _bust_serving_cache(self) -> None:
         """Drop the /graph/embeddings/3d Redis cache after writing coords.

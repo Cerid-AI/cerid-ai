@@ -9,6 +9,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+
 logger = logging.getLogger("ai-companion.data_sources")
 
 __all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry"]
@@ -37,6 +39,11 @@ class DataSource(ABC):
     requires_api_key: bool = False
     api_key_env_var: str = ""
     domains: list[str] = []  # empty = all domains
+    # Name of the core.mcp_clients.client_pool connector this source proxies
+    # (e.g. "google_workspace", "ms365"). Empty ("") — the default — means
+    # this source has no MCP-connector backing, so query_all's breaker check
+    # never applies to it.
+    mcp_connector_name: str = ""
 
     @abstractmethod
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
@@ -108,7 +115,7 @@ class DataSourceRegistry:
         self,
         query: str,
         domain: str | None = None,
-        timeout: float = 5.0,
+        timeout: float = EXTERNAL_SOURCE_QUERY_TIMEOUT,
         *,
         raw_query: str | None = None,
         keywords: list[str] | None = None,
@@ -124,6 +131,7 @@ class DataSourceRegistry:
         ``is_relevant()`` can skip irrelevant sources entirely.  If omitted,
         ``query`` is passed through unchanged (backward-compatible).
         """
+        from core.mcp_clients.client_pool import get_pool
         from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
         sources = self.get_enabled_sources(domain)
@@ -151,6 +159,22 @@ class DataSourceRegistry:
                 skipped, len(sources), domain,
             )
         sources = relevant
+        if not sources:
+            return []
+
+        # Skip sources whose MCP connector breaker is OPEN — no MCP call, no
+        # per-query WARNING. The breaker itself already logged once when it
+        # opened (core.mcp_clients.client_pool); repeating that on every
+        # subsequent query is exactly the log storm this closes (gmail +
+        # google_calendar sat OPEN for days, 160 failed calls/day x 3
+        # warnings each). Counts as "returned 0 results", same as today.
+        pool = get_pool()
+        breaker_open = [
+            s for s in sources
+            if s.mcp_connector_name and pool.is_open(s.mcp_connector_name)
+        ]
+        if breaker_open:
+            sources = [s for s in sources if s not in breaker_open]
         if not sources:
             return []
 

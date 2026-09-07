@@ -93,4 +93,23 @@ describe("useSmartSuggestions — R3 relative-to-top", () => {
     expect(result.current.suggestions).toHaveLength(1)
     expect(result.current.suggestions[0].artifact_id).toBe("only")
   })
+
+  it("caps typeahead retrieval at 2s without rerank", async () => {
+    mockQueryKB.mockResolvedValue({ results: [makeHit()] })
+    const { result } = renderHook(() =>
+      useSmartSuggestions({ enabled: true, injectedArtifactIds: [], debounceMs: 10 }),
+    )
+    await runSearch(result, "enough characters to search")
+    expect(mockQueryKB).toHaveBeenCalledWith(
+      "enough characters to search",
+      undefined,
+      3,
+      undefined,
+      expect.objectContaining({
+        useReranking: false,
+        budgetSeconds: 2,
+        signal: expect.any(AbortSignal),
+      }),
+    )
+  })
 })

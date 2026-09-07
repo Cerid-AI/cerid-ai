@@ -7,10 +7,11 @@ Two client-side levers so background enrichment cannot saturate the local
 backend:
 
 1. Bounded concurrency (``INTERNAL_LLM_MAX_CONCURRENCY``, default 2) on
-   non-streaming local calls.
-2. A shared cooldown armed on timeout — subsequent calls wait it out
-   instead of piling retries onto an already-saturated backend; doubling
-   per consecutive timeout, reset on success.
+   non-streaming local calls. Interactive-vs-background priority within
+   that budget is covered in test_internal_llm_priority_gate.py.
+2. A cooldown armed on timeout — subsequent calls of the same class wait
+   it out instead of piling retries onto an already-saturated backend;
+   doubling per consecutive timeout, reset on success.
 """
 
 import asyncio
@@ -59,7 +60,8 @@ class _FakeResponse:
 @pytest.mark.asyncio
 async def test_concurrency_cap_enforced(monkeypatch):
     """N concurrent local calls never exceed INTERNAL_LLM_MAX_CONCURRENCY
-    in-flight requests against the backend."""
+    in-flight requests against the backend — interactive callers may use
+    every permit, so this is the total-capacity bound."""
     monkeypatch.setenv("INTERNAL_LLM_MAX_CONCURRENCY", "2")
 
     inflight = {"now": 0, "max": 0}
@@ -75,7 +77,10 @@ async def test_concurrency_cap_enforced(monkeypatch):
 
     await asyncio.gather(*[
         mod._call_ollama(
-            [{"role": "user", "content": f"q{i}"}], temperature=0, max_tokens=5,
+            [{"role": "user", "content": f"q{i}"}],
+            temperature=0,
+            max_tokens=5,
+            stage="claim_extraction",
         )
         for i in range(8)
     ])
@@ -105,29 +110,29 @@ async def test_timeout_arms_shared_cooldown(monkeypatch):
     )
     assert result == "cloud"
     with mod._pacing_guard:
-        assert mod._pacing_cooldown_seconds == 5.0
-        assert mod._pacing_cooldown_until > 0
+        assert mod._background_cooldown.seconds == 5.0
+        assert mod._background_cooldown.until > 0
 
 
 @pytest.mark.asyncio
 async def test_cooldown_doubles_and_caps(monkeypatch):
     monkeypatch.setenv("INTERNAL_LLM_TIMEOUT_COOLDOWN", "2.0")
     monkeypatch.setenv("INTERNAL_LLM_TIMEOUT_COOLDOWN_MAX", "6.0")
-    mod._record_pacing_timeout()
-    assert mod._pacing_cooldown_seconds == 2.0
-    mod._record_pacing_timeout()
-    assert mod._pacing_cooldown_seconds == 4.0
-    mod._record_pacing_timeout()
-    assert mod._pacing_cooldown_seconds == 6.0  # capped, not 8.0
-    mod._record_pacing_timeout()
-    assert mod._pacing_cooldown_seconds == 6.0
+    mod._record_pacing_timeout(interactive=False)
+    assert mod._background_cooldown.seconds == 2.0
+    mod._record_pacing_timeout(interactive=False)
+    assert mod._background_cooldown.seconds == 4.0
+    mod._record_pacing_timeout(interactive=False)
+    assert mod._background_cooldown.seconds == 6.0  # capped, not 8.0
+    mod._record_pacing_timeout(interactive=False)
+    assert mod._background_cooldown.seconds == 6.0
 
 
 @pytest.mark.asyncio
 async def test_success_resets_cooldown(monkeypatch):
     monkeypatch.setenv("INTERNAL_LLM_TIMEOUT_COOLDOWN", "2.0")
-    mod._record_pacing_timeout()
-    assert mod._pacing_cooldown_seconds > 0
+    mod._record_pacing_timeout(interactive=False)
+    assert mod._background_cooldown.seconds > 0
 
     async def _post(url, json=None):
         return _FakeResponse()
@@ -139,8 +144,8 @@ async def test_success_resets_cooldown(monkeypatch):
         [{"role": "user", "content": "q"}], temperature=0, max_tokens=5,
     )
     assert result == "ok"
-    assert mod._pacing_cooldown_seconds == 0.0
-    assert mod._pacing_cooldown_until == 0.0
+    assert mod._background_cooldown.seconds == 0.0
+    assert mod._background_cooldown.until == 0.0
 
 
 @pytest.mark.asyncio
@@ -149,20 +154,20 @@ async def test_cooldown_wait_delays_next_call(monkeypatch):
     import time
 
     monkeypatch.setenv("INTERNAL_LLM_TIMEOUT_COOLDOWN", "0.1")
-    mod._record_pacing_timeout()
+    mod._record_pacing_timeout(interactive=False)
     start = time.monotonic()
-    await mod._wait_pacing_cooldown()
+    await mod._wait_pacing_cooldown(interactive=False)
     assert time.monotonic() - start >= 0.09
 
 
 @pytest.mark.asyncio
-async def test_semaphore_is_per_loop():
-    """A semaphore created on one loop is replaced on the next loop
+async def test_gate_is_per_loop():
+    """A gate created on one loop is replaced on the next loop
     (asyncio primitives bind to their creating loop)."""
-    sem_a = mod._get_pacing_semaphore()
+    gate_a = mod._get_pacing_gate()
 
     async def _other_loop():
-        return mod._get_pacing_semaphore()
+        return mod._get_pacing_gate()
 
     # Run on a fresh loop in a thread.
     import threading
@@ -170,9 +175,9 @@ async def test_semaphore_is_per_loop():
     result: dict = {}
 
     def _runner():
-        result["sem"] = asyncio.run(_other_loop())
+        result["gate"] = asyncio.run(_other_loop())
 
     t = threading.Thread(target=_runner)
     t.start()
     t.join()
-    assert result["sem"] is not sem_a
+    assert result["gate"] is not gate_a

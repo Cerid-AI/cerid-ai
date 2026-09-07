@@ -24,6 +24,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.routers.health import CachedPayload
+from config.constants import TRUST_SCORE_CACHE_TTL_S
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -583,6 +585,33 @@ async def get_community_endpoint(community_id: str) -> dict:
     return community.model_dump()
 
 
+def _build_trust_score_payload() -> dict:
+    """The trust-score cache's build function — resolves its own Neo4j
+    driver and returns a plain, JSON-serializable dict (CachedPayload caches
+    dicts, not pydantic models)."""
+    from app.services.trust_score import compute_trust_score
+    driver = None
+    try:
+        from app.deps import get_neo4j
+        driver = get_neo4j()
+    except Exception as exc:
+        log_swallowed_error("observability.get_trust_score.neo4j", exc)
+    return compute_trust_score(neo4j_driver=driver).model_dump()
+
+
+# Task 5: 1,244 calls/day, uncached — two Cypher queries plus four JSON reads
+# per call for a score the client hook itself calls "computed nightly".
+_trust_score_cache = CachedPayload(
+    build=_build_trust_score_payload,
+    ttl=TRUST_SCORE_CACHE_TTL_S,
+    empty={},
+    error_tag="observability.trust_score_cache_refresh",
+    # compute_trust_score() 500ed directly before this cache existed — keep
+    # that contract when there's no prior snapshot to fall back to.
+    raise_on_cold_failure=True,
+)
+
+
 @router.get("/trust-score", response_model=dict[str, Any])
 async def get_trust_score() -> dict:
     """System evaluation posture, 0–100, with disclosed component scores.
@@ -593,17 +622,11 @@ async def get_trust_score() -> dict:
     from the mean. This endpoint is **pure presentation**; it does not
     affect retrieval, generation, or any model decision.
 
-    Phase E.5 of the v0.92 plan. Preservation gate I14.
+    Phase E.5 of the v0.92 plan. Preservation gate I14. Cached for
+    TRUST_SCORE_CACHE_TTL_S (Task 5) via the same CachedPayload helper
+    /health/status uses.
     """
-    from app.services.trust_score import compute_trust_score
-    driver = None
-    try:
-        from app.deps import get_neo4j
-        driver = get_neo4j()
-    except Exception as exc:
-        log_swallowed_error("observability.get_trust_score.neo4j", exc)
-    ts = compute_trust_score(neo4j_driver=driver)
-    return ts.model_dump()
+    return await _trust_score_cache.get()
 
 
 # ---------------------------------------------------------------------------

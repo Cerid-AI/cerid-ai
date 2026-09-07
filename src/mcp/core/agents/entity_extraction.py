@@ -183,6 +183,66 @@ def is_junk_entity_name(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Shouty-acronym / codec-alias shapes
+# ---------------------------------------------------------------------------
+# Moved here from app.services.external_apis.wiki_enrichment (Task 3,
+# 2026-09-06) so opsrun/purge_junk_entities.py's classify_junk_entity and the
+# wiki-refresh pre-enqueue filter share one definition instead of duplicating
+# the rule. wiki_enrichment's per-route adapter gate imports these back.
+
+_MAX_PLAUSIBLE_ACRONYM_LEN = 6  # NASA(4)/IBM(3)/UNESCO(6) pass; ALIASES(7)/CHARSETS(8) fail
+
+_CODEC_ALIAS_FAMILIES = frozenset((
+    "ascii", "big5", "cp", "euc", "gb", "gb2312", "gb18030", "gbk", "hz",
+    "iso", "johab", "koi8", "latin", "mac", "ptcp154", "shift", "tis",
+    "utf", "windows",
+))
+
+
+def is_shouty_acronym_shaped(name: str) -> bool:
+    """ALL-CAPS pure-alpha token too long to be a plausible acronym.
+
+    Pure-alpha keeps hyphen/digit names like "COVID-19" or "UTF-8" out of
+    this check — they are judged by the codec gate or admitted.
+    """
+    if not name.isalpha() or not name.isupper():
+        return False
+    return len(name) > _MAX_PLAUSIBLE_ACRONYM_LEN
+
+
+def is_codec_alias_shaped(name: str) -> bool:
+    """Lowercase hyphenated token from a known codec family.
+
+    Matches "euc-jp", "iso-2022-jp", "utf-8". Does NOT match "gpt-4" or
+    "scikit-learn" — their first hyphen segment is not a codec family.
+    """
+    if " " in name or "-" not in name or name != name.lower():
+        return False
+    return name.split("-", 1)[0] in _CODEC_ALIAS_FAMILIES
+
+
+def is_junk_entity(name: str, *, entity_type_unknown: bool = False) -> bool:
+    """Combined junk-entity predicate.
+
+    Mirrors opsrun/purge_junk_entities.py's classify_junk_entity, minus its
+    per-class label: is_junk_entity_name's structural gate, plus the
+    shouty-acronym / codec-alias family that only fires for an unknown-typed
+    entity — the same gating wiki_enrichment._passes_adapter_gate applies to
+    its wikipedia route. This module cannot call wiki_enrichment.infer_entity_type
+    itself (core must not import app), so callers that have an opinion about
+    the entity's type pass entity_type_unknown=True when it resolved to
+    "unknown"; callers with none leave it False and get is_junk_entity_name
+    alone.
+    """
+    stripped = name.strip()
+    if is_junk_entity_name(stripped):
+        return True
+    return entity_type_unknown and (
+        is_shouty_acronym_shaped(stripped) or is_codec_alias_shaped(stripped)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Prompt + extraction
 # ---------------------------------------------------------------------------
 

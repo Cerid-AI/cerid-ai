@@ -32,6 +32,11 @@ EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT = 5.0
 # Per-source budget for authoritative claim verification (hallucination gate).
 # Each of these paths applies an outer guard of (inner + 1.0 s).
 AUTHORITATIVE_VERIFY_QUERY_TIMEOUT = 4.0
+# How long multi_domain_query trusts a cached Chroma collection.count() before
+# re-checking. A stale-for-up-to-this-long "empty" reading only delays a
+# newly-ingested domain's first hit by one TTL window; the alternative
+# (counting every collection on every query) is the cost this cache removes.
+COLLECTION_COUNT_CACHE_TTL_S = 60
 
 # ── Budget & rate limits ────────────────────────────────────────────
 MONTHLY_BUDGET_USD = 20.0
@@ -75,7 +80,7 @@ CONFIDENCE_CEILING = 0.95
 
 # ── Ingestion ───────────────────────────────────────────────────────
 AI_SNIPPET_MAX_CHARS = 1500
-BM25_MAX_LOADED_DOMAINS = 8   # LRU eviction threshold for in-memory BM25 indexes
+BM25_MAX_LOADED_DOMAINS = 8   # LRU floor for in-memory BM25 indexes; raised to len(DOMAINS) at runtime
 # Debounce window for the deferred BM25 rebuild. add_documents/remove_documents
 # no longer re-tokenize the whole domain corpus inline; they mark the index
 # dirty and the next eligible search rebuilds. A committed chunk is therefore
@@ -91,6 +96,19 @@ BM25_REBUILD_DEBOUNCE_SECONDS = 2.0
 # (kb-idle-zero: rebuilds serialized in vector_search blew the entire 20s
 # retrieval budget — bf-f3 default: background work yields to interactive).
 BM25_REBUILD_MAX_INLINE_WAIT_SECONDS = 0.5
+
+# ── Server-side polling hygiene (Task 5) ───────────────────────────────
+# /health/status rebuild cadence — decouples the 14.8k/day poll volume from
+# the live Neo4j RETURN 1 + breaker reads + quenchforge /api/tags probe cost
+# of degradation_status().
+HEALTH_STATUS_CACHE_TTL_S = 15
+# /observability/trust-score rebuild cadence — the client hook documents the
+# score as "computed nightly"; 60s trades no real freshness for removing the
+# two Cypher queries + four JSON reads compute_trust_score() ran per poll.
+TRUST_SCORE_CACHE_TTL_S = 60
+# Cadence for the background refresh of run_invariants() (the divergence
+# probe's Chroma gets), decoupled from the ~54s median /health rebuild gap.
+INVARIANTS_REFRESH_S = 600
 
 __all__ = [
     "MAX_ARTIFACT_LIST",
@@ -118,4 +136,7 @@ __all__ = [
     "CONFIDENCE_FLOOR",
     "CONFIDENCE_CEILING",
     "AI_SNIPPET_MAX_CHARS",
+    "HEALTH_STATUS_CACHE_TTL_S",
+    "TRUST_SCORE_CACHE_TTL_S",
+    "INVARIANTS_REFRESH_S",
 ]

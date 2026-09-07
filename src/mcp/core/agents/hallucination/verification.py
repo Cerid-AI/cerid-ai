@@ -923,11 +923,11 @@ async def _query_memories(
     the key (genuine user memories carry no ``memory_source_type``), so honest
     empirical/decision/preference facts remain admissible.
     """
-    try:
+    def _fetch() -> dict[str, Any]:
         collection = chroma_client.get_collection(
             name=config.collection_name("conversations")
         )
-        results = collection.query(
+        return collection.query(
             query_texts=[claim],
             n_results=top_k,
             where=with_tenant_scope({
@@ -938,6 +938,12 @@ async def _query_memories(
             }),
             include=["documents", "metadatas", "distances"],
         )
+
+    try:
+        # Chroma's get_collection + query are blocking network/disk calls;
+        # offload so N concurrent verify_claim() tasks don't serialise on
+        # the event loop.
+        results = await asyncio.to_thread(_fetch)
 
         formatted = []
         if results["ids"] and results["ids"][0]:
@@ -2204,17 +2210,23 @@ async def _score_kb_grounding(
     # this corroboration increases trust (knowledge graph structure as evidence).
     _graph_boost = getattr(config, "GRAPH_VERIFICATION_BOOST", 0.05)
     if _graph_boost > 0 and neo4j_driver and top_result.get("artifact_id"):
-        try:
+        def _fetch_graph_count() -> Any:
             with neo4j_driver.session() as _gs:
-                _graph_count = _gs.run(
+                return _gs.run(
                     "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|REFERENCES]-(b:Artifact) "
                     "WHERE EXISTS { MATCH (b)<-[:RELATES_TO]-(m:Memory)-[:VERIFIED_BY]->(r:VerificationReport) } "
                     "RETURN count(b) AS verified_neighbors",
                     aid=top_result["artifact_id"],
                 ).single()
-                if _graph_count and _graph_count["verified_neighbors"] >= 2:
-                    similarity = min(1.0, similarity + _graph_boost)
-                    details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
+
+        try:
+            # Neo4j's driver session/run/single is a blocking network call;
+            # offload so it doesn't serialise the event loop across the
+            # concurrently-verified claims.
+            _graph_count = await asyncio.to_thread(_fetch_graph_count)
+            if _graph_count and _graph_count["verified_neighbors"] >= 2:
+                similarity = min(1.0, similarity + _graph_boost)
+                details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
         except Exception as exc:  # noqa: BLE001 — graph boost is non-blocking
             log_swallowed_error(__name__, exc)
 

@@ -25,8 +25,9 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Iterator
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from http import HTTPStatus
 from typing import Any
@@ -112,36 +113,185 @@ async def close_ollama_client() -> None:
 #
 #   1. A bounded concurrency cap (``INTERNAL_LLM_MAX_CONCURRENCY``, default
 #      2) on non-streaming local calls, so background enrichment queues in
-#      the client instead of timing out in the server. The user-facing
-#      streaming path (``_stream_ollama``) is deliberately NOT capped —
-#      background work yields to interactive use.
-#   2. A shared cooldown armed on timeout: after a local call times out,
-#      subsequent local calls wait out the cooldown before issuing
-#      (doubling per consecutive timeout up to a max; reset on success) —
-#      backoff-on-timeout, never immediate retry pile-on.
+#      the client instead of timing out in the server. The cap is a PRIORITY
+#      gate, not a FIFO one: interactive stages may take every permit while
+#      background stages get ``capacity - 1`` and stand aside whenever an
+#      interactive caller is waiting. The user-facing streaming path
+#      (``_stream_ollama``) is deliberately NOT capped at all.
+#   2. A cooldown armed on timeout: after a local call times out,
+#      subsequent local calls of the SAME class wait out the cooldown before
+#      issuing (doubling per consecutive timeout up to a max; reset on
+#      success) — backoff-on-timeout, never immediate retry pile-on. Per
+#      class, so an ingest flood timing out cannot pace a chat turn.
 #
-# The semaphore is per-event-loop (asyncio primitives bind to a loop on
+# The gate is per-event-loop (asyncio primitives bind to a loop on
 # first use — same hazard as the shared httpx client above); the cooldown
 # clock is process-wide because the backend saturation it models is.
-_pacing_sem: asyncio.Semaphore | None = None
-_pacing_sem_loop: asyncio.AbstractEventLoop | None = None
+
+# Stages a user is actively blocked on. On the pre-priority FIFO gate these
+# queued behind the ingest tail (``wiki_summary``, ``entity_extraction``,
+# ``community_*``, briefs, …) and exhausted their budgets at p50 28 s per busy
+# call — tasks/2026-09-06-chat-verify-performance-root-cause.md §2a.
+_INTERACTIVE_STAGES = frozenset({
+    "claim_extraction",
+    "hallucination_topic",
+    "memory_extract",
+    "memory_consolidation",
+    "memory_conflict_resolve",
+    "query_decompose",
+    "rerank_llm",
+})
+
 _pacing_guard = threading.Lock()
-_pacing_cooldown_until: float = 0.0
-_pacing_cooldown_seconds: float = 0.0
+
+
+class _PriorityGate:
+    """Bounded-concurrency gate that lets interactive callers pre-empt the queue.
+
+    Interactive callers may hold every permit; background callers may hold at
+    most ``capacity - 1`` and are held back while any interactive caller is
+    waiting. Background callers are served in arrival order via a ticket
+    queue: ``Condition``'s own waiter deque cannot carry that order, because a
+    background caller bounced by interactive demand re-enters ``wait()`` at the
+    back of it.
+    """
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = capacity
+        self._background_capacity = max(1, capacity - 1)
+        self._held = 0
+        self._background_held = 0
+        self._interactive_waiting = 0
+        self._background_tickets: deque[int] = deque()
+        self._next_background_ticket = 0
+        self._cond = asyncio.Condition()
+
+    def _admits(self, interactive: bool) -> bool:
+        if self._held >= self._capacity:
+            return False
+        if interactive:
+            return True
+        return (
+            self._background_held < self._background_capacity
+            and self._interactive_waiting == 0
+        )
+
+    @asynccontextmanager
+    async def slot(self, interactive: bool) -> AsyncIterator[None]:
+        await self._acquire(interactive)
+        try:
+            yield
+        finally:
+            await self._release(interactive)
+
+    async def _acquire(self, interactive: bool) -> None:
+        if interactive:
+            _note_interactive_demand()
+        async with self._cond:
+            if interactive:
+                await self._wait_interactive()
+                # Re-stamp: a caller that queued for a whole backend call is
+                # still live demand while its own call runs, which is what
+                # interactive_demand_recent()'s window is asked about.
+                _note_interactive_demand()
+            else:
+                await self._wait_background()
+                self._background_held += 1
+            self._held += 1
+
+    async def _wait_interactive(self) -> None:
+        self._interactive_waiting += 1
+        try:
+            await self._cond.wait_for(lambda: self._admits(True))
+        finally:
+            # Runs under the condition lock on the cancellation path too, so a
+            # cancelled waiter neither leaks its count nor keeps background
+            # callers parked behind demand that is gone — hence the wake-up.
+            self._interactive_waiting -= 1
+            self._cond.notify_all()
+
+    async def _wait_background(self) -> None:
+        ticket = self._next_background_ticket
+        self._next_background_ticket += 1
+        self._background_tickets.append(ticket)
+        try:
+            await self._cond.wait_for(
+                lambda: self._background_tickets[0] == ticket
+                and self._admits(False)
+            )
+        finally:
+            # Leaving the queue — admitted or cancelled — promotes the next
+            # ticket, whose predicate nobody else would re-evaluate.
+            self._background_tickets.remove(ticket)
+            self._cond.notify_all()
+
+    async def _release(self, interactive: bool) -> None:
+        # A cancellation landing on this await (a second cancel, or one
+        # delivered while the condition lock is contended) would lose the
+        # permit for the life of the process; the give-back runs to completion
+        # even when the caller stops waiting for it.
+        await asyncio.shield(self._give_back_permit(interactive))
+
+    async def _give_back_permit(self, interactive: bool) -> None:
+        async with self._cond:
+            self._held -= 1
+            if not interactive:
+                self._background_held -= 1
+            self._cond.notify_all()
+
+
+class _Cooldown:
+    __slots__ = ("seconds", "until")
+
+    def __init__(self) -> None:
+        self.until = 0.0
+        self.seconds = 0.0
+
+
+_pacing_gate: _PriorityGate | None = None
+_pacing_gate_loop: asyncio.AbstractEventLoop | None = None
+_interactive_cooldown = _Cooldown()
+_background_cooldown = _Cooldown()
+_interactive_demand_at: float = 0.0
 
 
 def _pacing_max_concurrency() -> int:
     return max(1, int(os.environ.get("INTERNAL_LLM_MAX_CONCURRENCY", "2")))
 
 
-def _get_pacing_semaphore() -> asyncio.Semaphore:
-    global _pacing_sem, _pacing_sem_loop
+def _get_pacing_gate() -> _PriorityGate:
+    global _pacing_gate, _pacing_gate_loop
     loop = asyncio.get_running_loop()
     with _pacing_guard:
-        if _pacing_sem is None or _pacing_sem_loop is not loop:
-            _pacing_sem = asyncio.Semaphore(_pacing_max_concurrency())
-            _pacing_sem_loop = loop
-        return _pacing_sem
+        if _pacing_gate is None or _pacing_gate_loop is not loop:
+            _pacing_gate = _PriorityGate(_pacing_max_concurrency())
+            _pacing_gate_loop = loop
+        return _pacing_gate
+
+
+def _cooldown_for(interactive: bool) -> _Cooldown:
+    return _interactive_cooldown if interactive else _background_cooldown
+
+
+def _is_interactive(stage: str | None, interactive: bool) -> bool:
+    return interactive or stage in _INTERACTIVE_STAGES
+
+
+def _note_interactive_demand() -> None:
+    global _interactive_demand_at
+    _interactive_demand_at = time.monotonic()
+
+
+def interactive_demand_recent(window_s: float = 300.0) -> bool:
+    """True when an interactive stage acquired or waited on the pacing gate
+    within the last *window_s* seconds.
+
+    Background schedulers read this to stand down while a chat session is
+    live, rather than competing for the local backend's two permits.
+    """
+    if _interactive_demand_at <= 0.0:
+        return False
+    return (time.monotonic() - _interactive_demand_at) < window_s
 
 
 # Read timeout for the local daemon.
@@ -166,41 +316,43 @@ def _get_pacing_semaphore() -> asyncio.Semaphore:
 _LOCAL_READ_TIMEOUT_S = float(os.environ.get("INTERNAL_LLM_READ_TIMEOUT_S", "300"))
 
 
-def _record_pacing_timeout() -> None:
-    """Arm (or extend) the shared cooldown after a local-backend timeout."""
-    global _pacing_cooldown_until, _pacing_cooldown_seconds
+def _record_pacing_timeout(interactive: bool) -> None:
+    """Arm (or extend) the caller class's cooldown after a local-backend timeout."""
     initial = float(os.environ.get("INTERNAL_LLM_TIMEOUT_COOLDOWN", "2.0"))
     maximum = float(os.environ.get("INTERNAL_LLM_TIMEOUT_COOLDOWN_MAX", "30.0"))
+    cooldown = _cooldown_for(interactive)
     with _pacing_guard:
-        _pacing_cooldown_seconds = min(
-            maximum, (_pacing_cooldown_seconds * 2) or initial,
-        )
-        _pacing_cooldown_until = time.monotonic() + _pacing_cooldown_seconds
+        cooldown.seconds = min(maximum, (cooldown.seconds * 2) or initial)
+        cooldown.until = time.monotonic() + cooldown.seconds
 
 
-def _record_pacing_success() -> None:
-    global _pacing_cooldown_until, _pacing_cooldown_seconds
+def _record_pacing_success(interactive: bool) -> None:
+    cooldown = _cooldown_for(interactive)
     with _pacing_guard:
-        _pacing_cooldown_until = 0.0
-        _pacing_cooldown_seconds = 0.0
+        cooldown.until = 0.0
+        cooldown.seconds = 0.0
 
 
 def _reset_pacing_state() -> None:
-    """Test hook: drop the semaphore and disarm the cooldown."""
-    global _pacing_sem, _pacing_sem_loop
+    """Test hook: drop the gate, disarm both cooldowns, forget interactive demand."""
+    global _pacing_gate, _pacing_gate_loop, _interactive_demand_at
     with _pacing_guard:
-        _pacing_sem = None
-        _pacing_sem_loop = None
-    _record_pacing_success()
+        _pacing_gate = None
+        _pacing_gate_loop = None
+        _interactive_demand_at = 0.0
+    _record_pacing_success(interactive=True)
+    _record_pacing_success(interactive=False)
 
 
-async def _wait_pacing_cooldown() -> None:
+async def _wait_pacing_cooldown(interactive: bool) -> None:
+    cooldown = _cooldown_for(interactive)
     with _pacing_guard:
-        remaining = _pacing_cooldown_until - time.monotonic()
+        remaining = cooldown.until - time.monotonic()
     if remaining > 0:
         logger.info(
-            "local LLM cooldown after timeout — pacing %.2fs before next call",
+            "local LLM cooldown after timeout — pacing %.2fs before next %s call",
             remaining,
+            "interactive" if interactive else "background",
         )
         await asyncio.sleep(remaining)
 
@@ -329,6 +481,246 @@ def _build_chat_payload(
     return payload
 
 
+# ── Effective local chat model resolution (chat-verify-pipeline Task 6) ────
+# INTERNAL_LLM_MODEL is an operator-set config value that can drift from what
+# quenchforge actually has loaded — the gateway today silently routes any
+# chat name to its single slot, so the drift caused no request failure, only
+# invisible cost accounting (PricingTable raising "Unknown model" for a name
+# never registered) and a chat call landing on whatever model happened to be
+# loaded. A pending gateway build 400s on a name mismatch instead, making
+# this resolution load-bearing rather than cosmetic.
+_LOCAL_EMBED_RERANK_PATTERNS = ("embed", "rerank", "bge-", "nomic", "minilm", "e5-")
+
+_SERVED_MODELS_TTL_S = 300.0
+_SERVED_MODELS_TIMEOUT_S = 5.0
+_served_models_guard = threading.Lock()
+_served_models_cache: list[str] | None = None
+# None = never attempted a fetch yet. Distinct from 0.0 so the freshness
+# check below can throttle repeated FAILED attempts (cache stays None,
+# but the attempt still happened) the same as it throttles successes —
+# gating on "cache is not None" instead would retry every single call
+# for as long as the gateway never answers even once.
+_served_models_cache_ts: float | None = None
+
+_effective_local_model_guard = threading.Lock()
+_effective_local_model_cache: str | None = None
+# Served-list snapshot (its cache ts) the cached resolution above was
+# computed against — lets a served-list refresh trigger a re-resolution
+# without re-resolving (and re-logging) on every call.
+_effective_local_model_resolved_ts: float | None = None
+
+
+def is_embedding_or_rerank_model(name: str) -> bool:
+    """True when *name* looks like an embedding/reranking model, not chat."""
+    lowered = name.lower()
+    return any(pattern in lowered for pattern in _LOCAL_EMBED_RERANK_PATTERNS)
+
+
+def _served_models_url() -> str:
+    return getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
+        "OLLAMA_URL", "http://localhost:11434"
+    )
+
+
+def _fetch_served_models() -> tuple[list[str] | None, float]:
+    """GET ``{QUENCHFORGE_URL}/api/tags`` synchronously, cached for
+    ``_SERVED_MODELS_TTL_S``. Sync callers only — the async hot path
+    (``_call_ollama``) uses :func:`_fetch_served_models_async` instead so a
+    cache-miss/refresh never blocks the event loop.
+
+    Returns ``(served, ts)``: ``served`` is ``None`` on a fetch failure
+    (whether nothing has ever been cached, or a refresh attempt failed);
+    ``ts`` is the monotonic time this specific snapshot (or failed attempt)
+    was taken, so callers can detect whether two calls saw the *same*
+    underlying attempt without re-reading module state after releasing the
+    lock (a concurrent refresh could otherwise stamp a stale snapshot with
+    a newer timestamp than the one it was actually fetched under).
+
+    The freshness gate is on ``_served_models_cache_ts`` alone — NOT on
+    whether ``_served_models_cache`` is populated. A failed attempt is
+    throttled exactly like a success (``ts`` is stamped either way): a
+    gateway that has never answered even once must not be re-hammered on
+    every single call, which gating on "cache is not None" would do.
+    """
+    global _served_models_cache, _served_models_cache_ts
+    now = time.monotonic()
+    with _served_models_guard:
+        if (
+            _served_models_cache_ts is not None
+            and (now - _served_models_cache_ts) < _SERVED_MODELS_TTL_S
+        ):
+            return _served_models_cache, _served_models_cache_ts
+    base_url = _served_models_url()
+    try:
+        resp = httpx.get(f"{base_url}/api/tags", timeout=_SERVED_MODELS_TIMEOUT_S)
+        resp.raise_for_status()
+        names = [m.get("name", "") for m in resp.json().get("models", [])]
+    except Exception as exc:
+        log_swallowed_error("core.utils.internal_llm.fetch_served_models", exc)
+        with _served_models_guard:
+            _served_models_cache_ts = now
+        return None, now
+    with _served_models_guard:
+        _served_models_cache = names
+        _served_models_cache_ts = now
+        return names, now
+
+
+async def _fetch_served_models_async() -> tuple[list[str] | None, float]:
+    """Async counterpart of :func:`_fetch_served_models` for the hot async
+    call path (``_call_ollama``). Same cache, same TTL, same failure-
+    throttling semantics — but fetches with the module's loop-bound
+    ``httpx.AsyncClient`` (:func:`_get_ollama_client`) instead of the
+    blocking ``httpx.get``, so a cache-miss/refresh never stalls the event
+    loop for concurrent requests.
+    """
+    global _served_models_cache, _served_models_cache_ts
+    now = time.monotonic()
+    with _served_models_guard:
+        if (
+            _served_models_cache_ts is not None
+            and (now - _served_models_cache_ts) < _SERVED_MODELS_TTL_S
+        ):
+            return _served_models_cache, _served_models_cache_ts
+    base_url = _served_models_url()
+    try:
+        client = await _get_ollama_client()
+        resp = await client.get(
+            f"{base_url}/api/tags", timeout=_SERVED_MODELS_TIMEOUT_S
+        )
+        resp.raise_for_status()
+        names = [m.get("name", "") for m in resp.json().get("models", [])]
+    except Exception as exc:
+        log_swallowed_error("core.utils.internal_llm.fetch_served_models_async", exc)
+        with _served_models_guard:
+            _served_models_cache_ts = now
+        return None, now
+    with _served_models_guard:
+        _served_models_cache = names
+        _served_models_cache_ts = now
+        return names, now
+
+
+def _resolve_effective_local_model(served: list[str] | None, previous: str | None) -> str:
+    """Pure resolution logic shared by the sync and async entry points.
+
+    Callers hold ``_effective_local_model_guard`` for the duration and pass
+    the previously resolved name in ``previous``. The served-list TTL makes
+    this recompute every ``_SERVED_MODELS_TTL_S``, so warning on every config
+    miss reported the same unchanged fact ~288 times a day; the WARNING is
+    emitted only when the resolution actually changes.
+    """
+    configured = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    if served is None:
+        # No served list at all (first-ever fetch failed, or refresh failed
+        # with nothing cached). Keep whatever was last resolved rather than
+        # reverting to the raw config value; if nothing has ever resolved,
+        # fall back to the configured name silently.
+        return previous if previous is not None else configured
+    if configured in served:
+        return configured
+    candidates = [m for m in served if m and not is_embedding_or_rerank_model(m)]
+    if not candidates:
+        if previous != configured:
+            logger.warning(
+                "configured local chat model %r is not served by the gateway "
+                "(served=%s); no non-embedding alternative found, keeping it",
+                configured, served,
+            )
+        return configured
+    resolved = candidates[0]
+    if previous != resolved:
+        logger.warning(
+            "configured local chat model %r is not served by the gateway; "
+            "using served model %r instead",
+            configured, resolved,
+        )
+    return resolved
+
+
+def _apply_resolution(served: list[str] | None, snapshot_ts: float) -> str:
+    """Recompute (and cache) the resolution iff ``snapshot_ts`` — the time
+    the caller's own fetch attempt actually ran under, passed in directly
+    rather than re-read from module state — differs from the timestamp the
+    last resolution was computed from. This is what makes the served-list
+    TTL real (re-resolves on a stale-cache refresh) while still logging
+    the "not served" WARNING only once per actual change, not once per
+    call. Taking ``snapshot_ts`` as a parameter (instead of re-reading
+    ``_served_models_cache_ts`` here) avoids a race where a concurrent
+    refresh between the fetcher's lock section and this one could stamp
+    the caller's OLD served snapshot with a NEWER timestamp than the one
+    it was actually fetched under.
+    """
+    global _effective_local_model_cache, _effective_local_model_resolved_ts
+    with _effective_local_model_guard:
+        if (
+            _effective_local_model_cache is not None
+            and _effective_local_model_resolved_ts == snapshot_ts
+        ):
+            return _effective_local_model_cache
+        _effective_local_model_cache = _resolve_effective_local_model(
+            served, _effective_local_model_cache,
+        )
+        _effective_local_model_resolved_ts = snapshot_ts
+        return _effective_local_model_cache
+
+
+def effective_local_model() -> str:
+    """Resolve the local chat model name to send to the gateway (sync).
+
+    ``INTERNAL_LLM_MODEL`` wins when the gateway actually serves it.
+    Otherwise falls back to the first served model that isn't an
+    embedding/rerank model, logging one WARNING naming both. Re-resolves
+    whenever the served-list cache refreshes (at most every
+    ``_SERVED_MODELS_TTL_S``); a refresh failure keeps the last resolved
+    name. For sync callers only (health, pricing) — the async hot path
+    (``_call_ollama``) uses :func:`effective_local_model_async` so a
+    cache-miss never blocks the event loop.
+    :func:`reset_effective_local_model_cache` clears everything for tests.
+    """
+    served, ts = _fetch_served_models()
+    return _apply_resolution(served, ts)
+
+
+async def effective_local_model_async() -> str:
+    """Async-safe counterpart of :func:`effective_local_model` for the hot
+    async call path (``_call_ollama``) — see :func:`_fetch_served_models_async`
+    for why this must not call the blocking ``httpx.get``.
+    """
+    served, ts = await _fetch_served_models_async()
+    return _apply_resolution(served, ts)
+
+
+def is_local_model_name(name: str) -> bool:
+    """True when *name* names a local chat model.
+
+    Matches the configured value, the Ollama fallback default, or the
+    gateway-resolved effective model — whichever of those *name* happens to
+    be, it is a local-inference identifier with no per-token cost. Cloud
+    model ids always carry a ``provider/`` prefix, so a bare miss on the two
+    cheap config checks short-circuits before touching the network.
+    """
+    if not name or "/" in name:
+        return False
+    if name == getattr(config, "INTERNAL_LLM_MODEL", ""):
+        return True
+    if name == getattr(config, "OLLAMA_DEFAULT_MODEL", ""):
+        return True
+    return name == effective_local_model()
+
+
+def reset_effective_local_model_cache() -> None:
+    """Test hook: forget the cached served list and resolved model."""
+    global _effective_local_model_cache, _effective_local_model_resolved_ts
+    global _served_models_cache, _served_models_cache_ts
+    with _effective_local_model_guard:
+        _effective_local_model_cache = None
+        _effective_local_model_resolved_ts = None
+    with _served_models_guard:
+        _served_models_cache = None
+        _served_models_cache_ts = None
+
+
 def _ensure_json_prompt_token(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     """OpenAI/OpenRouter reject ``response_format=json_object`` with HTTP 400
     unless the literal token "json" appears in the prompt (E1 CR-103). Local
@@ -348,6 +740,7 @@ async def call_internal_llm(
     max_tokens: int = 500,
     response_format: dict | None = None,
     stage: str | None = None,
+    interactive: bool = False,
 ) -> str:
     """Route internal LLM call to configured provider.
 
@@ -365,6 +758,9 @@ async def call_internal_llm(
         :mod:`config.stage_profiles`. Caller doesn't pick a model; the
         registry does, and the operator can override per stage via env
         (``PROVIDER_STAGE_<NAME>_MODEL``) or per tier via the registry.
+      - pacing priority on the local backend: stages in
+        ``_INTERACTIVE_STAGES`` (or any call passing *interactive*) take
+        precedence over background enrichment at the concurrency gate.
     """
     default_provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
     provider = _resolve_stage_provider(stage, default_provider)
@@ -397,6 +793,7 @@ async def call_internal_llm(
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
+            interactive=interactive,
         )
     else:
         # Default: direct OpenRouter via unified client. CR-103: apply the same
@@ -421,6 +818,7 @@ async def _call_ollama(
     provider: str = "ollama",
     model: str = "",
     stage: str | None = None,
+    interactive: bool = False,
 ) -> str:
     """Call a local Ollama-protocol backend (stock Ollama or Quenchforge).
 
@@ -429,6 +827,8 @@ async def _call_ollama(
     user-facing label in fallback log lines.
     """
     import httpx
+
+    is_interactive = _is_interactive(stage, interactive)
 
     if provider == "quenchforge":
         base_url = getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
@@ -442,9 +842,14 @@ async def _call_ollama(
         start_hint = "is 'ollama serve' running?"
     # E1 CR-038: honor a stage-resolved / override model when it names a LOCAL
     # model (a bare id like "llama3.1-8b"). A tier id ("openrouter/...", carries a
-    # "/") can't be served by the local daemon, so use the local default there.
-    local_model = model if (model and "/" not in model) else (
-        getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
+    # "/") can't be served by the local daemon, so use the resolved local
+    # default there — validated against what the gateway actually serves
+    # (Task 6), not just the raw INTERNAL_LLM_MODEL config value. The async
+    # resolver is required here: a cache-miss/refresh fetch must never block
+    # this coroutine's event loop the way the sync `effective_local_model()`
+    # (used by health/pricing) would.
+    local_model = (
+        model if (model and "/" not in model) else await effective_local_model_async()
     )
     # Breaker key is provider- AND workload-specific. Pre-v0.93.9 both providers
     # shared the "ollama" breaker; v0.93.9 split by provider. The chat path now
@@ -489,11 +894,11 @@ async def _call_ollama(
         inner_exc: Exception | None = None
         for attempt in range(max_retries):
             try:
-                # bf-f3 pacing: honor the shared timeout cooldown, then take a
-                # bounded-concurrency slot for the duration of the attempt only
-                # (backoff sleeps below never hold a slot).
-                await _wait_pacing_cooldown()
-                async with _get_pacing_semaphore():
+                # bf-f3 pacing: honor this class's timeout cooldown, then take
+                # a gate permit for the duration of the attempt only (backoff
+                # sleeps below never hold a permit).
+                await _wait_pacing_cooldown(is_interactive)
+                async with _get_pacing_gate().slot(is_interactive):
                     return await _do_call()
             except httpx.ConnectError as exc:
                 inner_exc = exc
@@ -512,10 +917,10 @@ async def _call_ollama(
                 raise
             except httpx.TimeoutException as exc:
                 inner_exc = exc
-                # Arm the shared cooldown so CONCURRENT callers back off too —
-                # per-call retry backoff alone let N in-flight calls each
-                # retry into the already-saturated backend (qf-pacing).
-                _record_pacing_timeout()
+                # Arm the cooldown so CONCURRENT callers of the same class
+                # back off too — per-call retry backoff alone let N in-flight
+                # calls each retry into the saturated backend (qf-pacing).
+                _record_pacing_timeout(is_interactive)
                 if attempt + 1 < max_retries:
                     delay = backoff_base * (2 ** attempt)
                     logger.info(
@@ -556,7 +961,7 @@ async def _call_ollama(
     try:
         result = await breaker.call(_do_call_with_retries)
         inference_health.record_success("llm", provider=provider)
-        _record_pacing_success()
+        _record_pacing_success(is_interactive)
         return result
     except CircuitOpenError as exc:
         logger.warning("%s circuit breaker open — falling back to OpenRouter", label)

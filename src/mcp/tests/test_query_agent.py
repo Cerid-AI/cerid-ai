@@ -5,6 +5,7 @@
 
 import asyncio
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -26,6 +27,7 @@ from core.agents.query_agent import (  # noqa: E402  # noqa: E402
     apply_metadata_boost,
     assemble_context,
     deduplicate_results,
+    invalidate_collection_count_cache,
     multi_domain_query,
     rerank_results,
 )
@@ -413,6 +415,186 @@ class TestMultiDomainQuery:
 
 
 # ---------------------------------------------------------------------------
+# Tests: multi_domain_query skips empty collections (Task 1, chat/verify
+# pipeline optimization)
+# ---------------------------------------------------------------------------
+
+class _FakeCollection:
+    """Minimal Chroma collection stub: tracks count()/query() call counts."""
+
+    def __init__(self, name: str, doc_count: int, query_result: dict | None = None):
+        self.name = name
+        self.doc_count = doc_count
+        self._query_result = query_result or {
+            "ids": [[]], "distances": [[]], "documents": [[]], "metadatas": [[]],
+        }
+        self.count_calls = 0
+        self.query_calls = 0
+
+    def count(self) -> int:
+        self.count_calls += 1
+        return self.doc_count
+
+    def query(self, **kwargs):
+        self.query_calls += 1
+        return self._query_result
+
+
+class _FakeChromaClient:
+    """Chroma client stub exposing named collections, some of them empty."""
+
+    def __init__(self, collections: dict[str, _FakeCollection]):
+        self._collections = collections
+
+    def list_collections(self):
+        return [SimpleNamespace(name=n) for n in self._collections]
+
+    def get_collection(self, name: str):
+        return self._collections[name]
+
+
+class TestMultiDomainQuerySkipsEmptyCollections:
+    def setup_method(self):
+        # The count cache is module-level (TTL-scoped) — clear it so one
+        # test's cached count can never leak into the next.
+        import core.agents.query_agent as qa
+        qa._collection_count_cache.clear()
+
+    def test_skips_empty_collection_no_query_call(self, monkeypatch):
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["coding", "empty_dom"])
+        populated = _FakeCollection("domain_coding", doc_count=3, query_result={
+            "ids": [["c1"]], "distances": [[0.1]],
+            "documents": [["hit"]],
+            "metadatas": [[{"artifact_id": "a1", "filename": "f", "chunk_index": 0}]],
+        })
+        empty = _FakeCollection("domain_empty_dom", doc_count=0)
+        client = _FakeChromaClient({"domain_coding": populated, "domain_empty_dom": empty})
+
+        skipped: set[str] = set()
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            results = asyncio.run(
+                multi_domain_query(
+                    "test", domains=["coding", "empty_dom"], chroma_client=client,
+                    skipped_empty_out=skipped,
+                )
+            )
+
+        assert empty.query_calls == 0
+        assert populated.query_calls == 1
+        assert skipped == {"empty_dom"}
+        assert len(results) == 1
+        assert results[0]["domain"] == "coding"
+
+    def test_count_cache_prevents_second_count_within_ttl(self, monkeypatch):
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["empty_dom"])
+        empty = _FakeCollection("domain_empty_dom", doc_count=0)
+        client = _FakeChromaClient({"domain_empty_dom": empty})
+
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            asyncio.run(multi_domain_query("q1", domains=["empty_dom"], chroma_client=client))
+            asyncio.run(multi_domain_query("q2", domains=["empty_dom"], chroma_client=client))
+
+        assert empty.count_calls == 1
+
+    def test_ingest_invalidation_clears_the_count_cache(self, monkeypatch):
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["empty_dom"])
+        empty = _FakeCollection("domain_empty_dom", doc_count=0)
+        client = _FakeChromaClient({"domain_empty_dom": empty})
+
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            asyncio.run(multi_domain_query("q1", domains=["empty_dom"], chroma_client=client))
+            invalidate_collection_count_cache("empty_dom")
+            asyncio.run(multi_domain_query("q2", domains=["empty_dom"], chroma_client=client))
+
+        assert empty.count_calls == 2
+
+    def test_count_error_fails_open_domain_still_queried(self, monkeypatch):
+        """A collection whose count() raises must not be treated as empty.
+
+        Real Chroma failures (HTTP error, timeout) and test doubles without
+        ``count`` at all must fail open: the domain is queried normally and
+        never reported via skipped_empty_out.
+        """
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["broken_dom"])
+
+        class _CountRaisingCollection:
+            def __init__(self):
+                self.query_calls = 0
+
+            def count(self):
+                raise AttributeError("'_FakeCollection' object has no attribute 'count'")
+
+            def query(self, **kwargs):
+                self.query_calls += 1
+                return {
+                    "ids": [["c1"]], "distances": [[0.1]],
+                    "documents": [["hit"]],
+                    "metadatas": [[{"artifact_id": "a1", "filename": "f", "chunk_index": 0}]],
+                }
+
+        broken = _CountRaisingCollection()
+        client = _FakeChromaClient({"domain_broken_dom": broken})
+
+        skipped: set[str] = set()
+        with patch("core.retrieval.bm25.is_available", return_value=False):
+            results = asyncio.run(
+                multi_domain_query(
+                    "test", domains=["broken_dom"], chroma_client=client,
+                    skipped_empty_out=skipped,
+                )
+            )
+
+        assert broken.query_calls == 1
+        assert skipped == set()
+        assert len(results) == 1
+        assert results[0]["domain"] == "broken_dom"
+
+    def test_count_error_cached_for_ttl_no_log_spam(self, monkeypatch, caplog):
+        """A persistently failing count() is re-checked (and re-logged) at
+        most once per TTL, not on every query — same cadence as a real count.
+        """
+        monkeypatch.setattr("core.agents.query_agent.config.DOMAINS", ["broken_dom"])
+
+        class _CountRaisingCollection:
+            def __init__(self):
+                self.count_calls = 0
+                self.query_calls = 0
+
+            def count(self):
+                self.count_calls += 1
+                raise AttributeError("'_FakeCollection' object has no attribute 'count'")
+
+            def query(self, **kwargs):
+                self.query_calls += 1
+                return {
+                    "ids": [["c1"]], "distances": [[0.1]],
+                    "documents": [["hit"]],
+                    "metadatas": [[{"artifact_id": "a1", "filename": "f", "chunk_index": 0}]],
+                }
+
+        broken = _CountRaisingCollection()
+        client = _FakeChromaClient({"domain_broken_dom": broken})
+
+        with caplog.at_level("WARNING", logger="ai-companion.swallowed"):
+            with patch("core.retrieval.bm25.is_available", return_value=False):
+                asyncio.run(
+                    multi_domain_query("q1", domains=["broken_dom"], chroma_client=client)
+                )
+                asyncio.run(
+                    multi_domain_query("q2", domains=["broken_dom"], chroma_client=client)
+                )
+
+        assert broken.count_calls == 1
+        assert broken.query_calls == 2
+        swallowed_logs = [
+            r for r in caplog.records
+            if r.name == "ai-companion.swallowed"
+            and "core.agents.query_agent.collection_count" in r.getMessage()
+        ]
+        assert len(swallowed_logs) == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests: rerank_results
 # ---------------------------------------------------------------------------
 
@@ -763,6 +945,38 @@ class TestAgentQuery:
             )
 
         mock_log.assert_called_once()
+
+    @patch("core.agents.query_agent.log_event")
+    @patch("core.agents.query_agent.rerank_results")
+    @patch("core.agents.query_agent.graph_expand_results")
+    @patch("core.agents.query_agent.multi_domain_query")
+    @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
+    def test_domains_skipped_empty_surfaces_in_response(
+        self, mock_mdq, mock_graph, mock_rerank, mock_log, monkeypatch
+    ):
+        """multi_domain_query's skipped_empty_out contract must reach the
+        envelope as domains_skipped_empty (informational, alongside
+        domains_searched)."""
+        _pin_agent_query_config(monkeypatch, ["coding", "empty_dom"])
+
+        async def fake_mdq(**kwargs):
+            skipped_out = kwargs.get("skipped_empty_out")
+            if skipped_out is not None:
+                skipped_out.add("empty_dom")
+            return []
+
+        mock_mdq.side_effect = fake_mdq
+        mock_graph.return_value = []
+        mock_rerank.return_value = []
+
+        with patch("core.utils.temporal.parse_temporal_intent", return_value=None):
+            response = asyncio.run(
+                agent_query(
+                    "test query", domains=["coding", "empty_dom"], chroma_client=MagicMock(),
+                )
+            )
+
+        assert response["domains_skipped_empty"] == ["empty_dom"]
 
     @patch("core.agents.query_agent.log_event")
     @patch("core.agents.query_agent.rerank_results")
