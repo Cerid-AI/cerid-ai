@@ -252,6 +252,9 @@ def is_junk_entity(name: str, *, entity_type_unknown: bool = False) -> bool:
 # rejected here — after the type is known, so a DATE can additionally be
 # required to carry actual date content.
 
+# "42 tokens per second" is the longest unit tail the small models produced.
+_MAX_QUANTITY_UNIT_WORDS = 3
+
 _QUANTITY_UNIT_WORDS: frozenset[str] = frozenset((
     "ms", "s", "sec", "second", "seconds", "millisecond", "milliseconds",
     "min", "minute", "minutes", "hour", "hours", "day", "days", "week",
@@ -292,11 +295,16 @@ def _is_bare_quantity(name: str) -> bool:
     match = _QUANTITY_NUMBER_RE.match(name)
     if not match:
         return False
-    rest = match.group("rest").strip()
+    raw_rest = match.group("rest")
+    rest = raw_rest.strip()
     if not rest:
         return False
     words = rest.split()
-    if not words or len(words) > 3:
+    if not words or len(words) > _MAX_QUANTITY_UNIT_WORDS:
+        return False
+    # "5G", "5S", "3X": a single letter glued to the number is a name, not a
+    # unit; "5 g" with a space is still a quantity.
+    if len(words) == 1 and len(words[0]) == 1 and not raw_rest[:1].isspace():
         return False
     return all(w.lower() in _QUANTITY_UNIT_WORDS for w in words)
 

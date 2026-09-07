@@ -401,6 +401,7 @@ class TestJunkQuantityGate:
         ("5 retries", "OTHER"),
         ("25 Mbps", "OTHER"),
         ("3 weeks", "ORG"),
+        ("5 g", "OTHER"),
     ])
     def test_rejects_bare_quantities(self, name, entity_type):
         assert is_junk_quantity_name(name, entity_type) is True
@@ -447,6 +448,9 @@ class TestJunkQuantityGate:
 
     @pytest.mark.parametrize(("name", "entity_type"), [
         ("Qwen2.5-7B", "ASSET"),
+        ("5G", "OTHER"),
+        ("5S", "ASSET"),
+        ("3X", "OTHER"),
         ("10.7.0.0/24 subnet", "OTHER"),
         ("Windows 11", "ASSET"),
         ("Boeing 747", "ASSET"),

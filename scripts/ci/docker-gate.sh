@@ -146,6 +146,14 @@ CVE-2026-48959
 # loopback-only. Mirrors the pip-audit ignore in the security job.
 # Re-eval 2026-09-30 (chromadb patch cadence).
 CVE-2026-45829
+# PyTorch Lightning RCE via checkpoint `_instantiator` hyperparameters
+# (GHSA-qqmf-gpg7-g8gw). The advisory's patched version is "2022.6.15", a
+# calendar-versioned line older than every 2.x release, so Trivy reports the
+# newest release (2.6.5, pinned in the lock) as "fixed" and --ignore-unfixed
+# does not exclude it; no PyPI release carries the fix commit d710d68.
+# lightning is transitive via pyannote-audio; nothing in src/mcp calls
+# load_from_checkpoint or loads checkpoints. Re-eval 2026-10-15.
+CVE-2026-58659
 EOF
 
 # Trivy runs from its own container against the shared daemon via the socket.
