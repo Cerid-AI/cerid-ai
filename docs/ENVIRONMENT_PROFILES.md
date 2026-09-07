@@ -273,6 +273,32 @@ the interactive chat model at all. `memory_extract` and `claim_extraction`
 are interactive stages (§1) and never use the background slot; on `hybrid`
 they go to the cloud cheap tier instead.
 
+### Serving the second slot with quenchforge
+
+quenchforge `main` after PR #24 (2026-09-07, not yet in a tagged release) supervises an optional
+second chat-class slot. Set
+`QUENCHFORGE_BACKGROUND_MODEL=<gguf name under the models dir>` (and optionally
+`QUENCHFORGE_BACKGROUND_PORT`, default 11507, and `QUENCHFORGE_PLACE_BACKGROUND`, which follows
+the chat slot's CPU/GPU rule) in the service's environment and restart it once. Chat requests
+whose `model` names that GGUF route to the slot; every other name keeps going to the chat slot;
+a request for the background model while its slot is down gets 503 rather than a silent answer
+from the other model. Then set `INTERNAL_LLM_MODEL_BACKGROUND` to the same name here. Note that
+quenchforge's `/api/tags` lists every cached GGUF, not only loaded ones, so cerid's served-model
+check passes as soon as the file exists; if the slot is not configured the gateway answers with
+the chat model.
+
+### What a 3B does differently
+
+Measured on the reference host with the production prompt (`tasks/2026-09-07-3b-extraction-eval.md`):
+qwen2.5-3b runs a fixture in 13.3 s against the 7B's 20.5 s and finds a similar set of names,
+but it omits the `confidence` field for 90% of entities, emits bare quantities and heading
+fragments as entities at four times the 7B's rate, and returns malformed JSON on about one
+fixture in six. The extractor handles all three (a missing confidence is kept at the threshold,
+bare quantities and heading leaks are rejected, a malformed reply is retried once), and it logs
+`entity_extraction.confidence_unreported`, `entity_extraction.json_retry` and
+`entity_extraction.skipped` so a silent zero-entity artifact cannot recur. Expect somewhat fewer
+entities per document than the 7B produces.
+
 ## 7. Where the code diverges from the design
 
 The source analysis (`tasks/2026-09-07-hardware-limited-client-configs.md`
