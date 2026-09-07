@@ -205,6 +205,83 @@ class TestExtractEntities:
 
 
 # ---------------------------------------------------------------------------
+# _normalise_entities — missing vs. malformed confidence (2026-09-07)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestUnreportedConfidence:
+    async def test_missing_confidence_kept_at_min_confidence(self):
+        """A model that omits ``confidence`` entirely is not the same as 0.0."""
+        caller = _llm_caller_returning({
+            "entities": [{"name": "Quiet Vendor", "type": "ORG"}],
+        })
+        result = await extract_entities_from_text(
+            "Quiet Vendor shipped the update.", llm_caller=caller, min_confidence=0.5,
+        )
+        assert len(result) == 1
+        assert result[0].confidence == 0.5
+
+    async def test_low_reported_confidence_still_dropped(self):
+        """A reported confidence below the threshold is dropped as before."""
+        caller = _llm_caller_returning({
+            "entities": [{"name": "Low Conf Org", "type": "ORG", "confidence": 0.2}],
+        })
+        result = await extract_entities_from_text(
+            "Low Conf Org filed a report.", llm_caller=caller, min_confidence=0.5,
+        )
+        assert result == []
+
+    async def test_present_non_numeric_confidence_treated_as_zero_and_dropped(self):
+        """A present but unparseable confidence is malformed, not omitted — still 0.0."""
+        caller = _llm_caller_returning({
+            "entities": [{"name": "Bad Value Org", "type": "ORG", "confidence": "high"}],
+        })
+        result = await extract_entities_from_text(
+            "Bad Value Org filed a report.", llm_caller=caller, min_confidence=0.5,
+        )
+        assert result == []
+
+    async def test_unreported_confidence_logs_info_once(self, caplog):
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": "Quiet Vendor", "type": "ORG"},
+                {"name": "Loud Vendor", "type": "ORG", "confidence": 0.9},
+            ],
+        })
+        with caplog.at_level("INFO", logger="ai-companion.entity_extraction"):
+            await extract_entities_from_text(
+                "Quiet Vendor and Loud Vendor both filed reports.",
+                llm_caller=caller, min_confidence=0.5,
+            )
+        info_lines = [
+            r for r in caplog.records
+            if r.getMessage().startswith("entity_extraction.confidence_unreported")
+        ]
+        assert len(info_lines) == 1
+        assert info_lines[0].getMessage() == (
+            "entity_extraction.confidence_unreported n=1 of 2 (kept at threshold 0.50)"
+        )
+
+    async def test_all_below_threshold_logs_warning(self, caplog):
+        caller = _llm_caller_returning({
+            "entities": [{"name": "Low Conf Org", "type": "ORG", "confidence": 0.2}],
+        })
+        with caplog.at_level("WARNING", logger="ai-companion.entity_extraction"):
+            await extract_entities_from_text(
+                "Low Conf Org filed a report.", llm_caller=caller, min_confidence=0.5,
+            )
+        warning_lines = [
+            r for r in caplog.records
+            if r.getMessage().startswith("entity_extraction.all_below_threshold")
+        ]
+        assert len(warning_lines) == 1
+        assert warning_lines[0].getMessage() == (
+            "entity_extraction.all_below_threshold n=1 threshold=0.50"
+        )
+
+
+# ---------------------------------------------------------------------------
 # is_junk_entity_name — junk-name gate (2026-07-13)
 # ---------------------------------------------------------------------------
 

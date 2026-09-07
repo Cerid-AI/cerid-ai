@@ -8,8 +8,9 @@ infrastructure is required.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -175,6 +176,41 @@ class TestRunSuccess:
             result = await job.run(_noop_progress)
 
         assert result.metadata.get("skipped") == "no_entities"
+
+
+class TestRunPipelineSkipLogging:
+    """The real ``_run_pipeline`` — not the fake substituted above — must log
+    a skip reason next to ``.start``/``.done`` so a silent no-op is visible."""
+
+    async def test_skipped_no_entities_logs_reason(self, caplog):
+        job = _make_job()
+
+        with ExitStack() as stack:
+            stack.enter_context(patch(
+                "app.processor.jobs.entity_extraction.EntityExtractionJob._fetch_domain",
+                return_value="general",
+            ))
+            stack.enter_context(patch(
+                "app.processor.jobs.entity_extraction.EntityExtractionJob._fetch_chunks",
+                return_value=(["c1"], ["some text"], [{}]),
+            ))
+            stack.enter_context(patch("app.deps.get_neo4j", return_value=object()))
+            stack.enter_context(patch("app.deps.get_chroma", return_value=object()))
+            stack.enter_context(patch(
+                "core.agents.entity_extraction.extract_entities_from_text",
+                new=AsyncMock(return_value=[]),
+            ))
+            with caplog.at_level(
+                "INFO", logger="ai-companion.processor.entity_extraction"
+            ):
+                result = await job.run(_noop_progress)
+
+        assert result.metadata.get("skipped") == "no_entities"
+        skip_lines = [
+            r for r in caplog.records
+            if r.getMessage() == "entity_extraction.skipped artifact=art-123 reason=no_entities"
+        ]
+        assert len(skip_lines) == 1
 
 
 # ---------------------------------------------------------------------------

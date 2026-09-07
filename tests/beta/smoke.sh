@@ -74,7 +74,7 @@ assert_json_exists "${MCP_BASE}/collections" '.total' "S-07" "Collections endpoi
 
 # S-08: validate-env.sh --quick
 if [[ -f "${SCRIPT_DIR}/../../scripts/validate-env.sh" ]]; then
-  assert_command "cd ${SCRIPT_DIR}/../.. && bash scripts/validate-env.sh --quick" "0" "S-08" "validate-env.sh --quick" || FAILED=1
+  assert_command "cd \"${SCRIPT_DIR}/../..\" && bash scripts/validate-env.sh --quick" "0" "S-08" "validate-env.sh --quick" || FAILED=1
 else
   _skip "S-08" "validate-env.sh --quick" "Script not found"
 fi

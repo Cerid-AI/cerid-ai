@@ -152,6 +152,10 @@ class EntityExtractionJob(BaseJob):
             logger.warning(
                 "entity_extraction.artifact_not_found artifact=%s", self._artifact_id
             )
+            logger.info(
+                "entity_extraction.skipped artifact=%s reason=%s",
+                self._artifact_id, "artifact_not_found",
+            )
             return {"skipped": "artifact_not_found"}
 
         chunk_ids, docs, metadatas = await asyncio.to_thread(
@@ -160,10 +164,18 @@ class EntityExtractionJob(BaseJob):
         await progress_cb(0.3)
 
         if not chunk_ids:
+            logger.info(
+                "entity_extraction.skipped artifact=%s reason=%s",
+                self._artifact_id, "no_chunks",
+            )
             return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "no_chunks"}
 
         blob = "\n\n---\n\n".join(d for d in docs if d)
         if not blob.strip():
+            logger.info(
+                "entity_extraction.skipped artifact=%s reason=%s",
+                self._artifact_id, "empty_text",
+            )
             return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "empty_text"}
 
         # --- 2. LLM extraction -----------------------------------------------
@@ -175,6 +187,10 @@ class EntityExtractionJob(BaseJob):
         await progress_cb(0.7)
 
         if not entities:
+            logger.info(
+                "entity_extraction.skipped artifact=%s reason=%s",
+                self._artifact_id, "no_entities",
+            )
             return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "no_entities"}
 
         # --- 3. Neo4j upsert --------------------------------------------------

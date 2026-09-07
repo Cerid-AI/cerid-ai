@@ -489,6 +489,14 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
     """Apply schema validation, type-vocab filter, canonicalisation, dedup.
 
     Entities with ``confidence < min_confidence`` are dropped before yielding.
+
+    A model that follows the naming/typing instructions but omits the
+    ``confidence`` key entirely is not the same as one that emitted 0.0 —
+    treating "unreported" as 0.0 silently discarded every entity from
+    small local models (qwen2.5-3b observed) that skip the field, with no
+    log line explaining why. Unreported confidence is kept at the floor
+    (``min_confidence``) instead; a present-but-unparseable value is still
+    treated as 0.0 (it's a malformed value, not an omission).
     """
     if not isinstance(parsed, dict):
         return
@@ -497,6 +505,10 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
         return
 
     seen: set[str] = set()
+    kept: list[Entity] = []
+    total = 0
+    unreported = 0
+    below_threshold = 0
     for raw in raw_list:
         if not isinstance(raw, dict):
             continue
@@ -509,12 +521,18 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
         ent_type = str(raw.get("type") or "").strip().upper()
         if ent_type not in _VALID_TYPES:
             continue
-        try:
-            confidence = float(raw.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
+        total += 1
+        if "confidence" not in raw:
+            unreported += 1
+            confidence = min_confidence
+        else:
+            try:
+                confidence = float(raw["confidence"])
+            except (TypeError, ValueError):
+                confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
         if confidence < min_confidence:
+            below_threshold += 1
             continue
 
         # AF-032: no ``embed=`` here on purpose — ingest runs only Tiers A+B
@@ -528,12 +546,24 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
             if cid in seen:
                 continue
             seen.add(cid)
-            yield Entity(
+            kept.append(Entity(
                 name=name,
                 entity_type=ent_type,  # type: ignore[arg-type]
                 canonical_id=cid,
                 confidence=confidence,
-            )
+            ))
+
+    if unreported:
+        logger.info(
+            "entity_extraction.confidence_unreported n=%d of %d (kept at threshold %.2f)",
+            unreported, total, min_confidence,
+        )
+    if total and below_threshold == total:
+        logger.warning(
+            "entity_extraction.all_below_threshold n=%d threshold=%.2f",
+            total, min_confidence,
+        )
+    yield from kept
 
 
 # ---------------------------------------------------------------------------
