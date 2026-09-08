@@ -1,0 +1,13 @@
+{
+  "fixture": "eval-fixture-coding-cache-eviction.md",
+  "expected": [
+    "Aurora",
+    "LRU"
+  ],
+  "forbidden": [
+    "# aurora in-memory cache \u2014 eviction policy",
+    "900 seconds",
+    "fifteen minutes",
+    "nine hundred seconds"
+  ]
+}

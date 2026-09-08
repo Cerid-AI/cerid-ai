@@ -38,3 +38,14 @@ export function getConnectionBridge(): ConnectionBridge | null {
   const cerid = (window as unknown as { cerid?: { connection?: ConnectionBridge } }).cerid
   return cerid?.connection ?? null
 }
+
+/**
+ * True when the Electron desktop shell's preload bridge is present. Gates
+ * desktop-only chrome — e.g. the frameless-window drag band — that must not
+ * mount in a plain browser tab, where there is no window to drag and no
+ * bridge to make `-webkit-app-region` meaningful.
+ */
+export function hasCeridBridge(): boolean {
+  if (typeof window === "undefined") return false
+  return !!(window as unknown as { cerid?: unknown }).cerid
+}

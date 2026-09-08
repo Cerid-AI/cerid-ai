@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { hasCeridBridge } from "@/lib/cerid-bridge"
 import { clearForeignPaneParams, syncPanePath } from "@/lib/url-state"
 import { Sidebar, type Pane } from "./sidebar"
 import { NavigationProvider } from "@/contexts/navigation-context"
@@ -109,8 +110,13 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
       <div className="vignette" aria-hidden="true" />
       {/* Lets the frameless window be dragged. See .app-drag-region — the only
           drag region in the repo was in a loading shell local mode never
-          loads, so the window could not be moved at all. */}
-      <div className="app-drag-region" aria-hidden="true" />
+          loads, so the window could not be moved at all. Only mounted with
+          the desktop bridge present — in a plain browser tab there is no
+          window to drag, and the element would otherwise sit above page
+          content and swallow clicks (it has no pointer-events: none, so a
+          browser's normal click hit-testing lands on it regardless of
+          -webkit-app-region, which browsers ignore). */}
+      {hasCeridBridge() && <div className="app-drag-region" aria-hidden="true" />}
       {/* Phase E.6.6: first-query model-download notification —
           self-suppressing when both ONNX models are cached or the user
           has dismissed the banner. Sits above the main flex row so the

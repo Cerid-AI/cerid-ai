@@ -11,7 +11,7 @@ After Phases A → C, the sidebar has **4 top-level panes** plus theme + tier co
 ```
 ┌────────────────────────────────┐
 │  Chat                          │  ← MessageSquare
-│  Subjects                      │  ← Compass     (Atlas / Constellation / Timeline / Wiki)
+│  Subjects                      │  ← Compass     (Atlas / Constellation / Timeline / Wiki / Communities)
 │  Sources                       │  ← Files       (Library / Activity / Connectors)
 │  Settings                      │  ← Settings    (Models / Knowledge / Retrieval & Answers / Privacy / Extensions / Appearance / Plan & Billing / System)
 └────────────────────────────────┘
@@ -21,9 +21,9 @@ The shape of each pane is owned by a tabbed/mode sub-controller; deep links use 
 
 | Pane | URL param | Modes |
 |---|---|---|
-| Subjects | `?mode=` | atlas / constellation / timeline / wiki |
+| Subjects | `?mode=` | atlas / constellation / timeline / wiki / communities |
 | Sources | `?sources_mode=` | library / activity / connectors |
-| Settings | `?setting=` / `?settings_q=` | `?setting=` deep-links/reveals a single setting by id (registry-driven); `?settings_q=` drives the settings search; `?diagnostics_tab=` still selects the Diagnostics sub-tab (status / analytics / activity) |
+| Settings | `?category=` / `?setting=` / `?settings_q=` | `?category=` selects the top-level intent category (persisted to `localStorage` as `cerid-settings-category`); `?setting=` deep-links/reveals a single setting by id (registry-driven); `?settings_q=` drives the settings search; `?diagnostics_tab=` still selects the Diagnostics sub-tab (status / analytics / activity) |
 
 The legacy `?entity=` param is shared across all panes for cross-pane deep linking (an entity opened from a Communities link, for example).
 
@@ -54,14 +54,15 @@ Code that still calls `goTo("monitoring")` or `goTo("wiki")` continues to work �
 // src/web/src/contexts/navigation-context.tsx
 const LEGACY_PANE_REDIRECTS = {
   wiki:        { pane: "subjects",  mode: "wiki" },
-  communities: { pane: "subjects",  mode: "atlas" },
-  memories:    { pane: "subjects",  mode: "atlas" },
+  communities: { pane: "subjects",  mode: "communities" },
   knowledge:   { pane: "sources",   mode: "library" },
   monitoring:  { pane: "settings",  mode: "status" },
   audit:       { pane: "settings",  mode: "analytics" },
   agents:      { pane: "settings",  mode: "activity" },
 }
 ```
+
+`memories` is **not** in this map — Subjects/Atlas never gained a memory-viewing UI, so the old memories → subjects entry stranded MemoriesPane; `memories` is a first-class routable pane again (RA-08). `communities` now redirects to its own restored Subjects mode (the Leiden community explorer, RA-11) rather than to Atlas.
 
 Each redirect writes the destination pane's URL param (`?mode=` / `?sources_mode=` / `?diagnostics_tab=`) before triggering the pane change, so the user lands on the right tab even on first hit.
 
@@ -72,7 +73,7 @@ The Pane union retains the legacy values for one release window so existing test
 | Pane | Entry component | Sub-tabs / modes |
 |---|---|---|
 | Chat | `components/chat/chat-panel.tsx` | (no sub-tabs) |
-| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (decomposition icicle + Neighborhood leaf) / Constellation (cartographic map + cosmos.gl Live) / Timeline (Tephra) / Wiki (FOLIO) |
+| Subjects | `components/subjects/subjects-pane.tsx` | Atlas (decomposition icicle + Neighborhood leaf) / Constellation (cartographic map + cosmos.gl Live) / Timeline (Tephra) / Wiki (FOLIO) / Communities (Leiden community clusters) |
 | Sources | `components/sources/sources-pane.tsx` | Library (current KB pane) / Activity / Connectors |
 | Settings | `components/settings/settings-pane.tsx` | 8 intent categories (Models, Knowledge, Retrieval & Answers, Privacy, Extensions, Appearance, Plan & Billing, System) + a separate **Diagnostics** console entry below the separator (preserves the `?diagnostics_tab=` contract) |
 

@@ -365,9 +365,11 @@ class TestOllamaProbeCache:
             result = h.health_check()
 
         # One call for the reachability probe, one for the local-model
-        # resolver's own served-list fetch (Task 6) — each independently
-        # cached, so neither repeats across the remaining nine calls.
-        assert calls["n"] == 2, f"expected exactly two /api/tags probes, got {calls['n']}"
+        # resolver's own served-list fetch (Task 6), and one for the
+        # resolver's chat-slot-model root fetch (Task 1) that immediately
+        # follows a successful served-list fetch — each independently
+        # cached, so none repeats across the remaining nine calls.
+        assert calls["n"] == 3, f"expected exactly three /api/tags-or-root probes, got {calls['n']}"
         assert result["ollama"] == {
             "reachable": True,
             "models": 1,
@@ -411,5 +413,6 @@ class TestOllamaProbeCache:
         # The reachability probe's 60s TTL expires and refetches once more;
         # the local-model resolver (Task 6) resolves once per process and
         # never refetches, so the total is the probe's two calls plus the
-        # resolver's one.
-        assert calls["n"] == 3
+        # resolver's own served-list fetch and its chat-slot-model root
+        # fetch (Task 1).
+        assert calls["n"] == 4

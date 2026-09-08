@@ -6,6 +6,8 @@ import uuid
 import httpx
 import pytest
 
+from lib.kb_cleanup import KbCleanup
+
 MCP_BASE_URL = os.getenv("BETA_MCP_BASE", "http://ai-companion-mcp:8888")
 
 
@@ -25,6 +27,20 @@ def client() -> httpx.Client:
         timeout=30.0,
     ) as c:
         yield c
+
+
+@pytest.fixture(scope="session")
+def kb_cleanup():
+    """Delete every artifact tracked via kb_cleanup.track(...) at session teardown."""
+    headers: dict = {"X-Client-ID": "beta-test"}
+    api_key = os.getenv("CERID_API_KEY")
+    if api_key:
+        headers["X-API-Key"] = api_key
+    with httpx.Client(base_url=MCP_BASE_URL, headers=headers, timeout=30.0) as c:
+        cleanup = KbCleanup(c)
+        yield cleanup
+        failed = cleanup.delete_all()
+        assert not failed, f"beta cleanup left artifacts behind: {failed}"
 
 
 @pytest.fixture()

@@ -824,6 +824,7 @@ async def system_check(response: Response) -> dict:
         "gen_tok_s": inference_cfg.local_gen_tok_s,
         "probe_at": inference_cfg.local_probe_at,
         "expectations": expectations_for(inference_cfg),
+        "contended": inference_cfg.local_probe_contended,
     }
 
     # Which environment profile this host should run, and which one is in

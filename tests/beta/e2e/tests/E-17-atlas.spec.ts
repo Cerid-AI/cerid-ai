@@ -18,6 +18,9 @@ test.use({ reducedMotion: "reduce" })
  *   - Analyst lens radiogroup + hop stepper + type chips operate
  */
 test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/chips", async ({ page }) => {
+  // A little above the 30s default: the hover sweep below already spends up
+  // to 18s on its own, leaving thin margin against the rest of the test.
+  test.setTimeout(45_000)
   await suppressFirstRun(page)
 
   // Data-agnostic: E-17 exercises the Wiki→Atlas cross-link + Atlas chrome for
@@ -34,7 +37,7 @@ test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/c
   // Open the A–Z index and pick the first entity (deterministic, name-agnostic).
   // Entity rows carry a data-completeness attribute — a stable row selector
   // that domain-filter/action buttons don't.
-  await page.getByRole("button", { name: /A.Z Index/ }).click()
+  await page.getByRole("button", { name: "A–Z index — all articles" }).click()
   const firstEntity = page.locator("button[data-completeness]").first()
   await expect(firstEntity).toBeVisible({ timeout: 15_000 })
   await firstEntity.click()
@@ -59,8 +62,15 @@ test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/c
   // Wait for layout to settle (the "Computing layout" status disappears).
   await expect(page.getByText(/Computing layout/)).toHaveCount(0, { timeout: 30_000 })
 
-  // Trusted-input hover sweep through the canvas center until the entity
-  // tooltip ("N mentions · Click to pin") appears.
+  // Wait for at least one node before hovering — the pill toolbar's stats
+  // span only renders once the graph actually holds nodes, which lags
+  // "Computing layout" disappearing (that only marks the layout algorithm
+  // done, not the canvas painted). Hovering before this exists races the
+  // sweep against an empty canvas.
+  await expect(page.getByText(/\d+ (entity|entities) · \d+ connections/)).toBeVisible({ timeout: 15_000 })
+
+  // Trusted-input hover sweep until the entity tooltip ("N mentions · Click
+  // to pin") appears.
   const box = await canvas.boundingBox()
   if (!box) throw new Error("canvas has no bounding box")
   // Dense grid sweep: a 2-hop neighborhood is a diffuse cloud of small

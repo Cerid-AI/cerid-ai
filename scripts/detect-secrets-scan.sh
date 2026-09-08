@@ -51,19 +51,9 @@ git ls-files -z | xargs -0 "$DS" scan \
   --exclude-files 'src/mcp/config/knowledge_packs\.json$' \
   > "$TMPFILE"
 
-python3 -c "
-import json, sys, os
-with open(os.environ['TMPFILE']) as f:
-    results = json.load(f)
-secrets = {k: v for k, v in results.get('results', {}).items() if v}
-if secrets:
-    print('::error::Potential secrets detected in:')
-    for fname, findings in secrets.items():
-        for finding in findings:
-            print(f'  {fname}:{finding[\"line_number\"]} - {finding[\"type\"]}')
-    sys.exit(1)
-print('No secrets detected.')
-"
+# xargs may have run the scan more than once (its command buffer is 128 KiB in
+# the CI container), so the file can hold several JSON documents.
+python3 scripts/detect-secrets-report.py < "$TMPFILE"
 rc=$?
 rm -f "$TMPFILE"
 exit $rc

@@ -294,7 +294,10 @@ export type EnvironmentProfile = "cloud-first" | "hybrid" | "local-only"
 export function isLocalThroughputMeasured(
   throughput: LocalThroughput | null | undefined,
 ): throughput is LocalThroughput {
-  return typeof throughput?.gen_tok_s === "number" && throughput.gen_tok_s > 0
+  return (
+    typeof throughput?.gen_tok_s === "number" && throughput.gen_tok_s > 0 &&
+    typeof throughput?.prompt_tok_s === "number" && throughput.prompt_tok_s > 0
+  )
 }
 
 /** Extended health from GET /health/status — includes degradation + pipeline routing. */

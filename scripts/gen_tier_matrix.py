@@ -105,18 +105,13 @@ _TICK = {  # tier -> (Core, Pro, Enterprise)
 }
 
 # Section-level footnotes for gates whose enforcement point diverges from what
-# the tier column implies. No per-flag note mechanism exists yet (one section
-# needs it so far) — add one if a second section needs a footnote.
-_SECTION_FOOTNOTES = {
-    "Apple Connectors — Pro": (
-        "`apple_notes_reader`, `apple_mail_reader`, and `imessage_reader` are "
-        "enforced client-side only (Settings → Sources locks the row behind "
-        "`ProUpgradeOverlay`). The backend `/ingest/structured` endpoint the "
-        "desktop bridge posts to performs no server-side tier check for these "
-        "three flags — deliberate, matching the \"annoying, not DRM\" posture, "
-        "pending AF-043."
-    ),
-}
+# the tier column implies. No per-flag note mechanism exists yet (none of the
+# sections currently need one — the Apple Connectors — Pro footnote was
+# removed once AF-043 shipped the server-side gate: `/ingest/structured` now
+# checks `_CONNECTOR_FEATURE_BY_SOURCE_KIND` and returns 402 for an
+# unentitled tier, in addition to the existing client-side lock). Add an
+# entry here if a section needs one again.
+_SECTION_FOOTNOTES: dict[str, str] = {}
 
 
 _PLANNED: frozenset = frozenset()

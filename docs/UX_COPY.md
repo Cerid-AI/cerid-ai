@@ -4,6 +4,12 @@
 > All strings MUST be imported from `src/web/src/lib/ux-copy.ts`.
 > Do NOT inline verification copy in component files.
 
+## Per-claim feedback
+
+| Field | String |
+|---|---|
+| Rate-this-claim prompt (provenance popover thumbs) | "Rate this claim" |
+
 ## Verification bands
 
 | State | Display string |
@@ -53,6 +59,7 @@
 import { UX_COPY } from "@/lib/ux-copy"
 
 // Examples
+UX_COPY.feedback.rateThisClaim             // "Rate this claim"
 UX_COPY.verification.verified(2)           // "Verified by 2 sources"
 UX_COPY.verification.partial               // "Partial source"
 UX_COPY.verification.noSource              // "No source"

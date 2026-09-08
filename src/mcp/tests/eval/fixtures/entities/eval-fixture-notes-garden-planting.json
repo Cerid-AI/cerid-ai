@@ -1,0 +1,13 @@
+{
+  "fixture": "eval-fixture-notes-garden-planting.md",
+  "expected": [
+    "April 20, 2025",
+    "San Marzano",
+    "Sungold",
+    "basil",
+    "hornworms",
+    "late July",
+    "tomatoes"
+  ],
+  "forbidden": []
+}

@@ -150,6 +150,15 @@ def test_private_mode_degrades_to_local_only(requested):
     assert "Private Mode" in reason
 
 
+def test_degrade_warning_names_the_level_semantics(caplog):
+    """The reason names the rule (any L1+ degrades), not just this instance."""
+    with caplog.at_level(logging.WARNING, logger="ai-companion.environment_profiles"):
+        apply_environment_profile(
+            "hybrid", "A", has_cloud_key=True, private_mode_level=1,
+        )
+    assert "L1 or above disables cloud stages" in caplog.text
+
+
 def test_local_only_is_never_degraded():
     effective, reason = resolve_profile(
         "local-only", "A", has_cloud_key=False, private_mode_level=3,

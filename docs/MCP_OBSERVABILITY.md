@@ -97,6 +97,5 @@ Tools that consistently exceed their budget should either:
 * Be reclassified upward in the next release
 * Surface degradation through `_warnings` (see [`MCP_TOOL_STYLE.md`])
 
-A future contract test (planned v0.96+) will fail-fast when a tool's
-observed p95 over 100 calls exceeds the budget by 50%, so reclassification
-doesn't silently rot.
+See [`MCP_TOOL_TESTS.md`](MCP_TOOL_TESTS.md) § Latency budget tests for the
+shipped CI enforcement (`benchmark-slo`) and its scope.

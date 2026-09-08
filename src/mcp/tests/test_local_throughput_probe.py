@@ -282,6 +282,7 @@ class TestProbeWallClockFallback:
 
         fake_gate = MagicMock()
         fake_gate.slot = _delayed_slot
+        fake_gate.held = MagicMock(return_value=1)  # sole holder -> not contended
         monkeypatch.setattr(mod, "_get_pacing_gate", lambda: fake_gate)
 
         async def _post(url: str, *, json: dict) -> _FakeResponse:  # noqa: ARG001
@@ -379,6 +380,90 @@ class TestProbePacingGate:
 
 
 # ---------------------------------------------------------------------------
+# probe_local_throughput — a contended probe must not overwrite a quiet one
+# ---------------------------------------------------------------------------
+
+
+class _FakeGate:
+    def __init__(self, held_while_probing: int) -> None:
+        self._n = held_while_probing
+        self._inside = False
+
+    def held(self) -> int:
+        return self._n if self._inside else 0
+
+    @asynccontextmanager
+    async def slot(self, interactive: bool):  # noqa: ARG002
+        self._inside = True
+        try:
+            yield
+        finally:
+            self._inside = False
+
+
+def _timings_response(prompt: float, gen: float) -> _FakeResponse:
+    return _FakeResponse(
+        {"timings": {"prompt_n": 256, "prompt_per_second": prompt, "predicted_per_second": gen}},
+    )
+
+
+def _wire_timings(monkeypatch, prompt: float, gen: float) -> None:
+    async def _post(url: str, *, json: dict) -> _FakeResponse:  # noqa: ARG001
+        return _timings_response(prompt, gen)
+
+    _wire_fake_client(monkeypatch, _post)
+
+
+class TestProbeContention:
+    async def test_contended_probe_keeps_previous_quiet_measurement(self, monkeypatch, caplog):
+        cfg = mod.get_inference_config()
+        cfg.local_prompt_tok_s, cfg.local_gen_tok_s, cfg.local_probe_at = 100.0, 9.0, 1.0
+        cfg.local_probe_contended = False
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        monkeypatch.setattr(mod, "effective_local_model_async", AsyncMock(return_value="qwen2.5-7b"))
+        gate = _FakeGate(held_while_probing=2)  # another caller holds a permit
+        monkeypatch.setattr(mod, "_get_pacing_gate", lambda: gate)
+        _wire_timings(monkeypatch, prompt=30.0, gen=3.0)
+
+        with caplog.at_level(logging.INFO, logger=mod.logger.name):
+            await mod.probe_local_throughput()
+
+        assert (cfg.local_prompt_tok_s, cfg.local_gen_tok_s) == (100.0, 9.0)
+        assert cfg.local_probe_contended is False
+        assert "contended" in caplog.text
+
+    async def test_contended_probe_is_stored_when_nothing_better_exists(self, monkeypatch):
+        cfg = mod.get_inference_config()
+        cfg.local_prompt_tok_s = cfg.local_gen_tok_s = cfg.local_probe_at = None
+        cfg.local_probe_contended = False
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        monkeypatch.setattr(mod, "effective_local_model_async", AsyncMock(return_value="qwen2.5-7b"))
+        gate = _FakeGate(held_while_probing=2)  # another caller holds a permit
+        monkeypatch.setattr(mod, "_get_pacing_gate", lambda: gate)
+        _wire_timings(monkeypatch, prompt=30.0, gen=3.0)
+
+        await mod.probe_local_throughput()
+
+        assert cfg.local_gen_tok_s == 3.0
+        assert cfg.local_probe_contended is True
+
+    async def test_quiet_probe_replaces_contended_one(self, monkeypatch):
+        cfg = mod.get_inference_config()
+        cfg.local_prompt_tok_s, cfg.local_gen_tok_s, cfg.local_probe_at = 30.0, 3.0, 1.0
+        cfg.local_probe_contended = True
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        monkeypatch.setattr(mod, "effective_local_model_async", AsyncMock(return_value="qwen2.5-7b"))
+        gate = _FakeGate(held_while_probing=1)  # sole caller -> quiet
+        monkeypatch.setattr(mod, "_get_pacing_gate", lambda: gate)
+        _wire_timings(monkeypatch, prompt=100.0, gen=9.0)
+
+        await mod.probe_local_throughput()
+
+        assert cfg.local_gen_tok_s == 9.0
+        assert cfg.local_probe_contended is False
+
+
+# ---------------------------------------------------------------------------
 # expectations_for — pure derivation from measured rates
 # ---------------------------------------------------------------------------
 
@@ -451,6 +536,15 @@ async def test_recheck_loop_disabled_interval_skips_probe(monkeypatch):
     await mod._inference_recheck_loop()
 
     probe_calls.assert_not_called()
+
+
+def test_recheck_loop_source_carries_the_contended_flag():
+    """A contended measurement must stay labelled contended across the
+    300 s config replacement; otherwise a later contended probe believes
+    the stored value is quiet and never replaces it."""
+    import inspect
+    src = inspect.getsource(mod._inference_recheck_loop)
+    assert "new.local_probe_contended = old.local_probe_contended" in src
 
 
 def test_recheck_loop_source_calls_probe_each_pass():

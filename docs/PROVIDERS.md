@@ -78,6 +78,18 @@ INTERNAL_LLM_PROVIDER=ollama          # quenchforge if on AMD-Mac Metal
 llama.cpp Metal output is incorrect on non-UMA AMD GPUs. Model picks per
 VRAM tier: `docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`.
 
+## Profiles and the background slot
+
+`CERID_ENVIRONMENT_PROFILE` (`cloud-first` / `hybrid` / `local-only`) sets the
+provider defaults above *for you*, per-stage, rather than one global knob — an
+operator value already set in the environment always wins over the profile's
+default. `INTERNAL_LLM_MODEL_BACKGROUND` names a second, smaller local model
+dedicated to background stages (entity extraction, wiki summary, topic
+extraction) so a slow class-A host isn't paying 7B-model latency for
+enrichment work it doesn't need full quality for. Full routing table, the
+degrade rule, and the background-slot resolution order:
+[`docs/ENVIRONMENT_PROFILES.md`](ENVIRONMENT_PROFILES.md).
+
 ## Related
 
 - `INSTALL.md` — first-run flow and port table

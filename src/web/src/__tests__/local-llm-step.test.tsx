@@ -59,6 +59,20 @@ const UNMEASURED_THROUGHPUT: LocalThroughput = {
   },
 }
 
+const ONE_RATE_THROUGHPUT: LocalThroughput = {
+  prompt_tok_s: null,
+  gen_tok_s: 9.5,
+  probe_at: 1735689600,
+  expectations: {
+    memory_extract: { basis: "unmeasured" },
+    entity_extraction: { basis: "unmeasured" },
+    wiki_summary: { basis: "unmeasured" },
+    claim_extraction: { basis: "unmeasured" },
+    topic_extraction: { basis: "unmeasured" },
+    chat_turn_tail_s: null,
+  },
+}
+
 const UNACCELERATED_HARDWARE = { ram_gb: 16, cpu: "Intel i7-9700", gpu: "Intel UHD 630" }
 const ACCELERATED_HARDWARE = { ram_gb: 32, cpu: "Intel Core i9", gpu: "AMD Radeon Pro Vega II" }
 
@@ -282,6 +296,23 @@ describe("LocalLLMStep — measured local-model expectations", () => {
     )
     await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
     expect(screen.getByText(/CPU-only detected/i)).toBeInTheDocument()
+  })
+
+  it("keeps the existing CPU-only sentence when only one rate was measured", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({ hardware: UNACCELERATED_HARDWARE, models: [] })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+        localThroughput={ONE_RATE_THROUGHPUT}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/Your Hardware/i)).toBeInTheDocument())
+    expect(screen.getByText(/CPU-only detected/i)).toBeInTheDocument()
+    expect(screen.queryByText(/9\.5 tok\/s/)).not.toBeInTheDocument()
   })
 })
 

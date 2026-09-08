@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-notes-home-network.md",
+  "expected": [
+    "IoT VLAN",
+    "VLAN 20",
+    "ad-blocking",
+    "guest SSID",
+    "trusted LAN"
+  ],
+  "forbidden": []
+}

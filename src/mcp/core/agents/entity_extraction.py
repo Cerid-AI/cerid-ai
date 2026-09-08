@@ -255,13 +255,39 @@ def is_junk_entity(name: str, *, entity_type_unknown: bool = False) -> bool:
 # "42 tokens per second" is the longest unit tail the small models produced.
 _MAX_QUANTITY_UNIT_WORDS = 3
 
+# Spelled-out counts ("fifteen minutes", "nine hundred seconds") are quantities
+# too; small models emit them as often as digits.
+_NUMBER_WORDS: frozenset[str] = frozenset((
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+    "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
+    "thousand", "million", "half", "quarter",
+))
+
 _QUANTITY_UNIT_WORDS: frozenset[str] = frozenset((
     "ms", "s", "sec", "second", "seconds", "millisecond", "milliseconds",
     "min", "minute", "minutes", "hour", "hours", "day", "days", "week",
     "weeks", "percent", "%", "tokens", "requests", "retries", "entries",
     "items", "per", "mb", "gb", "kb", "mbps", "kbps", "gbps", "x", "°c",
-    "celsius", "fahrenheit", "grams", "g", "kg", "ml", "l",
+    "celsius", "fahrenheit", "grams", "g", "kg", "ml", "l", "degrees",
 ))
+
+# "22 grams of coffee": unit word(s), then "of", then exactly one more word.
+# "24 Hours of Le Mans" doesn't match — "Le Mans" is two words after "of" —
+# so it never reaches this helper; the word-count cap above rejects the
+# 4-word rest first.
+_QUANTITY_OF_WORD = "of"
+_QUANTITY_OF_TRAILING_WORD_COUNT = 1
+
+# "40-gram bloom": the hyphen glues the unit to the number, and the trailing
+# word names a small, closed set of package/measure nouns. "100ml bottle"
+# survives because "bottle" isn't in the set (and because "100ml" has no
+# hyphen at all).
+_HYPHEN_QUANTITY_TRAILING_WORDS: frozenset[str] = frozenset(
+    ("bloom", "dose", "serving", "portion")
+)
+_HYPHEN_QUANTITY_WORD_COUNT = 2
 
 # Leading digit (or leading "#digit" for a numbered-heading leak), digits/
 # separators, an optional " to <number>" range, then whatever's left.
@@ -285,6 +311,31 @@ _RELATIVE_DATE_WORDS: frozenset[str] = frozenset((
 _YEAR_RE = re.compile(r"\b\d{4}\b")
 
 
+def _is_quantity_of_phrase(words: list[str]) -> bool:
+    """True for "<unit word(s)> of <one word>" ("grams of coffee")."""
+    lowered = [w.lower() for w in words]
+    try:
+        of_index = lowered.index(_QUANTITY_OF_WORD)
+    except ValueError:
+        return False
+    trailing = words[of_index + 1:]
+    if of_index < 1 or len(trailing) != _QUANTITY_OF_TRAILING_WORD_COUNT:
+        return False
+    return all(w in _QUANTITY_UNIT_WORDS for w in lowered[:of_index])
+
+
+def _is_hyphenated_quantity_phrase(name: str, rest_start: int, words: list[str]) -> bool:
+    """True for "<number>-<unit> <word>" ("40-gram bloom") when the hyphen
+    glues the unit to the number and the trailing word is a package/measure
+    noun from :data:`_HYPHEN_QUANTITY_TRAILING_WORDS`.
+    """
+    if len(words) != _HYPHEN_QUANTITY_WORD_COUNT:
+        return False
+    if rest_start == 0 or name[rest_start - 1] != "-":
+        return False
+    return words[-1].lower() in _HYPHEN_QUANTITY_TRAILING_WORDS
+
+
 def _is_bare_quantity(name: str) -> bool:
     """True for a number glued/paired with 1-3 unit words and nothing else.
 
@@ -292,6 +343,12 @@ def _is_bare_quantity(name: str) -> bool:
     is never a bare quantity on its own; that's what could make it a real
     year, model number, or ID, and is left to the DATE-content check.
     """
+    words_all = name.lower().split()
+    if words_all and words_all[0] in _NUMBER_WORDS:
+        tail = [w for w in words_all if w not in _NUMBER_WORDS]
+        return bool(tail) and len(tail) <= _MAX_QUANTITY_UNIT_WORDS and all(
+            w in _QUANTITY_UNIT_WORDS for w in tail
+        )
     match = _QUANTITY_NUMBER_RE.match(name)
     if not match:
         return False
@@ -306,7 +363,11 @@ def _is_bare_quantity(name: str) -> bool:
     # unit; "5 g" with a space is still a quantity.
     if len(words) == 1 and len(words[0]) == 1 and not raw_rest[:1].isspace():
         return False
-    return all(w.lower() in _QUANTITY_UNIT_WORDS for w in words)
+    if all(w.lower() in _QUANTITY_UNIT_WORDS for w in words):
+        return True
+    return _is_quantity_of_phrase(words) or _is_hyphenated_quantity_phrase(
+        name, match.start("rest"), words
+    )
 
 
 def _is_punctuation_only(name: str) -> bool:

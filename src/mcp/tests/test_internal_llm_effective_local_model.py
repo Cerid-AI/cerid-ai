@@ -152,7 +152,8 @@ def test_resolution_is_cached_for_the_process(monkeypatch):
     calls = {"n": 0}
 
     def _get(url, timeout):
-        calls["n"] += 1
+        if url.endswith("/api/tags"):
+            calls["n"] += 1
         return _FakeTagsResponse(["llama3.1-8b"])
 
     monkeypatch.setattr(mod.httpx, "get", _get)
@@ -194,7 +195,8 @@ async def test_async_path_does_not_call_sync_httpx_get(monkeypatch):
     result = await mod.effective_local_model_async()
 
     assert result == "llama3.1-8b"
-    fake_client.get.assert_awaited_once()
+    # Tags fetch, then the chat-slot-model root fetch on the same client.
+    assert fake_client.get.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -238,7 +240,8 @@ def test_reresolves_after_ttl_when_served_list_changes(monkeypatch):
     clock = {"t": 0.0}
 
     def _get(url, timeout):
-        calls["n"] += 1
+        if url.endswith("/api/tags"):
+            calls["n"] += 1
         return _FakeTagsResponse(served["models"])
 
     monkeypatch.setattr(mod.httpx, "get", _get)
@@ -373,3 +376,121 @@ async def test_call_ollama_payload_model_is_the_resolved_name(monkeypatch):
 
     assert result == "ok"
     assert captured["model"] == "qwen2.5-7b-instruct-q4_k_m"
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (2026-09-07 close-out): the gateway's own chat-slot model
+# (quenchforge `GET /` -> slots.chat.model) is preferred over an arbitrary
+# alphabetically-first served model when the configured name isn't served.
+# ---------------------------------------------------------------------------
+
+
+def _resolve(served, previous, chat_slot):
+    mod._gateway_chat_slot_model_cache = chat_slot
+    return mod._resolve_effective_local_model(served, previous)
+
+
+def test_configured_model_wins_when_served(monkeypatch):
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "qwen2.5-7b-instruct-q4_k_m", raising=False)
+    assert _resolve(
+        ["qwen2.5-3b-instruct-q4_k_m", "qwen2.5-7b-instruct-q4_k_m"], None, "qwen2.5-7b-instruct-q4_k_m"
+    ) == "qwen2.5-7b-instruct-q4_k_m"
+
+
+def test_unserved_configured_falls_back_to_chat_slot_model(monkeypatch, caplog):
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "llama3.1-8b", raising=False)
+    with caplog.at_level(logging.WARNING, logger=mod.logger.name):
+        got = _resolve(
+            ["qwen2.5-3b-instruct-q4_k_m", "qwen2.5-7b-instruct-q4_k_m"], None, "qwen2.5-7b-instruct-q4_k_m"
+        )
+    assert got == "qwen2.5-7b-instruct-q4_k_m"
+    assert "chat-slot model" in caplog.text
+
+
+def test_still_served_previous_resolution_stays_put(monkeypatch):
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "llama3.1-8b", raising=False)
+    served = ["qwen2.5-3b-instruct-q4_k_m", "qwen2.5-7b-instruct-q4_k_m"]
+    assert _resolve(served, "qwen2.5-7b-instruct-q4_k_m", None) == "qwen2.5-7b-instruct-q4_k_m"
+    assert _resolve(served, "gone-model", None) == "qwen2.5-3b-instruct-q4_k_m"
+
+
+def test_alphabetical_fallback_only_without_a_chat_slot_answer(monkeypatch):
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "llama3.1-8b", raising=False)
+    assert _resolve(
+        ["qwen2.5-3b-instruct-q4_k_m", "qwen2.5-7b-instruct-q4_k_m"], None, None
+    ) == "qwen2.5-3b-instruct-q4_k_m"
+
+
+def test_chat_slot_model_must_itself_be_served(monkeypatch):
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_MODEL", "llama3.1-8b", raising=False)
+    assert _resolve(
+        ["qwen2.5-3b-instruct-q4_k_m"], None, "qwen2.5-7b-instruct-q4_k_m"
+    ) == "qwen2.5-3b-instruct-q4_k_m"
+
+
+class _FakeRootResponse:
+    def __init__(self, chat_model: str | None, status_code: int = 200) -> None:
+        self._chat_model = chat_model
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError("boom", request=MagicMock(), response=self)
+
+    def json(self) -> dict:
+        slots = {"chat": {"configured": True, "url": "http://gw:11434"}}
+        if self._chat_model is not None:
+            slots["chat"]["model"] = self._chat_model
+        return {"slots": slots}
+
+
+def test_sync_fetch_populates_chat_slot_cache_from_root_payload(monkeypatch):
+    def _get(url, timeout):
+        if url.endswith("/api/tags"):
+            return _FakeTagsResponse(["qwen2.5-7b-instruct-q4_k_m"])
+        return _FakeRootResponse("qwen2.5-7b-instruct-q4_k_m")
+
+    monkeypatch.setattr(mod.httpx, "get", _get)
+    mod._fetch_served_models()
+    assert mod._gateway_chat_slot_model_cache == "qwen2.5-7b-instruct-q4_k_m"
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_populates_chat_slot_cache_from_root_payload(monkeypatch):
+    async def _get(url, timeout=None):
+        if url.endswith("/api/tags"):
+            return _FakeTagsResponse(["qwen2.5-7b-instruct-q4_k_m"])
+        return _FakeRootResponse("qwen2.5-7b-instruct-q4_k_m")
+
+    fake_client = MagicMock()
+    fake_client.get = _get
+    monkeypatch.setattr(mod, "_get_ollama_client", AsyncMock(return_value=fake_client))
+    await mod._fetch_served_models_async()
+    assert mod._gateway_chat_slot_model_cache == "qwen2.5-7b-instruct-q4_k_m"
+
+
+def test_root_fetch_failure_leaves_chat_slot_cache_and_served_list_intact(monkeypatch):
+    """A gateway with no root route (older quenchforge, Ollama) must not
+    disturb the served list the tags fetch just succeeded at, nor clobber
+    a chat-slot name learned on a previous, luckier fetch."""
+    mod._gateway_chat_slot_model_cache = "qwen2.5-7b-instruct-q4_k_m"
+
+    def _get(url, timeout):
+        if url.endswith("/api/tags"):
+            return _FakeTagsResponse(["qwen2.5-7b-instruct-q4_k_m"])
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(mod.httpx, "get", _get)
+    served, _ts = mod._fetch_served_models()
+    assert served == ["qwen2.5-7b-instruct-q4_k_m"]
+    assert mod._gateway_chat_slot_model_cache == "qwen2.5-7b-instruct-q4_k_m"
+
+
+def test_served_names_drop_cached_but_unloaded_models():
+    payload = {"models": [
+        {"name": "qwen2.5-7b-instruct-q4_k_m", "loaded": True},
+        {"name": "qwen2.5-3b-instruct-q4_k_m", "loaded": False},
+        {"name": "nomic-embed-text-v1.5"},
+    ]}
+    assert mod._served_names(payload) == ["qwen2.5-7b-instruct-q4_k_m", "nomic-embed-text-v1.5"]
+

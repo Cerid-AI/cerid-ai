@@ -637,6 +637,18 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
 
+    # Wire the live Private Mode level into core/internal_llm via DI (same
+    # pattern as above — core/ cannot import app.services.private_mode). Lets
+    # _resolve_stage_provider honour an operator flipping Private Mode on at
+    # runtime instead of only at the settings-load-time profile resolution.
+    try:
+        from app.services.private_mode import get_private_mode_level
+        from core.utils.internal_llm import set_private_mode_level_probe
+        set_private_mode_level_probe(get_private_mode_level)
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+        logger.warning(f"Private Mode probe wiring failed (runtime degrade rule disabled): {e}")
+
     # Wire the contradiction-ledger sink into core/verification via DI (same
     # pattern as above — core/ cannot import app.services.contradiction_log).
     # When the NLI guard finds a claim contradicting KB evidence, this persists

@@ -192,8 +192,10 @@ if [ -n "$OLLAMA_ENABLED_VAL" ]; then
     elif [ "$ollama_container_status" = "missing" ]; then
         # Native Ollama on macOS lives outside Docker — probe the HTTP API.
         OLLAMA_URL_VAL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "http://localhost:11434")
-        if curl -sf "$OLLAMA_URL_VAL/api/tags" >/dev/null 2>&1; then
-            pass "Ollama (native) is reachable at $OLLAMA_URL_VAL"
+        # host.docker.internal is the container's name for this machine; on the host itself probe loopback.
+        HOST_PROBE_URL=${OLLAMA_URL_VAL//host.docker.internal/127.0.0.1}
+        if curl -sf "$HOST_PROBE_URL/api/tags" >/dev/null 2>&1; then
+            pass "Local LLM gateway is reachable at $HOST_PROBE_URL (containers use $OLLAMA_URL_VAL)"
         else
             warn "Local LLM enabled but not running — start with: launchctl kickstart -k gui/\$UID/com.cerid.quenchforge (quenchforge), or: ollama serve (native ollama), or: docker compose --profile ollama up -d"
         fi

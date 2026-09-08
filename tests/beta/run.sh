@@ -434,6 +434,17 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
   echo ""
 
   mkdir -p "${SCRIPT_DIR}/eval/reports"
+  # Entity-extraction recall runs inside the MCP container: it needs the
+  # production extractor and the configured local model, which the slim
+  # pytest container cannot import.
+  if docker exec -e CERID_LIVE_EXTRACTION_EVAL=1 ai-companion-mcp python -m tests.eval.entity_recall_runner \
+      > "${SCRIPT_DIR}/eval/reports/entity-recall.log" 2>&1; then
+    report_text "\n> Entity-extraction recall: all annotated fixtures at or above the floor.\n"
+  else
+    report_issue "medium" "entity_recall" "eval" "EV-RECALL" "quality" \
+      "Entity-extraction recall below floor or forbidden junk extracted; see eval/reports/entity-recall.log"
+    EVAL_EXIT=1
+  fi
 
   # --reruns 1: absorb seed/cleanup boundary flakes from neighboring cases
   # (same convention as the e2e tier's retries:1 — verified 2026-07-10:

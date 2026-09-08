@@ -18,6 +18,8 @@ import uuid
 import httpx
 import pytest
 
+from lib.kb_cleanup import KbCleanup
+
 MCP_BASE_URL = "http://ai-companion-mcp:8888"
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 
@@ -97,7 +99,7 @@ def test_f11_taxonomy(client: httpx.Client) -> None:
 
 
 @pytest.mark.p0
-def test_f12_ingest_content(client: httpx.Client) -> None:
+def test_f12_ingest_content(client: httpx.Client, kb_cleanup: KbCleanup) -> None:
     """F-12: POST /ingest returns an artifact_id."""
     uid = uuid.uuid4().hex[:12]
     resp = client.post(
@@ -111,11 +113,13 @@ def test_f12_ingest_content(client: httpx.Client) -> None:
         timeout=60.0,
     )
     assert resp.status_code == 200
-    assert "artifact_id" in resp.json()
+    data = resp.json()
+    assert "artifact_id" in data
+    kb_cleanup.track(data)
 
 
 @pytest.mark.p0
-def test_f13_file_upload(client: httpx.Client) -> None:
+def test_f13_file_upload(client: httpx.Client, kb_cleanup: KbCleanup) -> None:
     """F-13: POST /upload with a text file succeeds."""
     sample = FIXTURES_DIR / "sample.txt"
     assert sample.exists(), f"Missing fixture: {sample}"
@@ -134,6 +138,10 @@ def test_f13_file_upload(client: httpx.Client) -> None:
         with open(sample, "rb") as f:
             resp = upload_client.post("/upload", files={"file": ("sample.txt", f, "text/plain")})
     assert resp.status_code == 200
+    # /upload auto-detects a domain when none is given and lands in "general"
+    # for this fixture — the same artifact_id shape as /ingest, so it tracks
+    # the same way.
+    kb_cleanup.track(resp.json())
 
 
 @pytest.mark.p0

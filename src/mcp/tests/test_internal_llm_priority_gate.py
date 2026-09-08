@@ -384,3 +384,36 @@ async def test_mcp_tool_call_takes_the_free_permit_ahead_of_background(monkeypat
     for event in holds.values():
         event.set()
     await asyncio.gather(background, mcp_call)
+
+
+def _held(gate: "mod._PriorityGate") -> int:
+    """Read the permit count directly. ``held()`` is landing on another
+    branch; this local helper avoids adding it here too."""
+    return gate._held
+
+
+@pytest.mark.asyncio
+async def test_stream_holds_a_gate_permit_for_the_whole_stream(monkeypatch):
+    """A streaming chat turn must count against the pacing gate like a
+    non-streaming one, for the whole stream rather than per-chunk."""
+    gate = mod._PriorityGate(capacity=1)
+    monkeypatch.setattr(mod, "_get_pacing_gate", lambda: gate)
+    monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+    seen_held: list[int] = []
+
+    async def _fake_stream(*_a, **_k):
+        seen_held.append(_held(gate))
+        yield "a"
+        seen_held.append(_held(gate))
+        yield "b"
+
+    monkeypatch.setattr(mod, "_stream_ollama", _fake_stream)
+    chunks = [
+        c
+        async for c in mod.call_internal_llm_stream(
+            [{"role": "user", "content": "x"}], stage="chat",
+        )
+    ]
+    assert chunks == ["a", "b"]
+    assert seen_held == [1, 1]
+    assert _held(gate) == 0

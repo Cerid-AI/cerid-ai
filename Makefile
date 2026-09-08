@@ -1,3 +1,7 @@
+# Test processes must not inherit the operator's live key; an exported key made
+# an auth test answer 401 on 2026-09-07.
+unexport CERID_API_KEY
+
 .PHONY: lock-python lock-python-dev lock-all install-hooks install-macos-integration \
        deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \

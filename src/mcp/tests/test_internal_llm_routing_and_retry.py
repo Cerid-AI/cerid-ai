@@ -75,6 +75,72 @@ class TestResolveStageProvider:
             == "quenchforge"
         )
 
+    def test_runtime_private_mode_routes_cloud_pins_to_local(self, monkeypatch):
+        """The import-time degrade rule, honoured at call time (Private Mode
+        is mutable at runtime via Redis; a cloud-pinned stage must not keep
+        calling out once the operator flips it on)."""
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        mod.set_private_mode_level_probe(lambda: 1)
+        try:
+            assert mod._resolve_stage_provider("memory_extract", "openrouter") == "quenchforge"
+        finally:
+            mod.set_private_mode_level_probe(None)
+
+    def test_no_probe_registered_leaves_cloud_pin_alone(self, monkeypatch):
+        """core/ has no app/ probe wired (e.g. a script, not the FastAPI app)
+        — the guard must be inert, not raise."""
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        assert mod._resolve_stage_provider("memory_extract", "openrouter") == "openrouter"
+
+    def test_probe_below_cutoff_leaves_cloud_pin_alone(self, monkeypatch):
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        mod.set_private_mode_level_probe(lambda: 0)
+        try:
+            assert mod._resolve_stage_provider("memory_extract", "openrouter") == "openrouter"
+        finally:
+            mod.set_private_mode_level_probe(None)
+
+    def test_cloud_first_degrades_to_the_detected_local_backend(self, monkeypatch):
+        import core.utils.internal_llm as mod
+
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setenv("HOST_RECOMMENDED_LOCAL_BACKEND", "quenchforge")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "cloud-first", raising=False)
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "openrouter", raising=False)
+        mod.set_private_mode_level_probe(lambda: 1)
+        try:
+            assert mod._resolve_stage_provider("memory_extract", "openrouter") == "quenchforge"
+        finally:
+            mod.set_private_mode_level_probe(None)
+
+    def test_no_profile_is_not_degraded(self, monkeypatch):
+        import core.utils.internal_llm as mod
+
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "", raising=False)
+        mod.set_private_mode_level_probe(lambda: 1)
+        try:
+            assert mod._resolve_stage_provider("memory_extract", "openrouter") == "openrouter"
+        finally:
+            mod.set_private_mode_level_probe(None)
+
+    def test_local_only_profile_is_unaffected_by_the_guard(self, monkeypatch):
+        """local-only never routes to cloud in the first place — the guard
+        only concerns hybrid/cloud-first, where a cloud pin can exist."""
+        monkeypatch.setenv("PROVIDER_STAGE_MEMORY_EXTRACT", "openrouter")
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "local-only", raising=False)
+        monkeypatch.setattr(mod.config, "INTERNAL_LLM_PROVIDER", "quenchforge", raising=False)
+        mod.set_private_mode_level_probe(lambda: 1)
+        try:
+            assert mod._resolve_stage_provider("memory_extract", "openrouter") == "openrouter"
+        finally:
+            mod.set_private_mode_level_probe(None)
+
 
 # ---------------------------------------------------------------------------
 # _call_ollama retry behaviour

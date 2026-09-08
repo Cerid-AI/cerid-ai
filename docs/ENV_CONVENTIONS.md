@@ -1,12 +1,12 @@
 # Environment Variable Conventions
 
-> **Last updated:** 2026-03-07
+> **Last updated:** 2026-09-07
 > **Reference:** `.env.example` (template), `src/mcp/config/settings.py` (reader)
 
 ## Naming Rules for New Variables
 
 1. **App-level config** uses `CERID_` prefix: `CERID_STORAGE_MODE`, `CERID_SYNC_DIR`
-2. **External service URLs** use the service name: `NEO4J_URI`, `REDIS_URL`, `CHROMA_URL`, `BIFROST_URL`
+2. **External service URLs** use the service name: `NEO4J_URI`, `REDIS_URL`, `CHROMA_URL`, `QUENCHFORGE_URL`
 3. **Feature toggles** use `ENABLE_` prefix (no `CERID_`): `ENABLE_HALLUCINATION_CHECK`, `ENABLE_MODEL_ROUTER`
 4. **Cron schedules** use `SCHEDULE_` prefix: `SCHEDULE_RECTIFY`, `SCHEDULE_SYNC_EXPORT`
 5. **Tuning parameters** are bare descriptive names: `HYBRID_VECTOR_WEIGHT`, `HALLUCINATION_THRESHOLD`
@@ -71,8 +71,8 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CATEGORIZE_MODE` | `smart` | Categorization tier: manual, smart, pro |
-| `BIFROST_URL` | `http://bifrost:8080/v1` | LLM gateway URL |
-| `BIFROST_TIMEOUT` | `30.0` | LLM gateway timeout (seconds) |
+| `BIFROST_URL` | `http://localhost:8080` | **Not the retired LLM gateway** — read only by the optional `plugins/vision/plugin.py`, which talks to its own Bifrost-compatible endpoint. |
+| `BIFROST_TIMEOUT` | `30.0` | LLM gateway timeout (seconds) — survives as a timeout name only; see § Secrets above. |
 | `CERID_API_KEY` | *(empty)* | API key for MCP auth (opt-in) |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
 | `WATCH_FOLDER` | `~/cerid-archive` | Host-side file watcher path |

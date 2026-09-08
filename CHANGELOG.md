@@ -2,6 +2,71 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.4] — 2026-09-08
+
+The release that measured the local model instead of assuming it. On a
+hardware-limited host (an Intel Mac with an AMD GPU that runs the chat model
+on CPU) every chat turn waited behind its own ingest work and nobody could
+see why. This release measures the machine, routes stages by what it finds,
+and makes the tests that guard it honest.
+
+### Performance and retrieval
+
+- BM25 indexes are bounded by the number of domains on disk instead of a
+  fixed eight, ending the reload thrash that dominated every query.
+- The local model gets a priority gate: interactive stages (chat, memory
+  extraction, claim extraction, MCP tools) take permits ahead of ingest
+  stages, and the streaming path now takes a permit too.
+- Wiki refreshes triggered by a live chat turn defer to the nightly sweep;
+  verification calls run off the event loop; the invariants probe batches
+  its Chroma reads; cache invalidation after admin actions is domain-scoped.
+- Measured on the reference host: a 23-domain query fell from 7–19 s to
+  2–5 s, cold verification from ten timeouts in ten to six verified in 2–7 s,
+  and an interactive memory extract under three concurrent ingests from
+  72.6 s to under 7 s.
+
+### Environment profiles and the throughput probe
+
+- `CERID_ENVIRONMENT_PROFILE` (`cloud-first`, `hybrid`, `local-only`)
+  applies a coherent set of routing defaults for the detected hardware
+  class; operator-pinned values always win; without a cloud key or under
+  Private Mode L1 and above the profile degrades to `local-only`, at
+  settings load and now at call time.
+- A boot-time probe measures the local model's real prompt and generation
+  rates (retaken every recheck, never overwritten by a probe taken under
+  load) and derives per-function expectations shown in the setup wizard
+  and Settings → System.
+- `INTERNAL_LLM_MODEL_BACKGROUND` names a small model for background
+  stages; with quenchforge's new background chat slot a 3B serves
+  enrichment at roughly twice the 7B's speed. The local chat model resolves
+  to the gateway's chat-slot model when the configured name is not served.
+
+### Extraction quality
+
+- Entities whose confidence a small model did not report are kept at the
+  threshold instead of silently dropped; bare quantities, spelled-out
+  quantities, quantity phrases and leaked headings are rejected; a
+  malformed extraction reply is retried once; every skip is logged.
+- Ten annotated fixtures measure extraction recall live in the beta eval
+  tier (1.00 on all ten with the 3B at release).
+
+### Tests and gates
+
+- The beta harness deletes every artifact it ingests; its browser tier
+  passes with real mouse clicks after fixing the window drag band that
+  swallowed clicks on the Subjects controls; `validate-env.sh` probes the
+  local gateway on loopback from the host; validation environments scrub
+  the operator's live API key; the image scan reads one Trivy ignore list
+  and is green again (the lightning checkpoint CVE has no released fix and
+  is ignored with a re-evaluate date).
+
+### Documentation
+
+- Twenty-three documents corrected or archived after a full audit; a root
+  `SECURITY.md`; `docs/ENVIRONMENT_PROFILES.md` for the profiles, the probe
+  and the background slot; the close-out spec and plans under `tasks/` and
+  `docs/superpowers/plans/`.
+
 ## [1.0.3] — 2026-08-30
 
 Two days of reading what was actually running rather than what was supposed to

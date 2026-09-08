@@ -259,7 +259,11 @@ export default function SubjectsPane() {
   return (
     <div className="flex h-full flex-col">
       {/* ----- Mode switcher header ---------------------------------------- */}
-      <div className="flex shrink-0 items-center gap-2 border-b bg-card/40 px-4 py-2">
+      {/* app-no-drag: this header sits directly under the top of the window,
+          inside the frameless-window drag band (.app-drag-region, desktop
+          only). Without it, the mode tabs and Search button are unclickable
+          in the desktop shell — the drag band intercepts the click instead. */}
+      <div className="app-no-drag flex shrink-0 items-center gap-2 border-b bg-card/40 px-4 py-2">
         <div
           role="tablist"
           aria-label="Subjects view mode"

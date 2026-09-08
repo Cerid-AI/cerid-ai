@@ -20,6 +20,7 @@ import { AuthProvider } from "@/contexts/auth-context"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
+import { hasCeridBridge } from "@/lib/cerid-bridge"
 import { paneFromLocation } from "@/lib/url-state"
 import { SetupWizard } from "@/components/setup/setup-wizard"
 import {
@@ -106,9 +107,7 @@ export default function App() {
   // Mac.
   const [showDesktopSetup, setShowDesktopSetup] = useState(() =>
     needsDesktopSetup({
-      hasDesktopBridge:
-        typeof window !== "undefined" &&
-        !!(window as unknown as { cerid?: unknown }).cerid,
+      hasDesktopBridge: hasCeridBridge(),
       completedFlag: readDesktopSetupFlag(),
     }),
   )
@@ -197,7 +196,7 @@ export default function App() {
     return (
       <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
         <div className="vignette" aria-hidden="true" />
-        <div className="app-drag-region" aria-hidden="true" />
+        {hasCeridBridge() && <div className="app-drag-region" aria-hidden="true" />}
         <SetupWizard
           open
           canSkip={false}
@@ -213,7 +212,7 @@ export default function App() {
     return (
       <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
         <div className="vignette" aria-hidden="true" />
-        <div className="app-drag-region" aria-hidden="true" />
+        {hasCeridBridge() && <div className="app-drag-region" aria-hidden="true" />}
         <DesktopSetup
           open
           onDone={() => setShowDesktopSetup(false)}

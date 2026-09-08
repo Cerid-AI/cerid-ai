@@ -26,7 +26,7 @@ import os
 import threading
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from http import HTTPStatus
@@ -238,6 +238,10 @@ class _PriorityGate:
                 self._background_held -= 1
             self._cond.notify_all()
 
+    def held(self) -> int:
+        """Permits currently held, including the caller's own."""
+        return self._held
+
 
 class _Cooldown:
     __slots__ = ("seconds", "until")
@@ -360,6 +364,38 @@ async def _wait_pacing_cooldown(interactive: bool) -> None:
         await asyncio.sleep(remaining)
 
 
+# Cloud providers a Private Mode degrade should route away from. Kept
+# separate from config.PIPELINE_PROVIDERS (a routing table, not a privacy
+# classification) so adding a cloud provider here is a deliberate choice.
+_CLOUD_PROVIDERS = frozenset({"openrouter"})
+
+# Private Mode level at and above which cloud-pinned stages degrade to the
+# local provider — matches config.environment_profiles.resolve_profile's
+# import-time rule (L1 or above disables cloud stages).
+_PRIVATE_MODE_CLOUD_CUTOFF = 1
+
+# Registered by the app layer at startup (core/ must not import app/, so the
+# app wires this in rather than internal_llm importing app.services.private_mode
+# directly). None until wired — e.g. a script that never calls app.main.
+_private_mode_level_probe: Callable[[], int] | None = None
+
+
+def set_private_mode_level_probe(probe: Callable[[], int] | None) -> None:
+    """Register the callable ``_resolve_stage_provider`` polls for the live
+    Private Mode level.
+
+    ``config.environment_profiles.resolve_profile`` degrades a cloud profile
+    to ``local-only`` at settings load, but Private Mode's level lives in
+    Redis and is mutable at runtime — an operator flipping it on mid-process
+    must not leave already-resolved cloud pins (``PROVIDER_STAGE_*``,
+    ``PIPELINE_PROVIDERS``) still calling out. When the probe reports L1 or
+    above, cloud-pinned stages resolve to the local provider instead — the
+    import-time degrade rule, honoured at call time.
+    """
+    global _private_mode_level_probe
+    _private_mode_level_probe = probe
+
+
 def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     """Resolve the LLM provider for a specific call site.
 
@@ -375,16 +411,34 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     ``stage=longmemeval/score`` to OpenRouter to escape local-chat-slot
     queueing while keeping privacy-sensitive stages (``memory_resolution``,
     ``claim_extraction``) on the local daemon.
+
+    A live Private Mode L1+ overrides all of the above for a resolved cloud
+    provider under ``hybrid``/``cloud-first``: see
+    :func:`set_private_mode_level_probe`.
     """
     if not stage:
-        return default_provider
-    env_override = os.environ.get(f"PROVIDER_STAGE_{normalize_stage(stage)}")
-    if env_override:
-        return env_override
-    pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
-    if stage in pipeline_providers:
-        return pipeline_providers[stage]
-    return default_provider
+        resolved = default_provider
+    else:
+        env_override = os.environ.get(f"PROVIDER_STAGE_{normalize_stage(stage)}")
+        if env_override:
+            resolved = env_override
+        else:
+            pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
+            resolved = pipeline_providers.get(stage, default_provider)
+
+    if (
+        _private_mode_level_probe is not None
+        and resolved in _CLOUD_PROVIDERS
+        and getattr(config, "CERID_ENVIRONMENT_PROFILE", "") in ("hybrid", "cloud-first")
+        and _private_mode_level_probe() >= _PRIVATE_MODE_CLOUD_CUTOFF
+    ):
+        from config.environment_profiles import degrade_target_provider
+
+        return degrade_target_provider(
+            getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
+            os.environ.get("HOST_RECOMMENDED_LOCAL_BACKEND"),
+        )
+    return resolved
 
 
 def _resolve_stage_model(stage: str | None) -> str:
@@ -512,6 +566,10 @@ _effective_local_model_cache: str | None = None
 _effective_local_model_resolved_ts: float | None = None
 # Last model background stages resolved to — see _note_background_resolution.
 _background_model_resolution: str | None = None
+# The gateway's own chat-slot model (quenchforge `GET /` -> slots.chat.model).
+# Refreshed by the same fetch as the served list; None when the gateway does
+# not report it (Ollama, older quenchforge).
+_gateway_chat_slot_model_cache: str | None = None
 
 
 def is_embedding_or_rerank_model(name: str) -> bool:
@@ -524,6 +582,17 @@ def _served_models_url() -> str:
     return getattr(config, "QUENCHFORGE_URL", "") or os.getenv(
         "OLLAMA_URL", "http://localhost:11434"
     )
+
+
+def _served_names(payload: dict) -> list[str]:
+    """Names the gateway actually serves. quenchforge reports ``loaded`` per
+    cached GGUF; a file that is cached but not loaded by any slot is not
+    served, whatever the list says."""
+    return [
+        m.get("name", "")
+        for m in payload.get("models", [])
+        if m.get("loaded", True) is not False
+    ]
 
 
 def _fetch_served_models() -> tuple[list[str] | None, float]:
@@ -558,16 +627,33 @@ def _fetch_served_models() -> tuple[list[str] | None, float]:
     try:
         resp = httpx.get(f"{base_url}/api/tags", timeout=_SERVED_MODELS_TIMEOUT_S)
         resp.raise_for_status()
-        names = [m.get("name", "") for m in resp.json().get("models", [])]
+        names = _served_names(resp.json())
     except Exception as exc:
         log_swallowed_error("core.utils.internal_llm.fetch_served_models", exc)
         with _served_models_guard:
             _served_models_cache_ts = now
         return None, now
+    _refresh_gateway_chat_slot_model_sync(base_url)
     with _served_models_guard:
         _served_models_cache = names
         _served_models_cache_ts = now
         return names, now
+
+
+def _refresh_gateway_chat_slot_model_sync(base_url: str) -> None:
+    """Best-effort GET of ``{base_url}/`` for ``slots.chat.model``. Called
+    right after a successful served-list fetch; any error (older
+    quenchforge with no root route, Ollama, a timeout) leaves the cache
+    unchanged rather than disturbing the just-fetched served list."""
+    global _gateway_chat_slot_model_cache
+    try:
+        resp = httpx.get(f"{base_url}/", timeout=_SERVED_MODELS_TIMEOUT_S)
+        resp.raise_for_status()
+        chat_slot = resp.json().get("slots", {}).get("chat", {}).get("model")
+    except Exception as exc:
+        log_swallowed_error("core.utils.internal_llm.fetch_gateway_chat_slot_model", exc)
+        return
+    _gateway_chat_slot_model_cache = chat_slot
 
 
 async def _fetch_served_models_async() -> tuple[list[str] | None, float]:
@@ -593,16 +679,30 @@ async def _fetch_served_models_async() -> tuple[list[str] | None, float]:
             f"{base_url}/api/tags", timeout=_SERVED_MODELS_TIMEOUT_S
         )
         resp.raise_for_status()
-        names = [m.get("name", "") for m in resp.json().get("models", [])]
+        names = _served_names(resp.json())
     except Exception as exc:
         log_swallowed_error("core.utils.internal_llm.fetch_served_models_async", exc)
         with _served_models_guard:
             _served_models_cache_ts = now
         return None, now
+    await _refresh_gateway_chat_slot_model_async(base_url, client)
     with _served_models_guard:
         _served_models_cache = names
         _served_models_cache_ts = now
         return names, now
+
+
+async def _refresh_gateway_chat_slot_model_async(base_url: str, client: httpx.AsyncClient) -> None:
+    """Async counterpart of :func:`_refresh_gateway_chat_slot_model_sync`."""
+    global _gateway_chat_slot_model_cache
+    try:
+        resp = await client.get(f"{base_url}/", timeout=_SERVED_MODELS_TIMEOUT_S)
+        resp.raise_for_status()
+        chat_slot = resp.json().get("slots", {}).get("chat", {}).get("model")
+    except Exception as exc:
+        log_swallowed_error("core.utils.internal_llm.fetch_gateway_chat_slot_model_async", exc)
+        return
+    _gateway_chat_slot_model_cache = chat_slot
 
 
 def _resolve_effective_local_model(served: list[str] | None, previous: str | None) -> str:
@@ -623,6 +723,20 @@ def _resolve_effective_local_model(served: list[str] | None, previous: str | Non
         return previous if previous is not None else configured
     if configured in served:
         return configured
+    chat_slot = _gateway_chat_slot_model_cache
+    if chat_slot and chat_slot in served:
+        if previous != chat_slot:
+            logger.warning(
+                "configured local chat model %r is not served by the gateway; "
+                "using the gateway's chat-slot model %r",
+                configured, chat_slot,
+            )
+        return chat_slot
+    # A still-served previous resolution stays put: the served list's order can
+    # change between refreshes, and flapping between equally valid models
+    # would churn every stage's model for no reason.
+    if previous is not None and previous in served:
+        return previous
     candidates = [m for m in served if m and not is_embedding_or_rerank_model(m)]
     if not candidates:
         if previous != configured:
@@ -763,7 +877,7 @@ def reset_effective_local_model_cache() -> None:
     """Test hook: forget the cached served list and resolved model."""
     global _effective_local_model_cache, _effective_local_model_resolved_ts
     global _served_models_cache, _served_models_cache_ts
-    global _background_model_resolution
+    global _background_model_resolution, _gateway_chat_slot_model_cache
     with _effective_local_model_guard:
         _effective_local_model_cache = None
         _effective_local_model_resolved_ts = None
@@ -771,6 +885,7 @@ def reset_effective_local_model_cache() -> None:
     with _served_models_guard:
         _served_models_cache = None
         _served_models_cache_ts = None
+        _gateway_chat_slot_model_cache = None
 
 
 def _ensure_json_prompt_token(messages: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -1168,17 +1283,24 @@ async def call_internal_llm_stream(
     if provider in ("ollama", "quenchforge"):
         from core.utils import inference_health
         yielded_any = False
+        # The stream API has no interactive override; classify by stage alone,
+        # then hold one pacing-gate permit for the whole stream — a streaming
+        # chat turn must count against the two CPU permits like a
+        # non-streaming one.
+        is_interactive = _is_interactive(stage, False)
         try:
-            async for chunk in _stream_ollama(
-                messages,
-                provider=provider,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                json_mode=json_mode,
-                model=override_model,
-            ):
-                yielded_any = True
-                yield chunk
+            await _wait_pacing_cooldown(is_interactive)
+            async with _get_pacing_gate().slot(is_interactive):
+                async for chunk in _stream_ollama(
+                    messages,
+                    provider=provider,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                    model=override_model,
+                ):
+                    yielded_any = True
+                    yield chunk
             # E1 CR-093: record the streaming success so the breaker + /health see
             # it — the streaming path was previously invisible to inference_health.
             inference_health.record_success("llm", provider=provider)

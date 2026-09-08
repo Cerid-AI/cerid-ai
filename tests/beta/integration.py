@@ -10,6 +10,8 @@ import uuid
 import httpx
 import pytest
 
+from lib.kb_cleanup import KbCleanup
+
 BASE_URL = "http://ai-companion-mcp:8888"
 TIMEOUT = 60
 
@@ -32,7 +34,7 @@ def _client() -> httpx.Client:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.p1
-def test_i01_ingest_then_query():
+def test_i01_ingest_then_query(kb_cleanup: KbCleanup):
     uid = _uid()[:8]
     marker = f"cerid-beta-integration-{uid}"
     content = (
@@ -47,6 +49,7 @@ def test_i01_ingest_then_query():
             "domain": "general",
         })
         assert ingest_resp.status_code == 200, f"Ingest failed: {ingest_resp.text}"
+        kb_cleanup.track(ingest_resp.json())
 
         # Step 2 — wait for indexing
         time.sleep(3)
@@ -75,7 +78,7 @@ def test_i01_ingest_then_query():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.p1
-def test_i02_dedup_check():
+def test_i02_dedup_check(kb_cleanup: KbCleanup):
     uid = _uid()
     content = f"Dedup test content with marker {uid} should only appear once."
     payload = {"content": content, "domain": "general"}
@@ -83,9 +86,11 @@ def test_i02_dedup_check():
     with _client() as c:
         resp1 = c.post("/ingest", json=payload)
         assert resp1.status_code == 200, f"First ingest failed: {resp1.text}"
+        kb_cleanup.track(resp1.json())
 
         resp2 = c.post("/ingest", json=payload)
         assert resp2.status_code == 200, f"Second ingest failed: {resp2.text}"
+        kb_cleanup.track(resp2.json())
 
         data1 = resp1.json()
         data2 = resp2.json()
@@ -131,7 +136,7 @@ def test_i03_settings_roundtrip():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.p1
-def test_i04_artifact_detail_after_ingest():
+def test_i04_artifact_detail_after_ingest(kb_cleanup: KbCleanup):
     uid = _uid()
     content = f"Artifact detail test content with marker {uid}."
 
@@ -141,6 +146,7 @@ def test_i04_artifact_detail_after_ingest():
             "domain": "general",
         })
         assert ingest_resp.status_code == 200, f"Ingest failed: {ingest_resp.text}"
+        kb_cleanup.track(ingest_resp.json())
 
         artifact_id = ingest_resp.json().get("artifact_id")
         assert artifact_id, f"No artifact_id in ingest response: {ingest_resp.json()}"

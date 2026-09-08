@@ -140,7 +140,7 @@ export default function SourcesPane() {
       </div>
 
       {/* Mode switcher header */}
-      <div className="flex shrink-0 items-center gap-2 border-b bg-card/40 px-4 py-2">
+      <div className="app-no-drag flex shrink-0 items-center gap-2 border-b bg-card/40 px-4 py-2">
         <div
           role="tablist"
           aria-label="Sources view mode"

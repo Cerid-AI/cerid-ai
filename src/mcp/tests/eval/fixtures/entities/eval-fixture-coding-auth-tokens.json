@@ -1,0 +1,10 @@
+{
+  "fixture": "eval-fixture-coding-auth-tokens.md",
+  "expected": [
+    "JWKS",
+    "RS256"
+  ],
+  "forbidden": [
+    "# authentication \u2014 token lifetimes"
+  ]
+}

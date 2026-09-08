@@ -219,6 +219,19 @@ source serialized a ~5 s wait into the first-touch response until its circuit
 opened. The orchestrator adds a small outer margin on top of the per-source
 budget.
 
+**Environment profiles and the background chat slot.** `CERID_ENVIRONMENT_PROFILE`
+(`cloud-first` / `hybrid` / `local-only`) sets per-stage provider defaults —
+interactive vs. background stages route independently — and degrades to
+`local-only` when no cloud key is configured or Private Mode is L1+. A
+boot-time throughput probe (`utils/inference_config.py::probe_local_throughput`)
+measures the local model's real tok/s rather than guessing from hardware
+detection, feeding `/health/status.inference.expectations` and the setup
+wizard. `INTERNAL_LLM_MODEL_BACKGROUND` names a second, smaller local model
+(served by quenchforge's optional background slot) dedicated to background
+stages like entity extraction — routing to it is roughly 2.5× faster than the
+main chat model at equal extraction recall on class-A hardware. Full detail:
+[`docs/ENVIRONMENT_PROFILES.md`](ENVIRONMENT_PROFILES.md).
+
 ## Observability contract
 
 The canonical endpoint is `GET /health`. Every observability signal must appear in `/health.invariants`:

@@ -60,8 +60,6 @@
 | iMessage reader | — | ✓ | ✓ | `imessage_reader` |
 | Apple Reminders (EventKit) | — | ✓ | ✓ | `reminders_eventkit` |
 
-> `apple_notes_reader`, `apple_mail_reader`, and `imessage_reader` are enforced client-side only (Settings → Sources locks the row behind `ProUpgradeOverlay`). The backend `/ingest/structured` endpoint the desktop bridge posts to performs no server-side tier check for these three flags — deliberate, matching the "annoying, not DRM" posture, pending AF-043.
-
 ### macOS Native — Community
 
 | Feature | Core | Pro | Enterprise | Gate |

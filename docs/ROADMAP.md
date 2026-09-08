@@ -85,11 +85,11 @@ Make licenses safe to issue, revoke, and audit.
   fallback for disconnected installs.
 - A single canonical license-verification path.
 
-### P1 — Complete the Pro Apple connector suite
-Land the remaining Apple-native readers so the advertised Pro suite is whole at GA.
-- Apple Mail, iMessage, and Reminders readers (joining the already-shipped Apple Notes,
-  Calendar, and Photos), each behind its feature gate and TCC/Full-Disk-Access consent.
-- iMessage content honors Private Mode (Level 2+) at query time.
+### P1 — Complete the Pro Apple connector suite — ✅ Landed (Phase D)
+Apple Mail, iMessage, and Reminders readers shipped in Phase D alongside Apple Notes,
+Calendar, and Photos — see [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md). Each is
+behind its feature gate and TCC/Full-Disk-Access consent; iMessage content honors
+Private Mode (Level 2+) at query time.
 
 ### P0 — Stripe live-mode hardening & billing observability
 - Document and validate all billing/licensing configuration; pin the Stripe API version.

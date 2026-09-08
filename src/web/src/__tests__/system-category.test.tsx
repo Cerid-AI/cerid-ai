@@ -82,6 +82,23 @@ const mockSystemCheckMeasured = {
   active_profile: "cloud-first",
 }
 
+const mockSystemCheckOneRateOnly = {
+  ...mockSystemCheck,
+  local_throughput: {
+    prompt_tok_s: null,
+    gen_tok_s: 9.5,
+    probe_at: 1735689600,
+    expectations: {
+      memory_extract: { seconds: undefined, basis: "unmeasured" },
+      entity_extraction: { seconds: undefined, basis: "unmeasured" },
+      wiki_summary: { seconds: undefined, basis: "unmeasured" },
+      claim_extraction: { seconds: undefined, basis: "unmeasured" },
+      topic_extraction: { seconds: undefined, basis: "unmeasured" },
+      chat_turn_tail_s: null,
+    },
+  },
+}
+
 const mockStorage = {
   chromadb: { disk_mb: 10, collections: 2, chunks: 150 },
   neo4j: { disk_mb: 5, nodes: 100, relationships: 50 },
@@ -225,6 +242,18 @@ describe("SystemCategory — platform capabilities", () => {
     render(<SystemCategory {...defaultProps} />, { wrapper })
     await screen.findByText("Platform")
     expect(screen.queryByText("Expectations")).not.toBeInTheDocument()
+  })
+
+  it("hides the Expectations row when only one rate was measured", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/setup/system-check")) return ok(mockSystemCheckOneRateOnly)
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    await screen.findAllByText("Apple M1")
+    expect(screen.queryByText("Expectations")).not.toBeInTheDocument()
+    expect(screen.queryByText(/tok\/s local model/)).toBeNull()
   })
 })
 

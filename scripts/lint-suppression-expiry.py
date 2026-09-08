@@ -4,8 +4,9 @@
 """A suppression with no expiry is a decision nobody revisits.
 
 Every gate in this repo can be silenced: pip-audit takes ``--ignore-vuln``,
-Trivy takes a .trivyignore, dependabot.yml takes ``ignore:``. Each silence was
-correct on the day it was written. None of them expire on their own.
+Trivy takes the ignore list in scripts/ci/docker-gate.sh's heredoc,
+dependabot.yml takes ``ignore:``. Each silence was correct on the day it was
+written. None of them expire on their own.
 
 This gate enforces the convention the repo already uses — ``Re-eval
 YYYY-MM-DD`` in the comment above a suppression — and fails when that date has
@@ -63,6 +64,24 @@ _ENTRY_RE = re.compile(
 )
 _DATE_RE = re.compile(r"[Rr]e-eval:?\s*(\d{4})-(\d{2})-(\d{2})")
 
+_GATE = Path("scripts/ci/docker-gate.sh")
+_HEREDOC_RE = re.compile(r"cat > \.ci-artifacts/trivyignore <<'EOF'\n(.*?)\nEOF\n", re.S)
+
+
+def _trivy_gate_block(text: str) -> tuple[list[str], int]:
+    """The heredoc's lines and the 0-based line offset of its first line.
+
+    Scoping to the heredoc (rather than the whole script) matters: the file
+    is full of prose explaining CI behaviour, and a bare CVE id mentioned in
+    a comment — e.g. the cache-busting rationale a few lines above — must
+    never be mistaken for a suppression entry.
+    """
+    match = _HEREDOC_RE.search(text)
+    if match is None:
+        raise SystemExit(f"{_GATE}: trivy ignore heredoc not found")
+    offset = text[: match.start(1)].count("\n")
+    return match.group(1).split("\n"), offset
+
 
 def _entries() -> list[tuple[Path, int, str, dt.date | None]]:
     """Every suppression entry with the re-eval date from its comment block."""
@@ -71,7 +90,11 @@ def _entries() -> list[tuple[Path, int, str, dt.date | None]]:
         path = REPO / rel
         if not path.exists():
             continue
-        lines = path.read_text().split("\n")
+        text = path.read_text()
+        if rel == _GATE:
+            lines, offset = _trivy_gate_block(text)
+        else:
+            lines, offset = text.split("\n"), 0
         for i, line in enumerate(lines):
             m = _ENTRY_RE.match(line)
             if not m:
@@ -132,7 +155,7 @@ def _entries() -> list[tuple[Path, int, str, dt.date | None]]:
                     except ValueError:
                         pass
                     break
-            out.append((rel, i + 1, ident_txt, date))
+            out.append((rel, i + 1 + offset, ident_txt, date))
     return out
 
 
@@ -146,11 +169,11 @@ def _baseline() -> set[str]:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--update-baseline", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     entries, today, base = _entries(), dt.date.today(), _baseline()
 

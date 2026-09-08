@@ -179,7 +179,9 @@ def resolve_profile(
     if not has_cloud_key:
         causes.append("no OPENROUTER_API_KEY is configured")
     if private_mode_level >= 1:
-        causes.append(f"Private Mode L{private_mode_level} blocks cloud egress")
+        causes.append(
+            f"Private Mode L{private_mode_level}: L1 or above disables cloud stages",
+        )
     if not causes:
         return requested, ""
     return LOCAL_ONLY, " and ".join(causes)
@@ -255,6 +257,18 @@ def apply_environment_profile(
             profile, effective or "none", reason,
         )
     return profile_defaults(effective, hardware_class, recommended_local_backend)
+
+
+def degrade_target_provider(current_provider: str, recommended_local_backend: str | None) -> str:
+    """The provider a cloud-pinned stage degrades to under Private Mode.
+
+    ``cloud-first`` never defaults ``INTERNAL_LLM_PROVIDER`` to a local
+    backend, so the current provider cannot be trusted to be local; keep it
+    only when it already is, otherwise use the host's detected backend.
+    """
+    if current_provider in _LOCAL_PROVIDERS:
+        return current_provider
+    return _local_provider(recommended_local_backend)
 
 
 def _local_provider(recommended_local_backend: str | None) -> str:

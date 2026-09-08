@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-projects-orion-budget.md",
+  "expected": [
+    "$85,000",
+    "November 15, 2025",
+    "Project Orion"
+  ],
+  "forbidden": [
+    "# project orion \u2014 budget"
+  ]
+}

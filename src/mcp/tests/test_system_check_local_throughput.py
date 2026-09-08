@@ -50,6 +50,7 @@ async def test_system_check_carries_local_throughput_block_when_measured(monkeyp
         "gen_tok_s": 9.0,
         "probe_at": 123.0,
         "expectations": inference_config.expectations_for(cfg),
+        "contended": False,
     }
     assert result["local_throughput"]["expectations"]["memory_extract"]["basis"] == "measured"
 
@@ -64,3 +65,4 @@ async def test_system_check_local_throughput_unmeasured(monkeypatch):
     assert block["prompt_tok_s"] is None
     assert block["gen_tok_s"] is None
     assert block["expectations"]["memory_extract"]["basis"] == "unmeasured"
+    assert block["contended"] is False

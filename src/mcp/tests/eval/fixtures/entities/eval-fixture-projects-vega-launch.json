@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-projects-vega-launch.md",
+  "expected": [
+    "June 1, 2024",
+    "Project Vega",
+    "September 15, 2024"
+  ],
+  "forbidden": [
+    "# project vega \u2014 launch timeline"
+  ]
+}

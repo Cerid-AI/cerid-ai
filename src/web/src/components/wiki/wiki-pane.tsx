@@ -276,7 +276,7 @@ export default function WikiPane() {
       {/* ------------------------------------------------------------------- */}
       {/* Pane header                                                         */}
       {/* ------------------------------------------------------------------- */}
-      <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+      <div className="app-no-drag flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 
         {/* Breadcrumb */}

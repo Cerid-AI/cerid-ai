@@ -103,6 +103,7 @@ if ! $VALIDATE_ONLY; then
 fi
 echo "── pre-push: running local validation (ci-local + drift-check) ──"
 echo "   full parity is 'make prepush'"
+unset CERID_API_KEY
 make ci-local || fail "ci-local"
 make drift-check || fail "drift-check"
 echo "── pre-push: ✓ local validation passed ──"

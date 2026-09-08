@@ -11,6 +11,7 @@ preservation harness; here we only exercise the pure logic.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -402,6 +403,10 @@ class TestJunkQuantityGate:
         ("25 Mbps", "OTHER"),
         ("3 weeks", "ORG"),
         ("5 g", "OTHER"),
+        ("22 grams of coffee", "OTHER"),
+        ("360 grams of water", "OTHER"),
+        ("96 degrees Celsius", "OTHER"),
+        ("40-gram bloom", "OTHER"),
     ])
     def test_rejects_bare_quantities(self, name, entity_type):
         assert is_junk_quantity_name(name, entity_type) is True
@@ -457,6 +462,8 @@ class TestJunkQuantityGate:
         ("VLAN 20", "OTHER"),
         ("HTTP 429", "OTHER"),
         ("$85,000", "ASSET"),
+        ("100ml bottle", "ASSET"),
+        ("24 Hours of Le Mans", "EVENT"),
     ])
     def test_admits_real_digit_bearing_entities(self, name, entity_type):
         assert is_junk_quantity_name(name, entity_type) is False
@@ -755,3 +762,45 @@ class TestIsJunkEntity:
     def test_real_entity_is_never_junk(self):
         assert is_junk_entity("Elon Musk", entity_type_unknown=True) is False
         assert is_junk_entity("NASA", entity_type_unknown=True) is False
+
+
+# ---------------------------------------------------------------------------
+# Recall-eval annotation fixtures (2026-09-07)
+# ---------------------------------------------------------------------------
+# Non-live sanity check on tests/eval/fixtures/entities/*.json: the live
+# recall gate (tests/eval/test_entity_extraction_recall.py) only runs opt-in
+# against a real gateway, but a typo'd or stale "expected" name would silently
+# tank recall on every run without ever being caught. Whitespace is
+# normalised before comparing because the fixture markdown hard-wraps at
+# ~70 columns and can break a multi-word expected name across a line.
+
+_EVAL_FIXTURES_DIR = pathlib.Path(__file__).parent / "eval" / "fixtures"
+_EVAL_ANNOTATION_FILES = sorted((_EVAL_FIXTURES_DIR / "entities").glob("*.json"))
+_MIN_ANNOTATED_FIXTURES = 8
+_MIN_FORBIDDEN = 0
+_MAX_FORBIDDEN = 4
+
+
+def _normalise_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+class TestRecallAnnotationFixtures:
+    def test_at_least_eight_fixtures_are_annotated(self):
+        assert len(_EVAL_ANNOTATION_FILES) >= _MIN_ANNOTATED_FIXTURES
+
+    @pytest.mark.parametrize("annotation_path", _EVAL_ANNOTATION_FILES, ids=lambda p: p.stem)
+    def test_expected_names_appear_verbatim_in_fixture_text(self, annotation_path):
+        spec = json.loads(annotation_path.read_text())
+        fixture_path = _EVAL_FIXTURES_DIR / spec["fixture"]
+        assert fixture_path.exists(), f"{spec['fixture']} does not exist"
+        text = _normalise_whitespace(fixture_path.read_text()).lower()
+        for name in spec["expected"]:
+            assert _normalise_whitespace(name).lower() in text, (
+                f"{name!r} not found verbatim in {spec['fixture']}"
+            )
+
+    @pytest.mark.parametrize("annotation_path", _EVAL_ANNOTATION_FILES, ids=lambda p: p.stem)
+    def test_forbidden_list_is_two_to_four_items(self, annotation_path):
+        spec = json.loads(annotation_path.read_text())
+        assert _MIN_FORBIDDEN <= len(spec["forbidden"]) <= _MAX_FORBIDDEN

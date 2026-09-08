@@ -303,13 +303,16 @@ personal data"*. The harness defends this on three layers:
 
 ### Phase 10 — deferred (new adapters for stretch sources)
 
-Status: **4 of these adapters landed 2026-06-29** — the `hf_dataset`
-court-filter, `qa_xml`, `medlineplus_xml`, and `drug_facts` adapters are
-implemented + unit-tested, so `caselaw-scotus`, `medquad-health-qa`,
-`medlineplus-health-topics`, and `drug-supplement-key-facts` now need only
-a **curator build + publish** (run the adapter, seal the tarball, upload
-the release, set `download_url` + `sha256`). `bogleheads-wiki` and
-`pes2o-cs-recent` remain genuinely blocked on upstream issues.
+Status (re-checked 2026-09-07, `config/knowledge_packs.json`: 17 of 23
+catalog packs carry a `download_url`): **4 of these adapters landed
+2026-06-29** — the `hf_dataset` court-filter, `qa_xml`, `medlineplus_xml`,
+and `drug_facts` adapters are implemented + unit-tested, so
+`caselaw-scotus`, `medquad-health-qa`, `medlineplus-health-topics`, and
+`drug-supplement-key-facts` need only a **curator build + publish** (run
+the adapter, seal the tarball, upload the release, set `download_url` +
+`sha256`) — none of the four had been built as of this check, over two
+months after the adapters landed. `bogleheads-wiki` and `pes2o-cs-recent`
+remain genuinely blocked on upstream issues.
 
 | Pack | Reason | Adapter |
 |---|---|---|

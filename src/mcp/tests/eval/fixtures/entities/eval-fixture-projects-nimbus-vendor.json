@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-projects-nimbus-vendor.md",
+  "expected": [
+    "DynamoDB",
+    "Nimbus",
+    "PostgreSQL"
+  ],
+  "forbidden": [
+    "# project nimbus \u2014 ledger datastore decision"
+  ]
+}

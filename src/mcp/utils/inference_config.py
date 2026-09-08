@@ -86,6 +86,10 @@ class InferenceConfig:
     local_prompt_tok_s: float | None = None
     local_gen_tok_s: float | None = None
     local_probe_at: float | None = None
+    # True when the most recently *stored* measurement was taken while
+    # another caller held a pacing-gate permit — a contended run measures
+    # queueing, not the backend's quiet throughput.
+    local_probe_contended: bool = False
 
 
 # Module-level singleton
@@ -343,6 +347,7 @@ async def _inference_recheck_loop() -> None:
             new.local_prompt_tok_s = old.local_prompt_tok_s
             new.local_gen_tok_s = old.local_gen_tok_s
             new.local_probe_at = old.local_probe_at
+            new.local_probe_contended = old.local_probe_contended
 
             if new.provider != old_provider or new.tier != old_tier:
                 direction = "upgrade" if _tier_rank(new.tier) > _tier_rank(old_tier) else "downgrade"
@@ -380,6 +385,10 @@ def _tier_rank(tier: InferenceTier) -> int:
 
 _PROBE_PROMPT_TOKENS = 256
 _PROBE_GEN_TOKENS = 64
+
+# A probe is "contended" when more than this many pacing-gate permits are
+# held while it runs — i.e. some other caller is in flight alongside it.
+_CONTENDED_HELD_THRESHOLD = 1
 
 
 def _probe_prompt() -> str:
@@ -452,6 +461,10 @@ async def probe_local_throughput() -> None:
                 # non-interactive stage, never land as an extra permit on
                 # top of it or displace an interactive caller.
                 async with _get_pacing_gate().slot(interactive=False):
+                    # Held while still inside the slot: a permit count above
+                    # one means another caller is running alongside us, so
+                    # this run measures contention, not quiet throughput.
+                    held = _get_pacing_gate().held()
                     # Measured from here, not gate acquisition, so the
                     # wall-clock fallback below times only the HTTP call.
                     start = time.monotonic()
@@ -482,6 +495,7 @@ async def probe_local_throughput() -> None:
                 gen_tok_s = timings.get("predicted_per_second")
             else:
                 async with _get_pacing_gate().slot(interactive=False):
+                    held = _get_pacing_gate().held()
                     # Measured from here, not gate acquisition, so the
                     # wall-clock fallback below times only the HTTP call.
                     start = time.monotonic()
@@ -522,7 +536,17 @@ async def probe_local_throughput() -> None:
         logger.info("Local throughput probe returned no usable timing data")
         return
 
+    contended = held > _CONTENDED_HELD_THRESHOLD
     cfg = get_inference_config()
+    if contended and cfg.local_gen_tok_s is not None and not cfg.local_probe_contended:
+        # A quiet measurement is already on file — a contended run would
+        # only make the reported rate worse without saying why.
+        logger.info(
+            "Local throughput probe was contended (permits held=%d); keeping the "
+            "previous quiet measurement", held,
+        )
+        return
+    cfg.local_probe_contended = contended
     cfg.local_prompt_tok_s = prompt_tok_s
     cfg.local_gen_tok_s = gen_tok_s
     cfg.local_probe_at = time.time()
@@ -579,4 +603,5 @@ def inference_health_payload() -> dict:
         "rerank_latency_ms": round(cfg.rerank_latency_ms, 2),
         "message": cfg.message,
         "expectations": expectations_for(cfg),
+        "contended": cfg.local_probe_contended,
     }

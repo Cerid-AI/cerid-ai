@@ -1,0 +1,13 @@
+{
+  "fixture": "eval-fixture-coding-rate-limiter.md",
+  "expected": [
+    "HTTP 429",
+    "Redis",
+    "Retry-After",
+    "Sentinel",
+    "Zephyr API Gateway"
+  ],
+  "forbidden": [
+    "# zephyr api gateway \u2014 rate limiter"
+  ]
+}

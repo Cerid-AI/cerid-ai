@@ -489,8 +489,12 @@
    window could not be moved.
    Height matches the inset traffic lights. `left` clears them so the buttons
    stay clickable; a drag region swallows clicks, which is also why anything
-   interactive placed in this strip must opt out with .app-no-drag. Harmless in
-   a browser, where -webkit-app-region is ignored. */
+   interactive placed in this strip must opt out with .app-no-drag. Rendered
+   only when the desktop bridge (window.cerid) is present — in a plain
+   browser tab this element has no job to do, and being a normal fixed,
+   z-index:2 block with no pointer-events: none, it would otherwise swallow
+   real mouse clicks on anything underneath (-webkit-app-region has no effect
+   on browser hit-testing; it is not what protects clicks there). */
 .app-drag-region {
   position: fixed;
   top: 0;
@@ -499,8 +503,12 @@
   height: 28px;
   z-index: 2;
   -webkit-app-region: drag;
+  /* Electron builds its draggable regions from app-region rects, not from
+     hit-testing, so the band can drag the window while letting clicks
+     reach whatever sits under it. */
+  pointer-events: none;
 }
-.app-no-drag { -webkit-app-region: no-drag; }
+.app-no-drag { -webkit-app-region: no-drag; pointer-events: auto; }
 .dark .vignette {
   background: radial-gradient(ellipse 80% 70% at 50% 50%, transparent 50%, rgba(10, 31, 61, 0.18) 100%);
 }

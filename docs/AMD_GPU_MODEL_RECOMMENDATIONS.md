@@ -25,6 +25,22 @@ model catalog is available.
 
 ---
 
+## Environment profiles and the background slot
+
+The model picks below feed into `CERID_ENVIRONMENT_PROFILE` (`cloud-first` /
+`hybrid` / `local-only`), which routes interactive and background LLM stages
+independently rather than as one global switch — an AMD-Mac operator on
+`hybrid` gets local chat with background enrichment (entity extraction, wiki
+summary) sent to the cheap cloud tier, while `local-only` keeps everything on
+this hardware. The boot-time throughput probe measures this host's actual
+tok/s (see § LLM chat model above for the reference numbers on a 32 GB Vega
+II) rather than guessing from the VRAM tier, and quenchforge's optional
+second chat-class slot (quenchforge's own `QUENCHFORGE_BACKGROUND_MODEL` launch-agent variable; cerid selects it with `INTERNAL_LLM_MODEL_BACKGROUND`) can serve a smaller
+model — a 3B class-A pick — dedicated to background stages so the main chat
+model isn't paying enrichment latency on every extraction call. Full detail,
+including the degrade rule and the served-model resolution order:
+[`docs/ENVIRONMENT_PROFILES.md`](ENVIRONMENT_PROFILES.md).
+
 ## Hardware tiers
 
 | Tier | VRAM | Examples | Quenchforge support |

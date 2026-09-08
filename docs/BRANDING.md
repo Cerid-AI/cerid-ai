@@ -1,7 +1,6 @@
 # Cerid AI — Brand Identity Guide
 
-> **Status:** Locked & Production-Ready
-> **Last updated:** 2026-03-30
+> **Status:** reference, last reviewed 2026-09-07; not re-verified against code since 2026-03-30
 
 ## Brand Names
 

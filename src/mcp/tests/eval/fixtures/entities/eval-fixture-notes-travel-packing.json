@@ -1,0 +1,14 @@
+{
+  "fixture": "eval-fixture-notes-travel-packing.md",
+  "expected": [
+    "7-day itinerary",
+    "Iceland",
+    "UK type-G plugs",
+    "Vestmannaeyjar",
+    "power adapter of type F",
+    "thermal base layers"
+  ],
+  "forbidden": [
+    "# iceland trip \u2014 packing list"
+  ]
+}
