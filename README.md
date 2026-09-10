@@ -14,6 +14,9 @@ A privacy-first, local-first workspace that unifies your code, finance, projects
 
 **[90s product tour](https://cerid.ai/#demo)** · [30s sizzle](https://cerid.ai/cerid-30s-demo.mp4) — live UI: claim verification, Constellation explore, wiki, TrustScore.
 
+<p align="center"><a href="https://cerid.ai/#demo"><img src="https://cerid.ai/demo-poster.jpg" alt="Cerid AI chat with live claim verification: each claim in the answer is checked against the knowledge base and marked verified, partial or refuted" width="900"></a></p>
+<p align="center"><em>Chat with live claim verification. Frame from the product tour.</em></p>
+
 ---
 
 ## 5-minute quickstart
