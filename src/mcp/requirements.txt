@@ -1,7 +1,7 @@
 # Core framework
 fastapi>=0.141.1,!=0.136.3,<0.142  # 0.136.3 excluded — OSV MAL-2026-4750 (malicious `fastar` dep in [standard] extra)
 sentry-sdk[fastapi]>=2.68.1
-uvicorn[standard]>=0.49.0,<1
+uvicorn[standard]>=0.52.4,<1
 starlette>=1.6.0  # security: CVE-2026-54283 (HIGH) — fastapi transitive, pin the fix
 pydantic>=2.13.5,<3
 
