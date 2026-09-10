@@ -6,7 +6,7 @@ starlette>=1.6.0  # security: CVE-2026-54283 (HIGH) — fastapi transitive, pin 
 pydantic>=2.13.5,<3
 
 # MCP protocol
-mcp>=1.28.1,<2
+mcp>=2.1.1,<3
 
 # HTTP client
 httpx>=0.24,<0.29
