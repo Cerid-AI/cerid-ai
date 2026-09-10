@@ -57,7 +57,7 @@ services:
     # Direct upgrade from 5.26 is supported (no intermediate version, no
     # store-format change between 4.4 and 2026.x; existing databases
     # default to Cypher 5 on first 2026.x boot — backward compatible).
-    image: neo4j:2026.04.0-community
+    image: neo4j:2026.07.1-community
     ports:
       - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
       - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
