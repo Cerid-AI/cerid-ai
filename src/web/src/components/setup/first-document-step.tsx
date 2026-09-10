@@ -27,6 +27,12 @@ export interface FirstDocState {
 interface FirstDocumentStepProps {
   state: FirstDocState
   onChange: (state: FirstDocState) => void
+  /**
+   * Whether any model can answer at all — a valid provider key, or local
+   * inference enabled. False makes the query-failure copy name that cause
+   * instead of blaming indexing.
+   */
+  hasAnsweringModel?: boolean
 }
 
 type Phase = "choose" | "ingesting" | "chat" | "done"
@@ -38,6 +44,25 @@ const SUGGESTION_CHIPS = [
 ]
 
 const ACCEPTED_EXTS = ".pdf,.txt,.md,.docx"
+
+const INDEXING_COPY =
+  "Query failed — the knowledge base may still be indexing. Try again in a moment."
+const NO_MODEL_COPY =
+  "No model can answer yet — add a provider key or enable local inference in the earlier step."
+
+// The wizard's first query can fail three distinguishable ways and the old
+// copy blamed indexing for all of them. Nothing can answer without a model;
+// an HTTP failure already carries the server's detail in err.message (see
+// extractError in lib/api/common.ts); indexing is only a plausible cause when
+// the request succeeded and came back empty.
+function formatQueryError(err: unknown, hasAnsweringModel: boolean): string {
+  if (!hasAnsweringModel) return NO_MODEL_COPY
+  if (err instanceof TypeError) {
+    return "Cerid backend unreachable. Check that the MCP container is running."
+  }
+  if (err instanceof Error && err.message) return err.message
+  return "Query failed — unknown error."
+}
 
 // Distinguish "backend actually unreachable" from "backend rejected this file"
 // so users get an actionable error rather than a wild goose chase. Network
@@ -55,7 +80,7 @@ function formatIngestError(err: unknown, filename: string): string {
   return "Ingestion failed — unknown error."
 }
 
-export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
+export function FirstDocumentStep({ state, onChange, hasAnsweringModel = true }: FirstDocumentStepProps) {
   const [phase, setPhase] = useState<Phase>(state.ingested ? "chat" : "choose")
   const [ingestError, setIngestError] = useState<string | null>(null)
   const [ingestProgress, setIngestProgress] = useState<string | null>(null)
@@ -167,17 +192,19 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       }
       const topResult = result.results?.[0]
       setResponse(
-        topResult?.content
-          ?? `Found ${result.total_results} result(s) across ${(result.domains_searched ?? []).join(", ") || "all domains"}.`,
+        !result.results?.length
+          ? INDEXING_COPY
+          : topResult?.content
+            ?? `Found ${result.total_results} result(s) across ${(result.domains_searched ?? []).join(", ") || "all domains"}.`,
       )
       onChange({ ...state, ingested: true, queried: true, documentCount: Math.max(state.documentCount, 1) })
       setPhase("done")
-    } catch {
-      setResponse("Query failed — the knowledge base may still be indexing. Try again in a moment.")
+    } catch (err) {
+      setResponse(formatQueryError(err, hasAnsweringModel))
     } finally {
       setQueryLoading(false)
     }
-  }, [state, onChange, fileName])
+  }, [state, onChange, fileName, hasAnsweringModel])
 
   const onFilesDropped = useCallback(
     (files: File[]) => {

@@ -199,11 +199,14 @@ export function ModelDownloadBanner() {
     )
   }
 
-  // idle_uncached: show the proactive warning + Download Now action
+  // idle_uncached: show the proactive warning + Download Now action.
+  // app-no-drag: this banner mounts right under the top of the window
+  // (app-layout.tsx) and this is the only state with clickable controls —
+  // see .app-drag-region.
   return (
     <div
       role="alert"
-      className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm"
+      className="app-no-drag flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm"
     >
       <Info className="h-4 w-4 shrink-0 text-amber-500" />
       <div className="flex-1 min-w-0">

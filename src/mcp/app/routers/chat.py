@@ -816,6 +816,25 @@ async def _attempt_stream(
     except (httpx.ConnectError, httpx.ReadTimeout) as exc:
         logger.error("Upstream connection/timeout error for model=%s: %s", bare_model, exc)
         return 503
+    except httpx.HTTPError as exc:
+        # Capture the class name now — the `as exc` binding is implicitly
+        # deleted when this except block exits, and _http_error_gen is a
+        # generator whose body runs later, after that deletion.
+        exc_class_name = type(exc).__name__
+        logger.error("Upstream HTTP error for model=%s: %s(%s)", bare_model, exc_class_name, exc)
+
+        async def _http_error_gen() -> AsyncGenerator[bytes, None]:
+            friendly = f"Model provider connection failed ({exc_class_name}). Try again."
+            err = json.dumps({
+                "error": {
+                    "code": 502,
+                    "message": friendly,
+                    "type": "upstream_error",
+                }
+            })
+            yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
+
+        return _http_error_gen()
 
 
 async def _proxy_stream(
@@ -969,6 +988,18 @@ async def _proxy_stream(
     except (asyncio.CancelledError, GeneratorExit):
         logger.info("chat proxy_stream cancelled — propagating")
         raise
+    except Exception as exc:
+        log_swallowed_error("app.routers.chat.stream", exc)
+        friendly = f"Model provider connection failed ({type(exc).__name__}). Try again."
+        err = json.dumps({
+            "error": {
+                "code": 502,
+                "message": friendly,
+                "type": "upstream_error",
+            }
+        })
+        yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
+        return
 
 
 async def _collect_nonstream_response(

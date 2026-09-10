@@ -50,7 +50,20 @@ TAG="${GITHUB_RUN_ID:-local-$$}"
 MCP_IMG="cerid-mcp-test-${TAG}"
 WEB_IMG="cerid-web-test-${TAG}"
 
-cleanup() { docker rmi -f "$MCP_IMG" "$WEB_IMG" >/dev/null 2>&1 || true; }
+# --no-cache means every run orphans the whole previous build. Removing only
+# this run's tags left those layers dangling: 100 of them (526 GB) filled the
+# shared Docker Desktop VM on 2026-09-08 and took the dev stack down with it.
+#
+# Dangling only. NOT `-a`, which would evict the dev stack's own untagged-but-
+# in-use images, and NOT `system prune`, which would take that daemon's
+# volumes (see SHARED-DAEMON DISCIPLINE above). Hosted runners are skipped:
+# their VM is discarded after the job, so the prune is pure added minutes.
+cleanup() {
+  docker rmi -f "$MCP_IMG" "$WEB_IMG" >/dev/null 2>&1 || true
+  if [ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]; then
+    docker image prune -f >/dev/null 2>&1 || true
+  fi
+}
 trap cleanup EXIT
 
 echo "::group::hadolint"

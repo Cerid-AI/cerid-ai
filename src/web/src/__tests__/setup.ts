@@ -245,3 +245,39 @@ if (typeof Element.prototype.scrollIntoView === "undefined") {
 if (typeof (globalThis as Record<string, unknown>).WebGL2RenderingContext === "undefined") {
   ;(globalThis as Record<string, unknown>).WebGL2RenderingContext = class WebGL2RenderingContext {}
 }
+
+// ---------------------------------------------------------------------------
+// Defining the global above is not enough: sigma's CJS build also reads the
+// unprefixed `WebGLRenderingContext` at module scope
+// (sigma/dist/index-*.cjs.dev.js:711), and the same lazy article-infobox path
+// tripped it again in CI. Stubbing one global at a time chases the symptom —
+// the real invariant is that jsdom can never run a WebGL renderer, so no test
+// should load the module at all.
+//
+// Mocking it here is that invariant, applied once: any test reaching sigma
+// (directly or through a lazy Atlas import) gets an inert instance rather
+// than an unhandled ReferenceError from outside a test body. The methods are
+// the ones Atlas calls, so a stray render degrades to a no-op instead of a
+// TypeError. Tests that assert real graph behaviour mock the Atlas component
+// itself, which shadows this.
+vi.mock("sigma", () => {
+  class SigmaStub {
+    on() { return this }
+    off() { return this }
+    refresh() { return this }
+    kill() {}
+    setSetting() { return this }
+    getSetting() { return undefined }
+    getContainer() { return document.createElement("div") }
+    getNodeDisplayData() { return undefined }
+    graphToViewport() { return { x: 0, y: 0 } }
+    getCamera() {
+      return {
+        on: () => {}, off: () => {}, animate: () => {},
+        getState: () => ({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }),
+        setState: () => {}, ratio: 1,
+      }
+    }
+  }
+  return { default: SigmaStub, Sigma: SigmaStub }
+})

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { axe } from "jest-axe"
 
 const queryKB = vi.fn().mockResolvedValue({ results: [{ content: "doc answer" }], total_results: 1, domains_searched: ["general"] })
@@ -35,9 +35,16 @@ const DEFAULT_STATE: FirstDocState = {
 
 const onChange = vi.fn<(state: FirstDocState) => void>()
 
+const DEFAULT_QUERY_RESULT = {
+  results: [{ content: "doc answer" }],
+  total_results: 1,
+  domains_searched: ["general"],
+}
+
 beforeEach(() => {
   onChange.mockClear()
-  queryKB.mockClear()
+  queryKB.mockReset()
+  queryKB.mockResolvedValue(DEFAULT_QUERY_RESULT)
 })
 
 describe("FirstDocumentStep", () => {
@@ -87,6 +94,72 @@ describe("FirstDocumentStep", () => {
     // queryKB(query, domains, topK, conversationMessages, opts)
     const opts = queryKB.mock.calls[0]?.[4] as { contextSources?: { external?: boolean } }
     expect(opts?.contextSources?.external).toBe(false)
+  })
+})
+
+describe("FirstDocumentStep — query failure copy names the real cause", () => {
+  function ask() {
+    const input = screen.getByPlaceholderText("Or type your own question...")
+    fireEvent.change(input, { target: { value: "what is in my doc?" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+  }
+
+  it("says no model is configured when there is no provider and local inference is off", async () => {
+    queryKB.mockRejectedValue(new Error("[NO_PROVIDER] no model configured"))
+    render(
+      <FirstDocumentStep
+        state={{ ...DEFAULT_STATE, ingested: true }}
+        onChange={onChange}
+        hasAnsweringModel={false}
+      />,
+    )
+    ask()
+    expect(
+      await screen.findByText(
+        "No model can answer yet — add a provider key or enable local inference in the earlier step.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("surfaces the server detail for an HTTP error when a model is configured", async () => {
+    queryKB.mockRejectedValue(new Error("Collection 'general' does not exist"))
+    render(
+      <FirstDocumentStep
+        state={{ ...DEFAULT_STATE, ingested: true }}
+        onChange={onChange}
+        hasAnsweringModel
+      />,
+    )
+    ask()
+    expect(
+      await screen.findByText("Collection 'general' does not exist"),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the indexing copy for the retry-exhausted empty result", async () => {
+    // The component sleeps 300ms then 800ms between retries; drive those with
+    // fake timers rather than waiting 1.1s of wall clock per run.
+    vi.useFakeTimers()
+    try {
+      queryKB.mockResolvedValue({ results: [], total_results: 0, domains_searched: ["general"] })
+      render(
+        <FirstDocumentStep
+          state={{ ...DEFAULT_STATE, ingested: true }}
+          onChange={onChange}
+          hasAnsweringModel
+        />,
+      )
+      ask()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+      expect(queryKB).toHaveBeenCalledTimes(3)
+      expect(
+        screen.getByText(
+          "Query failed — the knowledge base may still be indexing. Try again in a moment.",
+        ),
+      ).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

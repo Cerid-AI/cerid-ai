@@ -18,8 +18,8 @@ test.use({ reducedMotion: "reduce" })
  *   - Analyst lens radiogroup + hop stepper + type chips operate
  */
 test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/chips", async ({ page }) => {
-  // A little above the 30s default: the hover sweep below already spends up
-  // to 18s on its own, leaving thin margin against the rest of the test.
+  // A little above the 30s default: layout settle + the lens/hop/chip
+  // interactions below leave thin margin against the default.
   test.setTimeout(45_000)
   await suppressFirstRun(page)
 
@@ -69,30 +69,23 @@ test("E-17 Atlas mounts via Wiki cross-link, hovers a node, drives lenses/hops/c
   // sweep against an empty canvas.
   await expect(page.getByText(/\d+ (entity|entities) · \d+ connections/)).toBeVisible({ timeout: 15_000 })
 
-  // Trusted-input hover sweep until the entity tooltip ("N mentions · Click
-  // to pin") appears.
+  // Trusted-input hover: target the focal node directly via the coordinates
+  // the sr-only a11y tree exposes (data-x/data-y — viewport pixels relative
+  // to the canvas, from sigma.graphToViewport, refreshed on afterRender;
+  // see Atlas.tsx's useNodeViewportPositions and atlas-a11y-tree.tsx).
   const box = await canvas.boundingBox()
   if (!box) throw new Error("canvas has no bounding box")
-  // Dense grid sweep: a 2-hop neighborhood is a diffuse cloud of small
-  // nodes, so single-point probes miss; rake across the middle band.
   const tooltip = page.getByText("Click to pin")
-  let hovered = false
-  outer: for (const fy of [0.5, 0.4, 0.6, 0.3, 0.7]) {
-    for (const fx of [0.3, 0.38, 0.46, 0.54, 0.62, 0.7]) {
-      const x = box.x + box.width * fx
-      const y = box.y + box.height * fy
-      await page.mouse.move(x - 10, y, { steps: 2 })
-      await page.mouse.move(x, y, { steps: 3 })
-      try {
-        await expect(tooltip).toBeVisible({ timeout: 600 })
-        hovered = true
-        break outer
-      } catch {
-        // miss — next probe
-      }
-    }
-  }
-  expect(hovered, "hovering the neighborhood should raise the entity tooltip").toBe(true)
+  const focalListItem = page.locator('li[role="option"][aria-label*="focal entity"]')
+  await expect(focalListItem).toHaveAttribute("data-x", /^\d+$/, { timeout: 15_000 })
+  const dataX = await focalListItem.getAttribute("data-x")
+  const dataY = await focalListItem.getAttribute("data-y")
+  if (dataX === null || dataY === null) throw new Error("focal node has no viewport position yet")
+  const x = box.x + Number(dataX)
+  const y = box.y + Number(dataY)
+  await page.mouse.move(x - 10, y, { steps: 2 })
+  await page.mouse.move(x, y, { steps: 3 })
+  await expect(tooltip).toBeVisible({ timeout: 5_000 })
 
   // Lens radiogroup: activate + deactivate one analyst lens. force: the
   // agent-console footer overlay trips Playwright's hit-target check.

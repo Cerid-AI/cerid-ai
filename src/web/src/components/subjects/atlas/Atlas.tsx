@@ -231,6 +231,52 @@ function useArrivalPing(
 }
 
 // ---------------------------------------------------------------------------
+// Node viewport positions — surfaced to the sr-only a11y tree (`data-x`/
+// `data-y`) so assistive tooling, and the E2E hover probe, can target a
+// real node instead of guessing. One-directional: Atlas computes, the tree
+// only renders.
+// ---------------------------------------------------------------------------
+
+function useNodeViewportPositions(
+  sigma: AtlasSigma | null,
+  graph: AtlasGraph | null,
+): Map<string, { x: number; y: number }> {
+  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
+
+  useEffect(() => {
+    if (!sigma || !graph) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (sigma/graph identity change); behavior validated in tests
+      setPositions(new Map())
+      return
+    }
+    const s = sigma
+    const g = graph
+
+    function compute() {
+      const next = new Map<string, { x: number; y: number }>()
+      // graphToViewport normalizes RAW graph coordinates itself.
+      // getNodeDisplayData's x/y are already normalized by sigma internally
+      // (applied in place when the node enters the display cache), so
+      // feeding those back in double-normalizes and lands off the actual
+      // rendered node. Read the raw layout coordinates off the graph instead.
+      g.forEachNode((id, attrs) => {
+        next.set(id, s.graphToViewport({ x: attrs.x, y: attrs.y }))
+      })
+      setPositions(next)
+    }
+
+    s.on("afterRender", compute)
+    compute()
+
+    return () => {
+      s.off("afterRender", compute)
+    }
+  }, [sigma, graph])
+
+  return positions
+}
+
+// ---------------------------------------------------------------------------
 // Entity card (hover tooltip + click-to-pin)
 // ---------------------------------------------------------------------------
 
@@ -1311,6 +1357,9 @@ export function Atlas({
   // Arrival ping on focal node
   useArrivalPing(sigmaInstance, graphInstance, entity, arrivalPingKey)
 
+  // Per-node viewport coordinates for the sr-only a11y tree
+  const nodeViewportPositions = useNodeViewportPositions(sigmaInstance, graphInstance)
+
   const { selectedNodeId, setSelectedNodeId, onKeyDown } = useAtlasKeyboard({
     sigma: sigmaInstance,
     graph: graphInstance,
@@ -1410,6 +1459,7 @@ export function Atlas({
         selectedNodeId={selectedNodeId}
         onSelect={setSelectedNodeId}
         focalEntity={entity}
+        positions={nodeViewportPositions}
       />
 
       <AtlasContextMenu

@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-coding-retry-policy.md",
+  "expected": [
+    "Zephyr client SDK",
+    "Zephyr service",
+    "exponential backoff"
+  ],
+  "forbidden": [
+    "# zephyr client — retry & backoff policy"
+  ]
+}

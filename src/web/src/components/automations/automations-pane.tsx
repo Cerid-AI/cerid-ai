@@ -227,8 +227,9 @@ export default function AutomationsPane() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      {/* Header — app-no-drag: sits directly under the top of the window,
+          see .app-drag-region. */}
+      <div className="app-no-drag flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-teal-500" />
           <h2 className="text-sm font-semibold">Automations</h2>

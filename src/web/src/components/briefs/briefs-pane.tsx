@@ -99,7 +99,9 @@ export default function BriefsPane() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="shrink-0 border-b px-6 py-5">
+      {/* app-no-drag: this header sits directly under the top of the
+          window — see .app-drag-region. */}
+      <header className="app-no-drag shrink-0 border-b px-6 py-5">
         <h1 className="text-xl font-semibold text-foreground">Briefs</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Daily and weekly summaries, with every claim traced to a source.

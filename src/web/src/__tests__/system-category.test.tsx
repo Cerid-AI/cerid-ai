@@ -82,6 +82,18 @@ const mockSystemCheckMeasured = {
   active_profile: "cloud-first",
 }
 
+const mockSystemCheckProfilesUnmeasured = {
+  ...mockSystemCheck,
+  suggested_profile: "hybrid",
+  active_profile: "hybrid",
+}
+
+const mockSystemCheckDegraded = {
+  ...mockSystemCheckProfilesUnmeasured,
+  active_profile: "local-only",
+  configured_profile: "cloud-first",
+}
+
 const mockSystemCheckOneRateOnly = {
   ...mockSystemCheck,
   local_throughput: {
@@ -254,6 +266,54 @@ describe("SystemCategory — platform capabilities", () => {
     await screen.findAllByText("Apple M1")
     expect(screen.queryByText("Expectations")).not.toBeInTheDocument()
     expect(screen.queryByText(/tok\/s local model/)).toBeNull()
+  })
+})
+
+describe("SystemCategory — environment profile", () => {
+  it("shows the profile line when the probe never ran", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/setup/system-check")) return ok(mockSystemCheckProfilesUnmeasured)
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    expect(await screen.findByText("Environment profile")).toBeInTheDocument()
+    expect(screen.getAllByText("hybrid").length).toBeGreaterThanOrEqual(1)
+    // The throughput sub-lines stay gated on a measured probe.
+    expect(screen.queryByText("Expectations")).not.toBeInTheDocument()
+    expect(screen.queryByText(/tok\/s local model/)).toBeNull()
+  })
+
+  it("shows the profile line alongside the numbers when measured", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/setup/system-check")) return ok(mockSystemCheckMeasured)
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    expect(await screen.findByText("Environment profile")).toBeInTheDocument()
+    expect(screen.getByText(/42 tok\/s/)).toBeInTheDocument()
+    expect(screen.getByText("cloud-first")).toBeInTheDocument()
+    expect(screen.getByText("hybrid")).toBeInTheDocument()
+  })
+
+  it("names the configured profile when the active one is degraded from it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/setup/system-check")) return ok(mockSystemCheckDegraded)
+      return mockApis()(url)
+    }))
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    expect(await screen.findByText("Environment profile")).toBeInTheDocument()
+    expect(screen.getByText(/degraded from cloud-first/)).toBeInTheDocument()
+  })
+
+  it("omits the profile line when the backend reports neither profile", async () => {
+    vi.stubGlobal("fetch", mockApis())
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    await screen.findByText("Platform")
+    await screen.findAllByText("Apple M1")
+    expect(screen.queryByText("Environment profile")).not.toBeInTheDocument()
   })
 })
 

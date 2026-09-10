@@ -293,7 +293,9 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
   return (
     <div className="flex flex-col h-full">
       {/* ── Top toolbar ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 p-3 border-b bg-muted/40 flex-wrap">
+      {/* app-no-drag: sits directly under the top of the window while
+          editing — see .app-drag-region. */}
+      <div className="app-no-drag flex items-center gap-2 p-3 border-b bg-muted/40 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <X className="h-4 w-4 mr-1" /> Back
         </Button>

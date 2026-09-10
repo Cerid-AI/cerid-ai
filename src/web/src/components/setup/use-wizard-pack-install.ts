@@ -148,9 +148,9 @@ export function useWizardPackInstall(
 
         setInstalledPackId(packId)
         setIsSuccess(true)
-        // Refresh both registry cache keys used by the wizard surfaces plus
-        // the artifact lists the install just grew.
-        queryClient.invalidateQueries({ queryKey: ["knowledge-pack-registry"] })
+        // Every registry consumer caches under the ["knowledge-packs"] prefix,
+        // so one invalidation covers them all, plus the artifact lists the
+        // install just grew.
         queryClient.invalidateQueries({ queryKey: ["knowledge-packs"] })
         queryClient.invalidateQueries({ queryKey: ["artifacts"] })
         return { alreadyInstalled: start.status === "already_installed" }

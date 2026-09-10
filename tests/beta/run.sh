@@ -11,6 +11,10 @@
 #   ./tests/beta/run.sh --eval             # Evaluation & efficacy suite only
 #   ./tests/beta/run.sh --full             # All tiers + evaluation suite
 #   ./tests/beta/run.sh --eval --browser   # Eval + browser E2E
+#   ./tests/beta/run.sh --desktop          # Packaged-app first-run smoke
+#                                           # only (opt-in; not part of
+#                                           # --full — needs the app
+#                                           # installed, see desktop-smoke.sh)
 #
 # Exit codes: 0 = all P0 pass, 1 = P0 failure, 2 = run error
 
@@ -36,6 +40,8 @@ RUN_SECURITY=true
 RUN_BROWSER=true
 RUN_AUTH=false
 RUN_EVAL=false
+RUN_DESKTOP=false
+DESKTOP_ARGS=()
 STOP_AFTER=""
 
 for arg in "$@"; do
@@ -48,12 +54,21 @@ for arg in "$@"; do
     --eval) RUN_EVAL=true; RUN_SMOKE=false; RUN_FUNCTIONAL=false; RUN_INTEGRATION=false; RUN_PERFORMANCE=false; RUN_SECURITY=false; RUN_BROWSER=false ;;
     --full) RUN_EVAL=true ;;
     --browser) RUN_BROWSER=true ;;
+    --desktop) RUN_DESKTOP=true ;;
+    --reset) DESKTOP_ARGS+=("--reset") ;;
     --help|-h)
-      echo "Usage: $0 [--smoke|--functional|--skip-browser|--skip-performance|--auth|--eval|--full|--browser]"
+      echo "Usage: $0 [--smoke|--functional|--skip-browser|--skip-performance|--auth|--eval|--full|--browser|--desktop [--reset]]"
       exit 0
       ;;
   esac
 done
+
+# Opt-in and standalone: the packaged desktop app is a different target
+# entirely (a macOS install, not the Docker stack), so it never combines
+# with the other tiers — see tests/beta/desktop-smoke.sh.
+if $RUN_DESKTOP; then
+  exec bash "${SCRIPT_DIR}/desktop-smoke.sh" "${DESKTOP_ARGS[@]}"
+fi
 
 # ─────────────────────────────────────────────────
 # Docker-network resolution + MCP reachability (shared by container tiers)
@@ -441,8 +456,12 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
       > "${SCRIPT_DIR}/eval/reports/entity-recall.log" 2>&1; then
     report_text "\n> Entity-extraction recall: all annotated fixtures at or above the floor.\n"
   else
+    recall_actual=$(grep -F "[FAIL]" "${SCRIPT_DIR}/eval/reports/entity-recall.log" | paste -sd '; ' -)
+    [[ -z "$recall_actual" ]] && recall_actual="entity_recall_runner exited non-zero; see eval/reports/entity-recall.log"
     report_issue "medium" "entity_recall" "eval" "EV-RECALL" "quality" \
-      "Entity-extraction recall below floor or forbidden junk extracted; see eval/reports/entity-recall.log"
+      "Entity-extraction recall below floor or forbidden junk extracted; see eval/reports/entity-recall.log" \
+      "every annotated fixture at or above RECALL_FLOOR with no forbidden hits" \
+      "$recall_actual"
     EVAL_EXIT=1
   fi
 

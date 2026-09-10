@@ -184,11 +184,12 @@ export function SamplePackTab({ onComplete }: SamplePackTabProps) {
 
   const { install, isPending, isSuccess, error, installedPackId, reset } = useWizardPackInstall()
 
-  // Fetch the catalog; re-use the same cache key as the KB-admin pane.
+  // Fetch the catalog; re-use the same cache key as the KB-admin pane, so a
+  // ["knowledge-packs"] invalidation from any surface reaches this tab too.
   // While the registry reports an in-flight install (this tab's or another
   // surface's), poll ~2s so the card flags track the async job.
   const { data: registry, isLoading: catalogLoading, isError: catalogError } = useQuery({
-    queryKey: ["knowledge-pack-registry"],
+    queryKey: ["knowledge-packs", "registry"],
     queryFn: fetchKnowledgePackRegistry,
     staleTime: 60_000,
     refetchInterval: (query) => (registryHasInstalling(query.state.data) ? 2000 : false),

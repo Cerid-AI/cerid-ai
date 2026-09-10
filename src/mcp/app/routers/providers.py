@@ -358,6 +358,7 @@ async def get_ollama_recommendations():
         "ram_gb": hw.ram_gb,
         "cpu": hw.cpu,
         "gpu": hw.gpu,
+        "gpu_type": hw.gpu_type,
         "platform": hw.os,
     }
 

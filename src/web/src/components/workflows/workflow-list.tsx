@@ -206,8 +206,10 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border">
+      {/* Header — app-no-drag: this is the Workflows pane's default (list)
+          view and its header sits directly under the top of the window,
+          see .app-drag-region. */}
+      <div className="app-no-drag flex items-center justify-between p-3 border-b border-border">
         <h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <GitBranch className="h-4 w-4 text-teal-400" />
           Workflows

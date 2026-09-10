@@ -48,6 +48,7 @@ vi.mock("@/lib/api", () => ({
     candidate_upgrades: {},
     catalog_size: 0,
   }),
+  fetchOllamaRecommendations: vi.fn().mockResolvedValue({ hardware: null, models: [] }),
   uploadFile: vi.fn(),
   queryKB: vi.fn(),
   pullOllamaModel: vi.fn(),
@@ -64,7 +65,7 @@ vi.mock("@/hooks/use-drag-drop", () => ({
 }))
 
 import { SetupWizard } from "@/components/setup/setup-wizard"
-import { fetchSetupStatus } from "@/lib/api"
+import { fetchSetupStatus, fetchSystemCheck } from "@/lib/api"
 import { applySetupConfiguration, completeOnboarding } from "@/lib/api/setup"
 
 const noop = () => {}
@@ -198,6 +199,113 @@ describe("SetupWizard — already-configured Apply guard", () => {
       expect(applySetupConfiguration).toHaveBeenCalledWith(expect.anything(), { force: false }),
     )
     expect(screen.queryByText(/overwrite settings\?/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("SetupWizard — Apply button provider gating (Task B3)", () => {
+  // Resume only jumps `state.step`; it does not restore keys/ollama from the
+  // persisted record (those come back from the mocked fetchSetupStatus below
+  // via the mount-time provider_status effect), so no-key-valid coverage can
+  // reuse the plain resume-to-step-4 helper.
+  function seedResumeAtApplyStep() {
+    localStorage.setItem(
+      "cerid-setup-progress",
+      JSON.stringify({
+        version: 5,
+        step: 4,
+        skippedSteps: [],
+        kbConfig: { archivePath: "~/cerid-archive", domains: ["general"], lightweightMode: false, watchFolder: false },
+        ollama: { detected: false, enabled: false, model: null, pulling: false },
+        selectedMode: "simple",
+        selectedBackend: null,
+        applied: false,
+        ts: Date.now(),
+      }),
+    )
+  }
+
+  async function renderAtApplyStep() {
+    seedResumeAtApplyStep()
+    renderWizard()
+    fireEvent.click(await screen.findByRole("button", { name: /resume/i }))
+    await screen.findByText(/Review & Apply/i)
+    await waitFor(() => expect(fetchSetupStatus).toHaveBeenCalled())
+  }
+
+  it("enables Apply when only the Anthropic key is valid", async () => {
+    vi.mocked(fetchSetupStatus).mockResolvedValue({
+      configured: false,
+      setup_required: true,
+      missing_keys: ["OPENROUTER_API_KEY"],
+      optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
+      configured_providers: ["anthropic"],
+      provider_status: {
+        anthropic: { configured: true, key_env_var: "ANTHROPIC_API_KEY", key_present: true },
+      },
+    })
+    await renderAtApplyStep()
+
+    expect(screen.getByRole("button", { name: /apply configuration/i })).toBeEnabled()
+    expect(
+      screen.queryByText(/add a valid provider key or enable local inference to apply/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it("disables Apply and shows the missing-condition sentence when nothing is valid", async () => {
+    vi.mocked(fetchSetupStatus).mockResolvedValue({
+      configured: false,
+      setup_required: true,
+      missing_keys: ["OPENROUTER_API_KEY"],
+      optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
+      configured_providers: [],
+    })
+    await renderAtApplyStep()
+
+    expect(screen.getByRole("button", { name: /apply configuration/i })).toBeDisabled()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Add a valid provider key or enable local inference to apply.",
+    )
+  })
+
+  it("enables Apply when local inference is enabled and no provider key is valid", async () => {
+    vi.mocked(fetchSetupStatus).mockResolvedValue({
+      configured: false,
+      setup_required: true,
+      missing_keys: ["OPENROUTER_API_KEY"],
+      optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
+      configured_providers: [],
+    })
+    // Ollama only auto-enables via the Welcome step's system check, which
+    // resume-to-step-4 skips — drive the real navigation instead so
+    // canProceedFromKeys picks up state.ollama.enabled from SET_SYSTEM_CHECK.
+    vi.mocked(fetchSystemCheck).mockResolvedValue({
+      ram_gb: 16,
+      docker_running: true,
+      env_exists: true,
+      env_keys_present: [],
+      ollama_detected: true,
+      ollama_url: "http://localhost:11434",
+      ollama_models: ["llama3.1-8b"],
+      lightweight_recommended: false,
+      archive_path_exists: false,
+      default_archive_path: "~/cerid-archive",
+      os: "darwin",
+      cpu: "Apple M1",
+      cpu_cores: 8,
+      gpu: "Apple M1 GPU",
+      gpu_acceleration: "metal",
+    })
+    renderWizard()
+    await screen.findByTestId("model-compat-compact")
+
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /next/i })) // Keys -> Storage
+    fireEvent.click(screen.getByRole("button", { name: /next/i })) // Storage -> Local LLM
+    fireEvent.click(screen.getByRole("button", { name: /next/i })) // Local LLM -> Review & Apply
+    await screen.findByText(/Review & Apply/i)
+
+    expect(screen.getByRole("button", { name: /apply configuration/i })).toBeEnabled()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 })
 

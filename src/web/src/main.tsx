@@ -38,7 +38,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
-      <Toaster richColors closeButton position="top-right" />
+      {/* offset="36px" — clears the 28px drag band so toasts and their
+          close button don't start inside it (see .app-drag-region). */}
+      <Toaster richColors closeButton position="top-right" offset="36px" />
     </QueryClientProvider>
   </StrictMode>
 )

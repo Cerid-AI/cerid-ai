@@ -574,7 +574,9 @@ export default function SettingsPane() {
 
 function Header({ mode }: { mode: SettingsMode }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+    // app-no-drag: rendered in every load state (loading/error/ready) and
+    // sits directly under the top of the window — see .app-drag-region.
+    <div className="app-no-drag flex items-center justify-between gap-3 border-b px-4 py-3">
       <div>
         <div className="flex items-center gap-2">
           <Settings className="h-4 w-4 text-muted-foreground" aria-hidden="true" />

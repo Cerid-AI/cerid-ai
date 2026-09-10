@@ -205,7 +205,13 @@ export function StatusBar({
         {health?.pipeline_providers && (() => {
           const localCount = Object.values(health.pipeline_providers).filter(isLocalProvider).length
           const totalStages = Object.values(health.pipeline_providers).length
-          const localLabel = health.internal_llm_provider === "quenchforge" ? "Quenchforge" : "Ollama"
+          // Name the backend actually serving these stages. Falling back to
+          // "Ollama" whenever internal_llm_provider was absent is how a
+          // quenchforge host came to report "Ollama: active".
+          const localProvider =
+            (isLocalProvider(health.internal_llm_provider) ? health.internal_llm_provider : undefined)
+            ?? Object.values(health.pipeline_providers).find(isLocalProvider)
+          const localLabel = localProvider === "quenchforge" ? "Quenchforge" : "Ollama"
           if (localCount > 0) {
             return (
               <Tooltip>

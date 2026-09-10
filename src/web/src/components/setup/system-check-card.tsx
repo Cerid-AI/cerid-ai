@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink, Monitor, Cpu, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchSystemCheck } from "@/lib/api"
 import { SystemCheckHttpError } from "@/lib/api/settings"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import type { SystemCheckResponse } from "@/lib/types"
+import { getDockerBridge, type DockerBridgeStatus } from "@/lib/cerid-bridge"
 
 // Slice of the desktop preload bridge this card uses (full shape lives in
 // packages/desktop/src/preload/preload.ts). Probed feature-by-feature so a
@@ -100,7 +101,14 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
   const [retrying, setRetrying] = useState(false)
   const [dockerMissing, setDockerMissing] = useState(false)
   const [dockerDownloadUrl, setDockerDownloadUrl] = useState(DOCKER_DESKTOP_FALLBACK_URL)
+  // B5: inside the desktop app the bridge answers even when the stack is
+  // down, so it — not the REST poll — decides whether we can offer to start
+  // Docker or the stack. Null means "no bridge / not asked yet".
+  const [dockerBridgeStatus, setDockerBridgeStatus] = useState<DockerBridgeStatus | null>(null)
+  const [starting, setStarting] = useState<"desktop" | "stack" | null>(null)
+  const [startError, setStartError] = useState<string | null>(null)
   const succeededRef = useRef(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // RA-02: on desktop, RAM comes from the local bridge before (and without)
   // the REST poll — a fresh Mac with no Docker installed otherwise shows an
@@ -121,7 +129,22 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
         if (!cancelled && url) setDockerDownloadUrl(url)
       })
       .catch((err) => logSwallowedError(err, "cerid.docker.downloadUrl"))
+    // An older packaged shell may expose only part of the docker bridge, so
+    // probe the method rather than assuming the whole surface is there.
+    const dockerBridge = getDockerBridge()
+    if (typeof dockerBridge?.status === "function") {
+      dockerBridge.status()
+        .then((status) => {
+          if (!cancelled) setDockerBridgeStatus(status)
+        })
+        .catch((err) => logSwallowedError(err, "cerid.docker.status"))
+    }
     return () => { cancelled = true }
+  }, [])
+
+  // Stop polling if the step unmounts mid-launch.
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
   }, [])
 
   useEffect(() => {
@@ -206,6 +229,80 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
     }
   }, [onCheckComplete])
 
+  // Docker Desktop can take a while to hand us a live daemon. Poll the bridge
+  // rather than making the user guess when to press Retry. Bounded at 90s;
+  // this is a launch wait, not a timeout that gates correctness.
+  const pollForDockerDaemon = useCallback((deadline: number) => {
+    const docker = getDockerBridge()
+    if (!docker) return
+    const timer = setInterval(() => {
+      docker.status()
+        .then((status) => {
+          setDockerBridgeStatus(status)
+          if (status.running || Date.now() >= deadline) {
+            clearInterval(timer)
+            setStarting(null)
+          }
+        })
+        .catch((err) => {
+          clearInterval(timer)
+          logSwallowedError(err, "cerid.docker.status")
+          setStarting(null)
+        })
+    }, 3000)
+    pollRef.current = timer
+  }, [])
+
+  const handleStartDockerDesktop = useCallback(async () => {
+    const docker = getDockerBridge()
+    if (!docker) return
+    setStartError(null)
+    setStarting("desktop")
+    try {
+      const result = await docker.startDesktop()
+      if (!result.success) {
+        // Verbatim: the main process explains CERID_REPO_ROOT here, and
+        // paraphrasing it would cost the user the one actionable detail.
+        setStartError(result.error ?? "Could not start Docker Desktop.")
+        setStarting(null)
+        return
+      }
+      pollForDockerDaemon(Date.now() + 90_000)
+    } catch (err) {
+      logSwallowedError(err, "cerid.docker.startDesktop")
+      setStartError(err instanceof Error ? err.message : String(err))
+      setStarting(null)
+    }
+  }, [pollForDockerDaemon])
+
+  const handleStartStack = useCallback(async () => {
+    const docker = getDockerBridge()
+    if (!docker) return
+    setStartError(null)
+    setStarting("stack")
+    try {
+      const result = await docker.start()
+      if (!result.success) {
+        setStartError(result.error ?? "Could not start Cerid services.")
+        setStarting(null)
+        return
+      }
+      const status = await docker.status()
+      setDockerBridgeStatus(status)
+    } catch (err) {
+      logSwallowedError(err, "cerid.docker.start")
+      setStartError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStarting(null)
+    }
+  }, [])
+
+  const canStartDockerDesktop = dockerBridgeStatus !== null && !dockerBridgeStatus.running
+  const canStartStack =
+    dockerBridgeStatus !== null &&
+    dockerBridgeStatus.running &&
+    !dockerBridgeStatus.containers.some((c) => c.state === "running")
+
   return (
     <div className="mt-4 rounded-lg border bg-card">
       <div className="border-b px-3 py-2">
@@ -274,6 +371,25 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-label-xs">./scripts/start-cerid.sh</code>
             </p>
           )}
+        </div>
+      )}
+      {(canStartDockerDesktop || canStartStack) && (
+        <div className="border-t px-3 py-2.5">
+          <button
+            type="button"
+            onClick={canStartDockerDesktop ? handleStartDockerDesktop : handleStartStack}
+            disabled={starting !== null}
+            className="inline-flex items-center gap-1.5 rounded-md border border-brand/40 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-60"
+          >
+            {starting !== null && <Loader2 className="h-3 w-3 animate-spin" />}
+            {canStartDockerDesktop ? "Start Docker Desktop" : "Start Cerid services"}
+          </button>
+          {starting === "desktop" && (
+            <p className="mt-1 text-label-xs text-muted-foreground" role="status">
+              Waiting for the Docker daemon...
+            </p>
+          )}
+          {startError && <p className="mt-1 text-label-xs text-destructive">{startError}</p>}
         </div>
       )}
       {dockerMissing && (

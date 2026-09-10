@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from app.deps import get_chroma, get_neo4j, get_redis
 from config.constants import HEALTH_STATUS_CACHE_TTL_S
+from core.routing.provider_state import active_provider as _active_provider
 from core.utils.internal_llm import effective_local_model
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
@@ -278,6 +279,10 @@ def health_check() -> dict:
         "embedding_cache": embedding_cache_stats,
         "wiki_freshness": wiki_health,
         "knowledge_packs": knowledge_packs_health,
+        # Which backend serves the internal LLM. Read through the one runtime
+        # authority so a quenchforge host is not reported (or labelled in the
+        # status strip) as Ollama, and so a runtime switch needs no restart.
+        "internal_llm_provider": _active_provider(),
     }
     result["encryption"] = {
         # get_encryptor() reflects whether encryption is actually operational —
@@ -980,6 +985,16 @@ _health_payload_cache = CachedPayload(
     empty={"services": {}, "invariants": {}},
     error_tag="app.routers.health.refresh_health_cache",
 )
+
+
+def is_ready() -> bool:
+    """Whether the app has finished its lifespan boot sequence.
+
+    ``_health_payload_cache.updated_at`` stays ``0.0`` until the /health
+    pre-warm in the lifespan (``app/main.py``) completes its first build —
+    reused here rather than adding a separate readiness flag.
+    """
+    return _health_payload_cache.updated_at > 0
 
 
 @router.get("/health")

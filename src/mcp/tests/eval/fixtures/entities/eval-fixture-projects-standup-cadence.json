@@ -1,0 +1,10 @@
+{
+  "fixture": "eval-fixture-projects-standup-cadence.md",
+  "expected": [
+    "Team Cadence",
+    "morning"
+  ],
+  "forbidden": [
+    "# team cadence — daily standup"
+  ]
+}

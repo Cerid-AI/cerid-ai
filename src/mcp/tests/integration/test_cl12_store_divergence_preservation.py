@@ -25,6 +25,7 @@ drives an EXISTING entry point and inspects stores DIRECTLY.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -247,6 +248,14 @@ def test_probe2_cache_residual_after_delete(tmp_path, monkeypatch):
     apply_retention_plan(
         driver, RetentionDecision(source_id="src-1", purge=[artifact_id], keep_count=0)
     )
+    # The coordinator busts the caches on a fire-and-forget daemon thread
+    # (utils.query_cache.invalidate_query_caches_threaded). Asserting straight
+    # away races that thread: it won on a warm interpreter and lost under CI's
+    # coverage instrumentation, which is how this probe went red on main
+    # (run 34426152132) with no product change. Wait for it before looking.
+    for thread in threading.enumerate():
+        if thread.name.startswith("qcache-invalidate:"):
+            thread.join(timeout=10)
 
     survivors = fake_redis.keys("qcache:*") + fake_redis.keys("semcache:*")
     assert survivors == [], (

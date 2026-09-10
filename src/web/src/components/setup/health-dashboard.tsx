@@ -45,6 +45,8 @@ function statusBadge(status: string, serviceName?: string) {
       return <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400" aria-label={label}>Healthy</Badge>
     case "degraded":
       return <Badge variant="outline" className="border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" aria-label={label}>Degraded</Badge>
+    case "starting":
+      return <Badge variant="outline" className="border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400" aria-label={label}><Loader2 className="h-2.5 w-2.5 animate-spin" />Starting…</Badge>
     default:
       return <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive" aria-label={label}>Offline</Badge>
   }
@@ -66,7 +68,7 @@ function ServiceRow({
   const meta = SERVICE_META[svc.name] ?? { label: svc.name, port: 0, description: "", category: "optional" as ServiceCategory }
   const isLightweightNeo4j = lightweightMode && svc.name === "neo4j"
   const isOptional = meta.optional ?? false
-  const isOffline = svc.status !== "healthy" && svc.status !== "connected" && svc.status !== "degraded"
+  const isOffline = svc.status !== "healthy" && svc.status !== "connected" && svc.status !== "degraded" && svc.status !== "starting"
 
   return (
     <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">

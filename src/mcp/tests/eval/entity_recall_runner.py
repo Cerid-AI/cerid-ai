@@ -14,9 +14,46 @@ FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 RECALL_FLOOR = 0.8
 MAX_CHARS = 8000
 
+# Fixtures deliberately excluded from the recall check, mapped to why: every
+# other file in fixtures/*.md must carry an entities/*.json annotation, or
+# test_every_fixture_is_scored_or_excluded fails.
+UNANNOTATED: dict[str, str] = {
+    "eval-fixture-notes-coffee-recipe.md": (
+        "recipe prose carries no named entities beyond the sentinel fact; 3B "
+        "returns only the spurious literal 'Sentinel fact', 7B returns bare "
+        "quantity phrases — no name either model recalls stably"
+    ),
+    "eval-fixture-notes-tea-recipe.md": (
+        "recipe prose carries no named entities beyond the sentinel fact; 3B "
+        "returns nothing, 7B returns bare quantity/prose fragments — no name "
+        "either model recalls stably"
+    ),
+    "eval-fixture-coding-deploy-pipeline.md": (
+        "3B silently returns [] — a chunk's JSON response comes back malformed "
+        "(JSONDecodeError: Expecting value: line 49 column 17) and the parse "
+        "failure is swallowed; tracked as a product defect in tasks/todo.md, "
+        "not pruned as an unstable annotation"
+    ),
+}
+
+
+def fixture_files() -> list[pathlib.Path]:
+    return sorted(p for p in FIXTURES.glob("*.md") if p.name != "README.md")
+
 
 def annotation_files() -> list[pathlib.Path]:
     return sorted((FIXTURES / "entities").glob("*.json"))
+
+
+def annotated_fixture_names() -> set[str]:
+    return {json.loads(p.read_text())["fixture"] for p in annotation_files()}
+
+
+def uncovered_fixtures() -> set[str]:
+    """Fixture filenames with neither an annotation nor an UNANNOTATED reason."""
+    all_names = {p.name for p in fixture_files()}
+    covered = annotated_fixture_names() | set(UNANNOTATED)
+    return all_names - covered
 
 
 def score(names: set[str], spec: dict) -> tuple[float, list[str]]:

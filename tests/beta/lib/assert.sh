@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+# Compose project — derived from the main checkout's directory name via
+# `git rev-parse --git-common-dir`, not the caller's cwd, so every
+# `docker compose` call below targets the shared running stack even when
+# this script is sourced from a worktree (whose basename compose would
+# otherwise default to).
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$(cd "$(git rev-parse --git-common-dir)/.." && pwd)")}"
+
 # Results file — set by caller or default
 RESULTS_FILE="${RESULTS_FILE:-/tmp/beta-test-results.txt}"
 

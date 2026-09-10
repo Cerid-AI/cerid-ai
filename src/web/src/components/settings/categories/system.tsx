@@ -199,6 +199,14 @@ function PlatformSection() {
   const measured = isLocalThroughputMeasured(throughput)
   const expectations = measured ? throughput.expectations : null
   const expectationsDef = getDef("system.capabilities.expectations")!
+  // The backend resolves both profiles at startup regardless of whether the
+  // throughput probe ever ran, so this line must not hide behind `measured`.
+  const profileDef = getDef("system.capabilities.profile")!
+  const hasProfile = Boolean(data.active_profile || data.suggested_profile)
+  const degradedFrom =
+    data.configured_profile && data.configured_profile !== data.active_profile
+      ? data.configured_profile
+      : null
 
   return (
     <SectionCard title="Platform">
@@ -223,16 +231,23 @@ function PlatformSection() {
           </Tooltip>
         ))}
       </div>
+      {hasProfile && (
+        <SettingRow def={profileDef}>
+          <div className="text-right text-label-xs text-muted-foreground">
+            <p>
+              Active: <span className="font-mono">{data.active_profile || "none"}</span>
+              {degradedFrom && <span className="font-mono"> (degraded from {degradedFrom})</span>}
+              {" · "}Suggested: <span className="font-mono">{data.suggested_profile ?? "—"}</span>
+            </p>
+          </div>
+        </SettingRow>
+      )}
       {measured && expectations && (
         <SettingRow def={expectationsDef}>
           <div className="text-right text-label-xs text-muted-foreground">
             <p>{Math.round(throughput.gen_tok_s ?? 0)} tok/s local model</p>
             <p>{Math.round(expectations.entity_extraction.seconds ?? 0)}s background enrichment / document</p>
             <p>{expectations.memory_extract.seconds ?? 0}s memory extraction / chat turn</p>
-            <p>
-              Active: <span className="font-mono">{data.active_profile || "none"}</span> · Suggested:{" "}
-              <span className="font-mono">{data.suggested_profile ?? "—"}</span>
-            </p>
           </div>
         </SettingRow>
       )}

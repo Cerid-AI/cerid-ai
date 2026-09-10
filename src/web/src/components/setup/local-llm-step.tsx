@@ -10,7 +10,7 @@ import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive, Copy, Zap
 import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
 import { isModelInstalled } from "@/lib/model-alias"
 import { isLocalThroughputMeasured } from "@/lib/types"
-import type { EnvironmentProfile, LocalThroughput, RecommendedLocalBackend } from "@/lib/types"
+import type { EnvironmentProfile, GpuType, LocalThroughput, RecommendedLocalBackend } from "@/lib/types"
 
 interface OllamaState {
   detected: boolean
@@ -61,10 +61,19 @@ function buildMeasuredLine(
 const RECOMMENDED_MODEL = "llama3.2:3b"
 const RECOMMENDED_MODEL_SIZE = "2.0 GB"
 
+// llama3.2:3b crashes the AMD-Mac Metal chat slot with
+// `GGML_ASSERT(buf_dst) failed` under quenchforge (CLAUDE.md); llama3.1:8b
+// runs stably there, so it's recommended instead on that hardware class.
+const AMD_MAC_RECOMMENDED_MODEL = "llama3.1:8b"
+const AMD_MAC_RECOMMENDED_MODEL_SIZE = "4.7 GB"
+const AMD_MAC_RECOMMENDED_REASON =
+  "llama3.2:3b crashes AMD-Mac Metal's chat slot (GGML_ASSERT(buf_dst)) — llama3.1:8b runs stably here."
+
 interface HardwareInfo {
   ram_gb: number
   cpu: string
   gpu: string
+  gpu_type?: GpuType
 }
 
 interface ModelRecommendation {
@@ -355,6 +364,7 @@ function OllamaBackendStep({
   const [pullProgress, setPullProgress] = useState<string | null>(null)
   const [pullError, setPullError] = useState<string | null>(null)
   const [hardware, setHardware] = useState<HardwareInfo | null>(null)
+  const [hardwareFetchFailed, setHardwareFetchFailed] = useState(false)
   const [modelRecs, setModelRecs] = useState<ModelRecommendation[]>([])
 
   useEffect(() => {
@@ -365,9 +375,13 @@ function OllamaBackendStep({
         if (data?.models) setModelRecs(data.models)
       })
       .catch(() => {
-        /* non-critical */
+        setHardwareFetchFailed(true)
       })
   }, [ollamaDetected])
+
+  const isAmdMac = hardware?.gpu_type === "amd-mac"
+  const recommendedModel = isAmdMac ? AMD_MAC_RECOMMENDED_MODEL : RECOMMENDED_MODEL
+  const recommendedModelSize = isAmdMac ? AMD_MAC_RECOMMENDED_MODEL_SIZE : RECOMMENDED_MODEL_SIZE
 
   const handlePull = useCallback(async () => {
     onChange({ ...state, pulling: true })
@@ -375,8 +389,8 @@ function OllamaBackendStep({
     setPullProgress("Starting download...")
 
     try {
-      await pullOllamaModel(RECOMMENDED_MODEL)
-      onChange({ ...state, pulling: false, model: RECOMMENDED_MODEL })
+      await pullOllamaModel(recommendedModel)
+      onChange({ ...state, pulling: false, model: recommendedModel })
       setPullProgress(null)
     } catch (err) {
       setPullError(
@@ -387,10 +401,10 @@ function OllamaBackendStep({
       onChange({ ...state, pulling: false })
       setPullProgress(null)
     }
-  }, [state, onChange])
+  }, [state, onChange, recommendedModel])
 
   const hasRecommendedModel = ollamaModels.some(
-    (m) => m === RECOMMENDED_MODEL || m.startsWith("llama3.2"),
+    (m) => m === recommendedModel || m.startsWith(isAmdMac ? "llama3.1" : "llama3.2"),
   )
 
   // CPU-only warning: was previously firing whenever the GPU string didn't
@@ -467,6 +481,11 @@ function OllamaBackendStep({
                 )}
               </div>
             )}
+            {!hardware && hardwareFetchFailed && (
+              <p className="text-center text-label-xxs text-muted-foreground">
+                Hardware not detected — start the server to see recommendations
+              </p>
+            )}
 
             {/* Model recommendations (dynamic from backend) */}
             {modelRecs.length > 0 && (
@@ -526,10 +545,13 @@ function OllamaBackendStep({
               <div className="rounded-lg border bg-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-medium">{RECOMMENDED_MODEL}</p>
+                    <p className="text-xs font-medium">{recommendedModel}</p>
                     <p className="text-label-xs text-muted-foreground">
-                      {RECOMMENDED_MODEL_SIZE} &mdash; best balance of speed and quality for pipeline tasks
+                      {recommendedModelSize} &mdash; best balance of speed and quality for pipeline tasks
                     </p>
+                    {isAmdMac && (
+                      <p className="mt-0.5 text-label-xxs text-muted-foreground/80">{AMD_MAC_RECOMMENDED_REASON}</p>
+                    )}
                   </div>
                   <Button size="sm" variant="outline" onClick={handlePull} disabled={state.pulling} className="shrink-0">
                     {state.pulling ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Download className="mr-1 h-3 w-3" />}

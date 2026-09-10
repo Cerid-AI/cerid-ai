@@ -1,0 +1,10 @@
+{
+  "fixture": "eval-fixture-projects-atlas-roadmap.md",
+  "expected": [
+    "Atlas",
+    "Dana Okafor"
+  ],
+  "forbidden": [
+    "# project atlas — roadmap"
+  ]
+}

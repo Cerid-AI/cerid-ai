@@ -375,6 +375,36 @@ def _is_punctuation_only(name: str) -> bool:
     return not any(ch.isalnum() for ch in name)
 
 
+_ALL_DIGITS_RE = re.compile(r"^[\d.,/\-:\s]+$")
+
+# "2025-11-03" / "2025/11/03": a full numeric calendar date carries actual
+# date content (year + month + day), same as "March 10, 2025" — unlike a
+# lone "2025", it is excluded from the bare-digit-sequence gate below and
+# left to the DATE-content check.
+_FULL_DATE_DIGITS_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
+
+# "192.168.1.1", "10.0.0.0/24", "3.12.1": three or more dot-separated digit
+# groups, with an optional CIDR suffix, are IP- or version-shaped and are
+# real entities in a network note — unlike a bare decimal ("3.14", one dot)
+# or a slash-date ("12/31", no dot), which stay rejected below.
+_DOTTED_MULTISEGMENT_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){2,}(?:/\d{1,2})?$")
+
+
+def _is_bare_digit_sequence(name: str) -> bool:
+    """True for a name made only of digits and ``. , / - :`` separators.
+
+    A bare year, decimal, or fragment ("2025", "3.14", "12/31", "1,000")
+    is never a proper noun regardless of what type the model reported it
+    as — unlike :func:`_is_bare_quantity`, which only rejects a number
+    when it carries a trailing unit word.
+    """
+    if not any(ch.isdigit() for ch in name) or not _ALL_DIGITS_RE.match(name):
+        return False
+    if _FULL_DATE_DIGITS_RE.match(name):
+        return False
+    return not _DOTTED_MULTISEGMENT_RE.match(name)
+
+
 def _has_date_content(name: str) -> bool:
     """True when the name contains a year, month, weekday, or relative-date word."""
     if _YEAR_RE.search(name):
@@ -386,14 +416,42 @@ def _has_date_content(name: str) -> bool:
     )
 
 
+# A sentence copied whole into the name field ("guest ssid is rate-limited
+# to 25 mbps.") reads nothing like a proper noun regardless of type; a real
+# multi-word name ("Q3 2025 roadmap", "IoT VLAN") never hits 7 words and
+# never carries a clause break or trailing period.
+_MAX_NAME_WORDS = 7
+# An opening and a closing quote with nothing between them is the shortest
+# string that can carry a wrapping pair.
+_MIN_QUOTED_LEN = 2
+_SENTENCE_BREAK_RE = re.compile(r"\w[.:;] \w")
+
+
+def _is_sentence_like(name: str) -> bool:
+    """True for a name shaped like a sentence or clause, not a proper noun.
+
+    Any of: 7+ words, a ``". "``/``": "``/``"; "`` break between words, or a
+    trailing period that isn't a corporate-suffix abbreviation ("Apple
+    Inc."). "San Marzano", "April 20, 2025", "Q3 2025 roadmap" and "IoT
+    VLAN" all clear every one of these.
+    """
+    if len(name.split()) >= _MAX_NAME_WORDS:
+        return True
+    if _SENTENCE_BREAK_RE.search(name):
+        return True
+    return name.endswith(".") and not _LEGAL_SUFFIX_RE.search(name)
+
+
 def is_junk_quantity_name(name: str, entity_type: str) -> bool:
     """Type-aware sibling to :func:`is_junk_entity_name`.
 
     Rejects bare quantities ("900 seconds", "75°C"), names that are only
     punctuation or a leaked markdown heading marker ("# Project Orion"),
-    and DATE-typed names with no actual date content ("5 retries",
-    "9:30am"). Called from :func:`_normalise_entities` once the type has
-    been validated.
+    bare digit sequences regardless of reported type ("2025", "3.14"),
+    sentence-shaped names ("guest ssid is rate-limited to 25 mbps.")
+    unless they carry real date content, and DATE-typed names with no
+    actual date content ("5 retries", "9:30am"). Called from
+    :func:`_normalise_entities` once the type has been validated.
     """
     stripped = name.strip()
     if not stripped:
@@ -402,7 +460,11 @@ def is_junk_quantity_name(name: str, entity_type: str) -> bool:
         return True
     if _is_punctuation_only(stripped):
         return True
+    if _is_bare_digit_sequence(stripped):
+        return True
     if _is_bare_quantity(stripped):
+        return True
+    if _is_sentence_like(stripped) and not _has_date_content(stripped):
         return True
     return entity_type == "DATE" and not _has_date_content(stripped)
 
@@ -677,6 +739,31 @@ def _drop_example_row_persons(entities: list[Entity], text: str) -> list[Entity]
     return kept
 
 
+_WRAPPING_QUOTE_PAIRS: tuple[tuple[str, str], ...] = (
+    ('"', '"'),
+    ("'", "'"),
+    ("“", "”"),
+)
+
+
+def _strip_wrapping_artifacts(name: str) -> str:
+    """Strip one layer of wrapping quotes and a trailing ``,``/``;``.
+
+    A model emitting broken JSON sometimes leaves its quoting inside the
+    string value itself (live 3B extraction: the ``name`` field decoded to
+    ``"vlan 20"`` and ``"...25 mbps.",`` — quote characters and a trailing
+    comma as literal content). The trailing punctuation is stripped first
+    so a wrapping quote pushed outward by it (``..."`,``) is still caught.
+    """
+    stripped = name.strip().rstrip(",;").strip()
+    if len(stripped) >= _MIN_QUOTED_LEN:
+        for open_q, close_q in _WRAPPING_QUOTE_PAIRS:
+            if stripped[0] == open_q and stripped[-1] == close_q:
+                stripped = stripped[1:-1].strip()
+                break
+    return stripped.rstrip(",;").strip()
+
+
 def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable[Entity]:
     """Apply schema validation, type-vocab filter, canonicalisation, dedup.
 
@@ -704,7 +791,7 @@ def _normalise_entities(parsed: Any, *, min_confidence: float = 0.0) -> Iterable
     for raw in raw_list:
         if not isinstance(raw, dict):
             continue
-        name = (raw.get("name") or "").strip()
+        name = _strip_wrapping_artifacts((raw.get("name") or "").strip())
         if not name:
             continue
         if is_junk_entity_name(name):

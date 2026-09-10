@@ -60,16 +60,26 @@ test("E-06 settings — SEXTANT shell: categories, mode toggle, search reveal, w
   await expect(main.getByText("CHUNK_MAX_TOKENS").first()).toBeVisible({ timeout: 10_000 })
 
   // Backend write round-trip: flip Self-RAG off, reload, confirm the server
-  // kept it, then restore. The switch is server-bound (checked reflects the
-  // persisted setting, not an optimistic flip), so the aria-checked change only
-  // lands after the PATCH + settings refetch — give it a load-tolerant window
-  // (the full suite can have the backend busy from the ingest/atlas tiers).
+  // kept it, then restore. The switch's checked state is an optimistic local
+  // update (settings-pane.tsx patch()) applied before the PATCH lands, so
+  // asserting aria-checked right after the click proves nothing about the
+  // server — reload immediately after can race (or outright cancel) the
+  // in-flight PATCH. Wait for the PATCH /settings response itself before
+  // reloading, so the reload's refetch is guaranteed to see the write.
+  const settingsPatch = () =>
+    page.waitForResponse(
+      (r) => r.request().method() === "PATCH" && /\/settings(\?|$)/.test(new URL(r.url()).pathname),
+      { timeout: 20_000 },
+    )
+
   await catNav.getByRole("button", { name: /^Retrieval & Answers/ }).click()
   const selfRag = main.getByRole("switch", { name: "Self-RAG validation" })
   await expect(selfRag).toBeVisible({ timeout: 15_000 })
   const initial = await selfRag.getAttribute("aria-checked")
-  await selfRag.click()
   const flipped = initial === "true" ? "false" : "true"
+  const flipPatch = settingsPatch()
+  await selfRag.click()
+  await flipPatch
   await expect(selfRag).toHaveAttribute("aria-checked", flipped, { timeout: 20_000 })
 
   await page.reload()
@@ -80,7 +90,9 @@ test("E-06 settings — SEXTANT shell: categories, mode toggle, search reveal, w
   const selfRag2 = main2.getByRole("switch", { name: "Self-RAG validation" })
   await expect(selfRag2).toBeVisible({ timeout: 15_000 })
   await expect(selfRag2).toHaveAttribute("aria-checked", flipped, { timeout: 20_000 })
+  const restorePatch = settingsPatch()
   await selfRag2.click()
+  await restorePatch
   await expect(selfRag2).toHaveAttribute("aria-checked", initial!, { timeout: 20_000 })
 
   // Privacy: canonical L0–L4 contract (same scale as the chat toolbar).

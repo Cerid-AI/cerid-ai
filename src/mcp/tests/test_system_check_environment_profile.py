@@ -85,3 +85,24 @@ async def test_no_cloud_key_suggests_local_only(monkeypatch):
     result = await setup_router.system_check(response=MagicMock())
 
     assert result["suggested_profile"] == "local-only"
+
+
+async def test_configured_profile_is_reported_verbatim(monkeypatch):
+    """The UI needs the operator's setting to say "degraded from <x>"."""
+    monkeypatch.setattr(
+        setup_router.config, "CERID_ENVIRONMENT_PROFILE", "cloud-first", raising=False,
+    )
+    monkeypatch.setattr(setup_router, "get_private_mode_level", lambda: 2)
+
+    result = await setup_router.system_check(response=MagicMock())
+
+    assert result["configured_profile"] == "cloud-first"
+    assert result["active_profile"] == "local-only"
+
+
+async def test_configured_profile_is_empty_when_unset(monkeypatch):
+    monkeypatch.setattr(setup_router.config, "CERID_ENVIRONMENT_PROFILE", "", raising=False)
+
+    result = await setup_router.system_check(response=MagicMock())
+
+    assert result["configured_profile"] == ""

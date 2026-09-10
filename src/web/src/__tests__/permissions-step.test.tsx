@@ -12,15 +12,19 @@ interface PermissionState {
   status: string
   required: boolean
   description: string
+  error?: string
 }
 
-const sampleAll = (overrides: Partial<Record<string, string>> = {}): PermissionState[] => [
-  { category: "microphone", status: overrides.microphone ?? "not-determined", required: false, description: "Mic" },
-  { category: "calendar", status: overrides.calendar ?? "not-determined", required: false, description: "Cal" },
-  { category: "reminders", status: overrides.reminders ?? "not-determined", required: false, description: "Rem" },
-  { category: "contacts", status: overrides.contacts ?? "not-determined", required: false, description: "Con" },
-  { category: "photos", status: overrides.photos ?? "not-determined", required: false, description: "Photo" },
-  { category: "full-disk-access", status: overrides["full-disk-access"] ?? "denied", required: false, description: "FDA" },
+const sampleAll = (
+  overrides: Partial<Record<string, string>> = {},
+  errors: Partial<Record<string, string>> = {},
+): PermissionState[] => [
+  { category: "microphone", status: overrides.microphone ?? "not-determined", required: false, description: "Mic", error: errors.microphone },
+  { category: "calendar", status: overrides.calendar ?? "not-determined", required: false, description: "Cal", error: errors.calendar },
+  { category: "reminders", status: overrides.reminders ?? "not-determined", required: false, description: "Rem", error: errors.reminders },
+  { category: "contacts", status: overrides.contacts ?? "not-determined", required: false, description: "Con", error: errors.contacts },
+  { category: "photos", status: overrides.photos ?? "not-determined", required: false, description: "Photo", error: errors.photos },
+  { category: "full-disk-access", status: overrides["full-disk-access"] ?? "denied", required: false, description: "FDA", error: errors["full-disk-access"] },
 ]
 
 const mockGetAll = vi.fn()
@@ -123,6 +127,19 @@ describe("PermissionsStep", () => {
     expect(screen.queryByTestId("permission-grant-microphone")).toBeNull()
     const row = screen.getByTestId("permission-row-microphone")
     expect(row.textContent).toMatch(/granted/)
+  })
+
+  it("unknown status shows 'Status unavailable' per-row without failing the whole list", async () => {
+    mockGetAll.mockResolvedValue(
+      sampleAll({ photos: "unknown" }, { photos: "photos-read-write is not a valid type" }),
+    )
+    render(<PermissionsStep />)
+    const row = await screen.findByTestId("permission-row-photos")
+    expect(row).toHaveTextContent("Status unavailable")
+    const badge = screen.getByTitle("photos-read-write is not a valid type")
+    expect(badge).toBeInTheDocument()
+    // The other rows still render normally.
+    expect(screen.getByTestId("permission-row-calendar")).toBeInTheDocument()
   })
 
   it("Skip and Continue buttons fire callbacks", async () => {

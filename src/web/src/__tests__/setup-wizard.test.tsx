@@ -197,6 +197,33 @@ describe("SetupWizard", () => {
     expect(screen.getByRole("button", { name: /^next$/i })).toBeDisabled()
   })
 
+  it("does not render an Add Custom Provider control on the API Keys step", async () => {
+    vi.mocked(fetchSystemCheck).mockResolvedValueOnce({
+      ram_gb: 16,
+      docker_running: true,
+      env_exists: true,
+      env_keys_present: [],
+      ollama_detected: false,
+      ollama_url: null,
+      ollama_models: [],
+      lightweight_recommended: false,
+      archive_path_exists: false,
+      default_archive_path: "~/cerid-archive",
+      os: "darwin",
+      cpu: "Apple M1",
+      cpu_cores: 8,
+      gpu: "Apple M1 GPU",
+      gpu_acceleration: "metal",
+    })
+    renderWizard()
+    await waitFor(() => expect(fetchSystemCheck).toHaveBeenCalled())
+    await screen.findByText(/Not found/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    await screen.findByText("API Keys")
+    expect(screen.queryByText(/Add Custom Provider/i)).not.toBeInTheDocument()
+  })
+
   it("step 6 renders both tabs via FirstDocumentStep", () => {
     // Test the tab structure through a direct FirstDocumentStep render —
     // wizard navigation side-effects (resume logic, localStorage gate) are

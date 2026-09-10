@@ -297,3 +297,23 @@ describe("SamplePackTab", () => {
     expect(results).toHaveNoViolations()
   })
 })
+
+
+describe("SamplePackTab — registry cache key", () => {
+  // The registry was cached under two spellings: ["knowledge-packs","registry"]
+  // in the KB library and the Build Knowledge step, and a flat
+  // ["knowledge-pack-registry"] here. The library pane invalidates only the
+  // ["knowledge-packs"] prefix, which never reached this tab, so a pack
+  // installed from the library left this catalog showing stale flags.
+  it("refetches when the shared knowledge-packs prefix is invalidated", async () => {
+    const { client } = renderWithQuery(<SamplePackTab onComplete={onComplete} />)
+    await waitFor(() => screen.getByText("Python Standard Library Documentation"))
+    const before = mockFetchRegistry.mock.calls.length
+
+    await client.invalidateQueries({ queryKey: ["knowledge-packs"] })
+
+    await waitFor(() =>
+      expect(mockFetchRegistry.mock.calls.length).toBeGreaterThan(before),
+    )
+  })
+})

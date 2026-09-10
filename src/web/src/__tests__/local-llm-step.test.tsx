@@ -316,6 +316,67 @@ describe("LocalLLMStep — measured local-model expectations", () => {
   })
 })
 
+// ---- Hardware-aware model recommendation (Task B6) ----
+
+describe("LocalLLMStep — hardware-aware model recommendation", () => {
+  it("recommends llama3.1:8b with a reason on amd-mac hardware", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({
+      hardware: { ram_gb: 64, cpu: "Xeon W-3245", gpu: "AMD Radeon Pro Vega II", gpu_type: "amd-mac" },
+      models: [],
+    })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText("llama3.1:8b")).toBeInTheDocument())
+    expect(screen.queryByText("llama3.2:3b")).not.toBeInTheDocument()
+    expect(screen.getByText(/GGML_ASSERT/)).toBeInTheDocument()
+  })
+
+  it("keeps llama3.2:3b with no extra note on metal hardware", async () => {
+    fetchOllamaRecommendations.mockResolvedValue({
+      hardware: { ram_gb: 32, cpu: "Apple M3", gpu: "Apple M3", gpu_type: "metal" },
+      models: [],
+    })
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText("llama3.2:3b")).toBeInTheDocument())
+    expect(screen.queryByText("llama3.1:8b")).not.toBeInTheDocument()
+    expect(screen.queryByText(/GGML_ASSERT/)).not.toBeInTheDocument()
+  })
+
+  it("shows a not-detected sentence instead of silently omitting hardware info when the fetch fails", async () => {
+    fetchOllamaRecommendations.mockRejectedValue(new Error("network error"))
+    render(
+      <LocalLLMStep
+        inferenceBackend="ollama"
+        ollamaDetected={true}
+        ollamaModels={[]}
+        state={{ ...DEFAULT_STATE, detected: true }}
+        onChange={onChange}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByText("Hardware not detected — start the server to see recommendations"),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/Your Hardware/i)).not.toBeInTheDocument()
+  })
+})
+
 // ---- Quenchforge backend (F-04-03, F-04-04) ----
 
 describe("LocalLLMStep — Quenchforge backend", () => {

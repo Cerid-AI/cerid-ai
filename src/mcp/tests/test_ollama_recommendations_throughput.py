@@ -22,6 +22,7 @@ class _FakeHW:
     cpu: str = "Xeon W-3245"
     gpu: str = "AMD Radeon Pro Vega II"
     os: str = "macOS 14.5"
+    gpu_type: str = "amd-mac"
 
 
 @pytest.fixture(autouse=True)
@@ -54,3 +55,21 @@ async def test_unmeasured_rate_yields_no_expected_tokens_per_sec(monkeypatch):
     result = await providers_router.get_ollama_recommendations()
 
     assert all(m["expected_tokens_per_sec"] is None for m in result["models"])
+
+
+async def test_hardware_reports_gpu_type():
+    # The setup wizard's Local LLM step picks its recommended model off
+    # this field — it must survive the HostHardware -> response dict copy.
+    result = await providers_router.get_ollama_recommendations()
+
+    assert result["hardware"]["gpu_type"] == "amd-mac"
+
+
+async def test_hardware_reports_gpu_type_for_non_amd_mac(monkeypatch):
+    monkeypatch.setattr(
+        "utils.host_info.get_host_hardware", lambda: _FakeHW(gpu_type="metal")
+    )
+
+    result = await providers_router.get_ollama_recommendations()
+
+    assert result["hardware"]["gpu_type"] == "metal"

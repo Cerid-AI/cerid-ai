@@ -20,6 +20,11 @@ if [[ -z "${REDIS_PASSWORD:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
   REDIS_PASSWORD=$(grep '^REDIS_PASSWORD=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
 fi
 REDIS_PW="${REDIS_PASSWORD:-cerid-dev}"
+# Same fallback for CERID_API_KEY (S-09 needs it to clear the gateway's SSO
+# forward_auth — see sso.py's X-API-Key bypass).
+if [[ -z "${CERID_API_KEY:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
+  CERID_API_KEY=$(grep '^CERID_API_KEY=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
+fi
 FAILED=0
 
 echo ""
@@ -77,6 +82,19 @@ if [[ -f "${SCRIPT_DIR}/../../scripts/validate-env.sh" ]]; then
   assert_command "cd \"${SCRIPT_DIR}/../..\" && bash scripts/validate-env.sh --quick" "0" "S-08" "validate-env.sh --quick" || FAILED=1
 else
   _skip "S-08" "validate-env.sh --quick" "Script not found"
+fi
+
+# S-09: Bifrost route removed — /api/bifrost/* used to proxy to the retired
+# `bifrost` service (no compose file has defined it since 2026-04-17,
+# stacks/gateway/Caddyfile). Unmatched now, so it should 404 instead of the
+# old dead-upstream 502. -k: Caddy's `local_certs` self-signed cert on the
+# public site; -H: clears the gateway's SSO forward_auth like a programmatic
+# client would (sso.py's X-API-Key bypass), so the request reaches routing.
+if [[ "$(docker inspect -f '{{.State.Running}}' cerid-gateway 2>/dev/null)" == "true" ]]; then
+  assert_http_status "https://127.0.0.1:443/api/bifrost/x" "404" "S-09" "Bifrost route removed (404)" \
+    -k -H "X-API-Key: ${CERID_API_KEY:-}" || FAILED=1
+else
+  _skip "S-09" "Bifrost route removed (404)" "cerid-gateway container not running"
 fi
 
 echo ""

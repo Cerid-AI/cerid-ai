@@ -79,6 +79,10 @@ export function ServerConnectionForm({
   const [detail, setDetail] = useState("")
   const [saving, setSaving] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  // Whether the user has pressed Test connection or Save at least once. The
+  // automatic mount probe does not count — it must never trigger the
+  // destructive needs-key alert before the user has done anything.
+  const [attempted, setAttempted] = useState(false)
 
   const target = mode === "local" ? LOCAL_SERVER_URL : serverUrl
 
@@ -117,6 +121,7 @@ export function ServerConnectionForm({
 
   const handleSave = useCallback(async () => {
     if (!bridge) return
+    setAttempted(true)
     setSaving(true)
     try {
       // apiKey omitted → keep the stored key; sending "" would erase it.
@@ -133,8 +138,15 @@ export function ServerConnectionForm({
   const urlInvalid = remote && serverUrl.trim() !== "" && !/^https?:\/\/.+/.test(serverUrl.trim())
   const canSave = !saving && (!remote || (serverUrl.trim() !== "" && !urlInvalid))
   const needsKey = probe === "needs-key"
-  // Connected and nobody asked to change anything: stay out of the way.
-  const collapsed = probe === "connected" && !expanded
+  // Unsaved changes: a typed-but-unsaved key, or a mode/URL that no longer
+  // matches what is actually stored. A successful probe here proves the
+  // credential works, not that it has been written to connection.json.
+  const dirty = info
+    ? apiKey !== "" || mode !== info.mode || (remote && serverUrl !== info.serverUrl)
+    : apiKey !== ""
+  // Connected, nothing unsaved, and nobody asked to change anything: stay
+  // out of the way.
+  const collapsed = probe === "connected" && !expanded && !dirty
 
   if (collapsed) {
     return (
@@ -180,14 +192,27 @@ export function ServerConnectionForm({
         </Alert>
       )}
 
-      {needsKey && (
-        <Alert data-testid="connection-needs-key">
+      {needsKey && attempted && (
+        <Alert data-testid="connection-needs-key" variant="destructive">
           <KeyRound className="h-4 w-4" />
           <AlertDescription className="text-label-xs">
             This server requires an API key. It is the <code>CERID_API_KEY</code> value in the
             server's <code>.env</code> file.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Same message, no alarm: the automatic mount probe found this out
+          before the user did anything, so it must not read as destructive. */}
+      {needsKey && !attempted && (
+        <p
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          data-testid="connection-needs-key"
+        >
+          <KeyRound className="h-3.5 w-3.5 shrink-0" />
+          This server requires an API key. It is the <code>CERID_API_KEY</code> value in the
+          server's <code>.env</code> file.
+        </p>
       )}
 
       <SegmentedControl<ConnectionMode>
@@ -237,13 +262,23 @@ export function ServerConnectionForm({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void runProbe(target, apiKey)}
+          onClick={() => {
+            setAttempted(true)
+            void runProbe(target, apiKey)
+          }}
           disabled={probe === "probing"}
           data-testid="connection-test"
         >
           {probe === "probing" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Test connection"}
         </Button>
-        <Button size="sm" onClick={handleSave} disabled={!canSave} data-testid="connection-save">
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={!canSave}
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- the user just pressed Test connection; this is the obvious next click, not an unrequested focus steal
+          autoFocus={probe === "connected" && dirty}
+          data-testid="connection-save"
+        >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saveLabel}
         </Button>
         {probe === "connected" && (
@@ -251,9 +286,14 @@ export function ServerConnectionForm({
             <CheckCircle2 className="h-3.5 w-3.5" /> {detail}
           </span>
         )}
-        {probe === "needs-key" && detail && (
+        {attempted && probe === "needs-key" && detail && (
           <span className="inline-flex items-center gap-1 text-xs text-destructive" role="alert">
             <XCircle className="h-3.5 w-3.5" /> {detail}
+          </span>
+        )}
+        {probe === "connected" && dirty && (
+          <span className="w-full text-xs text-muted-foreground">
+            Save to keep this key on this Mac
           </span>
         )}
       </div>

@@ -241,15 +241,20 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).not.toContain("below.py")
   })
 
-  it.skip("stops adding chunks when token budget is exhausted", async () => {
+  // The token budget bounds which chunks are SELECTED (they become the
+  // assistant message's sources). A second, much tighter per-model char
+  // budget (selectDocsWithinBudget) then decides which of those survive into
+  // the rendered system message, and any chunk large enough to exhaust the
+  // token budget is far too large to clear that char budget. Asserting on the
+  // system message therefore cannot observe this loop at all — which is why
+  // this test sat skipped. It asserts on the selection instead.
+  it("stops adding chunks when token budget is exhausted", async () => {
     const modelObj = MODELS[0]
-    // Budget ≈ effectiveContextWindow - reservedTokens (~1200 + user msg tokens)
-    // Create a first chunk that fits, a second that exceeds the remaining budget,
-    // and a third that would fit if budget weren't already spent.
-    // estimateTokenCount = Math.ceil(chars / 3.5), so chars = tokens * 3.5
-    const budgetTokens = modelObj.effectiveContextWindow - 2000 // generous reserved estimate
+    // estimateTokenCount = Math.ceil(chars / 3.5), so chars = tokens * 3.5.
+    // reservedTokens is history + user message + 1200; 2000 covers it here.
+    const budgetTokens = modelObj.effectiveContextWindow - 2000
     const firstContent = "a".repeat(Math.floor(budgetTokens * 3.5 * 0.8)) // uses 80% of budget
-    const secondContent = "b".repeat(Math.floor(budgetTokens * 3.5 * 0.5)) // needs 50%, only 20% left → breaks
+    const secondContent = "b".repeat(Math.floor(budgetTokens * 3.5 * 0.5)) // needs 50%, 20% left → breaks
     const small = makeKBResult({ artifact_id: "a1", relevance: 0.95, filename: "first.py", content: firstContent })
     const overBudget = makeKBResult({ artifact_id: "a2", relevance: 0.90, filename: "overbudget.py", content: secondContent })
     const trailing = makeKBResult({ artifact_id: "a3", relevance: 0.85, filename: "trailing.py", content: "Trailing chunk" })
@@ -265,13 +270,10 @@ describe("useChatSend — KB injection payload assembly", () => {
       await result.current.handleSend("test budget")
     })
 
-    const msgs = sentMessages(opts._sendSpy)
-    const sysMsg = msgs.find((m) => m.role === "system")
-    expect(sysMsg).toBeDefined()
-    // first.py should be included; overbudget.py exceeds remaining budget → break stops iteration
-    expect(sysMsg!.content).toContain("first.py")
-    expect(sysMsg!.content).not.toContain("overbudget.py")
-    expect(sysMsg!.content).not.toContain("trailing.py")
+    // first.py fits; overbudget.py exceeds the remainder, and the loop breaks
+    // rather than skipping — so trailing.py is not reached either.
+    const filenames = (sentSources(opts._sendSpy) ?? []).map((s: { filename?: string }) => s.filename)
+    expect(filenames).toEqual(["first.py"])
   })
 
   it("deduplicates chunks already injected in prior turns (session dedup via injectedHistoryRef)", async () => {

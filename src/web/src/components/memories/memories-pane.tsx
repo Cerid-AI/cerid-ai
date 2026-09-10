@@ -169,8 +169,9 @@ export default function MemoriesPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
-      <div className="border-b px-4 py-3">
+      {/* Header — app-no-drag: sits directly under the top of the window,
+          see .app-drag-region. */}
+      <div className="app-no-drag border-b px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Brain className="h-5 w-5 text-primary" />

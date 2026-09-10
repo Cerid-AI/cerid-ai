@@ -141,3 +141,51 @@ describe("StatusBar", () => {
     expect(screen.queryByText("Credits exhausted")).not.toBeInTheDocument()
   })
 })
+
+
+describe("StatusBar — local pipeline label", () => {
+  function stubHealth(payload: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ...mockHealthy, ...payload }),
+        }),
+      ),
+    )
+  }
+
+  it("labels quenchforge pipeline stages Quenchforge", async () => {
+    stubHealth({
+      internal_llm_provider: "quenchforge",
+      internal_llm_model: "llama3.1:8b",
+      pipeline_providers: { chat_generation: "quenchforge", reranking: "quenchforge" },
+    })
+    render(<StatusBar />, { wrapper })
+    expect(await screen.findByText(/Quenchforge: llama3\.1:8b/)).toBeInTheDocument()
+  })
+
+  it("labels ollama pipeline stages Ollama", async () => {
+    stubHealth({
+      internal_llm_provider: "ollama",
+      internal_llm_model: "llama3.2:3b",
+      pipeline_providers: { chat_generation: "ollama", reranking: "ollama" },
+    })
+    render(<StatusBar />, { wrapper })
+    expect(await screen.findByText(/Ollama: llama3\.2:3b/)).toBeInTheDocument()
+  })
+
+  // The live regression: /health omitted internal_llm_provider entirely, so a
+  // quenchforge host read "Ollama: active" off the default branch.
+  it("falls back to the provider the pipeline table names, not to Ollama", async () => {
+    stubHealth({
+      internal_llm_model: "llama3.1:8b",
+      pipeline_providers: { chat_generation: "quenchforge", reranking: "quenchforge" },
+    })
+    render(<StatusBar />, { wrapper })
+    expect(await screen.findByText(/Quenchforge: llama3\.1:8b/)).toBeInTheDocument()
+    expect(screen.queryByText(/Ollama: /)).not.toBeInTheDocument()
+  })
+})

@@ -320,7 +320,9 @@ export function ChatToolbar({
             ? "border-red-500/40 text-red-500"
             : "border-amber-500/40 text-amber-500"
   return (
-    <div className="flex items-center gap-2 border-b px-4 py-2">
+    // app-no-drag: this toolbar is the default (chat) pane's header and
+    // sits directly under the top of the window — see .app-drag-region.
+    <div className="app-no-drag flex items-center gap-2 border-b px-4 py-2">
       {isNarrow && onOpenSidebar && (
         <TooltipProvider delayDuration={0}>
           <Tooltip>

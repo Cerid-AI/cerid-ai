@@ -1,0 +1,11 @@
+{
+  "fixture": "eval-fixture-coding-db-index.md",
+  "expected": [
+    "GIN index",
+    "events table",
+    "audit-search"
+  ],
+  "forbidden": [
+    "# database index decision — events table"
+  ]
+}

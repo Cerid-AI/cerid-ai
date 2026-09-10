@@ -13,6 +13,17 @@ vi.stubGlobal("MutationObserver", class {
   disconnect() {}
 })
 
+// ArticleInfobox renders MiniGraph with defaultExpanded, which lazily imports
+// the real Atlas — and with it sigma, whose CJS build reads WebGL globals at
+// module load. jsdom has none, so the reference surfaces as an unhandled error
+// from outside any test body. mini-graph.test.tsx has carried this mock all
+// along; this file reached the same import through Suspense and did not.
+vi.mock("@/components/subjects/atlas/Atlas", () => ({
+  Atlas: ({ entity }: { entity: string }) => (
+    <div data-testid="atlas-mock">atlas:{entity}</div>
+  ),
+}))
+
 vi.mock("@/lib/api/graph", () => ({
   fetchNeighborhood: vi.fn().mockResolvedValue({
     focal_entity: "test-entity",

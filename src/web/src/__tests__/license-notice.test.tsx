@@ -137,4 +137,21 @@ describe("LicenseStatusBadge", () => {
       unmount()
     }
   })
+
+  // R9: "Plan unknown" must mean "we could not find out", never "you have no
+  // plan". A self-hosted community install has an answer — community — and is
+  // covered by the loop above; only an unreachable license server earns the
+  // label, and it must not linger while the query is still in flight.
+  it("says the plan is unknown only when the license query failed", async () => {
+    vi.mocked(billingApi.fetchCapabilities).mockRejectedValue(new Error("network down"))
+    render(<LicenseStatusBadge />)
+    expect(await screen.findByText("Plan unknown")).toBeInTheDocument()
+  })
+
+  it("shows nothing while the license query is still in flight", async () => {
+    vi.mocked(billingApi.fetchCapabilities).mockReturnValue(new Promise(() => {}) as never)
+    const { container } = render(<LicenseStatusBadge />)
+    await vi.waitFor(() => expect(billingApi.fetchCapabilities).toHaveBeenCalled())
+    expect(container).toBeEmptyDOMElement()
+  })
 })

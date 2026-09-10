@@ -60,6 +60,8 @@ interface PermissionState {
   status: Status
   required: boolean
   description: string
+  /** Set when the desktop main process couldn't read this category's status. */
+  error?: string
 }
 
 const ICONS: Record<Category, typeof Mic> = {
@@ -274,6 +276,15 @@ export function PermissionsStep({ onContinue, onSkip, hideIntro }: PermissionsSt
                     )}
                     {s.status === "not-determined" && (
                       <span className="text-xs text-muted-foreground">not asked yet</span>
+                    )}
+                    {s.status === "unknown" && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                        title={s.error ?? "Status unavailable"}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        Status unavailable
+                      </span>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{s.description}</p>

@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 import config
+from app.routers import health
 from app.services.private_mode import get_private_mode_level
 from config.environment_profiles import classify_hardware, resolve_profile, suggest_profile
 from core.utils.swallowed import log_swallowed_error
@@ -203,7 +204,12 @@ async def _service_statuses() -> dict[str, str]:
         os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000") + "/api/v2/heartbeat",
     )
 
-    mcp_status = "setup_mode" if not _is_configured() else "healthy"
+    if not health.is_ready():
+        mcp_status = "starting"
+    elif not _is_configured():
+        mcp_status = "setup_mode"
+    else:
+        mcp_status = "healthy"
 
     return {
         "neo4j": neo4j_status,
@@ -838,8 +844,9 @@ async def system_check(response: Response) -> dict:
     suggested_profile = suggest_profile(
         hardware_class, has_cloud_key, private_mode_level,
     )
+    configured_profile = getattr(config, "CERID_ENVIRONMENT_PROFILE", "")
     active_profile, _profile_reason = resolve_profile(
-        getattr(config, "CERID_ENVIRONMENT_PROFILE", ""),
+        configured_profile,
         hardware_class,
         has_cloud_key,
         private_mode_level,
@@ -866,6 +873,9 @@ async def system_check(response: Response) -> dict:
         "local_throughput": local_throughput,
         "suggested_profile": suggested_profile,
         "active_profile": active_profile,
+        # What the operator asked for, so the UI can say "degraded from <x>"
+        # when Private Mode or the hardware class overrode it.
+        "configured_profile": configured_profile,
     }
 
 

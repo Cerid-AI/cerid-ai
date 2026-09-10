@@ -2,6 +2,65 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.5] — 2026-09-10
+
+The release that installed itself. The 1.0.4 desktop build was signed, notarized
+and published, and then failed its own first run: the API key a new user tested
+was never stored, and the permissions step errored. This release is what an
+install smoke of the packaged app, a wizard audit and the recorded rough edges
+turned up.
+
+### Desktop first-run
+
+- The connection form keeps the tested key on screen until it is saved, focuses
+  the save button and only shows the "requires an API key" alert after an
+  attempt; a fresh install now reaches chat with a working key and does not
+  return to setup on the next launch.
+- The macOS permissions step asks node-mac-permissions for the photos level it
+  knows and reports each category independently; one unavailable category no
+  longer blanks the list.
+- A failed manual update check shows a dialog; automatic checks notify once per
+  session instead of logging to a console the packaged app does not have.
+- `tests/beta/desktop-smoke.sh` drives the installed app over Chrome DevTools
+  Protocol through first-run, permissions, a chat turn and a relaunch.
+
+### Setup wizard and settings
+
+- Apply is enabled for every provider the backend accepts and says why it is
+  disabled; Service Health offers Re-check once a key is valid; the dead custom
+  provider input is gone; inside the desktop app the wizard can start Docker
+  Desktop and the Cerid services; AMD-Mac hosts are recommended a chat model
+  that does not crash; a failed hardware probe says so; the first-document step
+  names the real cause of a failed query; the MCP service reads "starting" until
+  it is ready; Settings → System shows the environment profile before the
+  throughput probe has run; the status strip names the configured local backend
+  instead of assuming Ollama, and the backend pill shows the active provider
+  rather than the recommended one.
+- Every control that can sit in the Electron window drag band opts out of it,
+  including the chat toolbar, settings header, download banner, pane headers,
+  the workflow editor toolbar and toasts.
+
+### Chat and gateway
+
+- Every provider failure inside the chat stream reaches the user as an error
+  event with copy instead of a bare 500 or an aborted stream; non-chat callers
+  see exhausted credits as `CreditExhaustedError`.
+- The retired Bifrost route is gone from the gateway and unmatched `/api/*`
+  paths return 404 instead of the web app.
+
+### Tests and CI
+
+- The beta harness targets the running stack from any worktree; the Atlas
+  hover probe hovers a real node; the WebGL graph library is stubbed in jsdom;
+  extraction fixtures are all scored or excluded with a reason; self-hosted
+  docker gates prune the dangling images they leave behind.
+- The public repository's `security` and `docker` jobs run the shared
+  `scripts/ci/security.sh` and `scripts/ci/docker-gate.sh` instead of inline
+  copies whose ignore lists had drifted.
+- The retention preservation probe joins the coordinator's cache-bust thread,
+  the E-06 settings spec waits for its PATCH, the eval reporter no longer dies
+  on a recall failure, and all-digit entity names are rejected by the junk gate.
+
 ## [1.0.4] — 2026-09-08
 
 The release that measured the local model instead of assuming it. On a

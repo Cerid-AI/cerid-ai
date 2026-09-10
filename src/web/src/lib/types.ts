@@ -982,6 +982,8 @@ export interface OllamaRecommendations {
     ram_gb: number
     cpu: string
     gpu: string
+    /** Classified GPU bucket from detect-gpu.sh — see {@link GpuType}. */
+    gpu_type?: GpuType
     platform: string
   }
   models: OllamaModelOption[]
@@ -1302,11 +1304,17 @@ export interface SystemCheckResponse {
   local_throughput?: LocalThroughput | null
   suggested_profile?: EnvironmentProfile
   active_profile?: EnvironmentProfile | ""
+  /**
+   * The profile the operator configured via CERID_ENVIRONMENT_PROFILE. Empty
+   * when unset. Differs from ``active_profile`` when Private Mode or the
+   * hardware class forced a downgrade.
+   */
+  configured_profile?: EnvironmentProfile | ""
 }
 
 export interface SetupServiceHealth {
   name: string
-  status: "healthy" | "degraded" | "error" | "connected"
+  status: "healthy" | "degraded" | "error" | "connected" | "starting"
 }
 
 export interface SetupHealth {

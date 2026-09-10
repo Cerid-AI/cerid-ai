@@ -23,6 +23,12 @@ export interface AtlasA11yTreeProps {
   onSelect: (nodeId: string) => void
   /** Focal entity, surfaced as the "current focus" anchor */
   focalEntity: string
+  /**
+   * Per-node viewport coordinates (px, relative to the sigma canvas),
+   * computed by Atlas from `sigma.graphToViewport` and refreshed on
+   * `afterRender`. Absent (or missing an entry) before layout settles.
+   */
+  positions: Map<string, { x: number; y: number }>
 }
 
 function nodeAriaLabel(attrs: AtlasNodeAttributes): string {
@@ -42,6 +48,7 @@ export function AtlasA11yTree({
   selectedNodeId,
   onSelect,
   focalEntity,
+  positions,
 }: AtlasA11yTreeProps) {
   if (!graph) return null
 
@@ -68,24 +75,30 @@ export function AtlasA11yTree({
         className="sr-only"
         tabIndex={-1}
       >
-        {graph.mapNodes((id, attrs) => (
-          <li
-            key={id}
-            role="option"
-            aria-selected={id === selectedNodeId}
-            aria-label={nodeAriaLabel(attrs)}
-            tabIndex={id === selectedNodeId ? 0 : -1}
-            onClick={() => onSelect(id)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault()
-                onSelect(id)
-              }
-            }}
-          >
-            {attrs.name}
-          </li>
-        ))}
+        {graph.mapNodes((id, attrs) => {
+          const pos = positions.get(id)
+          return (
+            <li
+              key={id}
+              role="option"
+              aria-selected={id === selectedNodeId}
+              aria-label={nodeAriaLabel(attrs)}
+              data-node-id={id}
+              data-x={pos ? Math.round(pos.x) : undefined}
+              data-y={pos ? Math.round(pos.y) : undefined}
+              tabIndex={id === selectedNodeId ? 0 : -1}
+              onClick={() => onSelect(id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  onSelect(id)
+                }
+              }}
+            >
+              {attrs.name}
+            </li>
+          )
+        })}
       </ul>
     </>
   )

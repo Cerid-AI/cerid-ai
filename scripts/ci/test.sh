@@ -23,6 +23,11 @@ pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
 
 python -m pytest scripts/tests/ -q
 
+# docker-gate cleanup() contract test — bash, so pytest's collection above
+# never touches it. Needs no daemon (the function runs against a logging
+# `docker` stub), so unlike the conflicts test below it runs everywhere.
+bash scripts/tests/test_docker_gate_prune.sh
+
 # detect_conflicts() contract test — a bash script, so pytest's collection
 # above never touches it (RA-69). Spins throwaway docker containers, so it
 # only runs where a docker daemon is actually reachable (the containerised

@@ -4,7 +4,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Cpu, Cloud, HardDrive } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { fetchSystemCheck } from "@/lib/api"
+import { fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { backendSummary, deriveRecommendation } from "@/lib/hardware-profile"
 import { cn } from "@/lib/utils"
 import type { RecommendedLocalBackend } from "@/lib/types"
@@ -15,13 +15,21 @@ const ICON: Record<RecommendedLocalBackend, typeof Cpu> = {
   cloud: Cloud,
 }
 
+/** ``internal_llm_provider`` as the pill's three-way backend identity. */
+const PROVIDER_BACKEND: Record<string, RecommendedLocalBackend> = {
+  quenchforge: "quenchforge",
+  ollama: "ollama",
+  openrouter: "cloud",
+}
+
 /**
  * Compact at-a-glance indicator of the active inference backend.
  *
- * Mounted in the status bar. Reads `/system-check` to drive the label —
- * for now it uses the *recommended* backend as a stand-in for "active",
- * since the actual ``INTERNAL_LLM_PROVIDER`` value isn't surfaced over
- * the API yet. Wire-up to the canonical provider value follows in PR 3b.
+ * Mounted in the status bar. The label is the provider ``/health/status``
+ * reports, which is the canonical runtime value. The hardware recommendation
+ * from ``/system-check`` is only a fallback: the pill previously used it as a
+ * stand-in for "active", so a host running quenchforge on hardware that would
+ * be recommended cloud was labelled "Cloud".
  */
 export function BackendStatusPill() {
   const { data, isLoading, isError } = useQuery({
@@ -31,13 +39,24 @@ export function BackendStatusPill() {
     refetchInterval: 300_000,
     retry: 1,
   })
+  // eslint-disable-next-line cerid/no-query-error-as-empty -- deliberate: an unreachable /health/status leaves the provider undefined and the pill falls back to the hardware recommendation below, which is what it showed before this query existed
+  const { data: health } = useQuery({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    staleTime: 60_000,
+    refetchInterval: 300_000,
+    retry: 1,
+  })
 
   if (isLoading || isError || !data) {
     return null
   }
 
+  const configured = health?.internal_llm_provider
+    ? PROVIDER_BACKEND[health.internal_llm_provider]
+    : undefined
   const active: RecommendedLocalBackend =
-    data.recommended_local_backend ?? deriveRecommendation(data)
+    configured ?? data.recommended_local_backend ?? deriveRecommendation(data)
   const summary = backendSummary(active)
   const Icon = ICON[active]
 

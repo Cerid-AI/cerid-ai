@@ -411,6 +411,30 @@ class TestJunkQuantityGate:
     def test_rejects_bare_quantities(self, name, entity_type):
         assert is_junk_quantity_name(name, entity_type) is True
 
+    # -- rejects: bare digit sequences, regardless of reported type ----------
+    # A live 3B extraction returned "2025" (its fixture's annotation lists it
+    # forbidden); a bare digit sequence is never a proper noun no matter what
+    # type the model assigned it.
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("2025", "DATE"),
+        ("2025", "EVENT"),
+        ("2025", "OTHER"),
+        ("3.14", "OTHER"),
+        ("12/31", "DATE"),
+        ("1,000", "ASSET"),
+    ])
+    def test_rejects_bare_digit_sequences(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is True
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("Python 3.12", "ASSET"),
+        ("Atlas", "ORG"),
+        ("Q3 2025 roadmap", "EVENT"),
+    ])
+    def test_admits_names_with_digits_and_letters(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is False
+
     # -- rejects: leaked markdown heading markers -----------------------------
 
     @pytest.mark.parametrize("name", [
@@ -468,6 +492,48 @@ class TestJunkQuantityGate:
     def test_admits_real_digit_bearing_entities(self, name, entity_type):
         assert is_junk_quantity_name(name, entity_type) is False
 
+    # -- admits: dotted-quad IPv4 / multi-segment version addresses -----------
+    # #380 rejected these outright; a network note names them legitimately.
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("192.168.1.1", "OTHER"),
+        ("10.0.0.0/24", "OTHER"),
+        ("3.12.1", "ASSET"),
+    ])
+    def test_admits_ip_and_dotted_version_addresses(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is False
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("2025", "OTHER"),
+        ("3.14", "OTHER"),
+        ("12/31", "DATE"),
+    ])
+    def test_still_rejects_non_dotted_digit_sequences(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is True
+
+    # -- rejects: sentence-shaped names (live 3B extraction, 2026-09-10) ------
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        (
+            "sentinel fact: iot devices live on vlan 20 and the guest "
+            "network is capped at 25 mbps.",
+            "OTHER",
+        ),
+        ("vlan 20 is dedicated to iot devices", "OTHER"),
+        ("guest ssid is rate-limited to 25 mbps.", "OTHER"),
+    ])
+    def test_rejects_sentence_shaped_names(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is True
+
+    @pytest.mark.parametrize(("name", "entity_type"), [
+        ("San Marzano", "OTHER"),
+        ("April 20, 2025", "DATE"),
+        ("Q3 2025 roadmap", "EVENT"),
+        ("IoT VLAN", "OTHER"),
+    ])
+    def test_admits_multiword_proper_names(self, name, entity_type):
+        assert is_junk_quantity_name(name, entity_type) is False
+
     # -- end-to-end through the extraction pipeline ---------------------------
 
     @pytest.mark.asyncio
@@ -484,6 +550,66 @@ class TestJunkQuantityGate:
             llm_caller=caller,
         )
         assert [e.name for e in result] == ["Qwen2.5-7B"]
+
+
+# ---------------------------------------------------------------------------
+# Name-quote stripping — broken-JSON wrapping artifacts (2026-09-10)
+# ---------------------------------------------------------------------------
+# Live 3B extraction on tests/eval/fixtures/eval-fixture-notes-home-network.md
+# returned every name wrapped in literal double quotes, two of them whole
+# sentences, one carrying a trailing '",'.
+
+
+class TestNameQuoteStripping:
+    @pytest.mark.parametrize(("raw", "expected"), [
+        ('"vlan 20"', "vlan 20"),
+        ('"25 mbps"', "25 mbps"),
+        ('"rate-limited"', "rate-limited"),
+        ("'single quoted'", "single quoted"),
+        ("“curly quoted”", "curly quoted"),
+        ('"trailing comma",', "trailing comma"),
+        ("no quotes here", "no quotes here"),
+        ('""', ""),
+    ])
+    def test_strips_one_layer_of_wrapping_quotes(self, raw, expected):
+        from core.agents.entity_extraction import _strip_wrapping_artifacts
+        assert _strip_wrapping_artifacts(raw) == expected
+
+    @pytest.mark.asyncio
+    async def test_extraction_strips_quotes_and_rejects_sentences(self):
+        """The exact six names a live 3B extraction returned (2026-09-10).
+
+        "25 mbps" is deliberately excluded from the survivors here: once
+        unquoted it is a bare quantity ("<number> <unit>"), and the
+        pre-existing, separately-tested :func:`_is_bare_quantity` gate
+        rejects it regardless of quoting — out of scope for this fix.
+        """
+        fixture_path = _EVAL_FIXTURES_DIR / "eval-fixture-notes-home-network.md"
+        text = fixture_path.read_text()
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": '"vlan 20"', "type": "OTHER", "confidence": 0.9},
+                {
+                    "name": (
+                        '"sentinel fact: iot devices live on vlan 20 and the '
+                        'guest network is capped at 25 mbps.",'
+                    ),
+                    "type": "OTHER", "confidence": 0.9,
+                },
+                {"name": '"25 mbps"', "type": "OTHER", "confidence": 0.9},
+                {"name": '"rate-limited"', "type": "OTHER", "confidence": 0.9},
+                {
+                    "name": '"vlan 20 is dedicated to iot devices"',
+                    "type": "OTHER", "confidence": 0.9,
+                },
+                {
+                    "name": '"guest ssid is rate-limited to 25 mbps."',
+                    "type": "OTHER", "confidence": 0.9,
+                },
+            ]
+        })
+        result = await extract_entities_from_text(text, llm_caller=caller)
+        assert [e.name for e in result] == ["vlan 20", "rate-limited"]
 
 
 # ---------------------------------------------------------------------------

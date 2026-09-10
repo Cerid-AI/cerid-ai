@@ -12,9 +12,9 @@ import {
   AlertTriangle, Info,
 } from "lucide-react"
 import { ApiKeyInput } from "@/components/setup/api-key-input"
-import { CustomProviderInput } from "@/components/setup/custom-provider-input"
 import { HFTokenStep } from "@/components/setup/hf-token-step"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
+import { configuredProviderIds } from "@/components/setup/configured-providers"
 import { SystemCheckCard } from "@/components/setup/system-check-card"
 import { ServerConnectionForm } from "@/components/settings/server-connection-form"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
@@ -120,7 +120,6 @@ interface WizardState {
   /** Pack ids installed via the Build Knowledge step (SW5). */
   installedPackIds: string[]
   selectedMode: "simple" | "advanced"
-  customProvider: { name: string; baseUrl: string; apiKey: string; modelId: string; valid: boolean } | null
   /** User's chosen local-inference backend. null = follow recommendation. */
   selectedBackend: RecommendedLocalBackend | null
 }
@@ -141,7 +140,6 @@ type WizardAction =
   | { type: "SET_FIRST_DOC"; state: WizardState["firstDoc"] }
   | { type: "SET_BUILD_KNOWLEDGE"; installedPackIds: string[]; firstDoc: WizardState["firstDoc"] }
   | { type: "SET_MODE"; mode: "simple" | "advanced" }
-  | { type: "SET_CUSTOM_PROVIDER"; provider: WizardState["customProvider"] }
   | { type: "SET_BACKEND"; backend: RecommendedLocalBackend }
 
 function createInitialState(): WizardState {
@@ -181,7 +179,6 @@ function createInitialState(): WizardState {
     },
     installedPackIds: [],
     selectedMode: "simple",
-    customProvider: null,
     selectedBackend: null,
   }
 }
@@ -240,8 +237,6 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, installedPackIds: action.installedPackIds, firstDoc: action.firstDoc }
     case "SET_MODE":
       return { ...state, selectedMode: action.mode }
-    case "SET_CUSTOM_PROVIDER":
-      return { ...state, customProvider: action.provider }
     case "SET_BACKEND":
       return { ...state, selectedBackend: action.backend }
     default:
@@ -428,9 +423,17 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
     dispatch({ type: "SET_SYSTEM_CHECK", result })
   }, [])
 
-  // A detected+enabled local backend (Ollama/Quenchforge) is a valid
-  // alternative to an OpenRouter key — see task 1.3a.
-  const canProceedFromKeys = state.keys.openrouter.valid || state.ollama.enabled
+  // Any provider key the apply payload accepts (openrouter, openai,
+  // anthropic, xai) is sufficient, and a detected+enabled local backend
+  // (Ollama/Quenchforge) is a valid alternative to a provider key — see
+  // task 1.3a and ConfigureRequest in app/routers/setup.py.
+  const canProceedFromKeys =
+    Object.values(state.keys).some((k) => k.valid) || state.ollama.enabled
+
+  const configuredProviders = useMemo(
+    () => configuredProviderIds(state.keys, state.ollama, state.selectedBackend),
+    [state.keys, state.ollama, state.selectedBackend],
+  )
 
   // Capability assessment — recomputed when keys or ollama state changes
   const assessment = useMemo(
@@ -538,6 +541,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const providerCount = validProviders.length
   const providerNames = validProviders.map(([name]) => PROVIDER_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1))
   const domainCount = state.kbConfig.domains.length
+  // Can anything answer the first query? Cloud keys, or a local backend the
+  // user actually turned on. Drives the Try It Out failure copy.
+  const hasAnsweringModel =
+    providerCount > 0 || state.ollama.enabled || state.selectedBackend === "quenchforge"
 
   // Chat-model label for the Mode summary. The previous wizard mislabelled
   // the rerank slot model (`bge-reranker-v2-m3`) as "Local LLM", which is a
@@ -821,7 +828,6 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
                     />
-                    <CustomProviderInput onValidated={(cp) => dispatch({ type: "SET_CUSTOM_PROVIDER", provider: cp })} />
                   </div>
                 </div>
 
@@ -972,6 +978,12 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   </Button>
                 )}
 
+                {!state.applied && !confirmOverwrite && !canProceedFromKeys && (
+                  <p role="status" className="text-center text-xs text-muted-foreground">
+                    Add a valid provider key or enable local inference to apply.
+                  </p>
+                )}
+
                 {/* Overwrite confirmation — shown instead of the Apply button
                     when the backend is already configured (P0-B4 guard). */}
                 {!state.applied && confirmOverwrite && (
@@ -1027,6 +1039,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 interval={2000}
                 onAllHealthy={handleAllHealthy}
                 lightweightMode={state.kbConfig.lightweightMode}
+                configuredProviders={configuredProviders}
               />
               {state.healthTimedOut && !state.allHealthy && (
                 <p className="mt-3 text-center text-xs text-muted-foreground">
@@ -1051,6 +1064,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
             <FirstDocumentStep
               state={state.firstDoc}
               onChange={(s) => dispatch({ type: "SET_FIRST_DOC", state: s })}
+              hasAnsweringModel={hasAnsweringModel}
             />
           )}
 

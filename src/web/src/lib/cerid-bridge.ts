@@ -39,6 +39,43 @@ export function getConnectionBridge(): ConnectionBridge | null {
   return cerid?.connection ?? null
 }
 
+export interface DockerContainerInfo {
+  name: string
+  id: string
+  state: string
+  status: string
+  health: "healthy" | "unhealthy" | "starting" | "none"
+}
+
+export interface DockerBridgeStatus {
+  installed: boolean
+  running: boolean
+  containers: DockerContainerInfo[]
+}
+
+/** Result shape every mutating docker bridge call returns. */
+export interface DockerBridgeResult {
+  success: boolean
+  error?: string
+}
+
+export interface DockerBridge {
+  status(): Promise<DockerBridgeStatus>
+  /** Bring up the Cerid compose stack. */
+  start(): Promise<DockerBridgeResult>
+  stop(): Promise<DockerBridgeResult>
+  downloadUrl(): Promise<string>
+  /** Launch Docker Desktop itself and wait for the daemon. */
+  startDesktop(): Promise<DockerBridgeResult>
+}
+
+/** Returns the desktop docker bridge, or null in the browser build. */
+export function getDockerBridge(): DockerBridge | null {
+  if (typeof window === "undefined") return null
+  const cerid = (window as unknown as { cerid?: { docker?: DockerBridge } }).cerid
+  return cerid?.docker ?? null
+}
+
 /**
  * True when the Electron desktop shell's preload bridge is present. Gates
  * desktop-only chrome — e.g. the frameless-window drag band — that must not
