@@ -1,12 +1,13 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-08-30 (1.0.3 shipped; v1.0 release arc closed. Status authority:
+> **Last updated:** 2026-09-10 (1.0.5 shipped; v1.0 release arc closed. Status authority:
 > [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md).
 > Prior: 2026-07-24 Tier A audit + remediation T0–T4; 2026-06-13 RAG Quality Program
 > close-out; 2026-06-02 Commercial-GA Track 1).
-> **Shipped:** `v1.0.3` tagged 2026-08-30 (both repos) with `v1.0.3-desktop`
-> signed + notarized (macOS universal DMG + Windows installer), now Latest on the
-> public repo where the updater polls; previously `v1.0.2` 2026-08-15 and
+> **Shipped:** `v1.0.5` tagged 2026-09-10 with `v1.0.5-desktop` signed + notarized
+> (macOS universal DMG + Windows installer), now Latest on the public repo where
+> the updater polls; `v1.0.4` 2026-09-08 (performance, environment profiles);
+> `v1.0.3` 2026-08-30; previously `v1.0.2` 2026-08-15 and
 > `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop`
 > was WITHDRAWN 2026-08-16 — its binaries could not launch (restricted
 > entitlements, no provisioning profile); the tag remains, the release does not.
