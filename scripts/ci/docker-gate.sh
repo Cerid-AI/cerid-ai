@@ -173,11 +173,37 @@ EOF
 # The DB cache mount keeps the vulnerability DB warm between runs on the
 # self-hosted host (hosted runners are ephemeral and re-download; unchanged
 # from the action's behaviour there).
+#
+# ONE CACHE PER RUNNER, not one per host — Trivy takes an EXCLUSIVE lock on its
+# cache directory, and the two self-hosted runners share a $HOME. Two docker jobs
+# running at once therefore raced for one lock and the loser died:
+#
+#   ERROR  Failed to acquire cache or database lock
+#   FATAL  unable to initialize fs cache: cache may be in use by another process: timeout
+#
+# Observed 2026-09-13 with a dependabot backlog draining across both runners. It
+# reads as a broken build on a PR that changed nothing related, and a rerun clears
+# it, which is exactly the shape that gets rerun forever instead of fixed.
+#
+# Keyed on RUNNER_NAME rather than the run id because a runner executes ONE job at
+# a time: per-runner is the coarsest key that still cannot collide, and it is the
+# one that keeps the DB warm. A per-run key would remove the contention and the
+# whole point of the mount with it — every run re-downloading the vulnerability DB
+# — while leaving a directory behind on every build. The job already namespaces
+# IMAGE TAGS by run id for the same shared-daemon reason; this is the same
+# thought applied to the one resource that was still shared.
+#
+# Sanitised because a hosted runner's name contains spaces ("GitHub Actions 12"),
+# and unset falls back to the original shared path, which is correct for anywhere
+# that is not a multi-runner host.
+TRIVY_CACHE_DIR="$HOME/.cache/cerid-ci/trivy${RUNNER_NAME:+-${RUNNER_NAME//[^A-Za-z0-9_.-]/_}}"
+mkdir -p "$TRIVY_CACHE_DIR"
+
 trivy_scan() {
   local image_ref="$1"; shift
   docker run --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$HOME/.cache/cerid-ci/trivy":/root/.cache/trivy \
+    -v "$TRIVY_CACHE_DIR":/root/.cache/trivy \
     -v "$PWD/.ci-artifacts/trivyignore":/trivyignore:ro \
     "$TRIVY_IMAGE" image \
     --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed \

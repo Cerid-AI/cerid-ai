@@ -1552,7 +1552,28 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (40, 60),       # 40 req/min — lessons/outcomes push + hub reads
             "/agent/": (40, 60),
         },
-        "allowed_domains": ["anneal_lessons", "general"],
+        # ONE DOMAIN PER CORPUS KIND, because retrieval separates by domain and nothing else can.
+        # Measured 2026-09-12 against this server: `metadata_filter` honours exactly ONE key.
+        # {"kind": "lesson"} alone returns hits and {"source": "cerid-anneal"} alone returns hits,
+        # but the two together return an EMPTY RESULT rather than an error — so a shared domain
+        # cannot both separate the orchestrator's corpora and keep the `source` stamp its client
+        # uses as containment. The separation has to be the domain.
+        #
+        # DELIBERATELY ABSENT FROM `config/taxonomy.py`, which is the same choice already standing
+        # for `anneal_lessons` and is what keeps this safe. TAXONOMY feeds `config.DOMAINS`, which
+        # drives `query_agent`'s cross-domain affinity, `rectify`, `self_rag`, and `maintenance`'s
+        # expected Chroma collections — so registering these would let a PERSONAL query route into
+        # an orchestrator's operational memory, and would put four more domains through every
+        # rectify pass. Reachable by the consumer that names them explicitly; invisible to the
+        # owner's own retrieval. The taxonomy note on `trading` records the same reasoning from the
+        # other side: the 12-domain backbone assumes its set, so operational corpora stay out of it.
+        "allowed_domains": [
+            "anneal_lessons",
+            "anneal_decisions",
+            "anneal_runs",
+            "anneal_conversations",
+            "general",
+        ],
         "strict_domains": True,      # No bleed into personal/finance/trading/coding data
     },
     "folder_scanner": {

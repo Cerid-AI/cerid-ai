@@ -25,7 +25,14 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 HOOK="scripts/hooks/pre-push"
-STAMP=".git/prepush-validated"
+# Resolved, never literal `.git`: in a WORKTREE `.git` is a FILE pointing at
+# .git/worktrees/<name>, so a literal path makes this `rm` fail with
+# "Not a directory" and the push never validates. The caller then falls back to
+# a bare `git push`, which is the in-hook path this whole script exists to
+# avoid — it validated for minutes, printed "local validation passed", and the
+# transfer was already dead. Per-worktree is also the correct scope: the record
+# vouches for the commit that worktree is pushing, not another one's.
+STAMP="$(git rev-parse --git-dir)/prepush-validated"
 
 [ -f "$HOOK" ] || { echo "safe-push: $HOOK not found"; exit 1; }
 

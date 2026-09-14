@@ -78,7 +78,14 @@ class TestWithTenantScope:
 
         assert result == {"$and": [{"tenant_id": "alice"}, {"domain": "coding"}]}
 
-    def test_multi_key_caller_filter_preserves_caller_dict(self):
+    def test_multi_key_caller_filter_is_flattened_into_the_and(self):
+        # CHANGED 2026-09-13. This asserted the caller's dict was preserved as a
+        # SINGLE element: {"$and": [{tenant}, {"domain": ..., "filename": ...}]}.
+        # Driven against the live store, Chroma rejects that with
+        # HTTP 400 InvalidArgumentError "Invalid where clause" — a nested
+        # multi-key dict is as invalid inside $and as it is at the top level.
+        # So the old shape made the tenant filter look applied while the
+        # caller's half was never honoured at all.
         token = tenant_id_var.set("alice")
         try:
             result = with_tenant_scope({"domain": "code", "filename": "x.py"})
@@ -88,7 +95,8 @@ class TestWithTenantScope:
         assert result == {
             "$and": [
                 {"tenant_id": "alice"},
-                {"domain": "code", "filename": "x.py"},
+                {"domain": "code"},
+                {"filename": "x.py"},
             ]
         }
 
@@ -572,3 +580,44 @@ async def test_ingest_then_query_returns_chunk_in_default_tenant_single_user_mod
         "exact bug from the 2026-04-23 beta test where /agent/query missed "
         "freshly-ingested chunks"
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-key where clauses (2026-09-13)
+# ---------------------------------------------------------------------------
+# Chroma honours ONE condition at the top level of a `where`; two or more must
+# be fused with `$and`. An un-fused multi-key dict is not a narrower filter —
+# it is a clause Chroma will not honour, and it returns an EMPTY RESULT rather
+# than an error. Measured from an SDK consumer: {"kind": ...} returned hits,
+# {"source": ...} returned hits, and the two together returned nothing.
+# That reads as "the corpus does not hold it" when the truth is "the question
+# was never asked", which is why it is fused here rather than at each caller.
+from core.context.identity import _as_chroma_clause  # noqa: E402
+
+
+def test_single_condition_passes_through_untouched():
+    assert _as_chroma_clause({"kind": "lesson"}) == {"kind": "lesson"}
+    assert _as_chroma_clause(None) is None
+    assert _as_chroma_clause({}) == {}
+
+
+def test_multi_key_is_fused_with_and():
+    assert _as_chroma_clause({"source": "cerid-anneal", "kind": "lesson"}) == {
+        "$and": [{"source": "cerid-anneal"}, {"kind": "lesson"}]
+    }
+
+
+def test_an_operator_clause_is_left_alone():
+    # The caller already speaks Chroma's language; re-wrapping a clause we do
+    # not understand would change its meaning.
+    clause = {"$or": [{"a": 1}, {"b": 2}]}
+    assert _as_chroma_clause(clause) is clause
+
+
+def test_single_user_mode_still_normalises_the_callers_clause(monkeypatch):
+    # The regression that started this: single-user mode added no tenant filter
+    # and therefore passed a multi-key dict straight through.
+    monkeypatch.setattr("core.context.identity._is_multi_user_mode", lambda: False)
+    assert with_tenant_scope({"source": "x", "kind": "lesson"}) == {
+        "$and": [{"source": "x"}, {"kind": "lesson"}]
+    }

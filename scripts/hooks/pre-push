@@ -85,7 +85,9 @@ if [ -f scripts/guard-no-ai-commits.sh ]; then
 fi
 
 # -- 2. Did safe-push already validate this exact commit? ---------------------
-STAMP=".git/prepush-validated"
+# Resolved, not literal `.git` — a worktree's `.git` is a file (see safe-push.sh).
+# Read AFTER the unset above, exactly as safe-push resolves it, so the two agree.
+STAMP="$(git rev-parse --git-dir)/prepush-validated"
 # The record may hold several shas: the validated commit plus any annotated tag
 # objects pointing at it (a tag push presents the TAG object's sha, not the
 # commit's). Match any line, not the whole file.

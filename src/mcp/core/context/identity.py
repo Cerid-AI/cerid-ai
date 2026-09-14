@@ -85,6 +85,33 @@ def _is_multi_user_mode() -> bool:
     return os.getenv(_ENV_MULTI_USER, "").strip().lower() in _TRUTHY
 
 
+def _as_chroma_clause(where: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalise a plain equality dict into a form ChromaDB accepts.
+
+    Chroma takes ONE condition at the top level of a ``where`` clause; two or
+    more must be fused with ``$and``. A caller-supplied ``{"a": 1, "b": 2}``
+    is therefore not a narrower filter than ``{"a": 1}`` — it is a clause Chroma
+    will not honour, and the result is an EMPTY RESULT rather than an error.
+
+    Measured 2026-09-13 against this server from an SDK consumer, over a domain
+    holding three documents that satisfy BOTH conditions: ``{"kind": "decision"}``
+    returned 3, ``{"source": "cerid-anneal"}`` returned 3, and the two together
+    returned 0. Silently. That shape is the worst kind of filter bug — it reads
+    as "the corpus does not hold it" when the truth is "the question was never
+    asked" — so the fusion happens here, once, rather than at each of the call
+    sites that build a filter.
+
+    Left alone when the caller already speaks Chroma's operator language (any
+    top-level ``$`` key): that dict is theirs to get right, and re-wrapping it
+    would change a clause we do not understand.
+    """
+    if not where or len(where) <= 1:
+        return where
+    if any(k.startswith("$") for k in where):
+        return where
+    return {"$and": [{k: v} for k, v in where.items()]}
+
+
 def with_tenant_scope(where: dict[str, Any] | None) -> dict[str, Any] | None:
     """Fuse the active ``tenant_id`` into a ChromaDB ``where`` clause.
 
@@ -104,9 +131,10 @@ def with_tenant_scope(where: dict[str, Any] | None) -> dict[str, Any] | None:
     must surface, not silently override).
     """
     if not _is_multi_user_mode():
-        # Pass-through. Caller's where (None / {} / dict) flows to Chroma
-        # unchanged. None ⇒ no where clause, matches everything in collection.
-        return where
+        # No tenant condition to add — but the caller's own clause is still
+        # normalised, because a multi-key equality dict is one Chroma silently
+        # refuses to honour. See _as_chroma_clause.
+        return _as_chroma_clause(where)
 
     active = get_tenant_id()
     if not where:
@@ -121,9 +149,17 @@ def with_tenant_scope(where: dict[str, Any] | None) -> dict[str, Any] | None:
             f"caller supplied tenant_id={where[_TENANT_KEY]!r} but active tenant is {active!r}"
         )
     if _TENANT_KEY in where:
-        # Same key + same value → caller already in scope, no fusion needed.
-        return where
+        # Same key + same value → caller already in scope, no tenant fusion
+        # needed; their own clause still normalises.
+        return _as_chroma_clause(where)
 
+    # FLATTENED, not nested. Wrapping the caller's dict as a single element left
+    # a multi-key dict inside the $and, which Chroma refuses exactly as it would
+    # at the top level — so the tenant filter appeared to work while the caller's
+    # half quietly matched nothing.
+    normalised = _as_chroma_clause(where)
+    if normalised is not None and "$and" in normalised:
+        return {"$and": [{_TENANT_KEY: active}, *normalised["$and"]]}
     return {"$and": [{_TENANT_KEY: active}, where]}
 
 

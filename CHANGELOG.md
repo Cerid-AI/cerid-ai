@@ -2,6 +2,58 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.6] — 2026-09-13
+
+A maintenance release. The retrieval fix is the one that changes behaviour a
+caller can see: a filter that narrowed a search by more than one field had been
+returning nothing at all, silently, for as long as `metadata_filter` has
+existed.
+
+### Retrieval
+
+- A `metadata_filter` carrying two or more keys is fused with `$and` before it
+  reaches Chroma, which honours exactly one condition at the top level of a
+  `where` clause and matches NOTHING when given more. It did not error, so a
+  two-key filter read as "the corpus does not hold it" when the truth was "the
+  question was never asked". Measured against a domain holding three documents
+  that satisfied both conditions: each key alone returned 3, the two together
+  returned 0. Nesting a multi-key dict inside `$and` is equally invalid, so the
+  fusion splits into one single-key clause per condition.
+- Consumers may be granted a domain per corpus kind, and two consumer
+  allowlists now name the domains their owners actually use. The registry's
+  `allowed_domains` is the grant; the shared taxonomy is deliberately not
+  touched, so a consumer's own domains stay out of cross-domain affinity,
+  `rectify`, `self_rag` and the maintenance collections. A consumer whose
+  allowlist named domains it never queried, while the ones it did use sat
+  outside the wall, returned an empty scope for every request under
+  `strict_domains`.
+
+### Security
+
+- The transitive override pins that twelve dependabot advisories landed on are
+  raised: `next` 16.3.0-preview.9 → 16.3.3, `hono` 4.12.34 → 4.13.5,
+  `fast-uri` 3.1.5 → 3.1.6 and `qs` ^6.15.2 → ^6.16.0 in the web app, and
+  `js-yaml` ^4.3.2 in the desktop app, where electron-updater pulls it.
+
+### Dependencies
+
+- `chromadb` floor raised to 1.5.9; `protobufjs` 7.6.5 → 8.8.0 in the desktop
+  app; `typescript` 5.9.3 → 7.0.2 in the browser extension.
+
+### Build and CI
+
+- The mirror sync refuses to run under a Python older than 3.12. Under Xcode's
+  3.9 it had silently overwritten the mirror's hand-maintained `ci.yml`,
+  `CONTRIBUTING.md` and `SECURITY.md`.
+- Jobs queue on the self-hosted pool when the runner probe fails, instead of
+  falling through to a hosted runner that cannot reach the live stack.
+- Trivy gets one cache directory per runner rather than one per host. Both
+  self-hosted runners share a `$HOME` and Trivy takes an exclusive lock on its
+  cache, so two concurrent docker jobs raced and the loser died with "cache may
+  be in use by another process". Keyed per runner rather than per run because a
+  runner takes one job at a time, which is the coarsest key that cannot collide
+  and the only one that keeps the vulnerability database warm.
+
 ## [1.0.5] — 2026-09-10
 
 The release that installed itself. The 1.0.4 desktop build was signed, notarized
