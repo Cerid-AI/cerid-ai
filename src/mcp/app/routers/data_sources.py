@@ -125,10 +125,27 @@ async def configure_email(config: EmailConfigRequest):
     return {"status": "configured", "host": config.host, "user": config.user}
 
 
+# A status read that throws must not answer with the shape of a healthy,
+# never-polled mailbox — that is what the Sources row renders, and the one
+# field that would have revealed the problem (``errors``) was emptied by the
+# fallback. ``status_read_failed`` lets the row route to an error state.
+_EMAIL_STATUS_UNAVAILABLE = {
+    "last_poll": None,
+    "messages_ingested": 0,
+    "errors": ["Email status could not be read — the poller state is unavailable."],
+    "status_read_failed": True,
+    "configured": None,
+}
+
+
 @router.get("/data-sources/email/status")  # response-model-allowed: dynamic response (shape varies)
-@handle_errors(fallback={"last_poll": None, "messages_ingested": 0, "errors": []})
+@handle_errors(fallback=_EMAIL_STATUS_UNAVAILABLE)
 async def email_status():
-    """Return current email polling status — last poll time, message count, errors."""
+    """Return current email polling status — last poll time, message count, errors.
+
+    On a failed read the payload carries ``status_read_failed: true`` and a
+    non-empty ``errors`` list, so "the mailbox has not polled yet" and "the
+    status read blew up" are distinguishable by the client."""
     from app.data_sources.email_imap import get_email_status
 
     return await get_email_status()

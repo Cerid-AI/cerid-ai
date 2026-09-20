@@ -7,6 +7,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { isLocalProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import {
+  InferenceLaneRows,
+  degradedLaneSummary,
+  degradedLanes,
+  isOnBoxServing,
+  laneModelLabel,
+  laneModelUnset,
+  providerLabel,
+  readInferenceLanes,
+} from "@/components/monitoring/inference-lanes"
 import { TrustScoreChip } from "@/components/trust-score"
 import { BackendStatusPill } from "@/components/layout/backend-status-pill"
 import { LicenseStatusBadge } from "@/components/settings/license-notice"
@@ -36,7 +46,10 @@ export function StatusBar({
   // accent for users on the default tier. Gate to Pro+ tiers only.
   const tierGold = featureTier === "pro" || featureTier === "enterprise"
   const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
-    queryKey: ["health"],
+    // Keyed by endpoint, not by topic: react-query caches on the key alone,
+    // so sharing ["health"] with a component that fetches /health handed one
+    // of them the other's payload.
+    queryKey: ["health-status"],
     queryFn: fetchHealthStatus,
     refetchInterval: 15_000,
     retry: 1,
@@ -57,7 +70,15 @@ export function StatusBar({
     staleTime: 5_000,
   })
 
-  const status = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"
+  // The routing snapshot is the only surface that knows a lane is answering
+  // from its fallback. /health folds that into its own `status`; /health/status
+  // (what this bar polls) does not, so the fold happens here — otherwise the
+  // dot stays green while every rerank is served by the CPU ONNX path.
+  const lanes = readInferenceLanes(health?.inference_routing)
+  const laneProblems = degradedLanes(lanes)
+  const transportStatus = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"
+  const status =
+    transportStatus === "healthy" && laneProblems.length > 0 ? "degraded" : transportStatus
   const lastChecked = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "—"
 
   const services = health?.services
@@ -89,9 +110,16 @@ export function StatusBar({
                 )}
                 aria-hidden="true"
               />
-              <span>
-                {status === "healthy" && "All systems operational"}
-                {status === "degraded" && "Some services degraded"}
+              {/* Scope, not a whole-system grade: this dot sees datastore
+                  transports and inference lanes. Latency and verification
+                  coverage are graded in Diagnostics, which is why the two
+                  used to contradict each other. */}
+              <span data-testid="status-bar-verdict">
+                {status === "healthy" && "All services connected"}
+                {status === "degraded" &&
+                  (transportStatus === "healthy"
+                    ? `Inference degraded: ${degradedLaneSummary(lanes)}`
+                    : "Some services degraded")}
                 {status === "error" && "Connection error"}
                 {status === "loading" && "Checking..."}
                 {status === "unknown" && "Unknown status"}
@@ -99,12 +127,21 @@ export function StatusBar({
             </div>
           </TooltipTrigger>
           <TooltipContent side="top" className="space-y-1">
-            <p className="font-medium">System Status: {status}</p>
+            <p className="font-medium">Datastores and inference lanes: {status}</p>
             {services && (
               <p className="text-muted-foreground">
                 {connectedCount}/{totalCount} services connected
               </p>
             )}
+            {laneProblems.length > 0 && (
+              <p className="text-amber-700 dark:text-amber-400">
+                {laneProblems.length} inference lane
+                {laneProblems.length === 1 ? "" : "s"} serving from a fallback
+              </p>
+            )}
+            <p className="text-muted-foreground">
+              Latency and verification coverage are graded in Diagnostics.
+            </p>
             <p className="text-muted-foreground">Last checked: {lastChecked}</p>
           </TooltipContent>
         </Tooltip>
@@ -135,7 +172,7 @@ export function StatusBar({
               </div>
               {health.pipeline_providers && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {Object.values(health.pipeline_providers).filter(isLocalProvider).length}/
+                  {Object.values(health.pipeline_providers).filter(isOnBoxServing).length}/
                   {Object.values(health.pipeline_providers).length} stages local
                 </p>
               )}
@@ -201,33 +238,63 @@ export function StatusBar({
           </Tooltip>
         )}
 
-        {/* Local pipeline indicator (ollama | quenchforge — E1 R5 / CR-024) */}
+        {/* Local pipeline indicator (ollama | quenchforge — E1 R5 / CR-024).
+            Provider and model come from the LLM lane of the routing snapshot:
+            internal_llm_provider / internal_llm_model are /settings fields that
+            /health/status has never emitted, so reading them here printed
+            "Ollama: active" on every deployment regardless of the backend. */}
         {health?.pipeline_providers && (() => {
-          const localCount = Object.values(health.pipeline_providers).filter(isLocalProvider).length
-          const totalStages = Object.values(health.pipeline_providers).length
-          // Name the backend actually serving these stages. Falling back to
-          // "Ollama" whenever internal_llm_provider was absent is how a
+          const stageProviders = Object.values(health.pipeline_providers)
+          const localCount = stageProviders.filter(isOnBoxServing).length
+          const totalStages = stageProviders.length
+          const llmLane = lanes.find((l) => l.lane === "llm")
+          // Before any lane has answered, name the configured backend, then the
+          // one the pipeline table names. Defaulting to "Ollama" here is how a
           // quenchforge host came to report "Ollama: active".
-          const localProvider =
+          const configuredLocal =
             (isLocalProvider(health.internal_llm_provider) ? health.internal_llm_provider : undefined)
-            ?? Object.values(health.pipeline_providers).find(isLocalProvider)
-          const localLabel = localProvider === "quenchforge" ? "Quenchforge" : "Ollama"
+            ?? stageProviders.find(isLocalProvider)
+          const localLabel = llmLane
+            ? providerLabel(llmLane.provider)
+            : configuredLocal
+              ? providerLabel(configuredLocal)
+              : "Local inference"
+          const modelLabel = llmLane
+            ? laneModelUnset(llmLane)
+              ? "no model pinned"
+              : laneModelLabel(llmLane)
+            : health.internal_llm_model ?? ""
+          const laneWarning = laneProblems.length > 0 || (llmLane != null && laneModelUnset(llmLane))
           if (localCount > 0) {
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="flex items-center gap-1 text-label-xs text-green-600 dark:text-green-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    {localLabel}: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
+                  <span
+                    data-testid="local-pipeline-chip"
+                    className={cn(
+                      "flex items-center gap-1 text-label-xs",
+                      laneWarning
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-green-600 dark:text-green-400",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        laneWarning ? "bg-amber-500" : "bg-green-500",
+                      )}
+                    />
+                    {localLabel}
+                    {modelLabel ? `: ${modelLabel}` : ""} ({localCount}/{totalStages} local
+                    {laneProblems.length > 0 ? ` · ${laneProblems.length} degraded` : ""})
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="space-y-1">
-                  <p className="font-medium">{localLabel} — Local LLM</p>
-                  <p className="text-muted-foreground">{localCount} of {totalStages} pipeline stages running locally ($0)</p>
-                  <p className="text-muted-foreground">Model: {health.internal_llm_model || "configured"}</p>
-                  {health.inference_routing != null && (
-                    <p className="text-muted-foreground">Routing snapshot available</p>
-                  )}
+                  <p className="font-medium">{localLabel} — on-box inference</p>
+                  <p className="text-muted-foreground">
+                    {localCount} of {totalStages} pipeline stages served on this machine ($0)
+                  </p>
+                  <InferenceLaneRows lanes={lanes} />
                 </TooltipContent>
               </Tooltip>
             )
@@ -235,13 +302,14 @@ export function StatusBar({
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">
+                <span data-testid="local-pipeline-chip" className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">
                   <Zap className="size-3" aria-hidden="true" />
                   0 local
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="top">
+              <TooltipContent side="top" className="space-y-1">
                 <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>
+                <InferenceLaneRows lanes={lanes} />
               </TooltipContent>
             </Tooltip>
           )

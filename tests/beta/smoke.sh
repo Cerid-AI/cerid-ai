@@ -6,6 +6,16 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Resolve the MCP API key before assert.sh snapshots it. /health and the /api
+# routes require X-API-Key once the server binds off loopback (LAN mode), and a
+# standalone run of this script — outside run.sh — never inherited the
+# operator's key. Same .env read run.sh does.
+if [[ -z "${CERID_API_KEY:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
+  CERID_API_KEY=$(grep -E '^CERID_API_KEY=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
+  export CERID_API_KEY
+fi
+
 source "${SCRIPT_DIR}/lib/assert.sh"
 
 export RESULTS_FILE="${SCRIPT_DIR}/reports/smoke.results"

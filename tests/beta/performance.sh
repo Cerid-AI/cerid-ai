@@ -5,6 +5,16 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Resolve the MCP API key before assert.sh snapshots it. /health and the /api
+# routes require X-API-Key once the server binds off loopback (LAN mode), and a
+# standalone run of this script — outside run.sh — never inherited the
+# operator's key. Same .env read run.sh does.
+if [[ -z "${CERID_API_KEY:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
+  CERID_API_KEY=$(grep -E '^CERID_API_KEY=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
+  export CERID_API_KEY
+fi
+
 source "${SCRIPT_DIR}/lib/assert.sh"
 
 export RESULTS_FILE="${SCRIPT_DIR}/reports/performance.results"
@@ -57,7 +67,7 @@ p01_check() {
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
   for i in $(seq 1 50); do
-    curl -w '%{time_total}\n' -s -o /dev/null --connect-timeout 5 --max-time 10 "${MCP_BASE}/health" >> "$tmpfile" 2>/dev/null || echo "9999" >> "$tmpfile"
+    curl -w '%{time_total}\n' -s -o /dev/null --connect-timeout 5 --max-time 10 $KEY_HDR "${MCP_BASE}/health" >> "$tmpfile" 2>/dev/null || echo "9999" >> "$tmpfile"
   done
 
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")

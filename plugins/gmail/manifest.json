@@ -1,6 +1,7 @@
 {
   "name": "gmail-connector",
   "version": "1.0.0",
+  "type": "connector",
   "description": "Gmail OAuth connector for importing emails into Cerid KB",
   "tier": "pro",
   "license": "BUSL-1.1",

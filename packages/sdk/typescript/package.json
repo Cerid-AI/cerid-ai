@@ -1,6 +1,6 @@
 {
   "name": "@cerid-ai/sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Zero-dependency typed client for the Cerid AI SDK API.",
   "type": "module",
   "main": "dist/index.js",
@@ -8,9 +8,12 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
+  },
+  "engines": {
+    "node": ">=18.17"
   },
   "files": [
     "dist",

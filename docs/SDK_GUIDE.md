@@ -2,20 +2,26 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.1.0**. Client packages are published on
-[PyPI (`cerid-sdk`)](https://pypi.org/project/cerid-sdk/) and
-[npm (`@cerid-ai/sdk`)](https://www.npmjs.com/package/@cerid-ai/sdk) —
-both **0.1.1**, targeting the 17-endpoint `/sdk/v1/` surface. The SDK versions independently
-of the product; current release 0.1.x on PyPI/npm (per
-`docs/SDK_PUBLISHING.md`).
+**1.2.0**. Client packages are `cerid-sdk`
+([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
+([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.0** in this
+tree; the registries still serve 0.1.1 until 0.2.0 is published, which is a
+separate step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
+product. Additive in 1.2.0: `POST /sdk/v1/memory/recall`,
+`POST /sdk/v1/ingest/upload` (multipart), `DELETE /sdk/v1/artifacts/{id}`
+(consumer-scoped). Restricted domains raise HTTP 403 with
+`retrieval_reason: consumer_domain_restricted` (SDK: `DomainRestrictedError`).
 
 ## Overview
 
-The SDK exposes 17 endpoints covering knowledge-base operations, health
-monitoring, content ingestion (text / file / adapter-shaped), taxonomy,
-search, plugin discovery, smart-routed LLM completion, async memory
-extraction with job polling, and server configuration. All endpoints
-return typed JSON responses defined by Pydantic models in `models/sdk.py`.
+The `/sdk/v1/` surface is 20 endpoints. The client libraries wrap **18** of
+them, covering knowledge-base operations, health monitoring, content ingestion
+(text / path / multipart / adapter-shaped), taxonomy, search, plugin discovery,
+smart-routed LLM completion, memory extraction with job polling, memory recall,
+consumer-scoped artifact delete, and server configuration. The remaining two —
+the webhook receiver and the voice-note upload — are HTTP-only by design; see
+the endpoint table. All JSON endpoints return typed responses defined by
+Pydantic models in `src/mcp/app/models/sdk.py`.
 
 ## Authentication
 
@@ -30,6 +36,28 @@ X-Client-ID: my-app
 X-API-Key: sk-cerid-...
 ```
 
+Sibling env names (do not put the server `CERID_API_KEY` in a product client):
+
+| Product | URL | Key | Client ID |
+|---------|-----|-----|-----------|
+| Trading | `TRADING_CERID_URL` (alias `CERID_MCP_URL`) | `TRADING_CERID_API_KEY` | `trading-agent` |
+| Finance | DB `cerid_url` | DB `cerid_api_key` | `cerid-finance` |
+| Anneal | `ANNEAL_CERID_URL` | `ANNEAL_CERID_API_KEY` | `cerid-anneal` |
+| Boardroom | `BOARDROOM_CERID_MCP_URL` | `BOARDROOM_CERID_API_KEY` | (internal consumer id) |
+| Server | n/a | `CERID_API_KEY` | n/a |
+
+## Client cache (product policy, not in the SDK)
+
+Query L1 caches are owned by the product wrapper. Do not cache ingest, health, or llm.
+
+| Client | Query L1 TTL |
+|--------|----------------|
+| Trading | 20s (+ Redis 120s) |
+| Boardroom | 30s (+ Redis 180s) |
+| Finance | 5 min (LRU 200) |
+| Anneal | none (write outbox is durability) |
+| SDK | none |
+
 ## OpenAPI Spec
 
 The full OpenAPI 3.x specification is available at:
@@ -39,6 +67,10 @@ GET /sdk/v1/openapi.json
 ```
 
 Use this to generate client SDKs or import into API tools (Postman, Insomnia).
+The spec declares both auth headers as `apiKey` security schemes, so a
+generated client sends `X-Client-ID` (and `X-API-Key` when configured) without
+hand-editing. The same document is committed at
+[`docs/openapi-sdk-v1.json`](openapi-sdk-v1.json).
 
 ## Python SDK Quickstart
 
@@ -47,8 +79,8 @@ pip install cerid-sdk
 ```
 
 ```python
-# The distribution is `cerid-sdk`; the import name is `cerid`
-# (verified against the published 0.1.1 wheel).
+# The distribution is `cerid-sdk`; the import name is `cerid`.
+# Sibling products vendor 0.2.0 until PyPI publish.
 from cerid import CeridClient
 
 client = CeridClient(
@@ -57,9 +89,10 @@ client = CeridClient(
     api_key="sk-cerid-...",  # optional  # pragma: allowlist secret
 )
 
-# Query the knowledge base (domains is a list; mix your own + built-ins)
+# Query the knowledge base (domains is a list; mix your own + built-ins).
+# Results are plain dicts: the metadata keys vary by source.
 result = client.kb.query("How does the circuit breaker work?", domains=["coding"])
-print(result.results[0].content)
+print(result.results[0]["content"])
 
 # Check service health
 health = client.system.health()
@@ -73,13 +106,22 @@ resp = client.kb.ingest(
 )
 print(resp.artifact_id, resp.chunks)
 
-# Verify claims
-check = client.verify.check(
-    "Redis defaults to port 6380.",
-    context="What port does Redis use?",
-)
+# Verify claims — conversation_id is required (the server files the
+# verification under it)
+check = client.verify.check("Redis defaults to port 6380.", conversation_id="demo")
 for claim in check.claims:
-    print(claim.status, claim.confidence)
+    print(claim["status"], claim["confidence"])
+print(check.summary["overall_confidence"], "nli_skipped:", check.nli_skipped)
+
+# Extract memories. Servers running the extraction queue answer 202 with a
+# job to poll instead of an inline result — branch on the returned type.
+from cerid.models import MemoryExtractAcceptedResponse
+
+extracted = client.memory.extract("I prefer dark mode.", conversation_id="demo")
+if isinstance(extracted, MemoryExtractAcceptedResponse):
+    print(client.memory.get_job(extracted.job_id).status)
+else:
+    print(extracted.memories_stored, "memories stored")
 ```
 
 ## TypeScript SDK Quickstart
@@ -89,7 +131,7 @@ npm install @cerid-ai/sdk
 ```
 
 ```typescript
-import { CeridClient } from "@cerid-ai/sdk";
+import { CeridClient, isMemoryExtractAccepted } from "@cerid-ai/sdk";
 
 const client = new CeridClient({
   baseUrl: "http://localhost:8888",
@@ -97,9 +139,29 @@ const client = new CeridClient({
   apiKey: "sk-cerid-...", // optional  // pragma: allowlist secret
 });
 
-// Query the knowledge base (domains is a list)
-const result = await client.kb.query({ query: "circuit breaker pattern", domains: ["coding"], topK: 5 });
+// Query the knowledge base (domains is a list; the field is top_k, matching
+// the wire contract — there is no camelCase alias)
+const result = await client.kb.query({ query: "circuit breaker pattern", domains: ["coding"], top_k: 5 });
 console.log(result.results[0].content);
+
+// Verify claims — conversation_id is required
+const check = await client.verify.check({
+  response_text: "Redis defaults to port 6380.",
+  conversation_id: "demo",
+});
+console.log(check.summary.overall_confidence, check.nli_skipped);
+
+// Extract memories; a queued server answers 202 with a job to poll
+const extracted = await client.memory.extract({
+  response_text: "I prefer dark mode.",
+  conversation_id: "demo",
+});
+if (isMemoryExtractAccepted(extracted)) {
+  const job = await client.memory.getJob(extracted.job_id);
+  console.log(job.status);
+} else {
+  console.log(extracted.memories_stored, "memories stored");
+}
 
 // Check health
 const health = await client.system.health();
@@ -194,6 +256,12 @@ freshly-created client domain.
 | 16 | POST | `/sdk/v1/ingest/webhook/{token}` | Token-gated webhook receiver (provider payloads normalized via adapter recipes; returns 202) |
 | 17 | POST | `/sdk/v1/ingest/voice-note` | Voice-note transcribe + ingest |
 
+Endpoints 1-15 are wrapped by both client libraries. **16 and 17 are
+HTTP-only**: the webhook is an inbound receiver an external service posts to
+(nothing for a client to call), and the voice-note route takes a multipart
+upload, which neither client library models. Call those two with a plain HTTP
+request.
+
 ### Request/Response Examples
 
 **POST /sdk/v1/query**
@@ -229,7 +297,7 @@ freshly-created client domain.
 **GET /sdk/v1/settings**
 
 ```json
-{"version": "1.1.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
+{"version": "1.2.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
 ```
 
 ## Rate Limiting
@@ -250,24 +318,30 @@ Default limits:
 
 ## Error Handling
 
-All errors follow the `CeridError` JSON format:
+Errors use FastAPI's envelope — a single `detail` key. Both SDKs read it and
+raise a typed error from it:
 
 ```json
-{
-  "error": {
-    "type": "ValidationError",
-    "message": "Field 'query' is required",
-    "code": "VALIDATION_ERROR"
-  }
-}
+{"detail": "Field 'query' is required"}
+```
+
+`detail` is a string on most paths and an object on the SLO-budget 503, which
+reports the budget it could not meet:
+
+```json
+{"detail": {"error": "slo_budget_unsatisfiable", "budget_ms": 800, "floor_p95_ms": 2400}}
 ```
 
 | Status | Meaning |
 |--------|---------|
 | 200 | Success |
+| 202 | Accepted for background processing (async memory extract) |
+| 401 | Missing or invalid `X-API-Key` |
+| 403 | Authenticated but not permitted for this domain |
+| 404 | No such resource (e.g. an unknown memory-extract `job_id`) |
 | 422 | Invalid request parameters |
 | 429 | Rate limit exceeded (check `Retry-After` header) |
-| 503 | Backend service unavailable |
+| 503 | Backend service unavailable, or no model tier fits `slo_budget_ms` |
 
 On 503, call `GET /sdk/v1/health` or `GET /sdk/v1/health/detailed` to
 inspect which services are down and the current degradation tier.

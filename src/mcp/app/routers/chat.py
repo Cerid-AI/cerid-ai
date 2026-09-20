@@ -1012,14 +1012,20 @@ async def _collect_nonstream_response(
     frames at arbitrary byte boundaries, so accumulate and split on the ``\\n\\n``
     frame delimiter rather than parsing each yielded chunk in isolation. Returns
     ``(body, status_code)``.
+
+    ``model`` names the model that actually generated the content: a
+    ``cerid_meta_update`` frame carrying ``fallback_model`` or ``actual_model``
+    overrides the initially-resolved one, and a fallback triggered by a retryable
+    upstream status is disclosed as ``cerid_meta.original_error``.
     """
     content_parts: list[str] = []
     resolved_model = ""
+    original_error: int | None = None
     error: dict[str, Any] | None = None
     buffer = ""
 
     def _consume_frame(frame: str) -> None:
-        nonlocal resolved_model, error
+        nonlocal resolved_model, original_error, error
         for line in frame.splitlines():
             if not line.startswith("data: "):
                 continue
@@ -1033,7 +1039,19 @@ async def _collect_nonstream_response(
             if "cerid_meta" in obj:
                 resolved_model = obj["cerid_meta"].get("resolved_model", resolved_model)
             elif "cerid_meta_update" in obj:
-                continue
+                # The streaming path corrects the model twice: once when a
+                # retryable upstream status forces the fallback model, and once
+                # when the upstream body names a different model than we asked
+                # for. Dropping both stamped the PRE-fallback model on bytes the
+                # fallback generated — the K1 wrong-label class on this endpoint.
+                update = obj["cerid_meta_update"]
+                resolved_model = (
+                    update.get("actual_model")
+                    or update.get("fallback_model")
+                    or resolved_model
+                )
+                if update.get("original_error") is not None:
+                    original_error = update["original_error"]
             elif "error" in obj:
                 error = obj["error"]
             else:
@@ -1056,6 +1074,11 @@ async def _collect_nonstream_response(
     body: dict[str, Any] = {
         "object": "chat.completion",
         "model": resolved_model,
+        **(
+            {"cerid_meta": {"original_error": original_error}}
+            if original_error is not None
+            else {}
+        ),
         "choices": [
             {
                 "index": 0,

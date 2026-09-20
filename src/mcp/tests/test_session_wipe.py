@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import fakeredis
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -89,7 +90,8 @@ def test_wipe_deletes_each_memory_artifact_via_retention_helper(monkeypatch):
         lambda *_a: ["art-1", "art-2"],
     )
     monkeypatch.setattr(session_wipe, "_find_verified_memory_ids", lambda *_a: [])
-    fake_purge = MagicMock()
+    # Returns the count it purged — the wipe summary adds that, not 1 per call.
+    fake_purge = MagicMock(return_value=1)
     monkeypatch.setattr(session_wipe, "apply_retention_plan", fake_purge)
 
     driver = _FakeDriver()
@@ -293,48 +295,17 @@ def test_delete_verified_memory_purges_chroma_and_neo4j(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class _FakePipeline:
-    def __init__(self, owner) -> None:
-        self._owner = owner
-
-    def delete(self, key):
-        self._owner.store.pop(key, None)
-        return self
-
-    def execute(self):
-        return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc):
-        return False
-
-
-class _FakeRedis:
-    def __init__(self) -> None:
-        self.store: dict[str, str] = {}
-
-    def get(self, key):
-        return self.store.get(key)
-
-    def set(self, key, value):
-        self.store[key] = value
-
-    def delete(self, key):
-        self.store.pop(key, None)
-
-    def pipeline(self):
-        return _FakePipeline(self)
-
-
 @pytest.fixture
 def client(monkeypatch):
     app = FastAPI()
     app.include_router(router)
-    fake_redis = _FakeRedis()
+    # fakeredis rather than a hand-rolled stub: the endpoint uses sorted-set
+    # commands for the L4 session registry, which a get/set/delete stub cannot
+    # model (and would silently pass on).
+    fake_redis = fakeredis.FakeStrictRedis(decode_responses=True)
     monkeypatch.setattr("app.deps.get_redis", lambda: fake_redis)
     monkeypatch.setattr("app.routers.settings.get_redis", lambda: fake_redis)
+    monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake_redis)
     return TestClient(app), fake_redis
 
 
@@ -354,7 +325,7 @@ def test_endpoint_returns_documented_shape_when_neo4j_unreachable(client, monkey
         "app.routers.settings.wipe_conversation_state",
         lambda *a, **k: {"conversation_sync_deleted": False},
     )
-    fake_redis.store[_PRIVATE_MODE_KEY] = "4"
+    fake_redis.set(_PRIVATE_MODE_KEY, "4")
 
     r = tc.post(
         "/settings/private-mode/session-wipe",
@@ -367,7 +338,9 @@ def test_endpoint_returns_documented_shape_when_neo4j_unreachable(client, monkey
         "conversation_id": "conv-e2e",
         "summary": {"conversation_sync_deleted": False},
     }
-    assert _PRIVATE_MODE_KEY not in fake_redis.store
+    # F021: an explicit "0", not a deleted key — a missing key reads as
+    # "unset", which seed_private_mode_from_env re-seeds from the boot env.
+    assert fake_redis.get(_PRIVATE_MODE_KEY) == "0"
 
 
 def test_endpoint_clears_session_key_even_when_wipe_orchestrator_fails(client, monkeypatch):
@@ -384,7 +357,7 @@ def test_endpoint_clears_session_key_even_when_wipe_orchestrator_fails(client, m
         MagicMock(side_effect=RuntimeError("boom")),
     )
     session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}conv-fail"
-    fake_redis.store[session_key] = "4"
+    fake_redis.set(session_key, "4")
 
     r = tc.post(
         "/settings/private-mode/session-wipe",
@@ -392,7 +365,7 @@ def test_endpoint_clears_session_key_even_when_wipe_orchestrator_fails(client, m
     )
     assert r.status_code == 200
     assert r.json()["wiped"] is False
-    assert session_key not in fake_redis.store
+    assert fake_redis.get(session_key) is None
 
 
 def test_endpoint_reports_wiped_true_when_neo4j_reachable_and_orchestrator_succeeds(
@@ -415,3 +388,46 @@ def test_endpoint_reports_wiped_true_when_neo4j_reachable_and_orchestrator_succe
     body = r.json()
     assert body["wiped"] is True
     assert body["summary"] == fake_summary
+
+
+# ---------------------------------------------------------------------------
+# The wipe summary must count what was purged, not what was attempted
+# ---------------------------------------------------------------------------
+
+
+def test_memory_artifact_counter_reflects_what_was_actually_purged(monkeypatch):
+    """apply_retention_plan returns the count it purged; the wipe ignored it.
+
+    An artifact whose Neo4j node had already vanished (a concurrent
+    retention pass, a prior partial wipe) still counted as deleted, so the
+    operator's only evidence that a full-ephemeral wipe erased anything
+    over-reported.
+    """
+    monkeypatch.setattr(session_wipe, "delete_conversation", MagicMock())
+    monkeypatch.setattr(
+        session_wipe, "_find_extracted_memory_artifact_ids",
+        lambda *_a: ["art-gone", "art-real"],
+    )
+    monkeypatch.setattr(session_wipe, "_find_verified_memory_ids", lambda *_a: [])
+    monkeypatch.setattr(
+        session_wipe, "apply_retention_plan",
+        lambda _driver, decision: 0 if decision.purge == ["art-gone"] else 1,
+    )
+
+    summary = wipe_conversation_state("conv-1", sync_dir=None, neo4j_driver=_FakeDriver())
+
+    assert summary["memory_artifacts_deleted"] == 1
+    assert summary["memory_artifacts_failed"] == 0
+
+
+def test_memory_artifact_counter_still_counts_every_real_purge(monkeypatch):
+    monkeypatch.setattr(session_wipe, "delete_conversation", MagicMock())
+    monkeypatch.setattr(
+        session_wipe, "_find_extracted_memory_artifact_ids", lambda *_a: ["a", "b"],
+    )
+    monkeypatch.setattr(session_wipe, "_find_verified_memory_ids", lambda *_a: [])
+    monkeypatch.setattr(session_wipe, "apply_retention_plan", lambda *_a: 1)
+
+    summary = wipe_conversation_state("conv-1", sync_dir=None, neo4j_driver=_FakeDriver())
+
+    assert summary["memory_artifacts_deleted"] == 2

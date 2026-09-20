@@ -95,6 +95,20 @@ def create_user(
         return record["user"]
 
 
+def any_user_exists(driver) -> bool:
+    """True when the graph holds at least one user.
+
+    The first-run predicate for ``/auth/register``: an empty user set is the
+    only state in which handing out an admin role to an unauthenticated caller
+    is bootstrap rather than privilege escalation.
+    """
+    with driver.session() as session:
+        record = session.run(
+            "MATCH (u:User) RETURN count(u) > 0 AS exists"
+        ).single()
+        return bool(record["exists"]) if record else False
+
+
 def get_user_by_email(driver, email: str) -> dict | None:
     """Retrieve a user by email (for login). Includes hashed_password."""
     with driver.session() as session:

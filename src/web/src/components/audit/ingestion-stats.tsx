@@ -9,9 +9,17 @@ import type { AuditIngestion } from "@/lib/types"
 
 interface IngestionStatsProps {
   ingestion: AuditIngestion | undefined
+  /**
+   * The period the pane's selector is showing. Used only to say that this
+   * report is NOT scoped to it: get_ingestion_stats() takes no hours argument
+   * and scans a fixed window of recent audit-log entries, so its counts are
+   * neither corpus-wide nor period-scoped. Unlabelled, "Total Ingests 4" sat
+   * beside a corpus-wide "1,006 artifacts ingested" as a flat contradiction.
+   */
+  selectedRangeLabel?: string
 }
 
-export function IngestionStats({ ingestion }: IngestionStatsProps) {
+export function IngestionStats({ ingestion, selectedRangeLabel }: IngestionStatsProps) {
   if (!ingestion) return <EmptyState icon={FileUp} title="No ingestion data" description="Stats appear after files are ingested" />
 
   const duplicateRatePct = (ingestion.duplicate_rate * 100).toFixed(1)
@@ -19,7 +27,13 @@ export function IngestionStats({ ingestion }: IngestionStatsProps) {
   return (
     <Card>
       <CardHeader className="p-3 pb-0">
-        <CardTitle className="text-sm">Ingestion Stats</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm">Ingestion Stats</CardTitle>
+          <span className="text-xs text-muted-foreground">
+            recent activity log
+            {selectedRangeLabel ? ` · not the ${selectedRangeLabel} selection` : ""}
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="p-3">
         {/* Summary stats */}

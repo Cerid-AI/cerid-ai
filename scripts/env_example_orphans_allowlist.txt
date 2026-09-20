@@ -1,0 +1,21 @@
+# env_example_orphans_allowlist.txt — dead knobs still published to operators
+# Enforced by scripts/lint-env-example-orphans.py --check (gate G-F, F206 in
+# tasks/2026-09-02-audit-findings.json).
+#
+# Every line is a name lint-env-has-reader.py records as having zero readers
+# that gen_env_example.py nevertheless writes into .env.example. An operator
+# reading the file is told a lever exists that does nothing.
+#
+# Format: <ENV_VAR>  # <one-line reason>
+# Shrink-only. The fix is upstream, and either half removes the line: delete
+# the declaration, or wire a reader and drop it from the reader gate's
+# ALLOWLIST.
+#
+# Regenerate (preserves reasons for still-live keys) with:
+#   python scripts/lint-env-example-orphans.py --update
+
+CERID_CLASSIFICATION  # F206 seed 2026-09-03 — .env.example:24, Enterprise block. Reads as a data-classification control and is not read anywhere; the audit's proposed resolution is to delete CLASSIFICATION_ENABLED outright, matching the CERID_ENTERPRISE deletion (0f066be1). Needs config/settings.py, owned elsewhere.
+EMPIRICAL_MEMORY_STABILITY_DAYS  # F206 seed 2026-09-03 — GATE2-SELF-002; settings.py:813 declaration with no reader, published as a tunable.
+ENABLE_SENTRY  # F206 seed 2026-09-03 — GATE2-SELF-011; init_sentry() gates on SENTRY_DSN_MCP/SENTRY_DSN alone. Publishing the flag tells an operator they can turn Sentry off with it; they cannot.
+LONGMEMEVAL_INGEST_PARALLEL  # F206 seed 2026-09-03 — GATE2-SELF-007; eval-harness knob with no code reader. Resolution per the audit is a declared_for_env_example marker in settings.py, owned elsewhere.
+LONGMEMEVAL_SCORER  # F206 seed 2026-09-03 — GATE2-SELF-008; same eval-harness class as LONGMEMEVAL_INGEST_PARALLEL.

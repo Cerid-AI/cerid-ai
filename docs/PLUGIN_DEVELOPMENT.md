@@ -54,13 +54,81 @@ collected and mounted on the app after all plugins load.
 Implement `get_backend_class()` (returns `SyncBackend` subclass) and
 `get_backend_name()` (returns identifier string like `"s3"`).
 
+### ToolPlugin
+
+Implement `get_tools()` returning a list of tool definitions. Each entry needs
+`name`, `description`, `inputSchema` (JSON Schema) and `handler` (an async
+callable taking the arguments dict); `outputSchema` is optional. Prefix tool
+names with `plg_{plugin_name}_` so they cannot collide with the built-in
+`pkb_*` tools.
+
+The loader collects the definitions after every plugin has loaded and
+`app.tools.get_all_tools()` merges them, so a conforming ToolPlugin appears in
+`tools/list` and `tools/call` dispatches to its handler (RA-63). The base
+`register()` is a no-op — do not register tools yourself.
+
+```python
+from plugins.base import ToolPlugin
+
+class MyToolPlugin(ToolPlugin):
+    name = "my-tools"
+    version = "1.0.0"
+
+    def get_tools(self):
+        return [{
+            "name": "plg_my_tools_search",
+            "description": "Search my custom source",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            "handler": self.handle_search,
+        }]
+
+    async def handle_search(self, arguments: dict):
+        return {"results": []}
+```
+
+### ConnectorPlugin
+
+Implement `get_data_source()` returning a configured `DataSource` instance
+(`app.data_sources.base.DataSource`). The base `register()` adds it to the
+global `DataSourceRegistry`, after which it participates in
+circuit-breaker-protected parallel queries automatically — you do not call the
+registry yourself.
+
+This is the type every in-tree Pro plugin uses (gmail, google_calendar,
+outlook, outlook_calendar, apple_calendar, apple_mail, apple_photos).
+
+```python
+from plugins.base import ConnectorPlugin
+from app.data_sources.base import DataSource
+
+class SlackDataSource(DataSource):
+    name = "slack"
+    description = "Search Slack messages"
+    requires_api_key = True
+    api_key_env_var = "SLACK_BOT_TOKEN"  # pragma: allowlist secret
+
+    async def query(self, query, **kwargs):
+        ...
+
+class SlackConnector(ConnectorPlugin):
+    name = "slack"
+    version = "1.0.0"
+
+    def get_data_source(self):
+        return SlackDataSource()
+```
+
 ## Manifest Schema
 
 ```json
 {
   "name": "string (required)",
   "version": "string (required)",
-  "type": "parser | agent | sync | middleware (required)",
+  "type": "parser | agent | sync | middleware | tool | connector (required)",
   "description": "string (optional)",
   "tier": "community | pro | enterprise (optional, default: community)",
   "requires": ["package>=version (optional)"]

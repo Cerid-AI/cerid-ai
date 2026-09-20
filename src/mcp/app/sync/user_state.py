@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import re
 import tempfile
 import threading
 import time
@@ -131,6 +132,37 @@ def _conversations_dir(sync_dir: str) -> Path:
     p = _user_dir(sync_dir) / "conversations"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+# A conversation id becomes a filename. Anything outside this alphabet — a
+# separator, a dot segment, a NUL — is a path-traversal attempt, not a typo:
+# the ids this server issues are UUID v4.
+_CONV_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def validate_conversation_id(conv_id: Any) -> str:
+    """Return *conv_id* if it is safe to use as a filename, else raise.
+
+    Raises ``ValueError`` for anything that is not a bare, separator-free
+    identifier, so callers cannot smuggle ``../`` past the sync directory.
+    """
+    if not isinstance(conv_id, str) or not _CONV_ID_RE.match(conv_id):
+        raise ValueError(f"Invalid conversation id: {conv_id!r}")
+    return conv_id
+
+
+def _conversation_path(sync_dir: str, conv_id: str, *, create_dir: bool) -> Path:
+    """Resolve ``user/conversations/{conv_id}.json``, refusing to leave that dir."""
+    validate_conversation_id(conv_id)
+    conv_dir = (
+        _conversations_dir(sync_dir) if create_dir
+        else Path(sync_dir) / "user" / "conversations"
+    )
+    base = conv_dir.resolve()
+    path = (conv_dir / f"{conv_id}.json").resolve()
+    if not path.is_relative_to(base):
+        raise ValueError(f"Conversation id escapes the sync directory: {conv_id!r}")
+    return path
 
 
 def _now_iso() -> str:
@@ -318,10 +350,10 @@ def write_conversation(sync_dir: str, conversation: dict[str, Any]) -> None:
     conv_id = conversation.get("id")
     if not conv_id:
         raise ValueError("Conversation must have an 'id' field")
+    path = _conversation_path(sync_dir, conv_id, create_dir=True)
     conv = dict(conversation)
     conv["_synced_at"] = _now_iso()
     conv["_machine_id"] = config.MACHINE_ID
-    path = _conversations_dir(sync_dir) / f"{conv_id}.json"
     _write_json(path, _encrypt_dict(conv))
     logger.info("Wrote conversation %s to %s", conv_id, path)
 
@@ -366,13 +398,13 @@ def list_conversation_ids(sync_dir: str) -> list[str]:
 
 def read_conversation(sync_dir: str, conv_id: str) -> dict[str, Any]:
     """Read a single conversation by ID. Returns empty dict if missing."""
-    path = Path(sync_dir) / "user" / "conversations" / f"{conv_id}.json"
+    path = _conversation_path(sync_dir, conv_id, create_dir=False)
     return _decrypt_dict(_read_json(path))
 
 
 def delete_conversation(sync_dir: str, conv_id: str) -> None:
     """Delete a conversation file. No-op if the file does not exist."""
-    path = Path(sync_dir) / "user" / "conversations" / f"{conv_id}.json"
+    path = _conversation_path(sync_dir, conv_id, create_dir=False)
     if path.exists():
         path.unlink(missing_ok=True)  # missing_ok closes the exists()->unlink race
         logger.info("Deleted conversation %s", conv_id)

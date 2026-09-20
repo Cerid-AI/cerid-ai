@@ -58,3 +58,32 @@ def test_get_default_matches_env_default(client):
     direction."""
     body = client.get("/settings").json()
     assert body["sensitive_domain_retrieval"] is False
+
+
+def test_patch_is_visible_to_the_retrieval_reader(client, monkeypatch):
+    """The only runtime reader is ``utils.domain_privacy.sensitive_domains_opted_in()``,
+    which reads the ``config.settings`` submodule plane. A PATCH that only
+    mutates the ``config`` package plane returns 200 and changes nothing."""
+    import config.settings
+    from utils.domain_privacy import sensitive_domains_opted_in
+
+    monkeypatch.setattr(config.settings, "SENSITIVE_DOMAIN_RETRIEVAL_ENABLED", False)
+    assert sensitive_domains_opted_in() is False
+
+    r = client.patch("/settings", json={"sensitive_domain_retrieval": True})
+    assert r.status_code == 200
+    assert sensitive_domains_opted_in() is True
+
+    r = client.patch("/settings", json={"sensitive_domain_retrieval": False})
+    assert r.status_code == 200
+    assert sensitive_domains_opted_in() is False
+
+
+def test_get_reports_the_plane_retrieval_reads(client, monkeypatch):
+    """GET must echo the plane that gates retrieval, not a shadow copy."""
+    import config
+    import config.settings
+
+    monkeypatch.setattr(config.settings, "SENSITIVE_DOMAIN_RETRIEVAL_ENABLED", True)
+    monkeypatch.setattr(config, "SENSITIVE_DOMAIN_RETRIEVAL_ENABLED", False, raising=False)
+    assert client.get("/settings").json()["sensitive_domain_retrieval"] is True

@@ -34,13 +34,38 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 DEFAULT_BASE = os.environ.get("CERID_PRESERVATION_MCP", "http://127.0.0.1:8888")
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_api_key() -> str:
+    """The operator's key, from the environment or the .env that holds it.
+
+    /health stopped being anonymous once the server binds off loopback, and
+    neither `make pro-feature-health` nor a bare shell exports the key — it
+    lives in .env. Reading it here is what start-cerid.sh and tests/beta/run.sh
+    already do for their own single-key lookups.
+    """
+    key = os.getenv("CERID_API_KEY", "").strip()
+    if key:
+        return key
+    for env_file in (Path.cwd() / ".env", REPO_ROOT / ".env"):
+        try:
+            lines = env_file.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if line.startswith("CERID_API_KEY="):
+                return line.split("=", 1)[1].strip()
+    return ""
 
 
 def fetch_health(base: str, timeout: float) -> dict:
     req = urllib.request.Request(f"{base.rstrip('/')}/health")
-    api_key = os.getenv("CERID_API_KEY")
+    api_key = resolve_api_key()
     if api_key:
         req.add_header("X-API-Key", api_key)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -62,6 +87,19 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         health = fetch_health(args.base, args.timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            # Distinct from "cannot reach": the stack is up and gating us. A
+            # LAN-bound stack requires X-API-Key on /health, so reporting this
+            # as a dead server sends the operator after the wrong problem.
+            print(
+                f"::error::pro-feature-health: {args.base}/health returned HTTP "
+                f"{exc.code} — the stack requires an API key. Export "
+                "CERID_API_KEY or set it in .env."
+            )
+            return 2
+        print(f"::error::pro-feature-health: cannot reach {args.base}/health: {exc}")
+        return 2
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print(f"::error::pro-feature-health: cannot reach {args.base}/health: {exc}")
         return 2

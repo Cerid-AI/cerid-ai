@@ -36,7 +36,9 @@ warn() { printf "${YELLOW}  [warn]${RESET} %s\n" "$1"; }
 err()  { printf "${RED}  [error]${RESET} %s\n" "$1" >&2; }
 
 check_cerid_running() {
-    local health_url="${CERID_API}/health"
+    # /health/ping, not /health: the informative payload requires X-API-Key
+    # off loopback, and this installer only asks whether the stack answers.
+    local health_url="${CERID_API}/health/ping"
     if ! curl -sf -o /dev/null --max-time 5 "$health_url" 2>/dev/null; then
         warn "Cerid API is not reachable at $health_url"
         echo "  Start the stack first: ./scripts/start-cerid.sh"

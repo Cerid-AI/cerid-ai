@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from cerid.errors import _raise_for_status
 from cerid.models import (
     CollectionsResponse,
+    DeleteArtifactResponse,
     IngestExternalResponse,
     IngestResponse,
     QueryResponse,
@@ -21,6 +22,15 @@ if TYPE_CHECKING:
     import httpx
 
     from cerid._base import _BaseClient
+
+
+def _upload_params(domain: str, tags: str) -> Optional[Dict[str, str]]:
+    params: Dict[str, str] = {}
+    if domain:
+        params["domain"] = domain
+    if tags:
+        params["tags"] = tags
+    return params or None
 
 
 class KBResource:
@@ -37,6 +47,10 @@ class KBResource:
         domains: Optional[List[str]] = None,
         top_k: int = 5,
         conversation_id: Optional[str] = None,
+        rag_mode: Optional[str] = None,
+        strict_domains: Optional[bool] = None,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> QueryResponse:
         """Multi-domain KB search with hybrid BM25+vector retrieval."""
         body = self._client._build_json(
@@ -44,8 +58,15 @@ class KBResource:
             domains=domains,
             top_k=top_k,
             conversation_id=conversation_id,
+            rag_mode=rag_mode,
+            strict_domains=strict_domains,
+            model=model,
         )
-        resp = self._http.post(self._client._url("/query"), json=body)
+        resp = self._http.post(
+            self._client._url("/query"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return QueryResponse.model_validate(resp.json())
 
@@ -55,10 +76,22 @@ class KBResource:
         *,
         domain: str = "general",
         top_k: int = 5,
+        exclude_packs: bool = False,
+        timeout: Optional[float] = None,
     ) -> SearchResponse:
-        """Raw vector search without agent orchestration."""
-        body = self._client._build_json(query=query, domain=domain, top_k=top_k)
-        resp = self._http.post(self._client._url("/search"), json=body)
+        """Raw vector search without agent orchestration.
+
+        Set ``exclude_packs`` to drop bundled knowledge-pack chunks and search
+        only the operator's own content (personal-first retrieval).
+        """
+        body = self._client._build_json(
+            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs
+        )
+        resp = self._http.post(
+            self._client._url("/search"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return SearchResponse.model_validate(resp.json())
 
@@ -69,6 +102,8 @@ class KBResource:
         domain: str = "general",
         tags: str = "",
         metadata: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
     ) -> IngestResponse:
         """Ingest raw text content into the knowledge base.
 
@@ -80,7 +115,12 @@ class KBResource:
         body = self._client._build_json(
             content=content, domain=domain, tags=tags, metadata=metadata
         )
-        resp = self._http.post(self._client._url("/ingest"), json=body)
+        resp = self._http.post(
+            self._client._url("/ingest"),
+            json=body,
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
 
@@ -91,6 +131,8 @@ class KBResource:
         domain: str = "",
         tags: str = "",
         categorize_mode: str = "",
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
     ) -> IngestResponse:
         """Ingest a file from the archive or an absolute path."""
         body = self._client._build_json(
@@ -99,9 +141,51 @@ class KBResource:
             tags=tags,
             categorize_mode=categorize_mode,
         )
-        resp = self._http.post(self._client._url("/ingest/file"), json=body)
+        resp = self._http.post(
+            self._client._url("/ingest/file"),
+            json=body,
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
+
+    def ingest_bytes(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        domain: str = "",
+        tags: str = "",
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> IngestResponse:
+        """Multipart file ingest via ``POST /sdk/v1/ingest/upload``."""
+        resp = self._http.post(
+            self._client._url("/ingest/upload"),
+            files={"file": (filename, content)},
+            params=_upload_params(domain, tags),
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return IngestResponse.model_validate(resp.json())
+
+    def delete_artifact(
+        self,
+        artifact_id: str,
+        *,
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> DeleteArtifactResponse:
+        """Delete one artifact if the consumer is allowed its domain."""
+        resp = self._http.delete(
+            self._client._url(f"/artifacts/{artifact_id}"),
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return DeleteArtifactResponse.model_validate(resp.json())
 
     def ingest_external(
         self,
@@ -154,6 +238,10 @@ class AsyncKBResource:
         domains: Optional[List[str]] = None,
         top_k: int = 5,
         conversation_id: Optional[str] = None,
+        rag_mode: Optional[str] = None,
+        strict_domains: Optional[bool] = None,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> QueryResponse:
         """Multi-domain KB search with hybrid BM25+vector retrieval."""
         body = self._client._build_json(
@@ -161,8 +249,15 @@ class AsyncKBResource:
             domains=domains,
             top_k=top_k,
             conversation_id=conversation_id,
+            rag_mode=rag_mode,
+            strict_domains=strict_domains,
+            model=model,
         )
-        resp = await self._http.post(self._client._url("/query"), json=body)
+        resp = await self._http.post(
+            self._client._url("/query"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return QueryResponse.model_validate(resp.json())
 
@@ -172,10 +267,22 @@ class AsyncKBResource:
         *,
         domain: str = "general",
         top_k: int = 5,
+        exclude_packs: bool = False,
+        timeout: Optional[float] = None,
     ) -> SearchResponse:
-        """Raw vector search without agent orchestration."""
-        body = self._client._build_json(query=query, domain=domain, top_k=top_k)
-        resp = await self._http.post(self._client._url("/search"), json=body)
+        """Raw vector search without agent orchestration.
+
+        Set ``exclude_packs`` to drop bundled knowledge-pack chunks and search
+        only the operator's own content (personal-first retrieval).
+        """
+        body = self._client._build_json(
+            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs
+        )
+        resp = await self._http.post(
+            self._client._url("/search"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return SearchResponse.model_validate(resp.json())
 
@@ -195,7 +302,12 @@ class AsyncKBResource:
         body = self._client._build_json(
             content=content, domain=domain, tags=tags, metadata=metadata
         )
-        resp = await self._http.post(self._client._url("/ingest"), json=body)
+        resp = await self._http.post(
+            self._client._url("/ingest"),
+            json=body,
+            headers=self._client._write_headers(),
+            timeout=self._client._http_timeout(None),
+        )
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
 
@@ -206,6 +318,8 @@ class AsyncKBResource:
         domain: str = "",
         tags: str = "",
         categorize_mode: str = "",
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
     ) -> IngestResponse:
         """Ingest a file from the archive or an absolute path."""
         body = self._client._build_json(
@@ -214,9 +328,51 @@ class AsyncKBResource:
             tags=tags,
             categorize_mode=categorize_mode,
         )
-        resp = await self._http.post(self._client._url("/ingest/file"), json=body)
+        resp = await self._http.post(
+            self._client._url("/ingest/file"),
+            json=body,
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
         _raise_for_status(resp)
         return IngestResponse.model_validate(resp.json())
+
+    async def ingest_bytes(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        domain: str = "",
+        tags: str = "",
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> IngestResponse:
+        """Multipart file ingest via ``POST /sdk/v1/ingest/upload``."""
+        resp = await self._http.post(
+            self._client._url("/ingest/upload"),
+            files={"file": (filename, content)},
+            params=_upload_params(domain, tags),
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return IngestResponse.model_validate(resp.json())
+
+    async def delete_artifact(
+        self,
+        artifact_id: str,
+        *,
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> DeleteArtifactResponse:
+        """Delete one artifact if the consumer is allowed its domain."""
+        resp = await self._http.delete(
+            self._client._url(f"/artifacts/{artifact_id}"),
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return DeleteArtifactResponse.model_validate(resp.json())
 
     async def ingest_external(
         self,

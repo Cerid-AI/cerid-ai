@@ -2,9 +2,10 @@
 
 > Audience: operator running a Cerid instance.
 > Companion: [`docs/OPERATIONS.md`](OPERATIONS.md).
-> Driver: [`tasks/2026-05-10-v0.92-final-plan.md`](../tasks/2026-05-10-v0.92-final-plan.md) Phase P.
-> Status: **operator guide (processor + pointer to full APScheduler census).**  
-> Full job table: [`docs/superpowers/specs/2026-07-23-ta-a5-job-census.md`](superpowers/specs/2026-07-23-ta-a5-job-census.md).
+> Status: **operator guide (processor plane + the graph nightly trio).**
+> Full job table: your instance's own registry — call the `pkb_scheduler_status`
+> MCP tool, which returns every registered job with its id, next run and
+> trigger. The registrations live in `src/mcp/app/scheduler.py`.
 
 ## 1. What the processor does
 
@@ -177,9 +178,8 @@ or worker latency p95 > 30 s for high-priority jobs, or
 `/health.invariants` request latency rises during heavy processing — the
 worker should be extracted into its own container.
 
-See [`docs/EXTRACTION_PLAN.md`](EXTRACTION_PLAN.md) for the trigger
-criteria and lift procedure. Today we run in-process. The `core/processor/`
-boundary is designed for clean extraction when the day comes.
+Today we run in-process. The `core/processor/` boundary is designed for clean
+extraction when the day comes.
 
 ## 9. Environment reference
 
@@ -202,7 +202,9 @@ PROCESSOR_REDIS_KEY_PREFIX=cerid:proc
 
 ## 10. Knowledge-graph nightly jobs (subset)
 
-The full APScheduler inventory is ~30+ jobs (see the [job census](superpowers/specs/2026-07-23-ta-a5-job-census.md)).
+The full APScheduler inventory is ~30 jobs; `pkb_scheduler_status` lists the
+ones your instance actually registered, which is what matters — most are
+behind opt-in `SCHEDULE_*` / feature flags.
 This section documents only the **$0 graph layout/trust** trio behind Subjects
 panes. Empty `SCHEDULE_*` disables these three; `max_instances=1`. They run
 back-to-back in the early-morning window so Atlas/Constellation/Timeline wake
@@ -227,5 +229,6 @@ map (`derive_domains` → `cerid:graph:emb3d:*`, etc.) also lives there. See
 ## 11. Status
 
 Processor modes, cost caps, and the graph nightly trio are implemented.
-For the complete scheduler table (defaults, opt-in flags, tests), use
-[`2026-07-23-ta-a5-job-census.md`](superpowers/specs/2026-07-23-ta-a5-job-census.md).
+For the complete scheduler table on a running instance, call
+`pkb_scheduler_status`; for the defaults and opt-in flags behind each
+registration, read the `add_job(...)` calls in `src/mcp/app/scheduler.py`.

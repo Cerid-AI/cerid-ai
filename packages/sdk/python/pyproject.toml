@@ -1,6 +1,6 @@
 [project]
 name = "cerid-sdk"
-version = "0.1.1"
+version = "0.2.0"
 description = "Python SDK for Cerid AI Knowledge Companion"
 requires-python = ">=3.9"
 # Deliberate carve-out: the SDK stays Apache-2.0 while the repository root is
@@ -37,3 +37,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cerid"]
+
+[tool.pytest.ini_options]
+# The shipped tests must exercise this checkout, not whatever `cerid` is
+# installed in the interpreter. Anchoring rootdir here also keeps the
+# repo-root pytest config (testpaths = src/mcp/tests) from applying when the
+# suite is invoked as `pytest packages/sdk/python/tests/` from the repo root.
+pythonpath = ["src"]
+testpaths = ["tests"]

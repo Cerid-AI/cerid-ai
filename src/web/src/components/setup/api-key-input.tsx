@@ -58,7 +58,7 @@ export function ApiKeyInput({
         onKeyValidated(keyToTest === "__env__" ? "(from .env)" : keyToTest, true)
       } else {
         setStatus("invalid")
-        setError(result.suggestion ?? result.error ?? "Invalid API key")
+        setError(result.error ?? "Invalid API key")
         onKeyValidated(keyToTest, false)
       }
     } catch {

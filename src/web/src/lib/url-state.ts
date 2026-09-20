@@ -68,9 +68,7 @@ export function clearForeignPaneParams(newPane: Pane): void {
   window.history.replaceState({}, "", url)
 }
 
-// SF-7 — SPA cold-load routing. The panes App.tsx actually mounts; legacy
-// pane names (wiki / knowledge / …) are goTo()-only targets that
-// NavigationProvider rewrites and are never written as pathnames.
+// SF-7 — SPA cold-load routing. The panes App.tsx actually mounts.
 const PANE_PATHS: readonly Pane[] = [
   "chat",
   "settings",
@@ -82,16 +80,53 @@ const PANE_PATHS: readonly Pane[] = [
   "automations",
 ]
 
+// Pane names retired by the Phase A/B/C consolidation. NavigationProvider's
+// LEGACY_PANE_REDIRECTS handles them for in-app goTo() calls, but a bookmark,
+// a shared link or a browser-history entry arrives as a *pathname* — and
+// dropping those to null landed the user on Chat with the address bar still
+// reading /wiki, so a reload repeated the failure. Each entry names the
+// destination pane plus the sub-tab param that pane reads at mount.
+//
+// Kept in step with LEGACY_PANE_REDIRECTS + PARAM_BY_PANE in
+// contexts/navigation-context.tsx. `audit` writes `category` rather than
+// `diagnostics_tab` because Analytics is its own top-level settings section.
+const LEGACY_PANE_PATHS: Record<string, { pane: Pane; param: string; value: string }> = {
+  wiki: { pane: "subjects", param: "mode", value: "wiki" },
+  communities: { pane: "subjects", param: "mode", value: "communities" },
+  knowledge: { pane: "sources", param: "sources_mode", value: "library" },
+  monitoring: { pane: "settings", param: "diagnostics_tab", value: "status" },
+  audit: { pane: "settings", param: "category", value: "analytics" },
+  agents: { pane: "settings", param: "diagnostics_tab", value: "activity" },
+}
+
 /**
  * Resolve a cold-load pathname to the pane it names, or null when the
  * path is unknown (root, API routes, Electron file:// bundle paths) —
  * callers fall back to the chat pane.
+ *
+ * A legacy pane path additionally rewrites the address bar to the pane that
+ * replaced it (via `history.replaceState`, so no synthetic history entry),
+ * seeding the destination's sub-tab param. Idempotent: the rewritten path is
+ * a live pane path, so a second call is a plain lookup.
  */
 export function paneFromLocation(pathname: string): Pane | null {
   const segments = pathname.split("/").filter(Boolean)
   if (segments.length !== 1) return null
   const segment = segments[0]
-  return (PANE_PATHS as readonly string[]).includes(segment) ? (segment as Pane) : null
+  if ((PANE_PATHS as readonly string[]).includes(segment)) return segment as Pane
+  const legacy = LEGACY_PANE_PATHS[segment]
+  if (!legacy) return null
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search)
+    params.set(legacy.param, legacy.value)
+    const next = params.toString()
+    window.history.replaceState(
+      {},
+      "",
+      `/${legacy.pane}${next ? `?${next}` : ""}${window.location.hash}`,
+    )
+  }
+  return legacy.pane
 }
 
 /**

@@ -22,7 +22,6 @@ from typing import Any
 
 from core.utils.swallowed import log_swallowed_error
 from core.utils.test_residue import (
-    TEST_RESIDUE_EXACT_NAMES,
     TEST_RESIDUE_MEMORY_CONVO_PREFIXES,
     TEST_RESIDUE_PREFIXES,
     TEST_RESIDUE_TEXT_MARKERS,
@@ -55,7 +54,6 @@ def _candidate_where_clause(var: str, name_prop: str) -> str:
         f"AND {var}.{name_prop} CONTAINS '_{c}')"
         for c in TEST_RESIDUE_MEMORY_CONVO_PREFIXES
     )
-    clauses.append(f"{var}.{name_prop} IN $exact_names")
     return " OR ".join(clauses)
 
 
@@ -93,11 +91,9 @@ def sweep_test_residue(
         "RETURN e.canonical_id AS canonical_id, e.name AS name, "
         "e.updated_at AS updated_at"
     )
-    params = {"exact_names": list(TEST_RESIDUE_EXACT_NAMES)}
-
     with neo4j.session() as session:
-        artifact_rows = [dict(r) for r in session.run(artifact_query, **params)]
-        entity_rows = [dict(r) for r in session.run(entity_query, **params)]
+        artifact_rows = [dict(r) for r in session.run(artifact_query)]
+        entity_rows = [dict(r) for r in session.run(entity_query)]
 
     skipped_in_grace = 0
     samples: list[str] = []

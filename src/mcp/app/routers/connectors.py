@@ -168,6 +168,12 @@ class ConnectorStatus(BaseModel):
     requires_sibling: str | None
     sibling_reachable: bool | None  # None = no sibling, or not contacted yet
     sibling_circuit_open: bool | None
+    # Recorded failures against the sibling. None when there is no sibling or
+    # it is not registered in the pool. Without it "never called" and "called
+    # eight times this hour and failed every time" were the same response:
+    # the breaker needs three consecutive failures to open, so a connector
+    # that fails every call can sit at circuit_open=False indefinitely.
+    sibling_failures: int | None
     auth_kind: str
     instruction_doc: str
     imports_desc: str
@@ -297,6 +303,7 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
 
     sibling_reachable: bool | None = None
     sibling_circuit_open: bool | None = None
+    sibling_failures: int | None = None
     if meta.requires_sibling:
         try:
             from core.mcp_clients.client_pool import get_pool
@@ -304,10 +311,17 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
             sibling = pool_state.get(meta.requires_sibling)
             if sibling is not None:
                 sibling_circuit_open = bool(sibling.get("circuit_open", False))
+                sibling_failures = int(sibling.get("failures", 0) or 0)
                 if sibling_circuit_open:
                     sibling_reachable = False
                 elif sibling.get("ever_succeeded"):
                     sibling_reachable = True
+                elif sibling_failures > 0:
+                    # Called, and every call failed. Not "unknown": the pool
+                    # counted the failures, /health reports them as swallowed
+                    # errors, and telling the operator to go run a query is
+                    # telling them to repeat what cannot succeed.
+                    sibling_reachable = False
                 else:
                     # Registered, breaker closed, never actually talked to.
                     # Reporting True here is what made a connector whose
@@ -336,6 +350,7 @@ def _build_status(meta: ConnectorMeta) -> ConnectorStatus:
         requires_sibling=meta.requires_sibling,
         sibling_reachable=sibling_reachable,
         sibling_circuit_open=sibling_circuit_open,
+        sibling_failures=sibling_failures,
         auth_kind=meta.auth_kind,
         instruction_doc=meta.instruction_doc,
         imports_desc=meta.imports_desc,
@@ -541,6 +556,19 @@ async def get_auth_status(slug: str) -> OAuthStatusResponse:
                 f"Sibling {meta.requires_sibling} has not been contacted yet — "
                 "run a query through this connector, or bring the stack up if "
                 "it is not running."
+            )
+        elif status.sibling_circuit_open:
+            detail = (
+                f"Sibling {meta.requires_sibling} is circuit-broken after "
+                f"{status.sibling_failures} failure(s). Calls are being "
+                "refused locally until the breaker half-opens."
+            )
+        elif status.sibling_failures:
+            detail = (
+                f"Sibling {meta.requires_sibling} has failed "
+                f"{status.sibling_failures} call(s) and has never succeeded. "
+                "Check the sibling container's logs — re-running the query "
+                "will fail the same way."
             )
         elif not status.sibling_reachable:
             detail = f"Sibling {meta.requires_sibling} not reachable. " \

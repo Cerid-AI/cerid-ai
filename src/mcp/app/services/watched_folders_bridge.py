@@ -130,6 +130,42 @@ def strip_folder_prefix(source_id: str) -> str:
     return source_id[len(_PREFIX):] if source_id.startswith(_PREFIX) else source_id
 
 
+def _scan_error_summary(stats: dict[str, Any]) -> str | None:
+    """Last scan's failure count as operator-readable text, or None.
+
+    The scan already counts errored files (``app/routers/watched_folders.py``
+    ``_run_scan``); the projection used to drop that count and report
+    ``last_error: None``, so a folder whose every file failed looked exactly
+    like one that had simply not ingested anything yet.
+    """
+    errored = int(stats.get("errored", 0) or 0)
+    if errored <= 0:
+        return None
+    ingested = int(stats.get("ingested", 0) or 0)
+    if ingested:
+        return f"Last scan: {errored} file(s) failed to ingest, {ingested} succeeded."
+    return f"Last scan: all {errored} file(s) failed to ingest."
+
+
+def _folder_status(rec: dict[str, Any], stats: dict[str, Any]) -> str:
+    """Sources-pane status for a watched folder.
+
+    Paused wins — an operator who turned the folder off does not need it
+    shouting about the scan that ran before. A scan where nothing landed and
+    something failed is an error; a partial failure stays "connected" (files
+    ARE arriving) and reports itself through ``last_error``, because the
+    Sources row maps any status it does not recognise to "available", which
+    would read as healthier than "connected", not less.
+    """
+    if not rec.get("enabled", True):
+        return "paused"
+    errored = int(stats.get("errored", 0) or 0)
+    ingested = int(stats.get("ingested", 0) or 0)
+    if errored > 0 and ingested == 0:
+        return "error"
+    return "connected"
+
+
 def folder_record_to_source(rec: dict[str, Any]) -> dict[str, Any]:
     stats = rec.get("stats") or {}
     return {
@@ -138,7 +174,7 @@ def folder_record_to_source(rec: dict[str, Any]) -> dict[str, Any]:
         "family": "files",
         "display_name": rec.get("label") or rec.get("path", ""),
         "tier": "core",
-        "status": "connected" if rec.get("enabled", True) else "paused",
+        "status": _folder_status(rec, stats),
         "config": {
             "path": rec.get("path", ""),
             "exclude_patterns": rec.get("exclude_patterns") or [],
@@ -156,7 +192,7 @@ def folder_record_to_source(rec: dict[str, Any]) -> dict[str, Any]:
         "connection_time_ms": None,
         "last_sync_at": rec.get("last_scanned_at"),
         "created_at": rec.get("created_at"),
-        "last_error": None,
+        "last_error": _scan_error_summary(stats),
         "quality_floor": 0.0,
     }
 

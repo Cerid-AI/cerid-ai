@@ -556,15 +556,41 @@ export function KnowledgePane() {
   // UX-28: name the scope the count describes. An unlabeled "Showing 50 of
   // 94 artifacts" beside a corpus-wide hero count ("744 artifacts") read as
   // a contradiction; the 94 was a filtered subset all along.
+  //
+  // F375: the taxonomy scope alone was not the whole scope. The source
+  // dropdown defaults to "Personal" and the date dropdown to "All time", so
+  // the pane opens with a filter already narrowing the list and nothing in
+  // the label saying so -- which is how "Showing 50 of 220 artifacts" came to
+  // sit under a hero reading "1,006 ARTIFACTS" with, apparently, no filter.
   const scopeParts = [
     activeDomain,
     taxonomyFilter.subCategory,
     activeTag ? `#${activeTag}` : null,
   ].filter((p): p is string => !!p)
-  const scopeLabel = scopeParts.length > 0 ? ` in ${scopeParts.join(" › ")}` : ""
+  const sourceLabel =
+    clientSource === "all"
+      ? null
+      : CLIENT_SOURCE_OPTIONS.find((o) => o.value === clientSource)?.label ?? clientSource
+  const dateLabel =
+    dateFilter === "all"
+      ? null
+      : DATE_FILTER_OPTIONS.find((o) => o.value === dateFilter)?.label ?? `last ${dateFilter} days`
+  const scopeClauses = [
+    scopeParts.length > 0 ? `in ${scopeParts.join(" › ")}` : null,
+    sourceLabel ? `from ${sourceLabel}` : null,
+    dateLabel ? `within ${dateLabel}` : null,
+  ].filter((p): p is string => !!p)
+  const scopeLabel = scopeClauses.length > 0 ? ` ${scopeClauses.join(", ")}` : ""
+  // The backend's own total for the browse query was fetched and thrown away,
+  // leaving the count derived from the post-filter array. Name it when it
+  // disagrees, so the difference between what is shown and what the library
+  // holds has a stated reason instead of looking like loss.
+  const libraryTotal = artifactsResult?.total ?? 0
+  const libraryNote =
+    !activeSearch && libraryTotal > totalCount ? ` · ${libraryTotal} in the library` : ""
   const showingLabel = activeSearch
     ? `Showing ${totalCount}${searchWindowFull ? "+" : ""} results${scopeLabel}`
-    : `Showing ${paginatedResults.length} of ${totalCount} artifacts${scopeLabel}`
+    : `Showing ${paginatedResults.length} of ${totalCount} artifacts${scopeLabel}${libraryNote}`
 
   const executeSearch = useCallback(() => {
     if (searchInput.trim().length > 2) {

@@ -26,6 +26,7 @@ until ``generated_at`` advances.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -49,9 +50,13 @@ class DigestSummary(BaseModel):
     artifact_count: int
     flagged_count: int
     inbox_urgent_count: int
-    top_categories: list[dict[str, Any]]
+    # ``None`` means the digest that produced this artifact did not record
+    # the field — NOT "this digest had no categories / no action items".
+    # Both used to be hard-coded constants here, so a client could not tell
+    # a measurement from a code default.
+    top_categories: list[dict[str, Any]] | None
     has_urgent: bool
-    has_action_items: bool
+    has_action_items: bool | None
     persisted_artifact_id: str | None = None
 
 
@@ -73,13 +78,66 @@ def _feature_on() -> bool:
 
 
 def _list_digest_artifacts(driver: Any, limit: int = 30) -> list[dict[str, Any]]:
-    """Pull recent digest artifacts from the 'digests' domain."""
+    """Pull recent digest artifacts from the 'digests' domain.
+
+    Raises on a failed read rather than returning ``[]`` — an empty list is
+    the caller's "no digest has been generated yet" answer and must not
+    double as "the graph store is down".
+    """
+    from app.db import neo4j as graph_db
+    return graph_db.list_artifacts(driver, domain="digests", limit=limit) or []
+
+
+def _digest_driver_or_503() -> Any:
     try:
-        from app.db import neo4j as graph_db
-        return graph_db.list_artifacts(driver, domain="digests", limit=limit) or []
+        from app.deps import get_neo4j
+        return get_neo4j()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("digests: neo4j unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Digest store unavailable — the graph store could not be reached.",
+        ) from exc
+
+
+def _digest_artifacts_or_503(driver: Any, limit: int) -> list[dict[str, Any]]:
+    try:
+        return _list_digest_artifacts(driver, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.warning("digests list_artifacts failed: %s", exc)
-        return []
+        raise HTTPException(
+            status_code=503,
+            detail="Digest store unavailable — the digest read failed.",
+        ) from exc
+
+
+def _tag_top_categories(tags: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Ranked categories the digest recorded, or None when it recorded none.
+
+    ``/ingest/structured`` metadata values are strings, so the list arrives
+    JSON-encoded; accept a real list too for in-process callers.
+    """
+    raw = tags.get("top_categories")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    if not isinstance(raw, list):
+        return None
+    return [c for c in raw if isinstance(c, dict)]
+
+
+def _tag_has_action_items(tags: dict[str, Any]) -> bool | None:
+    raw = tags.get("action_item_count")
+    if raw is None:
+        return None
+    try:
+        return int(raw) > 0
+    except (TypeError, ValueError):
+        return None
 
 
 def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
@@ -91,9 +149,9 @@ def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
         artifact_count=int(tags.get("artifact_count", "0") or "0"),
         flagged_count=int(tags.get("flagged_count", "0") or "0"),
         inbox_urgent_count=int(tags.get("inbox_urgent_count", "0") or "0"),
-        top_categories=[],  # summary omits the full payload to stay light
+        top_categories=_tag_top_categories(tags),
         has_urgent=int(tags.get("inbox_urgent_count", "0") or "0") > 0,
-        has_action_items=False,  # action_items aren't in artifact tags
+        has_action_items=_tag_has_action_items(tags),
         persisted_artifact_id=a.get("id"),
     )
 
@@ -103,20 +161,15 @@ def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
 @router.get("/latest", response_model=DigestSummary | None)
 async def get_latest_digest() -> DigestSummary | None:
     """Most recent digest summary. Returns None when no digests have
-    been generated yet — UI renders an empty state."""
+    been generated yet — UI renders an empty state. 503 when the digest
+    store cannot be read, so an outage never renders as that empty state."""
     if not _feature_on():
         raise HTTPException(
             status_code=403,
             detail="daily_digest is Pro-tier. Upgrade to enable scheduled digests.",
         )
-    try:
-        from app.deps import get_neo4j
-        driver = get_neo4j()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("digests latest: neo4j unavailable: %s", exc)
-        return None
-
-    artifacts = _list_digest_artifacts(driver, limit=1)
+    driver = _digest_driver_or_503()
+    artifacts = _digest_artifacts_or_503(driver, limit=1)
     if not artifacts:
         return None
     return _artifact_to_summary(artifacts[0])
@@ -129,13 +182,8 @@ async def list_recent_digests(limit: int = 7) -> list[DigestSummary]:
     if not _feature_on():
         raise HTTPException(status_code=403, detail="daily_digest is Pro-tier.")
     limit = max(1, min(30, limit))
-    try:
-        from app.deps import get_neo4j
-        driver = get_neo4j()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("digests recent: neo4j unavailable: %s", exc)
-        return []
-    artifacts = _list_digest_artifacts(driver, limit=limit)
+    driver = _digest_driver_or_503()
+    artifacts = _digest_artifacts_or_503(driver, limit=limit)
     return [_artifact_to_summary(a) for a in artifacts]
 
 
@@ -152,14 +200,8 @@ async def get_digest_by_date(date: str) -> DigestSummary | None:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid ISO date: {date}")
 
-    try:
-        from app.deps import get_neo4j
-        driver = get_neo4j()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("digests by-date: neo4j unavailable: %s", exc)
-        return None
-
-    artifacts = _list_digest_artifacts(driver, limit=60)  # ~2-month window
+    driver = _digest_driver_or_503()
+    artifacts = _digest_artifacts_or_503(driver, limit=60)  # ~2-month window
     target_date = parsed.date().isoformat()
     for a in artifacts:
         tags = parse_tag_object(a.get("tags"))

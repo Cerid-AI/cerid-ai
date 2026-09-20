@@ -194,6 +194,7 @@ class TestEveryMutatingPostIsWrapped:
         "/sdk/v1/ingest/webhook/{token}",
         "/sdk/v1/ingest/voice-note",
         "/sdk/v1/memory/extract",
+        "/sdk/v1/ingest/upload",
     }
 
     # POSTs that only read/compute — POST is used for request-body ergonomics,
@@ -203,6 +204,7 @@ class TestEveryMutatingPostIsWrapped:
         "/sdk/v1/hallucination",
         "/sdk/v1/llm/complete",
         "/sdk/v1/search",
+        "/sdk/v1/memory/recall",
     }
 
     def _post_paths(self) -> set[str]:

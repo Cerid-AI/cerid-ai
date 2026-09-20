@@ -39,10 +39,25 @@ const makePartial = (overrides: Partial<ClaimVerificationFE> = {}): ClaimVerific
   ...overrides,
 })
 
+// "unverified" from the backend means two different things. This fixture is
+// the soft one: the KB simply held no matching evidence.
 const makeUnverified = (overrides: Partial<ClaimVerificationFE> = {}): ClaimVerificationFE => ({
   claim: "The moon is made of cheese",
   status: "unverified",
   confidence: 0.1,
+  source_artifact_id: "",
+  source_filename: "",
+  source_urls: [],
+  verification_method: "kb",
+  ...overrides,
+})
+
+// The hard one: an independent cross-model or web-search pass actively found
+// the claim to be wrong.
+const makeRefuted = (overrides: Partial<ClaimVerificationFE> = {}): ClaimVerificationFE => ({
+  claim: "The Eiffel Tower is in Berlin",
+  status: "unverified",
+  confidence: 0.05,
   source_artifact_id: "",
   source_filename: "",
   source_urls: [],
@@ -159,6 +174,44 @@ describe("VerifiedResponse — settled state, multiple bands", () => {
     expect(
       screen.getByRole("button", { name: /Claim has no source/ }),
     ).toBeTruthy()
+  })
+
+  // F236 — deriveBand collapsed every non-verified, non-uncertain claim into
+  // one "unverified" band labelled "No source", so a claim a cross-model or
+  // web-search pass actively found wrong rendered identically to one the KB
+  // simply had no evidence for. getClaimDisplayStatus already drew that
+  // distinction for the audit surface; the badge did not.
+  it("labels a refuted claim as refuted, not as missing a source", () => {
+    render(<VerifiedResponse claims={[makeRefuted()]} />)
+    expect(screen.getByText("Refuted")).toBeTruthy()
+    expect(screen.queryByText("No source")).toBeNull()
+  })
+
+  it("keeps refuted and no-evidence claims distinguishable side by side", () => {
+    render(<VerifiedResponse claims={[makeRefuted(), makeUnverified()]} />)
+    const bands = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("data-verification-band"))
+    expect(bands).toEqual(["refuted", "unverified"])
+    expect(screen.getByText("Refuted")).toBeTruthy()
+    expect(screen.getByText("No source")).toBeTruthy()
+  })
+
+  it("refuted badge names the verdict in its aria-label", () => {
+    render(<VerifiedResponse claims={[makeRefuted()]} />)
+    expect(screen.getByRole("button", { name: /refuted/i })).toBeTruthy()
+  })
+
+  it("treats a web-search refutation the same as a cross-model one", () => {
+    render(<VerifiedResponse claims={[makeRefuted({ verification_method: "web_search" })]} />)
+    expect(
+      screen.getByRole("button")?.getAttribute("data-verification-band"),
+    ).toBe("refuted")
+  })
+
+  it("is axe-clean with a refuted claim", async () => {
+    const { container } = render(<VerifiedResponse claims={[makeRefuted(), makeUnverified()]} />)
+    expect(await axe(container)).toHaveNoViolations()
   })
 
   it("snapshot matches multi-band settled state", () => {

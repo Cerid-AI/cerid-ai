@@ -14,6 +14,7 @@ from cerid import AsyncCeridClient, CeridClient, CeridSDKError
 from cerid.__version__ import SDK_PROTOCOL_VERSION
 from cerid.errors import (
     AuthenticationError,
+    DomainRestrictedError,
     NotFoundError,
     RateLimitError,
     ServiceUnavailableError,
@@ -148,6 +149,15 @@ class TestErrorMapping:
             _raise_for_status(resp)
         assert exc_info.value.status_code == 403
 
+    def test_403_domain_restricted_raises_domain_restricted_error(self) -> None:
+        resp = _mock_response(
+            403,
+            {"detail": {"retrieval_reason": "consumer_domain_restricted", "retrieval_skipped": True}},
+        )
+        with pytest.raises(DomainRestrictedError) as exc_info:
+            _raise_for_status(resp)
+        assert exc_info.value.status_code == 403
+
     def test_404_raises_not_found_error(self) -> None:
         resp = _mock_response(404, {"detail": "Not found"})
         with pytest.raises(NotFoundError) as exc_info:
@@ -249,6 +259,82 @@ class TestKBResource:
             client.kb.ingest("content")
             body = client._http.post.call_args.kwargs["json"]
             assert "metadata" not in body  # _build_json drops None
+
+    def test_ingest_sends_idempotency_key(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            mock_resp = _mock_response(
+                200, {"status": "success", "artifact_id": "a3", "chunks": 1, "domain": "general"}
+            )
+            client._http.post = MagicMock(return_value=mock_resp)
+            client.kb.ingest("content", idempotency_key="k-1")
+            headers = client._http.post.call_args.kwargs["headers"]
+            assert headers["Idempotency-Key"] == "k-1"
+
+    def test_ingest_bytes_sends_multipart_not_json_content_type(self) -> None:
+        captured: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["content_type"] = request.headers.get("content-type", "")
+            captured["idem"] = request.headers.get("idempotency-key", "")
+            return httpx.Response(
+                200,
+                json={"status": "ok", "artifact_id": "up-1", "chunks": 1, "domain": "general"},
+            )
+
+        transport = httpx.MockTransport(handler)
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            client._http = httpx.Client(
+                headers=client._build_headers(),
+                timeout=client.timeout,
+                transport=transport,
+            )
+            result = client.kb.ingest_bytes(
+                "note.md",
+                b"hello",
+                domain="general",
+                tags="pack",
+                idempotency_key="k-upload",
+            )
+        assert result.artifact_id == "up-1"
+        assert captured["url"].startswith("http://localhost:8888/sdk/v1/ingest/upload")
+        assert "domain=general" in captured["url"]
+        assert captured["content_type"].startswith("multipart/form-data")
+        assert captured["idem"] == "k-upload"
+
+    def test_json_post_still_sends_application_json(self) -> None:
+        captured: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["content_type"] = request.headers.get("content-type", "")
+            return httpx.Response(
+                200, json={"context": "ok", "sources": [], "confidence": 0.0}
+            )
+
+        transport = httpx.MockTransport(handler)
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            client._http = httpx.Client(
+                headers=client._build_headers(),
+                timeout=client.timeout,
+                transport=transport,
+            )
+            client.kb.query("q")
+        assert captured["content_type"].startswith("application/json")
+
+    def test_query_per_call_timeout(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            mock_resp = _mock_response(200, {"context": "", "sources": [], "confidence": 0.0})
+            client._http.post = MagicMock(return_value=mock_resp)
+            client.kb.query("q", timeout=60.0)
+            assert client._http.post.call_args.kwargs["timeout"] == 60.0
+
+    def test_recall_parses_envelope(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            mock_resp = _mock_response(200, {"memories": [{"content": "n"}], "total": 1})
+            client._http.post = MagicMock(return_value=mock_resp)
+            result = client.memory.recall("bills")
+            assert result.total == 1
+            assert result.memories[0]["content"] == "n"
 
 
 class TestSystemResource:

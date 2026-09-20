@@ -684,9 +684,13 @@ if [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
 else
     export VITE_MCP_URL="http://${CERID_HOST}:${CERID_PORT_MCP}"
 fi
-# Absolute MCP URL for the LAN reachability probe below (the MCP port is bound
-# to 0.0.0.0 in LAN mode; /health is auth-exempt so no key is needed).
-_MCP_LAN_HEALTH_URL="http://${CERID_HOST}:${CERID_PORT_MCP}/health"
+# Absolute MCP URL for the LAN reachability probe below. /health/ping, not
+# /health: the informative health payload (pack registry path, KB domains,
+# internal inference URL) requires X-API-Key once the server binds off
+# loopback, which is exactly what LAN mode does. /health/ping is the
+# unconditionally exempt liveness probe — the same one the container
+# HEALTHCHECK uses — and reachability is all this probe asks about.
+_MCP_LAN_HEALTH_URL="http://${CERID_HOST}:${CERID_PORT_MCP}/health/ping"
 
 # Surface the API key to the web container so the served UI carries X-API-Key.
 # Without this, every browser/remote-client API call 401s when auth is on.
@@ -840,6 +844,10 @@ GATEWAY_ENABLED=$(grep -s '^CERID_GATEWAY=true' "$ENV_FILE" 2>/dev/null || echo 
 if [ -n "${GATEWAY_ENABLED}" ] || [ "${CERID_GATEWAY:-}" = "true" ]; then
     echo "[6/6] Starting Caddy Gateway (HTTPS)..."
     docker compose -f "$CERID_ROOT/stacks/gateway/docker-compose.yml" --env-file "$ENV_FILE" up -d
+    # Hub collector is LaunchAgent-hosted (internal). Warn only — never exit.
+    if ! curl -sf -o /dev/null "http://127.0.0.1:${CERID_PORT_HUB:-8450}/__hub/status.json" 2>/dev/null; then
+        echo "[hub] collector not listening on :8450 — launchctl bootstrap the Hub agent"
+    fi
 fi
 
 # Optional: Cloudflare Tunnel for public demos
@@ -876,7 +884,7 @@ fi
 echo -n "  ChromaDB..."
 wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v2/heartbeat" 30 && echo " ready" || echo " timeout"
 echo -n "  MCP..."
-wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
+wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health/ping" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  React GUI..."
 wait_for_service "React GUI" "http://localhost:${CERID_PORT_GUI}" 60 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 
@@ -936,7 +944,7 @@ echo "=== Quick Health Check ==="
 #   - Redis: authenticated PING via `docker exec`, honoring REDIS_PASSWORD
 #   - Neo4j:  authenticated Cypher probe (not just HTTP, which ignores auth)
 
-check_http "MCP"       "http://localhost:${CERID_PORT_MCP}/health" || true
+check_http "MCP"       "http://localhost:${CERID_PORT_MCP}/health/ping" || true
 check_http "React GUI" "http://localhost:${CERID_PORT_GUI}"        || true
 
 if [ "$LIGHTWEIGHT_MODE" = "true" ]; then

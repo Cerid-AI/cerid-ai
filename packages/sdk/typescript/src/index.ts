@@ -32,7 +32,12 @@ export type {
   HallucinationResponse,
   MemoryExtractRequest,
   MemoryExtractResponse,
+  MemoryExtractAcceptedResponse,
   MemoryExtractJobStatus,
+  MemoryRecallRequest,
+  MemoryRecallResponse,
+  DeleteArtifactResponse,
+  RequestOptions,
   HealthResponse,
   DetailedHealthResponse,
   IngestRequest,
@@ -50,13 +55,21 @@ export type {
   PluginListResponse,
 } from "./types.js";
 
+// Protocol pin
+export { SDK_PROTOCOL_VERSION } from "./version.js";
+
+// Runtime helpers
+export { isMemoryExtractAccepted } from "./types.js";
+
 // Errors
 export {
   CeridSDKError,
   AuthenticationError,
+  DomainRestrictedError,
   RateLimitError,
   ValidationError,
   NotFoundError,
   ServiceUnavailableError,
+  ProtocolVersionError,
   raiseForStatus,
 } from "./errors.js";

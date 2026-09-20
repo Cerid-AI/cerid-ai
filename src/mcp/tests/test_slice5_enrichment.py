@@ -226,22 +226,22 @@ async def test_low_confidence_demotes_to_general_with_needs_review():
 
 
 @pytest.mark.asyncio
-async def test_high_confidence_preserves_domain_and_trading_subcategory():
+async def test_high_confidence_preserves_domain_and_investments_subcategory():
     import config
     from utils import metadata
 
     payload = {
-        "domain": "finance", "sub_category": "trading",
+        "domain": "finance", "sub_category": "investments",
         "confidence": 0.9, "tags": ["signals"], "keywords": [], "summary": "s",
     }
     with (
         patch.object(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
         patch("core.utils.llm_client.call_llm", new_callable=AsyncMock, return_value=_llm_json(payload)),
     ):
-        out = await metadata.ai_categorize("a trade signal log", "signals.csv", mode="pro")
+        out = await metadata.ai_categorize("a brokerage statement", "holdings.csv", mode="pro")
 
     assert out["suggested_domain"] == "finance"
-    assert out["sub_category"] == "trading"  # 5.2 new sub_category accepted
+    assert out["sub_category"] == "investments"
     assert "needs-review" not in out["tags"]
 
 

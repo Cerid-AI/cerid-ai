@@ -22,5 +22,9 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "src/__tests__/docker-entrypoint.test.ts"]
+  "include": [
+    "vite.config.ts",
+    "src/__tests__/docker-entrypoint.test.ts",
+    "src/__tests__/setup-response-contract.test.ts"
+  ]
 }

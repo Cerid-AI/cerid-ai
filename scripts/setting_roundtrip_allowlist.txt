@@ -1,0 +1,28 @@
+# setting_roundtrip_allowlist.txt — settings fields that do not round-trip
+# Enforced by scripts/lint-setting-roundtrip.py --check (gate G-C,
+# tasks/2026-09-02-audit-findings.json).
+#
+# Format: <field> <kind>  # <one-line reason>
+#   not-written  PATCH accepts the field and assigns nothing
+#   no-readback  PATCH writes a symbol nothing reads at request time
+#
+# Every line here is a knob the GUI presents as working and the pipeline
+# ignores. Shrink-only — wiring a reader (or deleting the field) makes the
+# entry stale and fails the gate.
+#
+# scripts/tests/test_lint_setting_roundtrip.py pins the count as
+# non-increasing, so this file cannot grow by accident.
+#
+# Regenerate (preserves reasons for still-live keys) with:
+#   python scripts/lint-setting-roundtrip.py --update
+
+adaptive_retrieval_light_top_k no-readback  # G-C seed 2026-09-03 — core/retrieval/retrieval_gate.py:16 value-imports ADAPTIVE_RETRIEVAL_LIGHT_TOP_K, so the PATCH write to config.features rebinds a name the gate module never re-reads (gate G-B's class).
+auto_inject_max no-readback  # G-C seed 2026-09-03 — consumed by the web client (use-chat-send.ts autoInjectMax), not by any src/mcp reader; in scope only because this gate deliberately stops at the backend boundary.
+auto_inject_threshold no-readback  # G-C seed 2026-09-03 — consumed by the web client (use-chat-send.ts autoInjectThreshold), not by any src/mcp reader; same backend-boundary note as auto_inject_max.
+enable_context_compression no-readback  # G-C seed 2026-09-03 — ENABLE_CONTEXT_COMPRESSION appears only in the config/features.py FEATURE_TOGGLES dict literal at module scope; no compression path consults the toggle.
+late_interaction_blend_weight no-readback  # G-C seed 2026-09-03 — core/retrieval/late_interaction.py:19 value-imports LATE_INTERACTION_BLEND_WEIGHT; the PATCH write cannot reach the frozen copy.
+late_interaction_top_n no-readback  # G-C seed 2026-09-03 — core/retrieval/late_interaction.py:19 value-imports LATE_INTERACTION_TOP_N; the PATCH write cannot reach the frozen copy.
+mmr_lambda no-readback  # G-C seed 2026-09-03 — core/utils/diversity.py:28 value-imports MMR_LAMBDA; features_mod.MMR_LAMBDA = v rebinds a different name and diversity keeps serving its boot-time 0.7.
+query_decomposition_max_subqueries no-readback  # G-C seed 2026-09-03 — core/retrieval/query_decomposer.py:17 value-imports QUERY_DECOMPOSITION_MAX_SUBQUERIES; the PATCH write cannot reach the frozen copy.
+rag_mode no-readback  # G-C seed 2026-09-03 — RAG_MODE exists only as a config/settings.py:374 module-scope declaration; no request-time reader anywhere in src/mcp.
+semantic_cache_threshold no-readback  # G-C seed 2026-09-03 — core/retrieval/semantic_cache.py:33 value-imports SEMANTIC_CACHE_THRESHOLD; the PATCH write cannot reach the frozen copy.

@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -129,3 +132,60 @@ def test_non_string_values_unchanged(tmp_path: Path) -> None:
             assert raw["count"] == 5
             assert raw["enabled"] is True
             assert raw["empty"] is None
+
+
+# ---------------------------------------------------------------------------
+# Startup posture: asking for encryption without a usable key must not
+# silently write cleartext to the sync directory.
+# ---------------------------------------------------------------------------
+
+_SRC_MCP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _import_settings(**overrides: str) -> subprocess.CompletedProcess:
+    """Import config.settings in a clean interpreter with a given env."""
+    env = {
+        k: v for k, v in os.environ.items()
+        if k not in ("CERID_ENCRYPT_SYNC", "CERID_ENCRYPTION_KEY")
+    }
+    env["PYTHONPATH"] = _SRC_MCP
+    env.update(overrides)
+    return subprocess.run(
+        [sys.executable, "-c",
+         "import config.settings as s; print(repr(s.ENCRYPT_SYNC))"],
+        env=env, capture_output=True, text=True, cwd=_SRC_MCP,
+    )
+
+
+def test_encrypt_sync_without_a_key_fails_closed() -> None:
+    """The operator asked for encryption; plaintext is not a downgrade path."""
+    proc = _import_settings(CERID_ENCRYPT_SYNC="true", CERID_ENCRYPTION_KEY="")
+    assert proc.returncode != 0, (
+        "startup reported encryption on and would write cleartext: "
+        f"{proc.stdout.strip()}"
+    )
+    assert "CERID_ENCRYPT_SYNC" in proc.stderr
+    assert "CERID_ENCRYPTION_KEY" in proc.stderr
+
+
+def test_unusable_encryption_key_fails_closed() -> None:
+    """A malformed Fernet key also yields a None encryptor — same silence."""
+    proc = _import_settings(CERID_ENCRYPTION_KEY="not-a-fernet-key")
+    assert proc.returncode != 0, proc.stdout
+    assert "CERID_ENCRYPTION_KEY" in proc.stderr
+
+
+def test_encrypt_sync_with_a_valid_key_starts() -> None:
+    from cryptography.fernet import Fernet
+
+    proc = _import_settings(
+        CERID_ENCRYPT_SYNC="true", CERID_ENCRYPTION_KEY=Fernet.generate_key().decode(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "True"
+
+
+def test_default_deployment_starts_with_encryption_off() -> None:
+    proc = _import_settings()
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "False"

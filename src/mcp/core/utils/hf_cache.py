@@ -26,8 +26,12 @@ def resolve_hf_file(
     cache_dir: str | None,
     *,
     logger: logging.Logger,
+    revision: str | None = None,
 ) -> str:
     """Return the local path to ``filename`` in ``repo_id``, cache-first.
+
+    ``revision`` pins the commit on both the cache lookup and the download,
+    so a pinned loader never resolves to whatever the repo serves today.
 
     Tries ``local_files_only=True`` (no network) first. Falls back to a
     single real download only when the file isn't already in the local
@@ -38,6 +42,7 @@ def resolve_hf_file(
             repo_id=repo_id,
             filename=filename,
             cache_dir=cache_dir,
+            revision=revision,
             local_files_only=True,
         )
     except LocalEntryNotFoundError:
@@ -45,4 +50,6 @@ def resolve_hf_file(
             "%s/%s not found in local HF cache — downloading from HuggingFace",
             repo_id, filename,
         )
-        return hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=cache_dir)
+        return hf_hub_download(
+            repo_id=repo_id, filename=filename, cache_dir=cache_dir, revision=revision,
+        )

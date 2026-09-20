@@ -73,7 +73,16 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `CATEGORIZE_MODE` | `smart` | Categorization tier: manual, smart, pro |
 | `BIFROST_URL` | `http://localhost:8080` | **Not the retired LLM gateway** — read only by the optional `plugins/vision/plugin.py`, which talks to its own Bifrost-compatible endpoint. |
 | `BIFROST_TIMEOUT` | `30.0` | LLM gateway timeout (seconds) — survives as a timeout name only; see § Secrets above. |
-| `CERID_API_KEY` | *(empty)* | API key for MCP auth (opt-in) |
+| `CERID_API_KEY` | *(empty)* | Server API key for MCP auth (opt-in). Sibling **clients** use `{PRODUCT}_CERID_API_KEY`. |
+
+### Sibling consumers (not server env)
+
+| Variable | Product | Notes |
+|----------|---------|-------|
+| `TRADING_CERID_URL` / `TRADING_CERID_API_KEY` | trading-agent | Aliases: `CERID_MCP_URL` / `CERID_API_KEY` |
+| `ANNEAL_CERID_URL` / `ANNEAL_CERID_API_KEY` | anneal | `ANNEAL_KB_*` URL/key/client-id deprecated |
+| `BOARDROOM_CERID_MCP_URL` / `BOARDROOM_CERID_API_KEY` | boardroom | Do not fall back to `CERID_API_KEY` |
+| Finance `cerid_url` / `cerid_api_key` | finance | Postgres settings, AES-GCM |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
 | `WATCH_FOLDER` | `~/cerid-archive` | Host-side file watcher path |
 | `DATA_DIR` | `data` | Data directory for BM25/tombstones |
@@ -212,7 +221,7 @@ flag (`scripts/cerid-sync.py import --conflict-strategy local_wins`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_ENCRYPTION` | `false` | Settings-panel display flag only — does not gate any encryption code path |
-| `CERID_ENCRYPTION_KEY` | *(empty)* | Fernet key; when set, encrypts per-user API keys, the sync directory (`CERID_ENCRYPT_SYNC`), and the Chroma chunk `summary` field. Full KB at-rest protection requires volume/disk encryption — see [`OPERATIONS.md`](OPERATIONS.md#field-level-encryption). |
+| `CERID_ENCRYPTION_KEY` | *(empty)* | Fernet key; when set, encrypts per-user API keys, the user-state sync files (`CERID_ENCRYPT_SYNC` — settings/preferences/conversations only, not the KB export bundle), and the Chroma chunk `summary` field. An unusable key with encryption requested fails startup. Full KB at-rest protection requires volume/disk encryption — see [`OPERATIONS.md`](OPERATIONS.md#field-level-encryption). |
 
 ### Memory (optional)
 

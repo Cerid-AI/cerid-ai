@@ -29,15 +29,15 @@
     "lint": "eslint src/ test/ --ext .ts"
   },
   "devDependencies": {
-    "@microsoft/api-extractor": "^7.59.0",
-    "@testing-library/dom": "^10.4.0",
+    "@microsoft/api-extractor": "^7.59.1",
+    "@testing-library/dom": "^10.4.2",
     "@types/jest-axe": "^3.5.9",
     "axe-core": "^4.13.0",
     "jest-axe": "^11.0.0",
     "jsdom": "^30.0.1",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2",
-    "vite-plugin-dts": "^5.0.3",
+    "vite": "^8.3.0",
+    "vite-plugin-dts": "^5.1.0",
     "vitest": "^4.1.11"
   },
   "keywords": [

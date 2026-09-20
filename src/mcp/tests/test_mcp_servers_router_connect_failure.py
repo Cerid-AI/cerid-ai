@@ -8,13 +8,23 @@ Backstop for the 2026-04-23 incident: anyio's exit-stack cleanup raised a
 ``BaseExceptionGroup`` after a failed stdio handshake (e.g. user typo'd a
 command), which escaped the handler and produced "Internal Server Error"
 in the UI instead of a useful error message in the rendered server card.
+
+Spawning a stdio server needs an operator allowlist (F071), so these tests
+grant one — the behaviour under test is what happens *after* the config is
+accepted.
 """
 from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _allow_echo(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CERID_MCP_STDIO_ALLOWED_COMMANDS", "echo")
 
 
 def _make_app():

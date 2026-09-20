@@ -1,0 +1,17 @@
+# model_label_provenance_allowlist.txt — model/provider labels that are not
+# read from what actually ran.
+# Enforced by scripts/lint-model-label-provenance.py --check (gate G-H,
+# tasks/2026-09-02-audit-findings.json).
+#
+# Format: <path>:<lineno>  # <one-line reason>
+# Shrink-only — threading the value the call actually used into the payload
+# removes the line; a stale entry fails the gate.
+#
+# Regenerate (preserves reasons for still-live keys) with:
+#   python scripts/lint-model-label-provenance.py --update
+
+src/mcp/app/routers/providers.py:315  # G-H seed 2026-09-03 — enable_ollama() echoes the literal 'ollama' it just asked set_active_provider to install; the label restates the request, not the state the switch left behind.
+src/mcp/app/routers/providers.py:326  # G-H seed 2026-09-03 — disable_ollama() echoes the literal 'openrouter'; same class as providers.py:315.
+src/mcp/app/routers/settings.py:440  # G-H seed 2026-09-03 — extraction_model is the hardcoded string 'Llama 3.3 (free tier)' in GET /settings; it does not move when INTERNAL_LLM_PROVIDER is switched to ollama or quenchforge.
+src/mcp/app/routers/settings.py:489  # G-H seed 2026-09-03 — rerank_provider reports os.getenv default 'sidecar'; same class as settings.py:488.
+src/mcp/app/routers/settings.py:490  # G-H seed 2026-09-03 — embeddings_provider reports os.getenv default 'sidecar' whenever EMBEDDINGS_PROVIDER is unset, which is the case where the operator most needs the observed path.

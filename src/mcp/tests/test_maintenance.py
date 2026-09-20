@@ -310,3 +310,73 @@ class TestAnalyzeCollections:
         result = analyze_collections(client)
         assert result["total_chunks"] == 0
         assert "domain_coding" in result["missing_collections"]
+
+
+# ---------------------------------------------------------------------------
+# F130: an unprobed lane is not a healthy lane
+# ---------------------------------------------------------------------------
+
+
+class TestUnprobedLaneIsNotHealthy:
+    """``check_system_health`` skips the LLM probe (it is async-only).
+
+    The sync ``maintenance`` workflow step returns this dict verbatim, so
+    counting "skipped" as OK handed the operator a green light for a lane
+    nothing had touched.
+    """
+
+    @staticmethod
+    def _healthy_stores(monkeypatch, mock_neo4j, mock_chroma, mock_redis):
+        monkeypatch.setattr("core.agents.maintenance.config.REDIS_INGEST_LOG", "ingest:log")
+        driver, session = mock_neo4j
+        client, _ = mock_chroma
+        col_obj = MagicMock()
+        col_obj.name = "domain_coding"
+        col_obj.count.return_value = 1
+        client.list_collections.return_value = [col_obj]
+        session.run.return_value.single.side_effect = [
+            {"artifact_count": 1},
+            {"domain_count": 1},
+        ]
+        mock_redis.ping.return_value = True
+        mock_redis.llen.return_value = 0
+        return driver, client, mock_redis
+
+    def test_skipped_llm_is_not_reported_healthy(
+        self, monkeypatch, mock_neo4j, mock_chroma, mock_redis
+    ):
+        driver, client, redis = self._healthy_stores(
+            monkeypatch, mock_neo4j, mock_chroma, mock_redis
+        )
+
+        health = check_system_health(driver, client, redis)
+
+        assert health["services"]["llm"].startswith("skipped")
+        assert health["overall"] != "healthy", (
+            "the LLM lane was never probed and the report still said healthy"
+        )
+        assert health["unchecked_services"] == ["llm"]
+
+    @pytest.mark.asyncio
+    async def test_maintain_probes_the_lane_and_can_report_healthy(
+        self, monkeypatch, mock_neo4j, mock_chroma, mock_redis
+    ):
+        from core.agents import maintenance
+
+        driver, client, redis = self._healthy_stores(
+            monkeypatch, mock_neo4j, mock_chroma, mock_redis
+        )
+        monkeypatch.setattr(
+            maintenance, "check_llm_health", AsyncMock(return_value="connected")
+        )
+
+        report = await maintenance.maintain(
+            neo4j_driver=driver,
+            chroma_client=client,
+            redis_client=redis,
+            actions=["health"],
+        )
+
+        assert report["health"]["services"]["llm"] == "connected"
+        assert report["health"]["overall"] == "healthy"
+        assert report["health"]["unchecked_services"] == []

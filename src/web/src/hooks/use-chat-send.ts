@@ -24,6 +24,26 @@ const PRUNE_TARGET_RATIO = 0.5
  *  does not pass options.autoInjectMax. */
 const DEFAULT_AUTO_INJECT_MAX = 3
 
+/** Budget for the auto-inject KB round trip. Past this the send goes out
+ *  without fresh context rather than making the user wait. This is a
+ *  responsiveness budget: breaching it says the answer will be ungrounded,
+ *  not that the knowledge base is unhealthy. */
+const KB_INJECT_TIMEOUT_MS = 500
+
+/** Budget past which the knowledge base is not slow, it is not answering.
+ *  Only a breach of THIS one is reported as degradation, and only a question
+ *  that cannot be answered without grounding waits for it — for those the
+ *  alternative is a fabricated denial, which is worth a couple of seconds. */
+const KB_DEGRADED_TIMEOUT_MS = 3_000
+
+/** Outcome of the auto-inject KB round trip. A plain `null` cannot say
+ *  whether the KB had nothing, took too long, or failed — and the caller has
+ *  to tell those apart to report the last two honestly. */
+type KBInjectOutcome =
+  | { kind: "ok"; value: Awaited<ReturnType<typeof queryKB>> }
+  | { kind: "timeout" }
+  | { kind: "error" }
+
 /** Questions about the user's own data — the ones an LLM cannot answer
  *  without KB grounding and will instead hallucinate a denial for
  *  ("I don't have access to your Apple Mail"). Deliberately possessive/
@@ -40,9 +60,17 @@ export function isPersonalDataQuery(content: string): boolean {
 /** Honest deferral streamed in place of an LLM answer when retrieval is
  *  degraded and a personal-data question has zero grounding (sf-2 / UX-01):
  *  an ungrounded model reliably fabricates "I don't have access to X". */
-export function buildDeferralMessage(): string {
+export function buildDeferralMessage(reason = ""): string {
+  // Name the failure. "I couldn't search" alone reads the same whether the
+  // backend is down or the knowledge base simply held nothing, and those two
+  // call for different actions from the user.
+  const cause = /failed|error/i.test(reason)
+    ? "Your knowledge base could not be reached, so I won't "
+    : /did not answer|exceeded|timed? out|budget/i.test(reason)
+      ? "Your knowledge base did not answer in time, so I won't "
+      : "I couldn't search your knowledge base for this just now, so I won't "
   return (
-    "I couldn't search your knowledge base for this just now, so I won't " +
+    cause +
     "guess about your personal data. Please try again in a moment — or " +
     "narrow the question to a specific domain (for example \"in my mail\") " +
     "to lighten the search."
@@ -236,23 +264,73 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         const cacheCold = !freshResults || freshResults.length === 0
         if (cacheCold && content.length > 2) {
           const injectAbort = new AbortController()
-          const timeout = new Promise<null>((resolve) => setTimeout(() => {
-            injectAbort.abort()
-            resolve(null)
-          }, 500))
+          // Questions about the user's own data are the ones the deferral gate
+          // below can refuse outright, so they get the long budget: waiting two
+          // more seconds for real grounding beats answering "I don't have
+          // access to your mail" because a healthy backend took 700ms.
+          const groundingCritical = isPersonalDataQuery(content)
+          // A grace period past the wait deadline: the abort has to land AFTER
+          // the timeout verdict, or the cancelled fetch rejects first and a
+          // knowledge base that never answered is reported as one that failed.
+          const abortAfter =
+            (groundingCritical ? KB_DEGRADED_TIMEOUT_MS : KB_INJECT_TIMEOUT_MS) + 50
+          const timers: ReturnType<typeof setTimeout>[] = []
+          const abortTimer = setTimeout(() => injectAbort.abort(), abortAfter)
+          timers.push(abortTimer)
+          const timeoutAfter = (ms: number) =>
+            new Promise<KBInjectOutcome>((resolve) => {
+              timers.push(setTimeout(() => resolve({ kind: "timeout" }), ms))
+            })
+          // The soft budget stops the WAIT; it no longer aborts the request,
+          // because a request cancelled at 500ms can never distinguish a slow
+          // backend from a dead one.
+          const softTimeout = timeoutAfter(KB_INJECT_TIMEOUT_MS)
           // E1 R16: honor contextSources.memory — do not recall when Memory is off.
           const memoryOn = options.memoryEnabled !== false
-          // Fire KB query and (optional) memory recall in parallel with shared timeout
-          const [freshKB, freshMemories] = await Promise.all([
-            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal, excludePacks: !options.includePacks }), timeout]).catch(() => null),
-            memoryOn
-              ? Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => [])
-              : Promise.resolve([]),
-          ])
+          // The KB leg is tagged so a 5xx, an abort and a genuinely empty
+          // knowledge base stay three different answers all the way to the
+          // degraded-reason check below — collapsing them into `null` is what
+          // let a KB outage render as "you have nothing about that".
+          const kbLeg: Promise<KBInjectOutcome> = queryKB(
+            content, undefined, 5, undefined,
+            { signal: injectAbort.signal, excludePacks: !options.includePacks },
+          )
+            .then((value) => ({ kind: "ok" as const, value }))
+            .catch(() => ({ kind: "error" as const }))
+          let kbOutcome: KBInjectOutcome
+          let freshMemories: unknown
+          try {
+            ;[kbOutcome, freshMemories] = await Promise.all([
+              Promise.race<KBInjectOutcome>([kbLeg, softTimeout]),
+              memoryOn
+                ? Promise.race([recallMemories(content, 3).catch(() => []), softTimeout]).catch(() => [])
+                : Promise.resolve([]),
+            ])
+            if (kbOutcome.kind === "timeout" && groundingCritical) {
+              kbOutcome = await Promise.race<KBInjectOutcome>([
+                kbLeg,
+                timeoutAfter(KB_DEGRADED_TIMEOUT_MS - KB_INJECT_TIMEOUT_MS),
+              ])
+            }
+          } finally {
+            for (const t of timers) clearTimeout(t)
+          }
+          if (!Array.isArray(freshMemories)) freshMemories = []
+          const freshKB = kbOutcome.kind === "ok" ? kbOutcome.value : null
           if (freshKB?.results?.length) {
             freshResults = freshKB.results
           }
-          if (freshKB?.degraded_reason) {
+          if (kbOutcome.kind === "timeout") {
+            // Outrunning the inject budget is not evidence of a sick backend,
+            // and reporting it as one turned every slow-but-fine answer into a
+            // degradation notice — and, for a personal-data question, into a
+            // refusal. Only the degradation budget produces a verdict.
+            if (groundingCritical) {
+              effectiveDegradedReason = `Knowledge base did not answer within ${KB_DEGRADED_TIMEOUT_MS}ms`
+            }
+          } else if (kbOutcome.kind === "error") {
+            effectiveDegradedReason = "KB search failed"
+          } else if (freshKB?.degraded_reason) {
             effectiveDegradedReason = freshKB.degraded_reason
           }
           // Merge memories into the candidate pool as pseudo-KB results.
@@ -397,7 +475,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         options.addMessage(convoId, {
           id: uuid(),
           role: "assistant",
-          content: buildDeferralMessage(),
+          content: buildDeferralMessage(effectiveDegradedReason),
           timestamp: Date.now(),
           degradedReason: effectiveDegradedReason,
         })

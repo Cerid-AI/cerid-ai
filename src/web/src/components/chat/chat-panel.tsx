@@ -36,13 +36,11 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchSetupStatus } from "@/lib/api/settings"
 import { fetchRoutingInfo } from "@/lib/api/routing"
 import { deriveDefaultModel } from "@/lib/derive-defaults"
-import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
+import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices } from "@/lib/api"
 import { findInstalledModel, isModelInstalled } from "@/lib/model-alias"
 import { notifyError } from "@/lib/query-client"
-import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { externalToKBResult } from "@/lib/kb-utils"
-import { uuid } from "@/lib/utils"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 const NARROW_MQ = "(max-width: 1024px)"
@@ -505,33 +503,6 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     [activeId, active, replaceMessages, handleSend],
   )
 
-  const handleEnrich = useCallback(
-    async (messageId: string, content: string) => {
-      try {
-        const res = await fetch(`${MCP_BASE}/agent/enrich`, {
-          method: "POST",
-          headers: mcpHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ message_id: messageId, content }),
-        })
-        if (!res.ok) return
-        const data = await res.json()
-        // If enrichment returned results, inject them as a system note
-        if (data.results?.length && activeId) {
-          const note: ChatMessage = {
-            id: uuid(),
-            role: "assistant",
-            content: `**Enrichment** (${data.source_count} sources):\n${data.results.map((r: { source: string; snippet: string }) => `- **${r.source}**: ${r.snippet}`).join("\n")}`,
-            timestamp: Date.now(),
-          }
-          addMessage(activeId, note)
-        }
-      } catch {
-        // Enrichment is non-critical — silently fail
-      }
-    },
-    [activeId, addMessage],
-  )
-
   // --- Welcome state (no active conversation) ---
   const recentConversations = conversations.slice(0, 3)
 
@@ -845,7 +816,6 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
           setSelectedVerificationMsgId(msgId ?? null)
           setFocusedClaimIndex(null)
         }}
-        onEnrich={handleEnrich}
         onRetry={(userContent) => {
           handleSend(userContent)
           smartSuggestions.clear()

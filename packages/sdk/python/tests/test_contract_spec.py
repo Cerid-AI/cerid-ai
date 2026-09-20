@@ -5,8 +5,8 @@
 
 ``docs/openapi-sdk-v1.json`` is generated from the live FastAPI routes by
 ``scripts/gen_sdk_openapi.py`` and is the authoritative ``/sdk/v1/*``
-contract (the ``sdk-openapi-drift`` CI gate keeps it byte-for-byte in sync
-with the server). These tests are the other half of that pin: for every
+contract (``scripts/gen_sdk_openapi.py --check``, a step in CI's ``lint``
+job, keeps it byte-for-byte in sync with the server). These tests are the other half of that pin: for every
 wrapped SDK method they assert
 
   1. the JSON body the method actually sends over the wire validates
@@ -35,8 +35,10 @@ from cerid.models import (
     HealthResponse,
     IngestExternalResponse,
     LLMCompleteResponse,
+    MemoryExtractAcceptedResponse,
     MemoryExtractJobStatus,
     MemoryExtractResponse,
+    MemoryRecallResponse,
     PluginListResponse,
     QueryResponse,
     SearchResponse,
@@ -104,12 +106,20 @@ def _capture_get(client: CeridClient, response_fixture: dict[str, Any]) -> Magic
 
 
 def _assert_response_model_covers_required(response_model: type, response_schema: dict[str, Any], label: str) -> None:
-    required = set(response_schema.get("required", []))
+    """The SDK model must type every field the spec declares on the response.
+
+    Checking only the spec's ``required`` list is not enough: the server gives
+    most response fields a default, so a newly-added field is never
+    ``required`` and an SDK model that omits it passes the gate while its
+    consumers get an untyped extra they cannot discover from autocomplete
+    (``mode`` and ``nli_skipped`` shipped that way).
+    """
+    spec_fields = set(response_schema.get("required", [])) | set(response_schema.get("properties", {}))
     declared = set(response_model.model_fields)
-    missing = required - declared
+    missing = spec_fields - declared
     assert not missing, (
-        f"{label}: spec requires {sorted(missing)} on the response but "
-        f"{response_model.__name__} doesn't declare {sorted(missing)}"
+        f"{label}: spec declares {sorted(missing)} on the response but "
+        f"{response_model.__name__} doesn't"
     )
 
 
@@ -160,7 +170,18 @@ POST_CASES: list[PostCase] = [
         "post",
         lambda c: c.verify.check("The sky is blue.", conversation_id="conv-1"),
         HallucinationResponse,
-        {"conversation_id": "conv-1", "skipped": False, "claims": [], "summary": {}},
+        {
+            "conversation_id": "conv-1",
+            "skipped": False,
+            "claims": [{"claim": "The sky is blue.", "status": "verified", "confidence": 0.91}],
+            # The server emits a float ``overall_confidence`` alongside the
+            # integer per-status counts (core/agents/hallucination/streaming.py).
+            # An empty-dict fixture here is what let a Dict[str, int] annotation
+            # ship: every real response would have failed validation.
+            "summary": {"total": 1, "verified": 1, "assessed": 1, "overall_confidence": 0.833},
+            "mode": "thorough",
+            "nli_skipped": False,
+        },
     ),
     (
         "memory.extract",
@@ -169,6 +190,14 @@ POST_CASES: list[PostCase] = [
         lambda c: c.memory.extract("I prefer dark mode.", conversation_id="conv-1"),
         MemoryExtractResponse,
         {"conversation_id": "conv-1", "memories_extracted": 1, "memories_stored": 1},
+    ),
+    (
+        "memory.recall",
+        "/sdk/v1/memory/recall",
+        "post",
+        lambda c: c.memory.recall("bills", top_k=5),
+        MemoryRecallResponse,
+        {"memories": [], "total": 0},
     ),
     (
         "llm.complete",
@@ -243,7 +272,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.health(),
         HealthResponse,
-        {"status": "healthy", "version": "1.1.0", "services": {"chromadb": "connected"}},
+        {"status": "healthy", "version": "1.2.0", "services": {"chromadb": "connected"}},
     ),
     (
         "system.settings",
@@ -251,7 +280,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.settings(),
         SettingsResponse,
-        {"version": "1.1.0", "tier": "community", "features": {}},
+        {"version": "1.2.0", "tier": "community", "features": {}},
     ),
     (
         "system.plugins",
@@ -395,12 +424,243 @@ async def test_async_verify_check_request_matches_spec() -> None:
     (not ``response_text=``) body-key bug as the sync client before this fix."""
     async with AsyncCeridClient(base_url="http://localhost:8888", client_id="test") as client:
         mock = await _async_capture_post(
-            client, {"conversation_id": "conv-1", "skipped": False, "claims": [], "summary": {}}
+            client,
+            {
+                "conversation_id": "conv-1",
+                "skipped": False,
+                "claims": [],
+                "summary": {"total": 0, "overall_confidence": 0.0},
+            },
         )
         await client.verify.check("The sky is blue.", conversation_id="conv-1")
         body = mock.call_args.kwargs["json"]
 
     Draft202012Validator(_request_schema("/sdk/v1/hallucination", "post")).validate(body)
+
+
+# ---------------------------------------------------------------------------
+# No-dead-parameters. A key the server does not read is worse than a missing
+# one: pydantic's default ``extra='ignore'`` drops it silently, so a typed,
+# documented SDK argument can do nothing at all and no test notices. For the
+# two endpoints whose body is an untyped ``dict`` there is no schema to check
+# against, so the keys the handler actually reads are listed here.
+# ---------------------------------------------------------------------------
+FREE_FORM_SERVER_KEYS: dict[str, set[str]] = {
+    # app/routers/sdk.py::sdk_ingest — content / domain / metadata, with tags
+    # folded into metadata.
+    "/sdk/v1/ingest": {"content", "domain", "tags", "metadata"},
+    # app/routers/sdk.py::sdk_ingest_file — file_path / domain / tags /
+    # categorize_mode.
+    "/sdk/v1/ingest/file": {"file_path", "domain", "tags", "categorize_mode"},
+}
+
+# Every row passes *every* keyword the method accepts — a parameter that only
+# appears in a call nobody writes is exactly how four inert arguments shipped.
+INGEST_FIXTURE = {"status": "success", "artifact_id": "a1", "chunks": 1, "domain": "databases"}
+
+DEAD_PARAM_CASES: list[tuple[str, str, Callable[[CeridClient], Any], dict[str, Any]]] = [
+    (
+        "kb.query",
+        "/sdk/v1/query",
+        lambda c: c.kb.query("q", domains=["general"], top_k=5),
+        {"context": "c", "sources": [], "confidence": 0.5},
+    ),
+    (
+        "kb.search",
+        "/sdk/v1/search",
+        lambda c: c.kb.search("q", domain="general", top_k=3),
+        {"results": [], "total_results": 0, "confidence": 0.0},
+    ),
+    (
+        "kb.ingest",
+        "/sdk/v1/ingest",
+        lambda c: c.kb.ingest("PostgreSQL uses MVCC.", domain="databases", tags="pg", metadata={"title": "T"}),
+        INGEST_FIXTURE,
+    ),
+    (
+        "kb.ingest_file",
+        "/sdk/v1/ingest/file",
+        lambda c: c.kb.ingest_file(
+            "/archive/notes.md", domain="databases", tags="pg", categorize_mode="manual",
+        ),
+        INGEST_FIXTURE,
+    ),
+    (
+        "kb.ingest_external",
+        "/sdk/v1/ingest/external",
+        lambda c: c.kb.ingest_external(
+            source_type="readwise",
+            payload={"highlights": []},
+            field_mappings={"content": "highlights[].text"},
+        ),
+        {"accepted": 0, "skipped": 0, "errors": [], "source_type": "readwise"},
+    ),
+    (
+        "verify.check",
+        "/sdk/v1/hallucination",
+        lambda c: c.verify.check("The sky is blue.", conversation_id="conv-1"),
+        {"conversation_id": "conv-1", "skipped": False, "claims": [], "summary": {}},
+    ),
+    (
+        "memory.extract",
+        "/sdk/v1/memory/extract",
+        lambda c: c.memory.extract("I prefer dark mode.", conversation_id="conv-1"),
+        {"conversation_id": "conv-1", "memories_extracted": 0, "memories_stored": 0},
+    ),
+    (
+        "llm.complete",
+        "/sdk/v1/llm/complete",
+        lambda c: c.llm.complete(
+            [{"role": "user", "content": "Hi"}],
+            task_type="internal",
+            query="Hi",
+            cost_sensitivity="high",
+            temperature=0.1,
+            max_tokens=10,
+            response_format={"type": "json_object"},
+            slo_budget_ms=5000,
+        ),
+        {"content": "Yes.", "model": "m", "provider": "openrouter_paid"},
+    ),
+]
+
+
+@pytest.mark.parametrize("label,path,invoke,response_fixture", DEAD_PARAM_CASES, ids=[c[0] for c in DEAD_PARAM_CASES])
+def test_request_body_carries_no_key_the_server_ignores(
+    label: str,
+    path: str,
+    invoke: Callable[[CeridClient], Any],
+    response_fixture: dict[str, Any],
+) -> None:
+    with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        mock = _capture_post(client, response_fixture)
+        invoke(client)
+        body = mock.call_args.kwargs["json"]
+
+    accepted = set(_request_schema(path, "post").get("properties", {})) or FREE_FORM_SERVER_KEYS[path]
+    ignored = set(body) - accepted
+    assert not ignored, (
+        f"{label}: sends {sorted(ignored)}, which the server drops on the floor "
+        "— wire the field server-side or take the parameter off the SDK method"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Default-invocation coverage. Every POST_CASES row passes conversation_id
+# explicitly, so the *documented default* call — the one every README shows —
+# was never exercised: it omitted a field the server marks required and
+# 422'd. A spec-required field must be unskippable at the call site.
+# ---------------------------------------------------------------------------
+DEFAULT_CALL_CASES: list[tuple[str, str, Callable[[CeridClient], Any], dict[str, Any]]] = [
+    (
+        "verify.check",
+        "/sdk/v1/hallucination",
+        lambda c: c.verify.check("The sky is blue."),  # type: ignore[call-arg]
+        {"conversation_id": "", "skipped": False, "claims": [], "summary": {}},
+    ),
+    (
+        "memory.extract",
+        "/sdk/v1/memory/extract",
+        lambda c: c.memory.extract("I prefer dark mode."),  # type: ignore[call-arg]
+        {"conversation_id": "", "memories_extracted": 0, "memories_stored": 0},
+    ),
+]
+
+
+@pytest.mark.parametrize("label,path,invoke,response_fixture", DEFAULT_CALL_CASES, ids=[c[0] for c in DEFAULT_CALL_CASES])
+def test_minimal_invocation_cannot_omit_a_spec_required_field(
+    label: str,
+    path: str,
+    invoke: Callable[[CeridClient], Any],
+    response_fixture: dict[str, Any],
+) -> None:
+    """Omitting a server-required argument must fail at the call site.
+
+    Either the SDK refuses the call (TypeError) or it supplies a value — what
+    it must not do is put a body the server will reject on the wire and let
+    the caller discover it as a 422 in production.
+    """
+    with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        mock = _capture_post(client, response_fixture)
+        try:
+            invoke(client)
+        except TypeError:
+            return
+        body = mock.call_args.kwargs["json"]
+
+    Draft202012Validator(_request_schema(path, "post")).validate(body)
+
+
+def test_search_can_drop_knowledge_packs() -> None:
+    """``exclude_packs`` is the personal-first search switch — answer from the
+    operator's own data rather than bundled knowledge packs. The server has
+    taken it since SDKSearchRequest gained the field; neither SDK could send
+    it, so the mode was unreachable from a published client."""
+    with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        mock = _capture_post(client, {"results": [], "total_results": 0, "confidence": 0.0})
+        client.kb.search("q", exclude_packs=True)
+        body = mock.call_args.kwargs["json"]
+
+    assert body["exclude_packs"] is True
+    Draft202012Validator(_request_schema("/sdk/v1/search", "post")).validate(body)
+
+
+# ---------------------------------------------------------------------------
+# The 202 async envelope. MEMORY_QUEUE_MODE=async is the default on
+# local-inference installs, so this is the ordinary path there — not an edge.
+# ---------------------------------------------------------------------------
+
+
+def test_memory_extract_202_returns_the_accepted_envelope() -> None:
+    """A queued extraction must not read back as a finished one with no memories.
+
+    The server answers 202 with a job_id and a status_url; parsing that as
+    ``MemoryExtractResponse`` renders queued work as ``extracted 0, stored 0``
+    and throws away the only handle the caller has on the job.
+    """
+    accepted = {
+        "job_id": "job-42",
+        "status": "queued",
+        "status_url": "/sdk/v1/memory/extract/jobs/job-42",
+        "conversation_id": "conv-1",
+    }
+    Draft202012Validator(_response_schema("/sdk/v1/memory/extract", "post", "202")).validate(accepted)
+
+    with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        client._http.post = MagicMock(return_value=_mock_response(202, accepted))
+        result = client.memory.extract("I prefer dark mode.", conversation_id="conv-1")
+
+    assert isinstance(result, MemoryExtractAcceptedResponse), (
+        f"202 Accepted parsed as {type(result).__name__} — the caller never "
+        "learns a job_id exists and never polls get_job"
+    )
+    assert result.job_id == "job-42"
+    assert result.status_url.endswith("job-42")
+
+
+def test_memory_extract_200_still_returns_the_sync_result() -> None:
+    body = {"conversation_id": "conv-1", "memories_extracted": 2, "memories_stored": 2}
+    with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        client._http.post = MagicMock(return_value=_mock_response(200, body))
+        result = client.memory.extract("I prefer dark mode.", conversation_id="conv-1")
+
+    assert isinstance(result, MemoryExtractResponse)
+    assert result.memories_stored == 2
+
+
+@pytest.mark.asyncio
+async def test_async_memory_extract_202_returns_the_accepted_envelope() -> None:
+    accepted = {"job_id": "job-43", "status": "queued", "status_url": "/sdk/v1/memory/extract/jobs/job-43"}
+
+    async with AsyncCeridClient(base_url="http://localhost:8888", client_id="test") as client:
+        async def _post(*args: Any, **kwargs: Any) -> httpx.Response:
+            return _mock_response(202, accepted)
+
+        client._http.post = _post
+        result = await client.memory.extract("I prefer dark mode.", conversation_id="conv-1")
+
+    assert isinstance(result, MemoryExtractAcceptedResponse)
+    assert result.job_id == "job-43"
 
 
 def test_sdk_protocol_version_matches_spec_version() -> None:

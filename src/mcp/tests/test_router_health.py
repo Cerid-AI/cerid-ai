@@ -21,10 +21,18 @@ def _make_app():
 
 class TestHealthEndpoint:
     def setup_method(self):
-        """Reset the health cache between tests."""
+        """Reset the health cache and the inference-lane state between tests.
+
+        /health folds a degraded inference lane into its status, and
+        core.utils.inference_health is process-global — a fallback recorded by
+        an earlier module would otherwise make this module's verdict depend on
+        test order.
+        """
         import app.routers.health as h
+        from core.utils import inference_health
         h._health_payload_cache.value = {}
         h._health_payload_cache.updated_at = 0.0
+        inference_health.reset()
 
     @patch("app.routers.health.get_redis")
     @patch("app.routers.health.get_chroma")
@@ -210,27 +218,6 @@ class TestSchedulerEndpoint:
             response = client.get("/scheduler")
 
         assert response.status_code == 200
-
-
-class TestPluginsEndpoint:
-    def test_returns_plugins_and_features(self):
-        mock_plugins = MagicMock(get_loaded_plugins=MagicMock(return_value=[]))
-        mock_features = MagicMock(
-            get_feature_status=MagicMock(
-                return_value={"features": {"encryption": False}, "tier": "community"}
-            )
-        )
-
-        with patch.dict(
-            "sys.modules",
-            {"plugins": mock_plugins, "utils.features": mock_features},
-        ):
-            client = TestClient(_make_app())
-            response = client.get("/plugins")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "plugins" in data
 
 
 class TestPipelineProviders:

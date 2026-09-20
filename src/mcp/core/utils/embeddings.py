@@ -78,6 +78,18 @@ _QUERY_PREFIX_MAP: dict[str, str] = {
 }
 
 
+# Pinned artifact revisions — HuggingFace commit SHAs, not branch names.
+# ``main`` moves, and these weights decide every vector in the index: a repo
+# owner retagging silently changes retrieval semantics on the next cold start.
+# EMBEDDING_MODEL_VERSION cannot notice, because it tracks a config string
+# rather than the artifact. The SHA below is the revision the live index was
+# built with. Bump it deliberately, and re-embed when you do.
+_PINNED_REVISIONS: dict[str, str] = {
+    "Snowflake/snowflake-arctic-embed-m-v1.5":
+        "e58a8f756156a1293d763f17e3aae643474e9b8a",  # pragma: allowlist secret
+}
+
+
 # ---------------------------------------------------------------------------
 # ONNX Embedding Function (implements chromadb.EmbeddingFunction protocol)
 # ---------------------------------------------------------------------------
@@ -100,6 +112,7 @@ class OnnxEmbeddingFunction:
         self._onnx_filename = onnx_filename
         self._cache_dir = cache_dir
         self._dimensions = dimensions  # Matryoshka: truncate to this dim
+        self._revision = _PINNED_REVISIONS.get(model_id)
         self._session: ort.InferenceSession | None = None
         self._tokenizer: Tokenizer | None = None
         self._lock = threading.Lock()
@@ -115,11 +128,20 @@ class OnnxEmbeddingFunction:
             if self._session is not None and self._tokenizer is not None:
                 return self._session, self._tokenizer
 
+            if self._revision is None:
+                logger.warning(
+                    "Embedding model %s is not revision-pinned — whatever the "
+                    "repo serves now decides every vector in the index. Add its "
+                    "commit SHA to _PINNED_REVISIONS.",
+                    self._model_id,
+                )
             model_path = resolve_hf_file(
-                self._model_id, self._onnx_filename, self._cache_dir, logger=logger,
+                self._model_id, self._onnx_filename, self._cache_dir,
+                logger=logger, revision=self._revision,
             )
             tok_path = resolve_hf_file(
-                self._model_id, "tokenizer.json", self._cache_dir, logger=logger,
+                self._model_id, "tokenizer.json", self._cache_dir,
+                logger=logger, revision=self._revision,
             )
 
             opts = ort.SessionOptions()
@@ -173,7 +195,12 @@ class OnnxEmbeddingFunction:
             return [c for c in cached if c is not None]  # type: ignore[misc]
 
         miss_texts = [input[i] for i in miss_indices]
-        miss_vectors = self._embed_uncached(miss_texts)
+        # The namespace the batch is WRITTEN under is the one that actually
+        # served, not the one the operator configured. A quenchforge blip drops
+        # the chain onto a different model; caching those vectors under the
+        # quenchforge key mixes vector spaces inside one namespace — and with
+        # CERID_EMBED_CACHE_PATH set the poisoned rows outlive the process.
+        miss_vectors, served_namespace = self._embed_uncached(miss_texts)
         if len(miss_vectors) != len(miss_indices):
             # Backend returned wrong cardinality — refuse to cache and
             # fall through to its result so ChromaDB sees a clean error
@@ -190,19 +217,20 @@ class OnnxEmbeddingFunction:
                 continue
             assert next_miss is not None and next_miss[0] == i
             vec = np.asarray(next_miss[1], dtype=np.float32)
-            cache.put(namespace, input[i], vec)
+            cache.put(served_namespace, input[i], vec)
             result.append(vec)
             next_miss = next(miss_iter, None)
         return result  # type: ignore[return-value]
 
-    def _active_namespace(self) -> str:
-        """Identify the model that will actually serve this batch.
+    def _local_namespace(self) -> str:
+        """Cache key for the sidecar / in-process ONNX legs.
 
-        Mirrors the routing fast-paths in ``__call__`` so the cache key
-        matches the producing vector space. Quenchforge is checked first
-        because its dispatch is operator-controlled by a single env var;
-        anything else collapses onto the local ONNX model identity.
+        Both run the same model identity, so they share one vector space.
         """
+        return f"onnx:{self._model_id}"
+
+    def _quenchforge_namespace(self) -> str | None:
+        """``qf:<model>`` when Quenchforge is the selected embedder, else ``None``."""
         try:
             from utils.quenchforge_client import is_embeddings_provider_quenchforge
             if is_embeddings_provider_quenchforge():
@@ -214,7 +242,15 @@ class OnnxEmbeddingFunction:
             log_swallowed_error(
                 "core.utils.embeddings.namespace_probe", exc,
             )
-        return f"onnx:{self._model_id}"
+        return None
+
+    def _active_namespace(self) -> str:
+        """The namespace a cache LOOKUP should use — the configured intent.
+
+        Writes use the namespace returned by :meth:`_embed_uncached`, which
+        names the leg that actually produced the vectors.
+        """
+        return self._quenchforge_namespace() or self._local_namespace()
 
     @staticmethod
     def _stitch_uncached_only(
@@ -229,12 +265,14 @@ class OnnxEmbeddingFunction:
         _ = input_texts, cached, miss_indices
         return [np.asarray(v, dtype=np.float32) for v in miss_vectors]
 
-    def _embed_uncached(self, input: list[str]) -> list[np.ndarray]:  # noqa: A002
+    def _embed_uncached(  # noqa: A002
+        self, input: list[str],
+    ) -> tuple[list[np.ndarray], str]:
         """Run the existing backend chain on a cache-miss subset.
 
-        Identical control flow to the original ``__call__`` body; lifted
-        into a helper so the cache layer can split a batch into hits +
-        misses without duplicating the routing logic.
+        Returns ``(vectors, namespace)`` where ``namespace`` names the leg that
+        actually produced the vectors — the caller keys the cache on it so a
+        silent fallback cannot write into another provider's vector space.
         """
         # Quenchforge GPU fast-path (v0.93.8) — opt-in via
         # EMBEDDINGS_PROVIDER=quenchforge.  Targets Intel Mac + AMD
@@ -252,7 +290,11 @@ class OnnxEmbeddingFunction:
             # actually expects List[ndarray], which is what the local-ONNX
             # path silently delivers (mypy couldn't catch it because
             # ndarray indexing returns Any).
-            return [np.asarray(row, dtype=np.float32) for row in quenchforge_result]  # type: ignore[misc]
+            qf_ns = self._quenchforge_namespace() or self._local_namespace()
+            return (
+                [np.asarray(row, dtype=np.float32) for row in quenchforge_result],
+                qf_ns,
+            )
 
         # Sidecar fast-path — only when explicitly preferred by inference
         # detection AND reachable. Sync-bridge to async via the proven
@@ -261,7 +303,10 @@ class OnnxEmbeddingFunction:
         sidecar_result = self._maybe_embed_via_sidecar(input)
         if sidecar_result is not None:
             # Same ndarray-row requirement as the Quenchforge branch above.
-            return [np.asarray(row, dtype=np.float32) for row in sidecar_result]  # type: ignore[misc]
+            return (
+                [np.asarray(row, dtype=np.float32) for row in sidecar_result],
+                self._local_namespace(),
+            )
 
         session, tokenizer = self._load()
         encodings = tokenizer.encode_batch(input)
@@ -303,7 +348,10 @@ class OnnxEmbeddingFunction:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True).clip(min=1e-12)
             embeddings = embeddings / norms
 
-        return [embeddings[i] for i in range(embeddings.shape[0])]
+        return (
+            [embeddings[i] for i in range(embeddings.shape[0])],
+            self._local_namespace(),
+        )
 
     def embed_query(self, input):  # noqa: A002 — chromadb protocol forces this kwarg name
         """Embed query text(s), applying the query prefix if configured.
@@ -443,6 +491,7 @@ class OnnxEmbeddingFunction:
             return None
         if not is_embeddings_provider_quenchforge():
             return None
+        qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
 
         # Sync-bridge via the persistent event-loop thread so the
         # cached httpx.AsyncClient inside quenchforge_client survives
@@ -462,13 +511,25 @@ class OnnxEmbeddingFunction:
             log_swallowed_error(
                 "core.utils.embeddings.quenchforge_fallthrough", exc,
             )
-            # Quenchforge embed was configured but failed — the chain serves
-            # from the sidecar / local ONNX (a DIFFERENT model). Recall stays
-            # consistent because vectors are namespaced per provider+model, but
-            # the GPU path is down: record it so /health reports the degradation.
             inference_health.record_fallback(
                 "embed", configured="quenchforge", served_by="onnx", detail=str(exc),
             )
+            # Falling through means the sidecar / local ONNX leg serves this
+            # batch. Only namespaces are per-provider, and the ONLY namespaced
+            # store is the in-process LRU — nothing namespaces the ChromaDB
+            # collection, and both nomic and arctic are 768-dim so the dimension
+            # guard cannot tell them apart. Serving a different vector space into
+            # the same collection is silent corruption, not degradation, so fall
+            # through ONLY when the fallback leg runs the same model identity.
+            if not _same_vector_space(qf_model, config.EMBEDDING_MODEL):
+                raise RuntimeError(
+                    f"Quenchforge embed failed ({exc}) and the fallback leg runs "
+                    f"{config.EMBEDDING_MODEL!r}, a different vector space from "
+                    f"{qf_model!r}. Refusing to serve — same dimensionality is not "
+                    f"the same space, and nothing namespaces the collection. "
+                    f"Restore the daemon, or set EMBEDDING_MODEL to the model "
+                    f"QUENCHFORGE_EMBED_MODEL names so the legs agree.",
+                ) from exc
             return None
 
     # -- sidecar fast-path (Workstream E Phase E.6.4) ----------------------
@@ -581,6 +642,36 @@ def get_embedder() -> Any | None:
     return get_embedding_function()
 
 
+def _normalise_model_id(name: str) -> str:
+    """Bare, comparable model identity — drops the HF org prefix and case."""
+    return name.strip().rsplit("/", 1)[-1].lower()
+
+
+def _same_vector_space(a: str, b: str) -> bool:
+    """True when two model names denote the same embedding vector space."""
+    return bool(a) and bool(b) and _normalise_model_id(a) == _normalise_model_id(b)
+
+
+def serving_embedding_model() -> str:
+    """The model identity that will actually produce vectors right now.
+
+    ``config.EMBEDDING_MODEL`` names the in-process ONNX pin, which is NOT the
+    producer when ``EMBEDDINGS_PROVIDER=quenchforge`` — the daemon's
+    ``QUENCHFORGE_EMBED_MODEL`` is. Every provenance surface must read this
+    rather than the local pin.
+    """
+    try:
+        from utils.quenchforge_client import is_embeddings_provider_quenchforge
+        if is_embeddings_provider_quenchforge():
+            qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
+            if qf_model:
+                return qf_model
+    except Exception as exc:  # noqa: BLE001 — provenance probe is best-effort
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("core.utils.embeddings.serving_model_probe", exc)
+    return config.EMBEDDING_MODEL
+
+
 def embedding_stamp(domain: str) -> dict[str, str]:
     """Return the ``{embedding_model, embedding_model_version}`` stamp for
     a chunk about to be written to ``domain``.
@@ -589,8 +680,10 @@ def embedding_stamp(domain: str) -> dict[str, str]:
     — every chunk-write path (ingest, re-embed) merges this into its
     per-chunk metadata so a future embedding-model swap can identify which
     chunks were computed under which model without inferring it from
-    vector geometry. ``embedding_model`` is the process-wide active model
-    (``config.EMBEDDING_MODEL``); ``embedding_model_version`` resolves
+    vector geometry. ``embedding_model`` is the model that will actually serve
+    (:func:`serving_embedding_model` — the Quenchforge model when the daemon is
+    the selected embedder, otherwise the local ONNX pin);
+    ``embedding_model_version`` resolves
     through the per-domain override so a staged migration
     (``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN``) stamps only the domain being
     migrated.
@@ -600,7 +693,7 @@ def embedding_stamp(domain: str) -> dict[str, str]:
     filtered out or specially privileged. Absence is expected, not an error.
     """
     return {
-        "embedding_model": config.EMBEDDING_MODEL,
+        "embedding_model": serving_embedding_model(),
         "embedding_model_version": config.embedding_version_for_domain(domain),
     }
 

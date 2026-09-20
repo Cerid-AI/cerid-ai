@@ -8,15 +8,24 @@ import type { AuditCosts } from "@/lib/types"
 
 interface CostBreakdownProps {
   costs: AuditCosts | undefined
-  hours?: number
+  /**
+   * The period the pane's selector is showing. Used only to say that this
+   * report is NOT scoped to it: core/agents/audit.py calls estimate_costs()
+   * without an hours argument, so the figures always cover that function's own
+   * 720h default whatever the user picked.
+   */
+  selectedRangeLabel?: string
 }
 
-export function CostBreakdown({ costs, hours }: CostBreakdownProps) {
+export function CostBreakdown({ costs, selectedRangeLabel }: CostBreakdownProps) {
   if (!costs) return <EmptyState icon={DollarSign} title="No cost data" description="Costs are tracked when AI operations run" />
 
   const totalCost = Object.values(costs.estimated_cost_usd).reduce((a, b) => a + b, 0)
   const totalTokens = Object.values(costs.estimated_tokens).reduce((a, b) => a + b, 0)
-  const windowHours = hours ?? costs.time_window_hours
+  // Project from the window the figures actually cover. Projecting from the
+  // selected period instead divided a 30-day cost by 24 hours and inflated the
+  // monthly number thirtyfold at the pane's default selection.
+  const windowHours = costs.time_window_hours
   const monthlyProjection = windowHours > 0 ? (totalCost / windowHours) * 730 : 0
 
   return (
@@ -24,16 +33,20 @@ export function CostBreakdown({ costs, hours }: CostBreakdownProps) {
       <CardHeader className="p-3 pb-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Cost Breakdown</CardTitle>
-          <span className="text-xs text-muted-foreground">{costs.time_window_hours}h window</span>
+          <span className="text-xs text-muted-foreground">
+            {costs.time_window_hours}h window
+            {selectedRangeLabel ? ` · not the ${selectedRangeLabel} selection` : ""}
+          </span>
         </div>
       </CardHeader>
       <CardContent className="p-3">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {/* Total */}
           <div className="rounded-lg bg-muted/50 p-2.5">
-            <p className="text-xs text-muted-foreground">Total Cost</p>
+            <p className="text-xs text-muted-foreground">Estimated Cost</p>
             <p className="text-lg font-semibold">${totalCost.toFixed(4)}</p>
             <p className="text-xs text-muted-foreground">{totalTokens.toLocaleString()} tokens</p>
+            <p className="text-xs text-muted-foreground">from operation counts</p>
           </div>
 
           {/* Monthly projection */}

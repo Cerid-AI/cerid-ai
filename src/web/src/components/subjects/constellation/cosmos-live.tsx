@@ -17,16 +17,57 @@
 // - Once the user moves the camera (userDriven zoom/pan), auto-fitting
 //   stops until the next big bang explicitly re-frames.
 //
-// jsdom can't run WebGL, so this component is verified by build + real Chrome,
-// not vitest; the data marshalling it relies on is unit-tested in cosmos-data.ts.
+// jsdom can't run WebGL, so the GPU path here is verified by build + real
+// Chrome, not vitest; the data marshalling it relies on is unit-tested in
+// cosmos-data.ts and the no-context fallback in
+// __tests__/cosmos-live-webgl-fallback.test.tsx.
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Graph } from "@cosmos.gl/graph"
+import { MonitorOff } from "lucide-react"
+import { EmptyState } from "@/components/ui/empty-state"
 import type { EntityEmbedding3D } from "@/lib/api/embeddings-3d"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { positionsFromEntities, randomPositions, linksToPairs, colorsFromRgb } from "./cosmos-data"
 
 const SPACE_SIZE = 4096
 const POINT_ALPHA = 0.9
+
+/**
+ * Can this browser actually hand out a WebGL2 context?
+ *
+ * Not every browser that ships the API can satisfy the request: a blocklisted
+ * GPU, a VM or remote desktop, hardware acceleration switched off, or a
+ * document that has already exhausted its context budget all return null. The
+ * GPU pipeline then dereferences that null deep inside a draw call, and the
+ * resulting TypeError escapes to the pane-level error boundary and takes every
+ * other Subjects mode down with it. Asking first keeps the failure local.
+ */
+function hasWebGL2(): boolean {
+  if (typeof document === "undefined") return false
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2")
+    if (!gl) return false
+    // Hand the probe's context straight back — contexts are the scarce
+    // resource this check exists to respect.
+    gl.getExtension("WEBGL_lose_context")?.loseContext()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function ConstellationUnavailable() {
+  return (
+    <div className="flex h-full w-full items-center justify-center p-6">
+      <EmptyState
+        icon={MonitorOff}
+        title="Live view needs WebGL2"
+        description="This browser could not create a WebGL2 context — hardware acceleration may be off, the GPU may be blocklisted, or too many 3D views are already open. Atlas, Timeline, Wiki and Communities are unaffected."
+      />
+    </div>
+  )
+}
 
 export interface CosmosLiveProps {
   entities: EntityEmbedding3D[]
@@ -59,6 +100,10 @@ export function CosmosLive({
   background,
   onNodeClick,
 }: CosmosLiveProps) {
+  // Probed once per mount: a context that was refused at mount will not
+  // appear mid-session, and re-probing would burn contexts on every render.
+  const [webGL2Available] = useState(hasWebGL2)
+  const [graphFailed, setGraphFailed] = useState(false)
   const divRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<Graph | null>(null)
   const destroyedRef = useRef(false)
@@ -110,42 +155,52 @@ export function CosmosLive({
   // Create the cosmos graph once — it owns its own canvas + WebGL context.
   useEffect(() => {
     const div = divRef.current
-    if (!div) return
+    if (!div || !webGL2Available) return
     destroyedRef.current = false
     sizedRef.current = false
     userMovedCameraRef.current = false
     pendingSeedFrameRef.current = false
-    const graph = new Graph(div, {
-      backgroundColor: background,
-      spaceSize: SPACE_SIZE,
-      simulationRepulsion: repulsion,
-      simulationGravity: 0.25,
-      simulationLinkSpring: 1.0,
-      simulationLinkDistance: 10,
-      simulationFriction: 0.85,
-      simulationDecay: 1000,
-      renderLinks: true,
-      enableDrag: true,
-      // We manage framing ourselves (see camera contract in the header):
-      // one fit per discrete moment, none per tick, none while unsized,
-      // none after the user takes the camera.
-      fitViewOnInit: false,
-      pointDefaultSize: 6,
-      scalePointsOnZoom: true,
-      onZoomStart: (_e, userDriven) => {
-        // Fires for pan AND wheel-zoom (cosmos camera is d3-zoom); fitView's
-        // own transforms come through with userDriven=false.
-        if (userDriven) userMovedCameraRef.current = true
-      },
-      onSimulationEnd: () => {
-        if (!userMovedCameraRef.current && hasSize()) graphRef.current?.fitView(400)
-      },
-      onClick: (index) => {
-        if (index === undefined) return
-        const ent = entitiesRef.current[index]
-        if (ent) onClickRef.current(ent.id)
-      },
-    })
+    let graph: Graph
+    try {
+      graph = new Graph(div, {
+        backgroundColor: background,
+        spaceSize: SPACE_SIZE,
+        simulationRepulsion: repulsion,
+        simulationGravity: 0.25,
+        simulationLinkSpring: 1.0,
+        simulationLinkDistance: 10,
+        simulationFriction: 0.85,
+        simulationDecay: 1000,
+        renderLinks: true,
+        enableDrag: true,
+        // We manage framing ourselves (see camera contract in the header):
+        // one fit per discrete moment, none per tick, none while unsized,
+        // none after the user takes the camera.
+        fitViewOnInit: false,
+        pointDefaultSize: 6,
+        scalePointsOnZoom: true,
+        onZoomStart: (_e, userDriven) => {
+          // Fires for pan AND wheel-zoom (cosmos camera is d3-zoom); fitView's
+          // own transforms come through with userDriven=false.
+          if (userDriven) userMovedCameraRef.current = true
+        },
+        onSimulationEnd: () => {
+          if (!userMovedCameraRef.current && hasSize()) graphRef.current?.fitView(400)
+        },
+        onClick: (index) => {
+          if (index === undefined) return
+          const ent = entitiesRef.current[index]
+          if (ent) onClickRef.current(ent.id)
+        },
+      })
+    } catch (err) {
+      // A driver that advertises WebGL2 and still fails to build the pipeline
+      // lands here. Same outcome as no context at all: degrade this mode,
+      // leave the rest of the pane standing.
+      logSwallowedError(err, "cosmos-live.graph-init")
+      setGraphFailed(true)
+      return
+    }
     graphRef.current = graph
 
     // Re-frame when the container gets its first real size (flex/drawer
@@ -182,7 +237,7 @@ export function CosmosLive({
     }
     // Created once; background/repulsion/data flow in via their own effects.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [webGL2Available])
 
   // Seed / refresh data. Positions + links only re-seed when the point count
   // changes (first load or corpus growth) so a routine refetch never jolts an
@@ -282,6 +337,8 @@ export function CosmosLive({
       g.render()
     })
   }, [bigBangNonce, hasSize])
+
+  if (!webGL2Available || graphFailed) return <ConstellationUnavailable />
 
   return <div ref={divRef} className="h-full w-full" aria-hidden="true" />
 }

@@ -28,8 +28,6 @@ from app.services.external_apis.wiki_enrichment import (
 )
 from app.services.wiki_pages import ExternalReference
 
-pytestmark = pytest.mark.asyncio
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

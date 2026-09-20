@@ -75,12 +75,27 @@ PIP_AUDIT_VERSION="2.10.0"
 #                     above and the same basis: trust_remote_code is never set anywhere
 #                     (grep-verified), and the UPDATE_COLLECTION permission it requires only exists
 #                     under an authz provider we do not configure.     Re-eval 2026-11-30 (verified still firing 2026-08-31).
+# PYSEC-2026-139      torch pt2 Loading Handler deserialization. Local-only; we do not
+#                     load untrusted .pth into torch. No fix version listed. Transitive
+#                     via pyannote/whisper.                            Re-eval 2026-11-30.
+# PYSEC-2025-194      torch.jit.script memory corruption. Local-only; we do not expose
+#                     jit.script to user input. Fix 2.13.0 — torch is a ~700MB Pro
+#                     transitive pin, not a Hub bump.                  Re-eval 2026-11-30.
+# PYSEC-2025-195      torch.lstm_cell memory corruption. Local-only. Fix 2.10.0.
+#                                                                      Re-eval 2026-11-30.
+# PYSEC-2026-2286     torch.load weights_only unpickler. Local-only; checkpoints we
+#                     load are operator-gated HF pins, not uploaded files. Fix 2.10.0.
+#                                                                      Re-eval 2026-11-30.
 IGNORES=(
   CVE-2026-45829
   CVE-2026-45830
   CVE-2026-45831
   CVE-2026-45833
   PYSEC-2026-3624
+  PYSEC-2026-139
+  PYSEC-2025-194
+  PYSEC-2025-195
+  PYSEC-2026-2286
 )
 
 IGNORE_ARGS=""

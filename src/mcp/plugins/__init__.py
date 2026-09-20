@@ -96,15 +96,29 @@ class FeatureFlagDisabledError(PluginLoadError):
 def manifest_display_name(manifest: dict[str, Any]) -> str:
     """Human-facing label: explicit ``display_name`` key, else title-cased name.
 
-    Shared by the loader record (served via ``app.routers.health``'s
-    ``GET /plugins``, which wins registration order in the real app) and
-    ``app.routers.plugins._manifest_to_info`` so both list shapes agree.
+    Shared by the loader record and ``app.routers.plugins._manifest_to_info``
+    so the loaded-plugin registry and ``GET /plugins`` agree on the label.
     """
     explicit = manifest.get("display_name")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
     name = str(manifest.get("name", "unknown"))
     return name.replace("_", " ").replace("-", " ").title()
+
+
+#: Manifest ``type`` values the loader accepts. Exported so
+#: docs/PLUGIN_DEVELOPMENT.md can be pinned against it — the docs published
+#: four of these six for long enough that no third-party developer could
+#: discover ``connector`` (every in-tree Pro plugin) or ``tool`` (RA-63,
+#: what puts a plugin's tools in tools/list).
+VALID_PLUGIN_TYPES: tuple[str, ...] = (
+    "parser",
+    "agent",
+    "sync",
+    "middleware",
+    "tool",
+    "connector",
+)
 
 
 def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
@@ -116,11 +130,10 @@ def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
             f"Plugin at {plugin_dir}: manifest.json missing required fields: {missing}"
         )
 
-    valid_types = ["parser", "agent", "sync", "middleware", "tool", "connector"]
-    if manifest["type"] not in valid_types:
+    if manifest["type"] not in VALID_PLUGIN_TYPES:
         raise PluginLoadError(
             f"Plugin '{manifest['name']}': invalid type '{manifest['type']}'. "
-            f"Must be one of: {valid_types}"
+            f"Must be one of: {list(VALID_PLUGIN_TYPES)}"
         )
 
 
@@ -343,6 +356,32 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     }
 
 
+def plugin_search_dirs(plugin_dir: str | None = None) -> list[Path]:
+    """Every directory a plugin may be installed into, in precedence order.
+
+    The loader and the ``/plugins`` management API MUST enumerate the same
+    set. They did not: ``load_plugins()`` scanned the configured PLUGIN_DIR
+    *and* the top-level ``plugins/`` tree, while the router scanned only the
+    former, so every community plugin under ``plugins/`` loaded and served
+    while being 404 to the API that lists, enables and configures it.
+
+    An explicit ``plugin_dir`` override is taken as the complete answer —
+    callers passing one (tests, discovery scripts) are naming the tree they
+    mean.
+    """
+    if plugin_dir is not None:
+        return [Path(plugin_dir)]
+
+    primary = Path(config.PLUGIN_DIR)
+    dirs = [primary]
+    # Top-level plugins/ tree (BSL-1.1 commercial plugins), resolved relative
+    # to PLUGIN_DIR (src/mcp/plugins) rather than to the process cwd.
+    secondary = primary.parent.parent.parent / "plugins"
+    if secondary.exists() and secondary.resolve() != primary.resolve():
+        dirs.append(secondary)
+    return dirs
+
+
 def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
     """Scan a single directory for plugins and load them."""
     if not base_dir.exists() or not base_dir.is_dir():
@@ -417,18 +456,8 @@ def load_plugins(plugin_dir: str | None = None, app: Any = None) -> list[str]:
     """
     loaded: list[str] = []
 
-    # Primary: configured plugin directory (in-tree at src/mcp/plugins/)
-    primary = Path(plugin_dir or config.PLUGIN_DIR)
-    _scan_directory(primary, loaded)
-
-    # Secondary: top-level plugins/ directory (BSL-1.1 commercial plugins)
-    # Only scan if not already covered by the primary path and no override
-    if plugin_dir is None:
-        repo_root = Path(config.PLUGIN_DIR).parent.parent.parent
-        secondary = repo_root / "plugins"
-        if secondary.exists() and secondary.resolve() != primary.resolve():
-            logger.debug(f"Also scanning external plugin directory: {secondary}")
-            _scan_directory(secondary, loaded)
+    for base in plugin_search_dirs(plugin_dir):
+        _scan_directory(base, loaded)
 
     if loaded:
         logger.info(f"Loaded {len(loaded)} plugin(s): {', '.join(loaded)}")
@@ -565,27 +594,26 @@ def discover_plugins(plugin_dir: str | None = None) -> list[dict[str, Any]]:
     Returns a list of manifest dicts for each valid plugin found.
     Useful for UI display of available (but not necessarily loaded) plugins.
     """
-    base_dir = Path(plugin_dir or config.PLUGIN_DIR)
-
-    if not base_dir.exists() or not base_dir.is_dir():
-        return []
-
     manifests = []
-    for entry in sorted(base_dir.iterdir()):
-        if not entry.is_dir() or entry.name.startswith(("_", ".")):
+    for base_dir in plugin_search_dirs(plugin_dir):
+        if not base_dir.exists() or not base_dir.is_dir():
             continue
 
-        manifest_path = entry / "manifest.json"
-        if not manifest_path.exists():
-            continue
+        for entry in sorted(base_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                continue
 
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["_dir"] = str(entry)
-            manifest["_loaded"] = manifest.get("name", "") in _loaded_plugins
-            manifests.append(manifest)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read manifest at %s: %s", manifest_path, e)
+            manifest_path = entry / "manifest.json"
+            if not manifest_path.exists():
+                continue
+
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["_dir"] = str(entry)
+                manifest["_loaded"] = manifest.get("name", "") in _loaded_plugins
+                manifests.append(manifest)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to read manifest at %s: %s", manifest_path, e)
 
     return manifests
 

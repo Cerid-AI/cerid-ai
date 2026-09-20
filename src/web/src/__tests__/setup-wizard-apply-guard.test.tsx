@@ -24,7 +24,7 @@ vi.mock("@/lib/api", () => ({
     setup_required: false,
     missing_keys: [],
     optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
-    configured_providers: [],
+    configured_providers: ["openrouter"],
   }),
   fetchSetupHealth: vi.fn().mockResolvedValue({ services: {} }),
   fetchProviderCredits: vi.fn().mockResolvedValue({ configured: false, balance: null }),
@@ -117,7 +117,7 @@ beforeEach(() => {
     setup_required: false,
     missing_keys: [],
     optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
-    configured_providers: [],
+    configured_providers: ["openrouter"],
   })
   vi.mocked(applySetupConfiguration).mockResolvedValue({ success: true })
   vi.mocked(completeOnboarding).mockResolvedValue({ onboarding_complete: true })
@@ -178,18 +178,15 @@ describe("SetupWizard — already-configured Apply guard", () => {
   })
 
   it("applies directly (force=false) when the backend is not configured", async () => {
-    // setup_required=true (not configured) — provider_status still marks an
-    // openrouter key valid so the Apply button clears its key gate (resume
-    // does not restore the persisted ollama/keys state).
+    // setup_required=true (not configured) — configured_providers still
+    // reports the openrouter key so the Apply button clears its key gate
+    // (resume does not restore the persisted ollama/keys state).
     vi.mocked(fetchSetupStatus).mockResolvedValue({
       configured: false,
       setup_required: true,
       missing_keys: ["OPENROUTER_API_KEY"],
       optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
-      configured_providers: [],
-      provider_status: {
-        openrouter: { configured: true, key_env_var: "OPENROUTER_API_KEY", key_present: true },
-      },
+      configured_providers: ["openrouter"],
     })
     await renderAtApplyStep()
 
@@ -239,9 +236,6 @@ describe("SetupWizard — Apply button provider gating (Task B3)", () => {
       missing_keys: ["OPENROUTER_API_KEY"],
       optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
       configured_providers: ["anthropic"],
-      provider_status: {
-        anthropic: { configured: true, key_env_var: "ANTHROPIC_API_KEY", key_present: true },
-      },
     })
     await renderAtApplyStep()
 

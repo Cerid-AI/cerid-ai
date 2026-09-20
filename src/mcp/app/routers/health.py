@@ -209,19 +209,20 @@ def health_check() -> dict:
     except Exception as exc:
         log_swallowed_error('app.routers.health', exc)
         status["neo4j"] = f"error: {exc}"
-    # Circuit breaker states
+    # Circuit breaker states — every registered breaker, not a hardcoded pair.
+    # Naming "ollama" here reported the state of a breaker a quenchforge
+    # deployment never touches (and get_breaker() would have created it on
+    # read), while quenchforge-chat/-embed/-rerank — the breakers that actually
+    # gate inference there — stayed invisible. Read the registry directly so
+    # this probe never manufactures an entry.
+    breaker_states: dict[str, str] = {}
     try:
-        from core.utils.circuit_breaker import get_breaker as _gb
-        ollama_cb_state = _gb("ollama").state.value
-    except (ValueError, ImportError):
-        ollama_cb_state = "unknown"
-
-    # OpenRouter circuit breaker — covers verification and LLM calls
-    try:
-        from core.utils.circuit_breaker import get_breaker as _gb2
-        openrouter_cb_state = _gb2("openrouter").state.value
-    except (ValueError, ImportError):
-        openrouter_cb_state = "unknown"
+        from core.utils.circuit_breaker import _BREAKER_REGISTRY
+        breaker_states = {
+            name: breaker.state.value for name, breaker in _BREAKER_REGISTRY.items()
+        }
+    except Exception as exc:
+        log_swallowed_error('app.routers.health.circuit_breakers', exc)
 
     # OpenRouter credit exhaustion flag (set by llm_client on 402)
     credits_exhausted = False
@@ -271,10 +272,7 @@ def health_check() -> dict:
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": get_version(),
         "services": status,
-        "circuit_breakers": {
-            "ollama": ollama_cb_state,
-            "openrouter": openrouter_cb_state,
-        },
+        "circuit_breakers": breaker_states,
         "openrouter_credits_exhausted": credits_exhausted,
         "embedding_cache": embedding_cache_stats,
         "wiki_freshness": wiki_health,
@@ -409,9 +407,69 @@ _openrouter_auth_cache: bool | None = None
 _openrouter_auth_cache_ts: float = 0.0
 
 
+# The stages of pipeline_providers each inference lane actually answers.
+# Stages with no lane (nothing records a fallback for them) keep their
+# configured provider.
+_STAGE_LANES = {
+    "claim_extraction": "llm",
+    "query_decomposition": "llm",
+    "topic_extraction": "llm",
+    "memory_resolution": "llm",
+    "reranking": "rerank",
+    "verification_simple": "llm",
+    "verification_complex": "llm",
+    "chat_generation": "llm",
+}
+
+# The consumer-relevant subset /sdk/v1/health reports; /health/detailed must
+# not report *fewer* features than the plain endpoint.
+_CONSUMER_FEATURE_KEYS = (
+    "enable_hallucination_check",
+    "enable_feedback_loop",
+    "enable_self_rag",
+    "enable_memory_extraction",
+)
+
+
+def _consumer_feature_toggles() -> dict:
+    """The feature toggles SDK consumers gate their UI on. Never raises."""
+    try:
+        from config.features import FEATURE_TOGGLES
+
+        return {k: v for k, v in FEATURE_TOGGLES.items() if k in _CONSUMER_FEATURE_KEYS}
+    except Exception as exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.consumer_feature_toggles", exc)
+        return {}
+
+
+def _serving_pipeline_providers(configured: dict[str, str]) -> dict[str, str]:
+    """Per-stage providers corrected by what actually served the lane.
+
+    ``configured`` is operator intent. A lane recorded as degraded by
+    :mod:`core.utils.inference_health` is being answered by its fallback, so
+    every stage riding that lane reports the fallback instead — otherwise this
+    table advertises quenchforge for a stage the CPU ONNX path is serving,
+    contradicting ``inference_routing`` in the same payload.
+    """
+    try:
+        from core.utils import inference_health
+
+        snap = inference_health.snapshot()
+    except Exception as exc:  # noqa: BLE001 — observability augmentation only
+        log_swallowed_error("app.routers.health.serving_pipeline_providers", exc)
+        return dict(configured)
+    serving = dict(configured)
+    for stage, lane in _STAGE_LANES.items():
+        lane_state = snap.get(lane)
+        if stage in serving and lane_state and lane_state.get("degraded"):
+            serving[stage] = lane_state.get("serving") or serving[stage]
+    return serving
+
+
 def degradation_status() -> dict:
     """Extended health check with degradation tier and uptime."""
     base = health_check()
+    mgr = None
     try:
         from utils.degradation import DegradationManager
         mgr = DegradationManager()
@@ -421,18 +479,19 @@ def degradation_status() -> dict:
         tier = "unknown"
     base["degradation_tier"] = tier
     base["uptime_seconds"] = int(time.time() - _start_time)
-    base.setdefault("features", {})
+    base["features"] = _consumer_feature_toggles()
 
     # Pipeline provider routing — tells the frontend which tasks use local models.
     # E1 CR-024: resolve the provider + local-ness through the one authority so a
     # quenchforge deployment (also local, on :11434) is not reported as cloud.
-    # This table is a *configuration* signal (which provider is set to serve each
-    # stage); daemon liveness is surfaced separately (degradation_tier +
-    # inference_routing's inference_health annotation), so it does not gate here.
+    # The configured intent lives under ``pipeline_providers_configured``; the
+    # serving table below overrides any stage whose lane has actually fallen
+    # back, so this block can no longer claim quenchforge for a stage the CPU
+    # ONNX fallback is answering.
     from core.routing.provider_state import active_provider, is_local_provider
     provider = active_provider()
     is_local = is_local_provider(provider)
-    base["pipeline_providers"] = {
+    configured = {
         "claim_extraction": provider if is_local else "openrouter",
         "query_decomposition": provider if is_local else "openrouter",
         "topic_extraction": provider if is_local else "openrouter",
@@ -442,15 +501,26 @@ def degradation_status() -> dict:
         "verification_complex": provider if is_local else "openrouter",
         "chat_generation": provider if is_local else "openrouter",
     }
-    try:
-        base["can_retrieve"] = mgr.can_retrieve()
-        base["can_verify"] = mgr.can_verify()
-        base["can_generate"] = mgr.can_generate()
-    except Exception as exc:
-        log_swallowed_error('app.routers.health', exc)
-        base["can_retrieve"] = True
-        base["can_verify"] = True
-        base["can_generate"] = True
+    base["pipeline_providers_configured"] = configured
+    base["pipeline_providers"] = _serving_pipeline_providers(configured)
+
+    if mgr is None:
+        # The manager never constructed — its capability claims are unknown,
+        # not True. Reporting True here overwrote the one signal that says
+        # the degradation subsystem itself is dead.
+        base["can_retrieve"] = None
+        base["can_verify"] = None
+        base["can_generate"] = None
+    else:
+        try:
+            base["can_retrieve"] = mgr.can_retrieve()
+            base["can_verify"] = mgr.can_verify()
+            base["can_generate"] = mgr.can_generate()
+        except Exception as exc:
+            log_swallowed_error('app.routers.health', exc)
+            base["can_retrieve"] = None
+            base["can_verify"] = None
+            base["can_generate"] = None
 
     # Inference tier — provider, GPU, latencies
     try:
@@ -979,10 +1049,26 @@ def _build_health_payload() -> dict:
     return result
 
 
+def _build_failed_payload() -> dict:
+    """The payload served when the health build itself never produced one.
+
+    Carries an explicit ``status`` so no consumer has to infer health from
+    an absent key — an empty ``services`` dict used to pass the ``all()``
+    gate below and render a total probe failure as HTTP 200 "healthy".
+    """
+    return {
+        "status": "degraded",
+        "error": "health build failed",
+        "version": get_version(),
+        "services": {},
+        "invariants": {},
+    }
+
+
 _health_payload_cache = CachedPayload(
     build=_build_health_payload,
     ttl=_HEALTH_CACHE_TTL,
-    empty={"services": {}, "invariants": {}},
+    empty=_build_failed_payload(),
     error_tag="app.routers.health.refresh_health_cache",
 )
 
@@ -1021,13 +1107,36 @@ async def health_check_endpoint():
     # genuinely cold cache only happens if the pre-warm itself failed at boot.
     result = await _health_payload_cache.get()
 
+    # Annotate a copy — ``result`` is the shared cache object and the
+    # inference-lane verdict below is per-request, not part of the build.
+    result = dict(result)
+
     # A service is "ok" when connected OR intentionally disabled (lightweight neo4j).
     def _ok(v: str) -> bool:
         return v == "connected" or v.startswith("disabled")
 
-    services_ok = all(_ok(v) for v in result["services"].values())
+    services = result.get("services") or {}
+    # An empty dict means the probe never ran — ``all()`` over it is True,
+    # which is how a total build failure used to be served as "healthy".
+    services_ok = bool(services) and all(_ok(v) for v in services.values())
     invariants_ok = result.get("invariants", {}).get("healthy_invariants", True)
     http_status = 200 if (services_ok and invariants_ok) else 503
+
+    # Transports being reachable is not the whole story: an inference lane
+    # that has silently fallen back to its local fallback (rerank → CPU ONNX,
+    # LLM → OpenRouter) degrades every request while every transport probe
+    # stays green. Fold that into the reported status. The HTTP code stays
+    # 200 — a degraded lane is still a serving container, and flipping the
+    # orchestrator's verdict on a fallback would restart-loop the stack.
+    degraded_lanes = sorted(
+        name
+        for name, lane in (result.get("inference_routing") or {}).items()
+        if isinstance(lane, dict) and lane.get("degraded")
+    )
+    if degraded_lanes:
+        result["degraded_lanes"] = degraded_lanes
+        if result.get("status") == "healthy":
+            result["status"] = "degraded"
     if http_status == HTTPStatus.OK:
         return result
     return JSONResponse(content=result, status_code=503)
@@ -1088,15 +1197,3 @@ async def scheduler_run_job_endpoint(job_id: str):
         )
     except ValueError as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
-
-
-@router.get("/plugins", response_model=dict[str, Any])
-def plugins_endpoint():
-    """Return loaded plugins and feature flag status."""
-    from plugins import get_loaded_plugins
-    from utils.features import get_feature_status
-
-    return {
-        "plugins": get_loaded_plugins(),
-        **get_feature_status(),
-    }

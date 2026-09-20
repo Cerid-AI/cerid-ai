@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pydantic response models mirroring the server-side ``models/sdk.py`` contract.
+"""Pydantic response models mirroring ``src/mcp/app/models/sdk.py`` on the server.
 
 These models are kept in sync with the server definitions. They use
 ``extra="allow"`` so that new fields added server-side pass through without
@@ -10,7 +10,7 @@ breaking existing consumers.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,7 +30,7 @@ class QueryResponse(_SDKBase):
     """Response from ``POST /sdk/v1/query``."""
 
     context: str = Field(default="")
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[Any] = Field(default_factory=list)
     confidence: float = Field(default=0.0)
     domains_searched: List[str] = Field(default_factory=list)
     total_results: int = Field(default=0)
@@ -47,9 +47,14 @@ class HallucinationResponse(_SDKBase):
     skipped: bool = Field(default=False)
     reason: Optional[str] = Field(default=None)
     claims: List[Dict[str, Any]] = Field(default_factory=list)
-    summary: Dict[str, int] = Field(
+    # Mirrors the server's ``dict[str, float | int]``: integer per-status counts
+    # plus the float ``overall_confidence``. Typing this ``Dict[str, int]``
+    # made every non-integral confidence a client-side ValidationError.
+    summary: Dict[str, Union[int, float]] = Field(
         default_factory=lambda: {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
     )
+    mode: str = Field(default="thorough")
+    nli_skipped: bool = Field(default=False)
 
 
 class MemoryExtractResponse(_SDKBase):
@@ -92,6 +97,24 @@ class IngestResponse(_SDKBase):
     artifact_id: str = Field(default="")
     chunks: int = Field(default=0)
     domain: str = Field(default="")
+
+
+class MemoryRecallResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/memory/recall``."""
+
+    memories: List[Dict[str, Any]] = Field(default_factory=list)
+    total: int = Field(default=0)
+    degraded: bool = Field(default=False)
+
+
+class DeleteArtifactResponse(_SDKBase):
+    """Response from ``DELETE /sdk/v1/artifacts/{artifact_id}``."""
+
+    deleted: bool = Field(default=False)
+    artifact_id: str = Field(default="")
+    filename: str = Field(default="")
+    chunks_removed: int = Field(default=0)
+    message: str = Field(default="")
 
 
 class CollectionsResponse(_SDKBase):

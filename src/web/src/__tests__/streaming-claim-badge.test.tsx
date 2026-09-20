@@ -77,6 +77,60 @@ describe("StreamingClaimBadge", () => {
     expect(screen.getByText(/92% match/)).toBeTruthy()
   })
 
+  // F237 — the live stream and the settled report render the same claim.
+  // The settled ClaimCard routes through getClaimDisplayStatus and says
+  // "refuted"; the streaming badge collapsed the same data into the generic
+  // no-source band, so a claim caught as actively false read as merely
+  // unchecked for exactly as long as an operator was watching the run.
+  it("shows a cross-model refutation as refuted while the stream is live", () => {
+    render(
+      <StreamingClaimBadge
+        claim={makeClaim({
+          status: "unverified",
+          verification_method: "cross_model",
+          source_urls: [],
+          source: undefined,
+          source_artifact_id: undefined,
+        })}
+      />,
+    )
+    const btn = screen.getByRole("button")
+    expect(btn.getAttribute("data-verification-band")).toBe("refuted")
+    expect(screen.getByText("Refuted")).toBeTruthy()
+  })
+
+  it("shows a web-search refutation as refuted while the stream is live", () => {
+    render(
+      <StreamingClaimBadge
+        claim={makeClaim({
+          status: "unverified",
+          verification_method: "web_search",
+          source_urls: [],
+          source: undefined,
+          source_artifact_id: undefined,
+        })}
+      />,
+    )
+    expect(screen.getByRole("button").getAttribute("data-verification-band")).toBe("refuted")
+  })
+
+  it("keeps a KB miss in the softer no-source band", () => {
+    render(
+      <StreamingClaimBadge
+        claim={makeClaim({
+          status: "unverified",
+          verification_method: "kb",
+          source_urls: [],
+          source: undefined,
+          source_artifact_id: undefined,
+        })}
+      />,
+    )
+    const btn = screen.getByRole("button")
+    expect(btn.getAttribute("data-verification-band")).toBe("unverified")
+    expect(screen.getByText("No source")).toBeTruthy()
+  })
+
   it("renders verified claim with KB artifact as 'verified' band", () => {
     render(
       <StreamingClaimBadge

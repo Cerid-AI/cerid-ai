@@ -31,10 +31,13 @@ side env var so the daemon loads the right model:
 * ``QUENCHFORGE_RERANK_MODEL``  — opt-in; not yet dimension-checked
   because reranker scores are scalars.
 
-The circuit breaker is shared with the LLM-chat path (``quenchforge``
-breaker name) so a single Quenchforge outage trips ALL Quenchforge
-consumers at once, with the existing fall-through to ONNX-sidecar +
-in-process providers.
+Each workload owns its own circuit breaker — ``quenchforge-embed`` here,
+``quenchforge-rerank`` here, and ``quenchforge-chat`` in
+``core.utils.internal_llm``. They are deliberately isolated: the slow chat
+slot returns transient 502s under load, and a single shared breaker let
+those trip the circuit for the healthy embed/rerank slots too, locking out
+the whole backend. Each breaker falls through to the ONNX-sidecar +
+in-process providers independently.
 
 SPLADE-v3 is intentionally NOT routed here — Quenchforge does not
 expose a sparse-encode endpoint as of v0.3.1.  Cerid's own sidecar at
@@ -135,6 +138,39 @@ _MAX_503_RETRIES = 3
 _MAX_RETRY_AFTER_SECONDS = 5.0
 
 
+def _error_detail(resp: httpx.Response) -> str:
+    """The daemon's own explanation for a failed response, if it gave one."""
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001 — a non-JSON body is normal on some errors
+        body = None
+    if isinstance(body, dict):
+        msg = body.get("error") or body.get("message") or ""
+        if isinstance(msg, str) and msg.strip():
+            return msg.strip()[:300]
+    text = getattr(resp, "text", "")
+    return text.strip()[:300] if isinstance(text, str) else ""
+
+
+def _raise_with_detail(resp: httpx.Response) -> None:
+    """``raise_for_status()``, but keep the daemon's error body on the exception.
+
+    Callers turn the exception into ``inference_health`` fallback detail, so
+    losing the body here is what left /health reporting a bare
+    "Server error '503 Service Unavailable' for url ..." while the daemon was
+    saying exactly what was wrong.
+    """
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = _error_detail(resp)
+        if not detail:
+            raise
+        raise httpx.HTTPStatusError(
+            f"{exc}: {detail}", request=exc.request, response=exc.response,
+        ) from exc
+
+
 def _is_retryable_unavailable(resp) -> bool:
     """True only for overload 503 (Retry-After present).
 
@@ -152,7 +188,7 @@ async def _post_with_retry_after(
     url: str,
     json_body: dict,
 ) -> dict:
-    """POST with 503/Retry-After awareness.
+    """POST, backing off only when the gateway actually asks us to.
 
     Differentiates three upstream failure modes:
 
@@ -169,12 +205,8 @@ async def _post_with_retry_after(
     - **Everything else** (502, 500, non-2xx) — the slot is genuinely
       broken. Propagate to the breaker.
 
-    This eliminates the interaction documented in
-    [[project_quenchforge_pr3_pending]]:
-    quenchforge auto-backoff returns 503 → cerid breaker opens after 3
-    failures → cerid embedding chain falls through to local ONNX
-    (different model than quenchforge serves) → ChromaDB ends up with a
-    mixed vector space → retrieval quality collapses.
+    - **Everything else** (502, 500, non-2xx) — the slot is genuinely broken.
+      Propagate to the breaker.
 
     The fix narrows the failure-trip surface so overload 503 (Retry-After
     present) triggers retries instead of fallthrough, while no-slot 503
@@ -184,7 +216,7 @@ async def _post_with_retry_after(
     for attempt in range(_MAX_503_RETRIES + 1):
         resp = await client.post(url, json=json_body)
         if not _is_retryable_unavailable(resp) or attempt == _MAX_503_RETRIES:
-            resp.raise_for_status()
+            _raise_with_detail(resp)
             return resp.json()
         # Server asked us to back off. Sleep for Retry-After (clamped).
         retry_after = _parse_retry_after(resp.headers.get("Retry-After")) or 1.0

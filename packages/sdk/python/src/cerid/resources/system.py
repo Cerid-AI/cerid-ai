@@ -32,19 +32,25 @@ class SystemResource:
         """Service connectivity and feature flags."""
         resp = self._http.get(self._client._url("/health"))
         _raise_for_status(resp)
-        return HealthResponse.model_validate(resp.json())
+        result = HealthResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     def health_detailed(self) -> DetailedHealthResponse:
         """Extended health with circuit breaker states and degradation tier."""
         resp = self._http.get(self._client._url("/health/detailed"))
         _raise_for_status(resp)
-        return DetailedHealthResponse.model_validate(resp.json())
+        result = DetailedHealthResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     def settings(self) -> SettingsResponse:
         """Read-only server configuration: version, tier, feature flags."""
         resp = self._http.get(self._client._url("/settings"))
         _raise_for_status(resp)
-        return SettingsResponse.model_validate(resp.json())
+        result = SettingsResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     def plugins(self) -> PluginListResponse:
         """List all loaded plugins with their status."""
@@ -64,19 +70,25 @@ class AsyncSystemResource:
         """Service connectivity and feature flags."""
         resp = await self._http.get(self._client._url("/health"))
         _raise_for_status(resp)
-        return HealthResponse.model_validate(resp.json())
+        result = HealthResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     async def health_detailed(self) -> DetailedHealthResponse:
         """Extended health with circuit breaker states and degradation tier."""
         resp = await self._http.get(self._client._url("/health/detailed"))
         _raise_for_status(resp)
-        return DetailedHealthResponse.model_validate(resp.json())
+        result = DetailedHealthResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     async def settings(self) -> SettingsResponse:
         """Read-only server configuration: version, tier, feature flags."""
         resp = await self._http.get(self._client._url("/settings"))
         _raise_for_status(resp)
-        return SettingsResponse.model_validate(resp.json())
+        result = SettingsResponse.model_validate(resp.json())
+        self._client._assert_protocol_compatible(result.version)
+        return result
 
     async def plugins(self) -> PluginListResponse:
         """List all loaded plugins with their status."""

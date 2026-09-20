@@ -27,6 +27,12 @@ export const UX_COPY = {
     /** Short form label for the "partial" band. */
     partial: "Partial source",
 
+    /** Short form label for the "refuted" band. */
+    refuted: "Refuted",
+
+    /** Longer form for the "refuted" band — an independent check disagreed. */
+    refutedLong: "An independent check contradicted this claim",
+
     /** Short form label for the "unverified" band. */
     unverified: "No source found for this claim",
 
@@ -51,6 +57,9 @@ export const UX_COPY = {
 
     /** aria-label for a partial badge */
     ariaPartial: "Claim has partial source",
+
+    /** aria-label for a refuted badge */
+    ariaRefuted: "Claim refuted by an independent check",
 
     /** aria-label for an unverified badge */
     ariaUnverified: "Claim has no source",

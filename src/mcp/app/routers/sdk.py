@@ -9,8 +9,8 @@ refactoring of the ``/agent/`` paths.
 
 Consumers should send ``X-Client-ID`` for per-client rate limiting and
 domain scoping.  See ``config.settings.CONSUMER_REGISTRY`` for the
-per-consumer configuration and ``docs/INTEGRATION_GUIDE.md`` for adding
-new cerid-series consumers.
+per-consumer configuration and ``docs/SDK_GUIDE.md`` for the endpoint
+catalogue.
 
 ``X-Client-ID`` is SELF-ASSERTED and is not an access-control boundary.
 It is an unauthenticated request header, so a caller can name any consumer
@@ -28,12 +28,21 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
 import config
+
+# config.features and config.taxonomy are imported as MODULES, never as
+# values. ``set_tier()`` rebinds ``FEATURE_TIER`` and the taxonomy writers
+# rebind ``DOMAINS``; a ``from ... import`` here would freeze a boot-time
+# copy that no runtime write can reach, which is how /sdk/v1/settings served
+# "pro" from a process whose /settings said "enterprise" (F023/F339/F340).
+import config.features as features_mod
+import config.taxonomy as taxonomy_mod
 from app.middleware.idempotency import idempotent
 from app.models.sdk import (
+    SDKDeleteArtifactResponse,
     SDKHallucinationResponse,
     SDKHealthResponse,
     SDKLLMCompleteRequest,
@@ -41,6 +50,8 @@ from app.models.sdk import (
     SDKMemoryExtractAcceptedResponse,
     SDKMemoryExtractJobStatus,
     SDKMemoryExtractResponse,
+    SDKMemoryRecallRequest,
+    SDKMemoryRecallResponse,
     SDKQueryResponse,
     SDKSearchRequest,
     SDKSearchResponse,
@@ -58,8 +69,8 @@ from app.routers.plugins import list_plugins
 from app.routers.sdk_version import SDK_VERSION
 from app.services.external_ingest import ExternalIngestRequest, IngestResult, ingest_external
 from app.services.ingestion import ingest_content, ingest_file
-from config.features import FEATURE_FLAGS, FEATURE_TIER
-from config.taxonomy import DOMAINS, TAXONOMY
+from app.services.private_mode import private_blocks
+from app.services.request_policy import build_request_context
 from core.processor.job import JobState
 from core.utils.swallowed import log_swallowed_error
 
@@ -103,6 +114,53 @@ router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
 _503 = {"description": "One or more backend services unavailable"}
 _422 = {"description": "Invalid request parameters"}
+_403 = {"description": "Consumer is not allowed to query the requested domain"}
+
+
+def _restricted_http() -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "retrieval_reason": "consumer_domain_restricted",
+            "retrieval_skipped": True,
+        },
+    )
+
+
+def _reject_restricted(result: Any) -> Any:
+    """Empty 200 on a domain wall is how Oracle starved. Surface it as 403."""
+    body = result.model_dump() if hasattr(result, "model_dump") else result
+    if isinstance(body, dict) and body.get("retrieval_reason") == "consumer_domain_restricted":
+        raise _restricted_http()
+    return result
+
+
+def _ensure_domain_allowed(request: Request, domain: str) -> None:
+    from app.services.request_policy import build_request_context
+
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    allowed = ctx.allowed_domains_list()
+    if allowed is not None and domain not in allowed:
+        raise _restricted_http()
+
+
+def _resolve_write_domain(request: Request, domain: str) -> str:
+    from app.services.request_policy import build_request_context
+
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    allowed = ctx.allowed_domains_list()
+    if allowed is None:
+        return domain
+    if domain:
+        if domain not in allowed:
+            raise _restricted_http()
+        return domain
+    if len(allowed) == 1:
+        return allowed[0]
+    raise HTTPException(
+        status_code=422,
+        detail="domain is required for this consumer",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,17 +192,19 @@ _PROC_STATE_TO_SDK_STATUS: dict[JobState, str] = {
 
 
 def _memory_async_enabled() -> bool:
-    """True when ``/sdk/v1/memory/extract`` should default to the async
-    processor path — explicit opt-in, or auto on local inference."""
-    if str(getattr(config, "MEMORY_QUEUE_MODE", "sync")).lower() == "async":
-        return True
-    try:
-        from core.routing.provider_state import is_local_provider
+    """True when ``/sdk/v1/memory/extract`` defaults to the async path.
 
-        return is_local_provider()  # no-arg = the active provider
-    except Exception as exc:  # noqa: BLE001 — probe failure ⇒ safe sync default
-        log_swallowed_error("sdk.memory_async_probe", exc)
-        return False
+    ``MEMORY_QUEUE_MODE`` is the ONLY switch. This used to also return True
+    whenever the active provider was local, which silently flipped the
+    response code to 202 on the shipped local-inference target while the
+    endpoint description, docs/SDK_GUIDE.md and .env.example all said 202
+    happens when MEMORY_QUEUE_MODE=async. Both bundled SDK clients validate
+    the body without checking the status and default every count to 0, so
+    that 202 read as "0 memories extracted" — a well-formed report of a
+    broken pipeline for a job that actually ran. An operator who wants
+    fire-and-forget on local inference sets the documented knob.
+    """
+    return str(getattr(config, "MEMORY_QUEUE_MODE", "sync")).lower() == "async"
 
 
 # ---------------------------------------------------------------------------
@@ -158,10 +218,10 @@ def _memory_async_enabled() -> bool:
     summary="KB Query",
     description="Multi-domain knowledge base search with hybrid BM25+vector retrieval and optional LLM reranking. "
     "Results are scoped by the consumer's allowed_domains in CONSUMER_REGISTRY.",
-    responses={422: _422, 503: _503},
+    responses={403: _403, 422: _422, 503: _503},
 )
 async def sdk_query(req: AgentQueryRequest, request: Request):
-    return await agent_query_endpoint(req, request)
+    return _reject_restricted(await agent_query_endpoint(req, request))
 
 
 @router.post(
@@ -182,10 +242,15 @@ async def sdk_hallucination(req: HallucinationCheckRequest):
     description=(
         "Extract facts, decisions, and preferences from conversation text "
         "and store as KB artifacts. Deduplicates against existing memories.\n\n"
-        "When ``MEMORY_QUEUE_MODE=async`` is set on the server (and a worker "
-        "is running), the default behaviour is **fire-and-forget**: returns "
-        "``202 Accepted`` immediately with a ``job_id`` and a ``status_url``. "
-        "Poll ``GET /sdk/v1/memory/extract/jobs/{job_id}`` for the result.\n\n"
+        "``MEMORY_QUEUE_MODE`` on the server is the only thing that selects "
+        "the response code, and it ships as ``sync``. When it is set to "
+        "``async`` (and a worker is running), the default behaviour is "
+        "**fire-and-forget**: returns ``202 Accepted`` immediately with a "
+        "``job_id`` and a ``status_url``, and **no counts** — a 202 body "
+        "carries no ``memories_extracted``. Poll "
+        "``GET /sdk/v1/memory/extract/jobs/{job_id}`` for the result. "
+        "Clients MUST branch on the status code: 200 is a result envelope, "
+        "202 is a job receipt.\n\n"
         "Pass ``?wait=true`` to force the synchronous path (waits for the "
         "full extract → consolidate → store pipeline before responding) — "
         "use for callers that need the result envelope inline."
@@ -361,6 +426,40 @@ async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse
     )
 
 
+def _with_sdk_versions(payload: dict) -> dict:
+    """Stamp the two distinct versions a consumer needs to tell apart.
+
+    ``version`` is the /sdk/v1 contract version — what a consumer negotiates
+    against. ``app_version`` is the application build serving it. The two
+    health endpoints used to disagree because one overwrote ``version`` with
+    the SDK version and the other passed the app version through under the
+    same key.
+    """
+    payload["app_version"] = payload.get("version")
+    payload["version"] = SDK_VERSION
+    return payload
+
+
+def _internal_llm_snapshot() -> dict:
+    """The LLM backend that would actually serve a request, right now.
+
+    Resolved through ``get_routing_snapshot`` — the same authority
+    /health/detailed reports — rather than from an import-time copy of
+    INTERNAL_LLM_MODEL, which advertised a model the backend does not serve.
+    """
+    import os
+
+    block: dict[str, Any] = {"provider": config.INTERNAL_LLM_PROVIDER, "model": "unset"}
+    try:
+        from core.utils.inference_routing import get_routing_snapshot
+
+        block = dict(get_routing_snapshot().get("llm") or block)
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("sdk.internal_llm_snapshot", exc)
+    block["ollama_enabled"] = os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1")
+    return block
+
+
 @router.get(
     "/health",
     response_model=SDKHealthResponse,
@@ -371,8 +470,7 @@ async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse
 def sdk_health():
     from config.features import FEATURE_TOGGLES
 
-    base = health_check()
-    base["version"] = SDK_VERSION
+    base = _with_sdk_versions(health_check())
     base["features"] = {
         k: v for k, v in FEATURE_TOGGLES.items()
         if k in (
@@ -382,13 +480,7 @@ def sdk_health():
             "enable_memory_extraction",
         )
     }
-    # Expose internal LLM provider info for SDK consumers
-    import os
-    base["internal_llm"] = {
-        "provider": config.INTERNAL_LLM_PROVIDER,
-        "model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
-        "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
-    }
+    base["internal_llm"] = _internal_llm_snapshot()
     return base
 
 
@@ -427,6 +519,7 @@ async def sdk_ingest_file(req: dict, request: Request):
             req.get("file_path", ""),
             domain=req.get("domain", ""),
             tags=req.get("tags", ""),
+            categorize_mode=req.get("categorize_mode", ""),
         ),
     )
 
@@ -445,10 +538,31 @@ async def sdk_ingest_file(req: dict, request: Request):
         "The ``source_type`` label is stored as provenance metadata and is never "
         "branched on in code — this endpoint is generic and not special-cased "
         "for any particular service.  "
-        "See ``docs/INTEGRATION_GUIDE.md`` for per-service mapping examples "
-        "(Readwise, Pocket, Instapaper, Raindrop, Telegram-bot)."
+        "Each mapping value is a dotted path into the payload: ``text`` reads "
+        "``payload['text']``, ``meta.source.url`` walks nested objects, and "
+        "``highlights[].text`` fans out to one item per array element. "
+        "``content`` and ``source_uri`` must both fan out or both be plain; "
+        "mixing them is a mapping failure. Recognised keys: ``content``, "
+        "``source_uri``, ``ts``, ``tags``, ``title``, ``id``.\n\n"
+        "**Failures are reported in the body, not the status line.** A "
+        "mapping failure — an unresolvable path or a fan-out mismatch — "
+        "returns ``200`` with ``accepted: 0`` and one entry in ``errors`` "
+        "carrying ``phase: \"mapping\"``; per-item ingest failures return "
+        "``200`` with the successes counted in ``accepted`` and one ``errors`` "
+        "entry per failed item, keyed by its ``index``. Callers MUST inspect "
+        "``errors`` and ``accepted`` rather than treating ``200`` as "
+        "\"everything stored\"."
     ),
-    responses={422: _422, 503: _503},
+    responses={
+        200: {
+            "description": (
+                "Batch processed. Per-item and mapping failures appear in "
+                "``errors``; ``accepted`` counts what was actually stored."
+            ),
+        },
+        422: {"description": "Malformed request body (schema validation)"},
+        503: _503,
+    },
 )
 async def sdk_ingest_external(request: ExternalIngestRequest, http_request: Request) -> IngestResult:
     from core.context.identity import get_tenant_id
@@ -652,13 +766,27 @@ async def _sdk_ingest_webhook_impl(token: str, request: Request) -> dict[str, st
         "through the Meeting Capture pipeline (``/meetings``) instead."
     ),
     responses={
+        200: {
+            "description": (
+                "Transcribed, but no artifact was created — ``status`` is "
+                "``duplicate`` (see ``duplicate_of``), ``dropped`` or "
+                "``skipped`` (see ``reason``). The transcript is still "
+                "returned."
+            ),
+        },
+        201: {"description": "Transcribed and stored as a new artifact"},
         422: {"description": "Invalid audio payload"},
         500: {"description": "Transcription pipeline failure"},
         501: {"description": "Whisper runtime deps not installed"},
+        502: {
+            "description": (
+                "Transcribed, but the ingest pipeline failed — see ``error``"
+            ),
+        },
     },
     status_code=201,
  response_model=SdkIngestVoiceNoteResponse)
-async def sdk_ingest_voice_note(request: Request) -> dict:
+async def sdk_ingest_voice_note(request: Request, response: Response) -> dict:
     """Multipart upload → transcript → artifact.
 
     The endpoint is *synchronous*: the wizard waits for the transcript
@@ -670,7 +798,26 @@ async def sdk_ingest_voice_note(request: Request) -> dict:
     first transcript instead of re-running transcription and creating a
     duplicate artifact.
     """
-    return await idempotent(request, lambda: _sdk_ingest_voice_note_impl(request))
+    result = await idempotent(request, lambda: _sdk_ingest_voice_note_impl(request))
+    response.status_code = _voice_note_status_code(result.get("status"))
+    return result
+
+
+#: Outcome -> HTTP status. The route declared a flat 201, so a duplicate
+#: (``artifact_id: None``) and an outright ingest failure both reported
+#: "Created" to callers that, per the documented pattern, read 2xx as stored.
+_VOICE_NOTE_STATUS_CODES = {
+    "success": 201,
+    "updated": 201,
+    "duplicate": 200,
+    "dropped": 200,
+    "skipped": 200,
+}
+
+
+def _voice_note_status_code(ingest_status: Any) -> int:
+    """201 only when an artifact was created; 502 for an ingest failure."""
+    return _VOICE_NOTE_STATUS_CODES.get(str(ingest_status), 502)
 
 
 async def _sdk_ingest_voice_note_impl(request: Request) -> dict:
@@ -765,47 +912,97 @@ async def _sdk_ingest_voice_note_impl(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _visible_domains_for(request: Request) -> list[str] | None:
+    """Domains the calling consumer is scoped to, or None for unrestricted.
+
+    Reads the same ``X-Client-ID`` → CONSUMER_REGISTRY mapping the retrieval
+    endpoints use, so the discovery routes describe the KB the caller can
+    actually read rather than the whole one.
+    """
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    return ctx.allowed_domains_list()
+
+
 @router.get("/collections", summary="List Collections")  # response-model-allowed: dynamic response (shape varies)
-def sdk_collections():
-    return list_collections()
+def sdk_collections(request: Request):
+    result = list_collections()
+    allowed = _visible_domains_for(request)
+    if allowed is None:
+        return result
+    permitted = {config.collection_name(d) for d in allowed}
+    names = [c for c in result.get("collections", []) if c in permitted]
+    return {"total": len(names), "collections": names}
 
 
 @router.get("/taxonomy", summary="Domain Taxonomy", response_model=SdkTaxonomyResponse)
-def sdk_taxonomy():
-    return {"domains": list(DOMAINS), "taxonomy": dict(TAXONOMY)}
+def sdk_taxonomy(request: Request):
+    # Derived from TAXONOMY at read time rather than from the DOMAINS list:
+    # every writer mutates TAXONOMY in place but *rebinds* DOMAINS, so the
+    # keys are the live answer and the list is a snapshot.
+    taxonomy = taxonomy_mod.TAXONOMY
+    allowed = _visible_domains_for(request)
+    if allowed is None:
+        return {"domains": list(taxonomy.keys()), "taxonomy": dict(taxonomy)}
+    allowed_set = set(allowed)
+    return {
+        "domains": list(allowed),
+        "taxonomy": {k: v for k, v in taxonomy.items() if k in allowed_set},
+    }
 
 
 @router.get("/health/detailed", summary="Detailed Health")  # response-model-allowed: dynamic response (shape varies)
 def sdk_health_detailed():
-    return degradation_status()
+    return _with_sdk_versions(degradation_status())
 
 
 @router.get("/settings", summary="SDK Settings", response_model=SdkSettingsResponse)
 def sdk_settings():
-    return {"version": SDK_VERSION, "tier": FEATURE_TIER, "features": dict(FEATURE_FLAGS)}
+    return {
+        "version": SDK_VERSION,
+        "tier": features_mod.current_tier(),
+        "features": dict(features_mod.FEATURE_FLAGS),
+    }
 
 
 @router.post(
     "/search",
     summary="KB Search",
     response_model=SDKSearchResponse,
-    responses={422: _422, 503: _503},
+    responses={403: _403, 422: _422, 503: _503},
 )
-async def sdk_search(req: SDKSearchRequest):
+async def sdk_search(req: SDKSearchRequest, request: Request):
+    """KB search under the same request policy as ``/sdk/v1/query``.
+
+    K4 / #327: this endpoint used to take no ``Request``, so it could not read
+    ``X-Client-ID`` and forwarded the caller's own ``domain`` verbatim — a
+    consumer scoped to one domain read the whole KB by calling /search instead
+    of /query. It now resolves the identical RequestContext, honours the
+    Private-Mode L2 "skip KB" gate, and queues behind KB_POOL like its siblings.
+    """
+    from app.concurrency import KB_POOL
     from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
+    from app.services.request_policy import build_request_context
     from core.agents.query_agent import agent_query_full
 
-    result = await agent_query_full(
-        query=req.query,
-        domains=[req.domain],
-        top_k=req.top_k,
-        exclude_packs=req.exclude_packs,
-        external_augmentation=False,
-        chroma_client=get_chroma(),
-        redis_client=get_redis(),
-        neo4j_driver=get_neo4j(),
-        graph_store=get_graph_store(),
-    )
+    if private_blocks(2):
+        return {"results": [], "total_results": 0, "confidence": 0.0}
+
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    async with KB_POOL.acquire():
+        result = await agent_query_full(
+            query=req.query,
+            domains=[req.domain],
+            top_k=req.top_k,
+            exclude_packs=req.exclude_packs,
+            external_augmentation=False,
+            allowed_domains=ctx.allowed_domains_list(),
+            strict_domains=ctx.strict_domains,
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            neo4j_driver=get_neo4j(),
+            graph_store=get_graph_store(),
+        )
+    _reject_restricted(result)
     sources = result.get("sources", [])
     return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}
 
@@ -814,3 +1011,100 @@ async def sdk_search(req: SDKSearchRequest):
 def sdk_plugins():
     result = list_plugins()
     return {"plugins": [p.model_dump() for p in result.plugins], "total": result.total}
+
+
+@router.post(
+    "/memory/recall",
+    response_model=SDKMemoryRecallResponse,
+    summary="Memory Recall",
+    description="Salience-aware memory recall scoped to the consumer allow-list.",
+    responses={403: _403, 422: _422, 503: _503},
+)
+async def sdk_memory_recall(req: SDKMemoryRecallRequest, request: Request):
+    from app.deps import get_chroma, get_neo4j
+    from app.services.request_policy import build_request_context
+    from core.agents.guarded_retrieval import guarded_recall_memories
+
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    try:
+        results = await guarded_recall_memories(
+            request_context=ctx,
+            query=req.query,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            top_k=req.top_k,
+        )
+    except Exception as exc:  # noqa: BLE001 — empty recall, not 500
+        log_swallowed_error("app.routers.sdk.memory_recall", exc)
+        return SDKMemoryRecallResponse(memories=[], total=0, degraded=True)
+    filtered = [
+        r
+        for r in (results or [])
+        if r.get("adjusted_score", r.get("score", 0)) >= req.min_score
+    ]
+    return SDKMemoryRecallResponse(memories=filtered, total=len(filtered))
+
+
+@router.post(  # response-model-allowed: dynamic response (shape varies; same as /ingest)
+    "/ingest/upload",
+    summary="Ingest Upload",
+    description="Multipart file ingest under /sdk/v1. Restricted consumers must name an allowed domain.",
+    responses={403: _403, 422: _422, 503: _503},
+)
+async def sdk_ingest_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    domain: str = Query(""),
+    tags: str = Query(""),
+    sub_category: str = Query(""),
+    categorize_mode: str = Query(""),
+):
+    from app.routers.upload import upload_file_endpoint
+
+    resolved = _resolve_write_domain(request, domain)
+
+    async def _work():
+        return await upload_file_endpoint(
+            file=file,
+            domain=resolved,
+            sub_category=sub_category,
+            tags=tags,
+            categorize_mode=categorize_mode,
+        )
+
+    return await idempotent(request, _work)
+
+
+@router.delete(
+    "/artifacts/{artifact_id}",
+    response_model=SDKDeleteArtifactResponse,
+    summary="Delete Artifact",
+    description="Hard-delete one artifact if its domain is on the consumer allow-list.",
+    responses={403: _403, 404: {"description": "Artifact not found"}, 422: _422, 503: _503},
+)
+async def sdk_delete_artifact(artifact_id: str, request: Request):
+    from app.db.neo4j.artifacts import get_artifact
+    from app.deps import get_chroma, get_neo4j
+    from app.services.content_lifecycle import remove_content
+
+    art = await asyncio.to_thread(get_artifact, get_neo4j(), artifact_id)
+    if not art:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    _ensure_domain_allowed(request, art.get("domain") or "")
+
+    async def _work():
+        removal = await asyncio.to_thread(
+            remove_content, artifact_id, neo4j=get_neo4j(), chroma=get_chroma(),
+        )
+        if not removal.found:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        chunks_removed = len(removal.chunk_ids or [])
+        return SDKDeleteArtifactResponse(
+            deleted=True,
+            artifact_id=artifact_id,
+            filename=art.get("filename") or "",
+            chunks_removed=chunks_removed,
+            message=f"Deleted artifact {artifact_id[:8]}",
+        )
+
+    return await idempotent(request, _work)

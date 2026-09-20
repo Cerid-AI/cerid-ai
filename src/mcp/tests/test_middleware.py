@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -13,6 +14,19 @@ from starlette.testclient import TestClient
 
 from middleware.auth import APIKeyMiddleware, _redact_ip
 from middleware.request_id import RequestIDMiddleware
+
+
+@pytest.fixture(autouse=True)
+def _declared_loopback_bind(monkeypatch):
+    """These cases assume a server only the local host can reach.
+
+    Left implicit, that assumption came from the CERID_BIND_ADDR default, which
+    no longer holds inside a container — and docs/CONTRIBUTING.md runs this
+    suite in one. Keyless middleware is refused off loopback, so the state
+    under test is declared rather than inherited.
+    """
+    monkeypatch.setenv("CERID_BIND_ADDR", "127.0.0.1")
+
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app for middleware testing

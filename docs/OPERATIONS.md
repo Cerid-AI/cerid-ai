@@ -353,6 +353,16 @@ All rate-limited responses include:
 
 Set `TRUSTED_PROXIES` (comma-separated CIDRs) to extract real client IP from `X-Forwarded-For`. Without this, the direct peer IP is used.
 
+Browsers reach the API through the cerid-web container's same-origin
+`/api/mcp/` proxy (`VITE_MCP_URL=/api/mcp`, the LAN/gateway default). That
+proxy forwards `X-Forwarded-For` and `X-Real-IP`, but the API ignores both
+until `TRUSTED_PROXIES` lists the network the proxy sits on — set it to the
+Docker bridge network (`TRUSTED_PROXIES=172.16.0.0/12`), or to `127.0.0.1`
+when the proxy is loopback-only. Until you do, every GUI user shares one
+rate-limit bucket and one redacted identity in the auth log: the `/auth/`
+budget documented above as brute-force protection (5 requests / 60s) becomes
+a lockout any LAN user can trigger for everyone.
+
 ### Known Limitations
 
 - **In-memory only:** Rate limit state is lost on container restart. No warm-up period — limits reset to zero.
@@ -544,9 +554,22 @@ and behavior is byte-identical to encryption being "off". When a key is
 set, it covers exactly:
 
 - Per-user API keys (stored in Neo4j, `PUT /auth/me/api-key`).
-- The sync directory, via `CERID_ENCRYPT_SYNC`.
+- User-state sync files — the settings, preferences and conversation JSON
+  written by `app/sync/user_state.py` — via `CERID_ENCRYPT_SYNC`.
 - The Chroma per-chunk `summary` metadata field (`CHROMA_ENCRYPTED_FIELDS`)
   — display-only chunk metadata with no query/filter targeting it.
+
+`CERID_ENCRYPT_SYNC` does **not** cover the knowledge-base bundle. The
+exporter (`app/sync/export.py`) writes artifact filenames and summaries,
+full chunk text and embeddings, the entity graph, memories and the audit log
+to the sync directory as plaintext JSONL. If that directory is a cloud-synced
+folder, the KB leaves the machine in cleartext unless you encrypt the volume
+itself (see "Full at-rest encryption" below).
+
+Requesting sync encryption without a usable key is refused at startup: when
+`CERID_ENCRYPT_SYNC` is on, or `CERID_ENCRYPTION_KEY` is set to something
+Fernet cannot load, the process raises `ConfigError` and exits rather than
+writing cleartext while reporting encryption as enabled.
 
 It deliberately does **not** cover Neo4j or Redis fields
 (`NEO4J_ENCRYPTED_FIELDS` / `REDIS_ENCRYPTED_FIELDS` are both empty lists).

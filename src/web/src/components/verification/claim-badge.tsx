@@ -5,10 +5,16 @@
  * ClaimBadge — per-claim verification badge with hover provenance.
  *
  * Renders a keyboard-focusable `<button>` wrapping a shadcn Badge with
- * variant matching the three linguistic bands:
+ * variant matching the four linguistic bands:
  *   - "verified"   → green / CheckCircle icon
  *   - "partial"    → amber / Minus icon
- *   - "unverified" → red / XCircle icon
+ *   - "refuted"    → red / XCircle icon   (a check actively disagreed)
+ *   - "unverified" → red / HelpCircle icon (nothing found either way)
+ *
+ * Refuted and unverified share the red band the design system assigns to
+ * "no support / contradiction" — no fourth colour is invented — and are told
+ * apart by icon, label and aria-label, which is also what keeps the pair
+ * distinguishable without colour vision.
  *
  * Wrapped in a Radix HoverCard so hovering (or focusing) opens
  * `<ProvenancePopover>` with full detail.
@@ -16,7 +22,7 @@
  * WCAG 2.1 AA: color paired with icon; aria-label includes band + count.
  */
 
-import { CheckCircle, Minus, XCircle, type LucideIcon } from "lucide-react"
+import { CheckCircle, HelpCircle, Minus, XCircle, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   HoverCard,
@@ -53,6 +59,13 @@ const BAND_STYLES: Record<
     label: () => UX_COPY.verification.partial,
     ariaLabel: () => UX_COPY.verification.ariaPartial,
   },
+  refuted: {
+    badge:
+      "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20",
+    icon: "text-red-600 dark:text-red-400",
+    label: () => UX_COPY.verification.refuted,
+    ariaLabel: () => UX_COPY.verification.ariaRefuted,
+  },
   unverified: {
     badge:
       "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20",
@@ -65,7 +78,8 @@ const BAND_STYLES: Record<
 const BAND_ICONS: Record<VerificationBand, LucideIcon> = {
   verified: CheckCircle,
   partial: Minus,
-  unverified: XCircle,
+  refuted: XCircle,
+  unverified: HelpCircle,
 }
 
 export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {

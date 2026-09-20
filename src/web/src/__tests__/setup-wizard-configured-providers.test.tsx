@@ -111,10 +111,8 @@ describe("SetupWizard — Service Health step", () => {
       setup_required: false,
       missing_keys: [],
       optional_keys: [],
-      configured_providers: [],
-      provider_status: { openrouter: { configured: true } },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+      configured_providers: ["openrouter"],
+    })
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({

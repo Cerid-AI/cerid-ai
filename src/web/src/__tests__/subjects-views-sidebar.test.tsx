@@ -99,6 +99,44 @@ describe("SubjectsViewsSidebar", () => {
     expect(await screen.findByText(/Upgrade to Pro/i)).toBeInTheDocument()
   })
 
+  // F230 — the server caps on the user's TOTAL saved views (atlas_views.py
+  // counts the whole per-user hash), so a cap hint computed from the
+  // mode-filtered list told a community user a slot was free and then 402'd
+  // the save with no prior signal.
+  it("warns at the cap when other modes already fill it", async () => {
+    mockList.mockImplementation((opts?: { mode?: string }) =>
+      Promise.resolve(
+        opts?.mode === "constellation"
+          ? []
+          : [
+              view({ view_id: "1", name: "v1", mode: "timeline" }),
+              view({ view_id: "2", name: "v2", mode: "timeline" }),
+              view({ view_id: "3", name: "v3", mode: "wiki" }),
+            ],
+      ),
+    )
+    mockFetch.mockResolvedValue(healthResp({ pro_unlocked: false, free_tier_max_views: 3 }))
+    render(wrap(<SubjectsViewsSidebar mode="constellation" onRestore={vi.fn()} />))
+    expect(await screen.findByText(/Upgrade to Pro/i)).toBeInTheDocument()
+  })
+
+  it("counts the cap fraction across every mode, not the visible list", async () => {
+    mockList.mockImplementation((opts?: { mode?: string }) =>
+      Promise.resolve(
+        opts?.mode === "constellation"
+          ? [view({ view_id: "1", name: "v1", mode: "constellation" })]
+          : [
+              view({ view_id: "1", name: "v1", mode: "constellation" }),
+              view({ view_id: "2", name: "v2", mode: "timeline" }),
+            ],
+      ),
+    )
+    mockFetch.mockResolvedValue(healthResp({ pro_unlocked: false, free_tier_max_views: 3 }))
+    render(wrap(<SubjectsViewsSidebar mode="constellation" onRestore={vi.fn()} />))
+    expect(await screen.findByText(/2\/3 all modes/)).toBeInTheDocument()
+    expect(screen.queryByText(/Upgrade to Pro/i)).not.toBeInTheDocument()
+  })
+
   it("hides cap hint when Pro is unlocked", async () => {
     mockList.mockResolvedValue([
       view({ view_id: "1", name: "pro-1" }),

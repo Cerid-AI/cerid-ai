@@ -23,11 +23,11 @@ import { formatFileSize } from "@/lib/utils"
 import {
   fetchKnowledgePackRegistry,
   fetchInstalledKnowledgePacks,
-  installKnowledgePack,
   uninstallKnowledgePack,
   type KnowledgePackSummary,
   type InstalledKnowledgePack,
 } from "@/lib/api"
+import { useWizardPackInstall } from "@/components/setup/use-wizard-pack-install"
 
 interface KnowledgeLibraryDialogProps {
   open: boolean
@@ -58,24 +58,25 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
     enabled: open,
   })
 
-  const installMutation = useMutation({
-    mutationFn: (packId: string) => installKnowledgePack(packId),
-    onMutate: (packId) => {
-      setBusyPackId(packId)
-      setErrorMessage(null)
-    },
-    onSuccess: (_data, packId) => {
-      // Refresh installed list + the artifact pages so newly-ingested
-      // content shows up in the KB pane immediately.
-      queryClient.invalidateQueries({ queryKey: ["knowledge-packs"] })
-      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-      // Tell the parent so it can broaden its filter to surface pack content
-      // that lives outside the "Personal" namespace (F-05-01).
-      onPackInstalled?.(packId)
-    },
-    onError: (err: Error) => setErrorMessage(err.message),
-    onSettled: () => setBusyPackId(null),
-  })
+  // The install endpoint answers 202 {job_id, status:"queued"} and runs the
+  // ingestion as a background processor job, so completion is only knowable
+  // from the registry's installing/installed flags. The shared hook owns that
+  // poll loop and the cache invalidations that follow a real completion.
+  const packInstall = useWizardPackInstall()
+
+  const startInstall = (packId: string) => {
+    setBusyPackId(packId)
+    setErrorMessage(null)
+    packInstall
+      .install(packId)
+      .then(() => {
+        // Tell the parent so it can broaden its filter to surface pack content
+        // that lives outside the "Personal" namespace (F-05-01).
+        onPackInstalled?.(packId)
+      })
+      .catch((err: Error) => setErrorMessage(err.message))
+      .finally(() => setBusyPackId(null))
+  }
 
   const uninstallMutation = useMutation({
     mutationFn: (packId: string) => uninstallKnowledgePack(packId),
@@ -170,7 +171,7 @@ export function KnowledgeLibraryDialog({ open, onOpenChange, onPackInstalled }: 
                         pack={pack}
                         installed={installedById.get(pack.id)}
                         busy={busyPackId === pack.id}
-                        onInstall={() => installMutation.mutate(pack.id)}
+                        onInstall={() => startInstall(pack.id)}
                         onUninstall={() => uninstallMutation.mutate(pack.id)}
                       />
                     ))}
@@ -270,7 +271,7 @@ function PackCard({ pack, installed, busy, onInstall, onUninstall }: PackCardPro
         ) : (
           <Button size="sm" disabled={busy} onClick={onInstall}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            <span className="ml-1">Install</span>
+            <span className="ml-1">{busy ? "Installing…" : "Install"}</span>
           </Button>
         )}
       </div>

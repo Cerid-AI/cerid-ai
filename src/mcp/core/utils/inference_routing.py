@@ -61,10 +61,15 @@ def get_routing_snapshot() -> dict[str, dict[str, Any]]:
 
     # LLM ------------------------------------------------------------------
     if llm_provider == "quenchforge":
+        # INTERNAL_LLM_MODEL, not QUENCHFORGE_DEFAULT_MODEL: the latter is the
+        # daemon's own knob, set in its launchd plist and never present in this
+        # process, so this lane printed "unset" on every quenchforge deployment.
+        # INTERNAL_LLM_MODEL is the pin chat, sdk, settings and provider_state
+        # all read — the one value that describes what cerid asks for.
         llm_block = {
             "provider": "quenchforge",
             "url": local_url,
-            "model": os.getenv("QUENCHFORGE_DEFAULT_MODEL", "unset"),
+            "model": os.getenv("INTERNAL_LLM_MODEL", "unset"),
         }
     elif llm_provider == "ollama":
         llm_block = {

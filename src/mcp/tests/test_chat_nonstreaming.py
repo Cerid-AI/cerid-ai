@@ -132,3 +132,47 @@ def test_stream_false_without_api_key_is_json_503(monkeypatch):
     assert resp.status_code == 503
     assert resp.headers["content-type"].startswith("application/json")
     assert resp.json()["error"]["type"] == "config_error"
+
+
+# ---------------------------------------------------------------------------
+# F009 — the buffered body must name the model that actually generated it
+# ---------------------------------------------------------------------------
+
+
+async def test_collect_reports_the_fallback_model_after_a_retry():
+    """_proxy_stream emits cerid_meta_update when the primary 429s and the
+    fallback serves. The aggregator dropped it and stamped the ORIGINAL model,
+    so a stream:false client got fallback bytes under the primary's name."""
+    body, status = await chat._collect_nonstream_response(_gen_from([
+        b'data: {"cerid_meta": {"requested_model": "openrouter/gpt-4o-mini",'
+        b' "resolved_model": "gpt-4o-mini"}}\n\n',
+        b'data: {"cerid_meta_update": {"fallback_model": "claude-3-5-haiku",'
+        b' "original_error": 429}}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]))
+    assert status == int(HTTPStatus.OK)
+    assert body["model"] == "claude-3-5-haiku"
+    assert body["cerid_meta"]["original_error"] == 429
+
+
+async def test_collect_reports_the_upstream_actual_model():
+    """_success_gen emits actual_model when the upstream body names a
+    different model than the one we asked for."""
+    body, _ = await chat._collect_nonstream_response(_gen_from([
+        b'data: {"cerid_meta": {"resolved_model": "gpt-4o-mini"}}\n\n',
+        b'data: {"cerid_meta_update": {"actual_model": "gpt-4o-mini-2024-07-18"}}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]))
+    assert body["model"] == "gpt-4o-mini-2024-07-18"
+
+
+async def test_collect_without_a_meta_update_is_unchanged():
+    body, _ = await chat._collect_nonstream_response(_gen_from([
+        b'data: {"cerid_meta": {"resolved_model": "gpt-4o-mini"}}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]))
+    assert body["model"] == "gpt-4o-mini"
+    assert "cerid_meta" not in body

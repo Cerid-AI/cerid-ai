@@ -205,8 +205,12 @@ def wipe_conversation_state(
                 decision = RetentionDecision(
                     source_id=conversation_id, purge=[artifact_id], keep_count=0,
                 )
-                apply_retention_plan(neo4j_driver, decision)
-                summary["memory_artifacts_deleted"] += 1
+                # apply_retention_plan returns the count it actually purged;
+                # an artifact whose node had already vanished reports 0, and
+                # counting the attempt instead over-reported the wipe.
+                summary["memory_artifacts_deleted"] += apply_retention_plan(
+                    neo4j_driver, decision,
+                )
             except Exception as exc:  # noqa: BLE001 — best-effort per store, see module docstring
                 summary["memory_artifacts_failed"] += 1
                 log_swallowed_error(

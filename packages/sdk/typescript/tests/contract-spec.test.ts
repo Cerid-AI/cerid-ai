@@ -6,8 +6,8 @@
  *
  * docs/openapi-sdk-v1.json is generated from the live FastAPI routes by
  * scripts/gen_sdk_openapi.py and is the authoritative `/sdk/v1/*` contract
- * (the `sdk-openapi-drift` CI gate keeps it byte-for-byte in sync with the
- * server). This is the TypeScript half of the pin — the Python half lives
+ * (`scripts/gen_sdk_openapi.py --check`, a step in CI's `lint` job, keeps it
+ * byte-for-byte in sync with the server). This is the TypeScript half of the pin — the Python half lives
  * at packages/sdk/python/tests/test_contract_spec.py and uses `jsonschema`
  * against the same file.
  *
@@ -39,7 +39,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import { CeridClient } from "../src/index.js";
+import { CeridClient, SDK_PROTOCOL_VERSION } from "../src/index.js";
+import type { HallucinationResponse } from "../src/index.js";
 
 // ---------------------------------------------------------------------------
 // Spec loading + a minimal JSON-Schema-lite checker (no new dependency).
@@ -155,7 +156,15 @@ const POST_CASES: PostCase[] = [
     label: "verify.check",
     path: "/sdk/v1/hallucination",
     method: "post",
-    responseFixture: { conversation_id: "conv-1", timestamp: "", skipped: false, reason: null, claims: [], summary: {} },
+    responseFixture: {
+      conversation_id: "conv-1", timestamp: "", skipped: false, reason: null,
+      claims: [{ claim: "The sky is blue.", status: "verified", confidence: 0.91 }],
+      // The server emits a float `overall_confidence` beside the integer
+      // per-status counts; an empty-dict fixture is what let a counts-only
+      // `summary` type ship in both SDKs.
+      summary: { total: 1, verified: 1, assessed: 1, overall_confidence: 0.833 },
+      mode: "thorough", nli_skipped: false,
+    },
     invoke: (c) => c.verify.check({ response_text: "The sky is blue.", conversation_id: "conv-1" }),
   },
   {
@@ -169,6 +178,13 @@ const POST_CASES: PostCase[] = [
     invoke: (c) => c.memory.extract({ response_text: "I prefer dark mode.", conversation_id: "conv-1" }),
   },
   {
+    label: "memory.recall",
+    path: "/sdk/v1/memory/recall",
+    method: "post",
+    responseFixture: { memories: [], total: 0 },
+    invoke: (c) => c.memory.recall({ query: "bills", top_k: 5 }),
+  },
+  {
     label: "llm.complete",
     path: "/sdk/v1/llm/complete",
     method: "post",
@@ -179,6 +195,72 @@ const POST_CASES: PostCase[] = [
     invoke: (c) => c.llm.complete({ messages: [{ role: "user", content: "Hi" }], task_type: "internal" }),
   },
 ];
+
+// ---------------------------------------------------------------------------
+// No-dead-parameters: a key the server never reads is dropped silently by
+// pydantic's `extra="ignore"`, so a typed and documented request field can do
+// nothing at all. The two `dict`-bodied endpoints have no schema to check
+// against, so the keys their handlers actually read are listed here.
+// ---------------------------------------------------------------------------
+
+const FREE_FORM_SERVER_KEYS: Record<string, string[]> = {
+  // app/routers/sdk.py::sdk_ingest
+  "/sdk/v1/ingest": ["content", "domain", "tags", "metadata"],
+  // app/routers/sdk.py::sdk_ingest_file
+  "/sdk/v1/ingest/file": ["file_path", "domain", "tags"],
+};
+
+interface MaximalCase {
+  label: string;
+  path: string;
+  responseFixture: Record<string, unknown>;
+  /** Passes every keyword the method accepts — a field only reachable from a
+   * call nobody writes is how inert parameters survive. */
+  invoke: (client: CeridClient) => Promise<unknown>;
+}
+
+const MAXIMAL_CASES: MaximalCase[] = [
+  {
+    label: "kb.ingest",
+    path: "/sdk/v1/ingest",
+    responseFixture: { status: "success", artifact_id: "a1", chunks: 1, domain: "databases" },
+    invoke: (c) =>
+      c.kb.ingest({
+        content: "PostgreSQL uses MVCC.", domain: "databases", tags: "pg",
+        metadata: { title: "T" },
+      }),
+  },
+  {
+    label: "kb.ingestFile",
+    path: "/sdk/v1/ingest/file",
+    responseFixture: { status: "success", artifact_id: "a2", chunks: 1, domain: "databases" },
+    invoke: (c) => c.kb.ingestFile({ file_path: "/archive/notes.md", domain: "databases", tags: "pg" }),
+  },
+  {
+    label: "kb.search",
+    path: "/sdk/v1/search",
+    responseFixture: { results: [], total_results: 0, confidence: 0 },
+    invoke: (c) => c.kb.search({ query: "q", domain: "general", top_k: 3, exclude_packs: true }),
+  },
+];
+
+describe("Request bodies carry no key the server ignores", () => {
+  for (const tc of MAXIMAL_CASES) {
+    it(`${tc.label} sends only keys the server reads`, async () => {
+      const mockFetch = vi.fn().mockResolvedValue(jsonResponse(tc.responseFixture));
+      const client = new CeridClient({ baseUrl: "http://localhost:8888", clientId: "test", fetch: mockFetch });
+
+      await tc.invoke(client);
+
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      const declared = Object.keys(resolveRef(requestSchema(tc.path, "post")).properties ?? {});
+      const accepted = declared.length > 0 ? declared : FREE_FORM_SERVER_KEYS[tc.path];
+      const ignored = Object.keys(body).filter((k) => !accepted.includes(k));
+      expect(ignored, `${tc.label} sends ${JSON.stringify(ignored)}, which the server drops`).toEqual([]);
+    });
+  }
+});
 
 describe("POST request bodies match the spec", () => {
   for (const tc of POST_CASES) {
@@ -224,14 +306,14 @@ const GET_CASES: GetCase[] = [
     label: "system.health",
     path: "/sdk/v1/health",
     method: "get",
-    responseFixture: { status: "healthy", version: "1.1.0", services: {}, features: {} },
+    responseFixture: { status: "healthy", version: "1.2.0", services: {}, features: {} },
     invoke: (c) => c.system.health(),
   },
   {
     label: "system.settings",
     path: "/sdk/v1/settings",
     method: "get",
-    responseFixture: { version: "1.1.0", tier: "community", features: {} },
+    responseFixture: { version: "1.2.0", tier: "community", features: {} },
     invoke: (c) => c.system.settings(),
   },
   {
@@ -277,12 +359,41 @@ describe("GET endpoints round-trip through the spec's response schema", () => {
 });
 
 describe("Spec version pin", () => {
-  it("docs/openapi-sdk-v1.json declares a version", () => {
-    // The TS SDK doesn't carry its own protocol-version constant (unlike
-    // the Python SDK's SDK_PROTOCOL_VERSION) — this just guards against the
-    // spec losing its version field entirely. See CONTRIBUTING.md "SDK
-    // contract & versioning" for the bump discipline.
+  it("SDK_PROTOCOL_VERSION tracks the spec's info.version", () => {
+    // Both SDKs now carry the constant, and both must move with the spec —
+    // the TypeScript half used to assert only that a version string existed,
+    // which is why it could sit on a protocol the server had moved off.
     expect(typeof SPEC.info.version).toBe("string");
-    expect(SPEC.info.version.length).toBeGreaterThan(0);
+    expect(SDK_PROTOCOL_VERSION).toBe(SPEC.info.version);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layer 1 (compile-time): the declared response interface must be able to hold
+// a real server payload. `npm run typecheck` is the assertion here — a summary
+// typed as four fixed counts, or a missing `mode` / `nli_skipped`, fails to
+// compile below.
+// ---------------------------------------------------------------------------
+
+describe("HallucinationResponse matches the server's declared fields", () => {
+  it("holds a real thorough-mode payload", () => {
+    const report: HallucinationResponse = {
+      conversation_id: "conv-1",
+      timestamp: "2026-09-03T00:00:00Z",
+      skipped: false,
+      reason: null,
+      claims: [{ claim: "The sky is blue.", status: "verified", confidence: 0.91 }],
+      summary: { total: 1, verified: 1, assessed: 1, overall_confidence: 0.833 },
+      mode: "thorough",
+      nli_skipped: false,
+    };
+
+    const mode: string = report.mode;
+    const nliSkipped: boolean = report.nli_skipped;
+    const overall: number = report.summary.overall_confidence;
+
+    expect(mode).toBe("thorough");
+    expect(nliSkipped).toBe(false);
+    expect(overall).toBeCloseTo(0.833);
   });
 });

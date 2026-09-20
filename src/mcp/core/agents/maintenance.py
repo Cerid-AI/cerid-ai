@@ -87,14 +87,26 @@ def check_system_health(
     # overwrite this with the real result after awaiting check_llm_health().
     health["services"]["llm"] = "skipped (sync context)"
 
-    service_statuses = health["services"]
-    all_ok = all(
-        v == "connected" or v.startswith("skipped")
-        for v in service_statuses.values()
-    )
-    health["overall"] = "healthy" if all_ok else "degraded"
+    health["overall"], health["unchecked_services"] = _overall_status(health["services"])
 
     return health
+
+
+def _overall_status(services: dict[str, str]) -> tuple[str, list[str]]:
+    """``(overall, unchecked)`` for a service map.
+
+    A lane reported as ``skipped`` was never probed, which is not the same as
+    working: it yields ``unknown`` rather than ``healthy``, so the sync
+    ``maintenance`` workflow step cannot hand an operator a green light for the
+    LLM provider nothing has called.
+    """
+    unchecked = sorted(k for k, v in services.items() if str(v).startswith("skipped"))
+    if any(
+        v != "connected" and not str(v).startswith("skipped")
+        for v in services.values()
+    ):
+        return "degraded", unchecked
+    return ("unknown" if unchecked else "healthy"), unchecked
 
 
 async def check_llm_health() -> str:
@@ -309,9 +321,9 @@ async def maintain(
         health = check_system_health(neo4j_driver, chroma_client, redis_client)
         llm_status = await check_llm_health()
         health["services"]["llm"] = llm_status
-        health["overall"] = "healthy" if all(
-            v == "connected" for v in health["services"].values()
-        ) else "degraded"
+        health["overall"], health["unchecked_services"] = _overall_status(
+            health["services"]
+        )
         report["health"] = health
 
     if "stale" in actions:

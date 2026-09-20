@@ -6,11 +6,17 @@ packages: the Python SDK at
 TypeScript SDK at
 [`packages/sdk/typescript/`](../packages/sdk/typescript/) (→ npm).
 
-Both release pipelines use OIDC trusted publishing — no long-lived API
-token lives anywhere for either registry. Both require **operator-only,
-one-time registry-side setup** (creating the trusted-publisher binding)
-before the first release of either SDK can fire; everything under
-"Per-release flow" is safe for anyone with repo write access to run.
+The two pipelines authenticate differently, and the difference matters
+before the first release of either:
+
+| SDK | Registry | Auth | One-time operator setup |
+|---|---|---|---|
+| Python | PyPI / TestPyPI | OIDC trusted publishing — no token anywhere | Register the trusted-publisher binding |
+| TypeScript | npm | Granular access token in the `NPM_TOKEN` secret | Mint the token and store the secret |
+
+Both one-time setups are **operator-only**: they need registry credentials
+this runbook does not and should not grant to CI or an agent. Everything
+under "Per-release flow" is safe for anyone with repo write access to run.
 
 ---
 
@@ -93,15 +99,15 @@ Edit
 ```diff
 [project]
  name = "cerid-sdk"
--version = "0.1.1"
-+version = "0.1.2"
+-version = "0.2.0"
++version = "0.2.1"
 ```
 
 If the wire protocol shifted, also bump
 [`packages/sdk/python/src/cerid/__version__.py`](../packages/sdk/python/src/cerid/__version__.py):
 
 ```python
-SDK_PROTOCOL_VERSION = "1.1.1"
+SDK_PROTOCOL_VERSION = "1.2.1"
 ```
 
 `SDK_PROTOCOL_VERSION` and the package `version` are independent —
@@ -113,10 +119,10 @@ changes; bump only the package version for client-only fixes.
 
 ```bash
 git add packages/sdk/python/pyproject.toml
-git commit -m "cerid-sdk: bump to 0.1.2"
-git tag cerid-sdk-v0.1.2
+git commit -m "cerid-sdk: bump to 0.2.1"
+git tag cerid-sdk-v0.2.1
 git push origin main
-git push origin cerid-sdk-v0.1.2
+git push origin cerid-sdk-v0.2.1
 ```
 
 The tag pattern **must** be `cerid-sdk-v<version>` exactly — the
@@ -161,6 +167,19 @@ explicit index URL:
 pip install --index-url https://test.pypi.org/simple/ cerid-sdk==<version>
 ```
 
+Locally, the same test pass without CI (mirrors the TypeScript block
+further down):
+
+```bash
+cd packages/sdk/python
+pytest tests/
+```
+
+`packages/sdk/python/pyproject.toml` sets `pythonpath = ["src"]`, so the
+suite imports the checkout with no editable install required. An editable
+install still works — it is what CI does — but it is no longer a
+precondition for running the tests.
+
 ---
 
 ## Rollback / yanking
@@ -172,7 +191,7 @@ broken:
    Releases → Yank. Yanking hides the version from
    `pip install cerid-sdk` (without a version pin) but preserves
    reproducibility for anyone already pinned to it.
-2. Bump the version in `pyproject.toml` to the next patch (`0.1.3`),
+2. Bump the version in `pyproject.toml` to the next patch (`0.2.2`),
    land the fix, tag, push.
 
 Never reuse a yanked version number.
@@ -195,10 +214,12 @@ Never reuse a yanked version number.
 
 The release pipeline is
 [`.github/workflows/release-sdk-typescript.yml`](../.github/workflows/release-sdk-typescript.yml),
-mirroring the Python workflow's structure and trigger shape. Auth uses
-**npm Trusted Publishing** (OIDC) — no long-lived `NPM_TOKEN` lives
-anywhere. The npm side must be configured once before the first
-release fires.
+mirroring the Python workflow's structure and trigger shape. Auth uses a
+**granular npm access token** in the `NPM_TOKEN` secret — the publish job
+hard-fails if it is empty. npm trusted publishing (OIDC) is *not* wired up;
+the workflow only uses OIDC opportunistically for provenance attestation, and
+falls back to a plain token publish when the registry rejects it. The secret
+must exist before the first release fires.
 
 ---
 
@@ -290,8 +311,8 @@ Edit
 ```diff
  {
    "name": "@cerid-ai/sdk",
--  "version": "0.1.1",
-+  "version": "0.1.2",
+-  "version": "0.2.0",
++  "version": "0.2.1",
 ```
 
 If the wire protocol shifted, also bump `SDK_PROTOCOL_VERSION` in the
@@ -304,10 +325,10 @@ by the `sdk-contract` CI gate testing both against the same
 
 ```bash
 git add packages/sdk/typescript/package.json
-git commit -m "cerid-sdk-ts: bump to 0.1.2"
-git tag cerid-sdk-ts-v0.1.2
+git commit -m "cerid-sdk-ts: bump to 0.2.1"
+git tag cerid-sdk-ts-v0.2.1
 git push origin main
-git push origin cerid-sdk-ts-v0.1.2
+git push origin cerid-sdk-ts-v0.2.1
 ```
 
 The tag pattern **must** be `cerid-sdk-ts-v<version>` exactly — the
@@ -327,8 +348,9 @@ The tag push triggers `release-sdk-typescript.yml`. Steps:
 4. `npm test`
 5. `npm run build`
 6. `npm pack --dry-run` (sanity-check the artifact listing in the log)
-7. Publish via npm Trusted Publisher OIDC (`npm publish --provenance
-   --access public`) — `prepublishOnly` in `package.json` re-runs
+7. Publish with the `NPM_TOKEN` granular token (`npm publish --provenance
+   --access public`, retried without `--provenance` if the registry rejects
+   the attestation) — `prepublishOnly` in `package.json` re-runs
    build + typecheck + test as a final guard even though the workflow
    already ran them explicitly
 
@@ -373,10 +395,10 @@ policy blocks unpublish after 72 hours, and even within that window
 unpublishing is discouraged for anything with downstream consumers).
 If a release is broken:
 
-1. **Deprecate** the bad version: `npm deprecate @cerid-ai/sdk@0.1.2
-   "broken — use 0.1.3"`. This is reversible and doesn't break
+1. **Deprecate** the bad version: `npm deprecate @cerid-ai/sdk@0.2.1
+   "broken — use 0.2.2"`. This is reversible and doesn't break
    existing installs pinned to that version.
-2. Bump the version in `package.json` to the next patch (`0.1.3`),
+2. Bump the version in `package.json` to the next patch (`0.2.2`),
    land the fix, tag, push.
 
 Never reuse a deprecated or unpublished version number.
@@ -388,17 +410,18 @@ Never reuse a deprecated or unpublished version number.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Workflow fails "Tag version does not match package.json" | Tag suffix ≠ `package.json` version | Re-tag with correct suffix; or bump `package.json` and re-tag |
-| Publish step fails with an OIDC/auth error | npm side missing the trust binding | Repeat one-time setup step 2 — match repo, workflow filename, environment name exactly |
+| Publish step fails "NPM_TOKEN secret is empty" | Secret missing on the repo or the `npm` environment | Repeat one-time setup step 2 — set it on both |
+| Publish step fails with a 401/403 from npm | Token expired, lacks publish rights, or is a classic "bypass 2FA" token | Mint a fresh granular token with read-and-write on `@cerid-ai/sdk` and re-store the secret |
 | Publish step fails "cannot publish over previously published version" | Version already on npm (immutable) | Bump the version, re-tag |
-| Publish "succeeds" but the version never appears, or fails with a masked 404 | npm 10 (bundled with Node 22) doesn't support OIDC trusted publishing and silently publishes unauthenticated | Upgrade npm to >= 11.5.1 before `npm publish` — the workflow does this automatically |
+| Publish logs a provenance warning then republishes | The registry rejected the attestation (no trusted-publisher binding) | Expected — the workflow retries without `--provenance` and the token publish is authoritative |
 | `npm pack --dry-run` lists `src/` or `tests/` | `files` field in `package.json` missing or wrong | Confirm `"files": ["dist"]` is present; npm always includes `LICENSE` + `package.json` regardless |
 
 ---
 
 ## Compatibility with the server-side drift gate
 
-The server-side
-[`sdk-openapi-drift`](../.github/workflows/ci.yml) CI job enforces
+The spec drift check — `scripts/gen_sdk_openapi.py --check`, a step in the
+[`lint`](../.github/workflows/ci.yml) job — enforces
 that `/sdk/v1/` doesn't drift from the committed baseline at
 [`docs/openapi-sdk-v1.json`](openapi-sdk-v1.json). When either SDK
 ships a new release, the server's `SDK_VERSION`

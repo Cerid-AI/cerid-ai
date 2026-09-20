@@ -10,6 +10,9 @@ live-stack test run's probes alive.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -32,9 +35,15 @@ class TestResidueNamespace:
             f"memory_decision_audit-tr_20260716_{fresh}"
         ) is True
 
-    def test_seeded_demo_notes_are_residue(self):
-        assert is_test_residue_name("Project Aurora") is True
-        assert is_test_residue_name("GreenTech Inc.") is True
+    def test_plain_titles_are_never_residue(self):
+        """A free-text title is not evidence of anything.
+
+        "Project Aurora" and "GreenTech Inc." were seeded demo notes once;
+        they are also entirely plausible user artifacts and entity names.
+        A namespace built out of literals like these deletes user knowledge.
+        """
+        assert is_test_residue_name("Project Aurora") is False
+        assert is_test_residue_name("GreenTech Inc.") is False
 
     def test_user_content_is_never_residue(self):
         for name in (
@@ -142,8 +151,8 @@ class TestSweep:
         ]
         entity_rows = [
             {
-                "canonical_id": "org:greentech-inc",
-                "name": "GreenTech Inc.",
+                "canonical_id": f"org:e2e-marker-{fresh}",
+                "name": f"e2e-marker-{fresh}",
                 "updated_at": _old_iso(),
             },
         ]
@@ -189,4 +198,96 @@ class TestSweep:
             if "DETACH DELETE" in str(c.args[0])
         ]
         assert len(delete_calls) == 1
-        assert delete_calls[0].kwargs["ids"] == ["org:greentech-inc"]
+        assert delete_calls[0].kwargs["ids"] == [
+            entity_rows[0]["canonical_id"]
+        ]
+
+
+class TestUserContentNamedLikeASeededDemo:
+    """The deletion arm must key on test-tooling markers, never on a title.
+
+    A weekly unattended sweep with ``apply=True`` hard-deletes across Neo4j,
+    Chroma and the lexical indexes; an artifact whose only "evidence" is its
+    name is a user note.
+    """
+
+    def _user_rows(self):
+        artifact_rows = [
+            {
+                "id": "user-1",
+                "filename": "Project Aurora",
+                "summary": "Sprint 14 status notes: migration is on track.",
+                "ingested_at": _old_iso(),
+            },
+        ]
+        entity_rows = [
+            {
+                "canonical_id": "org:greentech-inc",
+                "name": "GreenTech Inc.",
+                "updated_at": _old_iso(),
+            },
+        ]
+        return artifact_rows, entity_rows
+
+    def test_sweep_does_not_purge_them(self):
+        driver, session = _neo4j_returning(*self._user_rows())
+        removal = MagicMock()
+        removal.found = True
+        with patch(
+            "app.services.content_lifecycle.remove_content",
+            return_value=removal,
+        ) as mock_remove:
+            from app.services.kb_hygiene import sweep_test_residue
+
+            summary = sweep_test_residue(driver, MagicMock(), apply=True)
+
+        assert summary["artifacts_found"] == 0, (
+            "a user note titled 'Project Aurora' is not test residue"
+        )
+        assert summary["entities_found"] == 0
+        mock_remove.assert_not_called()
+        assert not [
+            c for c in session.run.call_args_list
+            if "DETACH DELETE" in str(c.args[0])
+        ]
+
+    def test_prefilter_does_not_select_on_free_text_names(self):
+        """The Cypher must not scan for the literals either.
+
+        The Python matcher is the decider, but the prefilter is what the
+        production sweep actually loads: a name arm here is a list of
+        user-plausible titles handed to a delete path.
+        """
+        driver, session = _neo4j_returning(*self._user_rows())
+        from app.services.kb_hygiene import sweep_test_residue
+
+        sweep_test_residue(driver, MagicMock(), apply=False)
+
+        for call in session.run.call_args_list:
+            query = str(call.args[0])
+            assert "exact_names" not in query, query
+            assert "Project Aurora" not in query, query
+            assert "GreenTech" not in query, query
+
+
+def test_scheduled_sweep_is_opt_in():
+    """The unattended, applying sweep must not ship enabled.
+
+    Read the default out of a clean interpreter rather than the already
+    imported settings module: the value is captured at import time from the
+    environment this suite runs in.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k != "SCHEDULE_TEST_RESIDUE_SWEEP"}
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import config.settings as s;"
+         " print(repr(s.SCHEDULE_TEST_RESIDUE_SWEEP))"],
+        env=env, capture_output=True, text=True, cwd=env["PYTHONPATH"],
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "''", (
+        "a weekly cron that hard-deletes KB rows is opt-in, "
+        f"got {proc.stdout.strip()}"
+    )

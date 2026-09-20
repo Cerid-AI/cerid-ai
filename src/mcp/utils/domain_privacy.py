@@ -19,10 +19,12 @@ The contract documented in docs/PRO_MESSAGES.md states the iMessage
 connector ingests opt-in conversations BUT retrieval will not surface
 their content unless ``SENSITIVE_DOMAIN_RETRIEVAL_ENABLED`` is also on.
 
-This module is the single source of truth for that filter. Callers
-into pkb_search_filtered, the /query + /sdk/v1/search endpoints, and any
-direct ChromaDB collection lookup go through ``visible_domains()`` to
-drop the privacy-gated entries.
+This module is the single source of truth for the filter's *definition*;
+``core.agents.query_agent.multi_domain_query`` is the single site that
+*applies* it to retrieval. Every KB path — /query, /sdk/v1/search, chat,
+the MCP tools, decomposed sub-queries, the adjacent-domain bleed — reaches
+ChromaDB through that function, so a new caller cannot open a second door
+by forgetting to call ``visible_domains()`` itself.
 """
 from __future__ import annotations
 

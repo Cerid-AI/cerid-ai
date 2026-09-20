@@ -3,7 +3,7 @@
 
 /**
  * TypeScript interfaces matching the server-side SDK response models
- * defined in src/mcp/models/sdk.py.
+ * defined in src/mcp/app/models/sdk.py.
  *
  * All response types allow extra fields (index signature) for forward
  * compatibility — the server uses `extra="allow"` on its Pydantic models.
@@ -22,6 +22,13 @@ export interface CeridClientOptions {
   apiKey?: string;
   /** Optional custom fetch implementation (defaults to globalThis.fetch). */
   fetch?: typeof globalThis.fetch;
+  /** Default per-request timeout in milliseconds. */
+  timeoutMs?: number;
+}
+
+export interface RequestOptions {
+  timeoutMs?: number;
+  idempotencyKey?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +62,29 @@ export interface MemoryExtractRequest {
   model?: string;
 }
 
+export interface MemoryRecallRequest {
+  query: string;
+  top_k?: number;
+  min_score?: number;
+}
+
+export interface MemoryRecallResponse {
+  memories: Array<Record<string, unknown>>;
+  total: number;
+  /** True when recall failed server-side: the empty list is an outage, not an empty memory. */
+  degraded?: boolean;
+  [key: string]: unknown;
+}
+
+export interface DeleteArtifactResponse {
+  deleted: boolean;
+  artifact_id: string;
+  filename: string;
+  chunks_removed: number;
+  message: string;
+  [key: string]: unknown;
+}
+
 export interface IngestRequest {
   content: string;
   domain?: string;
@@ -71,13 +101,17 @@ export interface IngestFileRequest {
   file_path: string;
   domain?: string;
   tags?: string;
-  categorize_mode?: string;
 }
 
 export interface SearchRequest {
   query: string;
   domain?: string;
   top_k?: number;
+  /**
+   * Drop bundled knowledge-pack chunks and search only the operator's own
+   * content (personal-first retrieval). Defaults to false server-side.
+   */
+  exclude_packs?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,12 +136,24 @@ export interface HallucinationResponse {
   skipped: boolean;
   reason: string | null;
   claims: Array<Record<string, unknown>>;
-  summary: {
-    total: number;
-    verified: number;
-    unverified: number;
-    uncertain: number;
-  };
+  /**
+   * Integer per-status counts (`total`, `verified`, `unverified`,
+   * `uncertain`, `assessed`) plus the float `overall_confidence`. Mirrors the
+   * server's `dict[str, float | int]` — a fixed counts-only shape here made
+   * every real response a type error at the call site.
+   */
+  summary: Record<string, number>;
+  /**
+   * Verification depth actually applied: `fast` returns extracted claims with
+   * `status: "uncertain"` and `nli_skipped: true`; `thorough` runs the full
+   * cross-model pipeline.
+   */
+  mode: string;
+  /**
+   * True when cross-model NLI verification was skipped (fast mode) — render a
+   * hedged warning rather than an authoritative verdict.
+   */
+  nli_skipped: boolean;
   [key: string]: unknown;
 }
 
@@ -176,6 +222,33 @@ export interface PluginListResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Async memory extract (POST /sdk/v1/memory/extract → 200 or 202)
+// ---------------------------------------------------------------------------
+
+/**
+ * 202 Accepted envelope returned when the server enqueued the extraction
+ * (`MEMORY_QUEUE_MODE=async`, the default on local-inference installs).
+ * Poll `client.memory.getJob(job_id)` for the result.
+ */
+export interface MemoryExtractAcceptedResponse {
+  job_id: string;
+  /** Always "queued" on accept. */
+  status: string;
+  /** Path to GET for the job result, relative to the SDK base URL. */
+  status_url: string;
+  conversation_id?: string;
+  [key: string]: unknown;
+}
+
+/** Narrow a `memory.extract()` result to the queued (202) envelope. */
+export function isMemoryExtractAccepted(
+  result: MemoryExtractResponse | MemoryExtractAcceptedResponse,
+): result is MemoryExtractAcceptedResponse {
+  return typeof (result as MemoryExtractAcceptedResponse).job_id === "string"
+    && typeof (result as MemoryExtractAcceptedResponse).status_url === "string";
+}
+
+// ---------------------------------------------------------------------------
 // Async memory extract job polling (GET /sdk/v1/memory/extract/jobs/{job_id})
 // ---------------------------------------------------------------------------
 
@@ -204,7 +277,11 @@ export interface LLMCompleteRequest {
   task_type?: string;
   /** Optional query summary for the router's complexity classifier */
   query?: string;
-  /** low | medium | high */
+  /**
+   * How sensitive you are to spend, not what you want to spend:
+   * `high` routes to the cheapest tier that can do the job, `low` to the most
+   * capable model. Defaults to `medium`.
+   */
   cost_sensitivity?: string;
   temperature?: number;
   max_tokens?: number;

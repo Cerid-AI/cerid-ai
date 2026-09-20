@@ -20,6 +20,7 @@ from app.sync.user_state import (
     read_conversations,
     read_preferences,
     read_settings,
+    validate_conversation_id,
     write_conversation,
     write_preferences_with_retry,
 )
@@ -50,6 +51,14 @@ logger = logging.getLogger("ai-companion.user_state")
 def _sync_dir() -> str:
     """Return the configured sync directory. Extracted for test patching."""
     return config.SYNC_DIR
+
+
+def _checked_conv_id(conv_id: str) -> str:
+    """Reject ids that are not safe as a filename, before any path is built."""
+    try:
+        return validate_conversation_id(conv_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=dict[str, Any])
@@ -83,7 +92,7 @@ def get_conversation(conv_id: str):
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    data = read_conversation(sd, conv_id)
+    data = read_conversation(sd, _checked_conv_id(conv_id))
     if not data:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return data
@@ -97,6 +106,7 @@ def save_conversation(body: dict[str, Any]):
         raise HTTPException(status_code=412, detail="Sync directory not configured")
     if "id" not in body:
         raise HTTPException(status_code=400, detail="Conversation must have an 'id' field")
+    _checked_conv_id(body["id"])
     if private_blocks(1):
         # response_model=SaveConversationResponse only declares `saved`, so
         # any extra key here would be silently stripped on the wire — the
@@ -115,6 +125,7 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
     for conv in body:
         if "id" not in conv:
             raise HTTPException(status_code=400, detail="Each conversation must have an 'id' field")
+        _checked_conv_id(conv["id"])
     if private_blocks(1):
         return {"saved": []}
     for conv in body:
@@ -131,7 +142,7 @@ def remove_conversation(conv_id: str):
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=412, detail="Sync directory not configured")
-    delete_conversation(sd, conv_id)
+    delete_conversation(sd, _checked_conv_id(conv_id))
     # E1 CR-012: also drop the durable hall:{cid} verification report so a deleted
     # conversation does not leave its verbatim claims + source snippets cached in
     # Redis for the 7-day TTL. Best-effort — the conversation delete already

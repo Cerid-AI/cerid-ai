@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -451,7 +452,7 @@ async def get_settings_endpoint():
         "rerank_llm_weight": config.RERANK_LLM_WEIGHT,
         "rerank_original_weight": config.RERANK_ORIGINAL_WEIGHT,
         "pack_relevance_weight": config.PACK_RELEVANCE_WEIGHT,
-        "sensitive_domain_retrieval": config.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED,
+        "sensitive_domain_retrieval": config.settings.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED,
         "temporal_half_life_days": config.TEMPORAL_HALF_LIFE_DAYS,
         "temporal_recency_weight": config.TEMPORAL_RECENCY_WEIGHT,
         # Advanced RAG pipeline (read-write)
@@ -592,7 +593,13 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["pack_relevance_weight"] = req.pack_relevance_weight
 
     if req.sensitive_domain_retrieval is not None:
+        # utils.domain_privacy.sensitive_domains_opted_in() — the sole retrieval
+        # reader — resolves this through ``config.settings``, a different module
+        # object from the ``config`` package namespace ``from config.settings
+        # import *`` populated. Writing only the package plane returned 200 and
+        # left iMessage retrieval exactly as hidden as before.
         config.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED = req.sensitive_domain_retrieval  # type: ignore[assignment]
+        config.settings.SENSITIVE_DOMAIN_RETRIEVAL_ENABLED = req.sensitive_domain_retrieval
         updated["sensitive_domain_retrieval"] = req.sensitive_domain_retrieval
 
     # Advanced RAG pipeline — boolean toggles via set_toggle(), numeric params
@@ -753,12 +760,22 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         os.environ["RERANK_PROVIDER"] = req.rerank_provider
         updated["rerank_provider"] = req.rerank_provider
 
+    # utils.quenchforge_client resolves these as ``os.getenv(NAME) or
+    # getattr(config.settings, NAME, "")``, so an env-only write cannot express
+    # "cleared": an empty env value is falsy and dispatch silently falls back to
+    # whatever the module captured at boot. Write every plane the client reads
+    # so an explicit clear turns the lane off instead of reporting success and
+    # keeping the old model.
     if req.quenchforge_embed_model is not None:
         os.environ["QUENCHFORGE_EMBED_MODEL"] = req.quenchforge_embed_model
+        config.QUENCHFORGE_EMBED_MODEL = req.quenchforge_embed_model  # type: ignore[assignment]
+        config.settings.QUENCHFORGE_EMBED_MODEL = req.quenchforge_embed_model
         updated["quenchforge_embed_model"] = req.quenchforge_embed_model
 
     if req.quenchforge_rerank_model is not None:
         os.environ["QUENCHFORGE_RERANK_MODEL"] = req.quenchforge_rerank_model
+        config.QUENCHFORGE_RERANK_MODEL = req.quenchforge_rerank_model  # type: ignore[assignment]
+        config.settings.QUENCHFORGE_RERANK_MODEL = req.quenchforge_rerank_model
         updated["quenchforge_rerank_model"] = req.quenchforge_rerank_model
 
     # v0.93.9 — internal_llm_provider + internal_llm_model live-mutation.
@@ -875,11 +892,38 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
 # in user_state.py / agents.py / feedback.py reads the same key. Aliased
 # here — the name is part of this module's tested surface (test_private_mode_l4.py).
 _PRIVATE_MODE_KEY = PRIVATE_MODE_KEY
+# Full-ephemeral mode. At this level a session is tracked in the L4
+# registry so the session-wipe endpoint can scope its flag-clear to the
+# last session still holding the shared global flag up.
+_PRIVATE_MODE_L4 = 4
 # Per-tab/session level overrides — written when a tab declares its
 # private level via the X-Cerid-Session header.  Used by the L4
 # session-wipe endpoint to confirm a tab is in full-ephemeral mode
 # before clearing its state.
 _PRIVATE_MODE_SESSION_PREFIX = "cerid:private_mode:session:"
+# Live L4 sessions, scored by expiry timestamp. The global private-mode flag
+# is shared by every tab and every direct API/SDK/MCP caller, so the L4
+# session-wipe can only drop it once the LAST session holding it up is gone —
+# otherwise closing one private tab silently un-privates all the others.
+# A crashed tab never fires its beacon, so entries carry a TTL and are pruned
+# on read rather than pinning private mode on forever.
+_PRIVATE_MODE_L4_SESSIONS_KEY = "cerid:private_mode:l4_sessions"
+_L4_SESSION_TTL_SECONDS = 12 * 60 * 60
+
+
+def _register_l4_session(redis: Any, conversation_id: str) -> None:
+    """Record that ``conversation_id`` is holding the global flag at L4."""
+    redis.zadd(
+        _PRIVATE_MODE_L4_SESSIONS_KEY,
+        {conversation_id: time.time() + _L4_SESSION_TTL_SECONDS},
+    )
+
+
+def _release_l4_session(redis: Any, conversation_id: str) -> int:
+    """Release ``conversation_id`` and return how many live L4 sessions remain."""
+    redis.zrem(_PRIVATE_MODE_L4_SESSIONS_KEY, conversation_id)
+    redis.zremrangebyscore(_PRIVATE_MODE_L4_SESSIONS_KEY, "-inf", time.time())
+    return int(redis.zcard(_PRIVATE_MODE_L4_SESSIONS_KEY) or 0)
 
 
 def _sync_dir() -> str:
@@ -912,13 +956,33 @@ class PrivateModeRequest(BaseModel):
         ..., ge=0, le=4,
         description="Private mode level (0=off, 1=skip saves, 2=skip KB, 3=skip audit, 4=full ephemeral)",
     )
+    # Optional so every existing caller keeps working. A caller that sends it
+    # joins the L4 session registry, which is what lets the session-wipe
+    # endpoint tell "the last private tab closed" from "one of several did".
+    conversation_id: str | None = Field(
+        None, min_length=1, max_length=128,
+        description="Caller's session/thread id, registered while this caller sits at level 4.",
+    )
 
 
 @router.post("/settings/private-mode", response_model=SetPrivateModeResponse)
 async def set_private_mode(req: PrivateModeRequest):
-    """Set private mode level."""
+    """Set private mode level.
+
+    When the caller identifies itself with ``conversation_id`` it is tracked
+    in the L4 session registry for as long as it stays at level 4, so the
+    session-wipe endpoint can scope its flag-clear to the last session out.
+    """
     redis = get_redis()
     redis.set(_PRIVATE_MODE_KEY, str(req.level))
+    if req.conversation_id:
+        session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
+        if req.level >= _PRIVATE_MODE_L4:
+            redis.set(session_key, str(req.level))
+            _register_l4_session(redis, req.conversation_id)
+        else:
+            redis.delete(session_key)
+            _release_l4_session(redis, req.conversation_id)
     logger.info("Private mode set to level %d", req.level)
     return {"level": req.level}
 
@@ -933,6 +997,9 @@ async def reset_private_mode():
     """
     redis = get_redis()
     redis.set(_PRIVATE_MODE_KEY, "0")
+    # The explicit off switch is authoritative: drop every L4 registration so a
+    # later beacon from a since-closed tab cannot re-assert a live session.
+    redis.delete(_PRIVATE_MODE_L4_SESSIONS_KEY)
     logger.info("Private mode reset to 0")
     return {"level": 0}
 
@@ -944,7 +1011,9 @@ class SessionWipeRequest(BaseModel):
     when L4 is active.  ``conversation_id`` is the canonical chat thread
     id the frontend already tracks for localStorage caching; the backend
     uses it to scope the wipe (so a wipe from one L4 tab doesn't affect
-    another open tab's state).
+    another open tab's state) — pass the same id to
+    ``POST /settings/private-mode`` when entering L4 so this endpoint can
+    tell the last session out from one of several.
     """
 
     conversation_id: str = Field(
@@ -982,8 +1051,13 @@ async def wipe_private_session(req: SessionWipeRequest):
       server-side at L1+ (task 1.2b — ``app/routers/agents.py`` injects no
       write function once private mode engages), so this only cleans up
       memories promoted *before* the conversation escalated past L0.
-    * The global ``cerid:private_mode:global`` flag and the per-session
-      override at ``cerid:private_mode:session:{id}``.
+    * The per-session override at ``cerid:private_mode:session:{id}`` and
+      this session's entry in the L4 registry. The global
+      ``cerid:private_mode:global`` flag is shared by every tab and every
+      direct API/SDK/MCP caller, so it is only wound back — to an explicit
+      ``"0"``, per the reset endpoint's E1 R13 note — once no other live L4
+      session is registered. ``level_after`` reports the level that is
+      actually in force afterwards.
 
     Each of the above is independently best-effort: one store's failure
     is logged (``log_swallowed_error``) and does not prevent the others
@@ -1033,10 +1107,16 @@ async def wipe_private_session(req: SessionWipeRequest):
 
     redis = get_redis()
     session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
-    with redis.pipeline() as pipe:
-        pipe.delete(_PRIVATE_MODE_KEY)
-        pipe.delete(session_key)
-        pipe.execute()
+    redis.delete(session_key)
+    # F021: the pre-fix code deleted the GLOBAL key here, which
+    # get_private_mode_level() resolves to 0 — one closing tab dropped every
+    # other tab and every direct caller out of private mode with no signal.
+    remaining_l4_sessions = _release_l4_session(redis, req.conversation_id)
+    if remaining_l4_sessions:
+        level_after = get_private_mode_level()
+    else:
+        redis.set(_PRIVATE_MODE_KEY, "0")
+        level_after = 0
 
     wiped = neo4j_driver is not None and orchestrator_ran
     logger.info(
@@ -1045,7 +1125,7 @@ async def wipe_private_session(req: SessionWipeRequest):
     )
     return {
         "wiped": wiped,
-        "level_after": 0,
+        "level_after": level_after,
         "conversation_id": req.conversation_id,
         "summary": summary,
     }
@@ -1065,6 +1145,27 @@ async def set_tier(req: TierRequest):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid tier: '{req.tier}'. Must be one of {valid_tiers}",
+        )
+    # The tier this server is actually entitled to — a valid key, an active
+    # trial, or the operator's CERID_TIER floor. Without this ceiling the
+    # endpoint is a self-service upgrade: it writes the very env var
+    # license.py:_baseline_tier() reads back, so a caller could mint
+    # enterprise without ever touching the license router.
+    try:
+        from app.routers.license import higher_tier, reconcile_license_state
+        entitled = reconcile_license_state(get_redis())
+    except Exception as exc:  # noqa: BLE001 — no Redis means no evidence of entitlement
+        log_swallowed_error("app.routers.settings.tier_entitlement", exc)
+        from app.routers.license import higher_tier
+        entitled = os.getenv("CERID_TIER", "community")
+    if req.tier != entitled and higher_tier(req.tier, entitled) == req.tier:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Tier '{req.tier}' exceeds this server's entitlement "
+                f"('{entitled}'). Activate a license or start a trial via "
+                f"/license first."
+            ),
         )
     # Single mutation point — set_tier rebinds the canonical global, recomputes
     # FEATURE_FLAGS, and syncs the config-namespace copy so no reader goes stale.

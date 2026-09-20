@@ -94,7 +94,13 @@ async def add_mcp_server(req: MCPServerAddRequest):
     """
     import logging
 
-    from utils.mcp_client import MCPServerConfig, mcp_client_manager
+    from fastapi import HTTPException
+
+    from utils.mcp_client import (
+        MCPServerConfig,
+        mcp_client_manager,
+        validate_stdio_config,
+    )
 
     cfg = MCPServerConfig(
         name=req.name,
@@ -105,6 +111,13 @@ async def add_mcp_server(req: MCPServerAddRequest):
         url=req.url,
         headers=req.headers,
     )
+    # A stdio server is a host process with the caller's argv and environment.
+    # Refuse before registering, so a rejected body leaves nothing behind.
+    if cfg.transport == "stdio":
+        try:
+            validate_stdio_config(cfg)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     mcp_client_manager.add_server(cfg)
 
     connect_error: str | None = None

@@ -249,3 +249,54 @@ async def test_update_folder_source_strips_prefix_for_lookup():
 
     folder_id_arg = mock_update.call_args[0][0]
     assert folder_id_arg == "abc123"
+
+
+# ---------------------------------------------------------------------------
+# Scan outcomes must reach the /sources contract
+#
+# The projection returned last_error=None and derived status from the enabled
+# flag alone, so a watched folder whose every file errored during the scan
+# rendered as status=connected, last_error=null — indistinguishable from a
+# healthy folder that has ingested nothing yet. Watched folders are the
+# primary bulk-ingest surface, so this is the case operators most need to see.
+# ---------------------------------------------------------------------------
+
+def _rec_with_stats(**stats):
+    rec = dict(_REC)
+    rec["stats"] = {"ingested": 0, "skipped": 0, "errored": 0, **stats}
+    return rec
+
+
+def test_a_folder_whose_scan_wholly_failed_is_not_connected():
+    s = folder_record_to_source(_rec_with_stats(ingested=0, errored=7))
+    assert s["status"] == "error"
+    assert s["last_error"]
+    assert "7" in s["last_error"]
+
+
+def test_a_partial_scan_failure_surfaces_last_error():
+    s = folder_record_to_source(_rec_with_stats(ingested=9, errored=3))
+    assert s["last_error"]
+    assert "3" in s["last_error"]
+
+
+def test_a_clean_scan_reports_no_error():
+    s = folder_record_to_source(_rec_with_stats(ingested=12, skipped=1, errored=0))
+    assert s["status"] == "connected"
+    assert s["last_error"] is None
+
+
+def test_a_failed_scan_on_a_paused_folder_still_reads_as_paused():
+    rec = _rec_with_stats(ingested=0, errored=4)
+    rec["enabled"] = False
+    s = folder_record_to_source(rec)
+    assert s["status"] == "paused"
+    assert s["last_error"]
+
+
+def test_a_never_scanned_folder_claims_nothing():
+    rec = dict(_REC)
+    rec.pop("stats")
+    s = folder_record_to_source(rec)
+    assert s["status"] == "connected"
+    assert s["last_error"] is None

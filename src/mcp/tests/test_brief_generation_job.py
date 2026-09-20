@@ -487,3 +487,130 @@ class TestEmptyDeltaDay:
             await job.run(_noop_progress)
 
         assert mock_service.generate_daily.call_args.kwargs["has_new_data"] is True
+
+
+# ---------------------------------------------------------------------------
+# The corpus the LLM reads must be the corpus the delta counted (F360)
+#
+# _assemble_corpus counted :Artifact nodes for the nothing-new decision but
+# built the prompt from (:Brief {kind:'inbox'}) — which no producer writes,
+# BriefRecord.kind only ever being 'daily' or 'weekly' — and (:Claim). On a
+# day with 183 artifacts the guard saw has_new_data=True and the prompt saw
+# "(empty)", so the Briefs pane published LLM filler asserting nothing had
+# landed. That is the exact failure the UX-18 guard was written to stop.
+# ---------------------------------------------------------------------------
+
+
+class _CorpusResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def single(self):
+        return self._rows[0] if self._rows else None
+
+    def data(self):
+        return list(self._rows)
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+class _CorpusSession:
+    def __init__(self, artifacts, claims, artifact_count):
+        self._artifacts = artifacts
+        self._claims = claims
+        self._count = artifact_count
+        self.queries: list[str] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def run(self, query, **_params):
+        self.queries.append(query)
+        if "count(a)" in query:
+            return _CorpusResult([{"n": self._count}])
+        # The notes query OPTIONAL MATCHes an :Artifact, so :Claim wins first.
+        if "(c:Claim)" in query:
+            return _CorpusResult(self._claims)
+        if "(a:Artifact)" in query:
+            return _CorpusResult(self._artifacts)
+        return _CorpusResult([])
+
+
+class _CorpusDriver:
+    def __init__(self, artifacts=(), claims=(), artifact_count=0):
+        self.fake_session = _CorpusSession(list(artifacts), list(claims), artifact_count)
+
+    def session(self):
+        return self.fake_session
+
+
+class TestCorpusMatchesTheDelta:
+    def test_ingested_artifacts_reach_the_prompt(self):
+        from app.processor.jobs.brief_generation import _assemble_corpus
+
+        driver = _CorpusDriver(
+            artifacts=[
+                {"summary": "Quarterly invoice from Acme", "filename": "acme.pdf",
+                 "domain": "finance"},
+                {"summary": "", "filename": "meeting-notes.md", "domain": "work"},
+            ],
+            artifact_count=183,
+        )
+
+        inbox, notes, delta = _assemble_corpus(driver, "2026-09-02")
+
+        assert delta > 0
+        assert inbox.strip(), "183 artifacts landed and the prompt corpus was empty"
+        assert "Quarterly invoice from Acme" in inbox
+        # An artifact with no summary still has to be represented.
+        assert "meeting-notes.md" in inbox
+
+    def test_a_genuinely_quiet_day_still_produces_no_corpus(self):
+        from app.processor.jobs.brief_generation import _assemble_corpus
+
+        inbox, notes, delta = _assemble_corpus(_CorpusDriver(), "2026-09-02")
+
+        assert delta == 0
+        assert inbox == ""
+        assert notes == ""
+
+    def test_claims_still_feed_the_notes_arm(self):
+        from app.processor.jobs.brief_generation import _assemble_corpus
+
+        driver = _CorpusDriver(claims=[{"text": "SOL is down 1.2%"}])
+        _inbox, notes, _delta = _assemble_corpus(driver, "2026-09-02")
+
+        assert "SOL is down 1.2%" in notes
+
+
+class TestHasNewDataAgreesWithTheCorpus:
+    async def test_an_empty_corpus_is_a_nothing_new_day_whatever_the_count_says(self):
+        """The guard exists to stop 'empty inbox' claims on a busy day.
+
+        If the corpus handed to the LLM is empty, synthesising from it can
+        only produce filler — regardless of what the delta counter saw.
+        """
+        job = _make_job()
+        mock_service = AsyncMock()
+        mock_service.generate_daily.return_value = _make_brief_record()
+        mock_service.store.return_value = None
+
+        with (
+            _patch_service_factory(mock_service),
+            patch(
+                "app.processor.jobs.brief_generation._get_neo4j",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.processor.jobs.brief_generation._assemble_corpus",
+                return_value=("", "", 183),
+            ),
+            _patch_verification_deps(),
+        ):
+            await job.run(_noop_progress)
+
+        assert mock_service.generate_daily.call_args.kwargs["has_new_data"] is False

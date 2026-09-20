@@ -52,7 +52,9 @@ class LLMResource(_LLMResourceBase):
 
     The server's ``smart_router`` selects a model tier (FREE / CHEAP /
     CAPABLE / RESEARCH / EXPERT) based on ``task_type``, ``query`` complexity,
-    and ``cost_sensitivity``. When ``slo_budget_ms`` is set, tiers whose
+    and ``cost_sensitivity``. ``cost_sensitivity`` is how sensitive *you* are
+    to spend, not what you want to spend: ``"high"`` is the cheapest routing,
+    ``"low"`` the most capable. When ``slo_budget_ms`` is set, tiers whose
     empirical p95 exceeds the budget are filtered out — if no tier fits the
     response is HTTP 503 with a ``Retry-After`` header carrying the floor
     p95.

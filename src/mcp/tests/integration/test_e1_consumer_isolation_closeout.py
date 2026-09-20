@@ -11,7 +11,7 @@ Consumer domain isolation (X-Client-ID -> CONSUMER_REGISTRY -> allowed_domains /
 strict_domains) was applied only inside the canonical ``/agent/query`` handler.
 The legacy ``POST /query`` and ``POST /custom-agents/{id}/query`` handlers called
 the retrieval pipeline WITHOUT reading X-Client-ID, so a consumer restricted to
-its allow-list (e.g. cerid-finance -> [finance, general], trading-agent ->
+its allow-list (e.g. cerid-finance -> [finance], trading-agent ->
 [trading]) escaped the wall simply by using those endpoints — a cross-domain read
 escalation the SDK contract claims is impossible.
 
@@ -31,7 +31,7 @@ import pytest
 # dependency is invisible to fixture-shape inference, so declare it.
 pytestmark = pytest.mark.live_stack
 
-_FINANCE = ["finance", "general"]
+_FINANCE = ["finance"]
 
 
 class _FakeRequest:
@@ -68,6 +68,15 @@ async def test_legacy_query_resolves_consumer_isolation(monkeypatch):
     be walled to its allowed_domains, not read across all domains. RED on HEAD:
     /query reads no X-Client-ID (CR-087)."""
     _neutral_private(monkeypatch)
+    # Register the consumer here: the distribution that ships this test has no
+    # trading consumer, and relying on another module to have registered it made
+    # the result depend on collection order.
+    from config.settings import CONSUMER_REGISTRY
+    monkeypatch.setitem(
+        CONSUMER_REGISTRY,
+        "trading-agent",
+        {"rate_limits": {}, "allowed_domains": ["trading"], "strict_domains": True},
+    )
     for g in ("get_chroma", "get_redis", "get_neo4j", "get_graph_store"):
         monkeypatch.setattr(f"app.routers.query.{g}", lambda: MagicMock(), raising=False)
     spy = _KwargSpy(_RESULT)

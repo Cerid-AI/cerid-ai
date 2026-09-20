@@ -15,7 +15,7 @@ exports[`VerifiedResponse — error state > snapshot matches error state 1`] = `
     >
       <svg
         aria-hidden="true"
-        class="lucide lucide-circle-alert h-4 w-4"
+        class="lucide lucide-circle-alert lucide-alert-circle h-4 w-4"
         fill="none"
         height="24"
         stroke="currentColor"
@@ -84,7 +84,7 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
         >
           <svg
             aria-hidden="true"
-            class="lucide lucide-circle-check-big h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
+            class="lucide lucide-circle-check-big lucide-check-circle h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
             fill="none"
             height="24"
             stroke="currentColor"
@@ -161,7 +161,7 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
         >
           <svg
             aria-hidden="true"
-            class="lucide lucide-circle-x h-3 w-3 shrink-0 text-red-600 dark:text-red-400"
+            class="lucide lucide-circle-question-mark lucide-help-circle lucide-circle-help h-3 w-3 shrink-0 text-red-600 dark:text-red-400"
             fill="none"
             height="24"
             stroke="currentColor"
@@ -178,10 +178,10 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
               r="10"
             />
             <path
-              d="m15 9-6 6"
+              d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"
             />
             <path
-              d="m9 9 6 6"
+              d="M12 17h.01"
             />
           </svg>
           No source
@@ -218,7 +218,7 @@ exports[`VerifiedResponse — settled state, verified claim > snapshot matches v
         >
           <svg
             aria-hidden="true"
-            class="lucide lucide-circle-check-big h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
+            class="lucide lucide-circle-check-big lucide-check-circle h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
             fill="none"
             height="24"
             stroke="currentColor"
@@ -255,7 +255,7 @@ exports[`VerifiedResponse — streaming state > snapshot matches streaming state
   >
     <svg
       aria-hidden="true"
-      class="lucide lucide-loader-circle h-3.5 w-3.5 animate-spin text-muted-foreground"
+      class="lucide lucide-loader-circle lucide-loader-2 h-3.5 w-3.5 animate-spin text-muted-foreground"
       fill="none"
       height="24"
       stroke="currentColor"

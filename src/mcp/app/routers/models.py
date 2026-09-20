@@ -476,7 +476,11 @@ async def model_doctor():
     configured: dict[str, str] = dict(_current_assignments())  # OpenRouter roles
     local_roles: dict[str, str] = {}
 
-    internal_model = getattr(_settings, "INTERNAL_LLM_MODEL", "")
+    # Env first: PATCH /settings writes these knobs to os.environ only, so
+    # reading the config attr audits whatever was pinned at boot.
+    internal_model = os.getenv("INTERNAL_LLM_MODEL") or getattr(
+        _settings, "INTERNAL_LLM_MODEL", "",
+    )
     if internal_model:
         configured["INTERNAL_LLM_MODEL"] = internal_model
         # Only a local provider makes INTERNAL_LLM_MODEL a local "chat" pin;
@@ -488,15 +492,86 @@ async def model_doctor():
         ("QUENCHFORGE_EMBED_MODEL", "embed"),
         ("QUENCHFORGE_RERANK_MODEL", "rerank"),
     ):
-        val = getattr(_settings, var, "")
+        val = os.getenv(var) or getattr(_settings, var, "")
         if val:
             configured[var] = val
             local_roles[var] = role
 
     ids = catalog_ids(await fetch_openrouter_catalog())
-    return build_compat_report(
+    report = build_compat_report(
         configured=configured,
         hardware_profile=profile,
         catalog_ids=ids,
         local_roles=local_roles,
     )
+
+    # Ask the daemon what it serves. The static known-good table cannot see a
+    # pin the daemon has no weights for: local names never look like a remote
+    # id, so the dead-pin check skips them and the box reads clean while
+    # retrieval falls back on every request.
+    served, daemon_url = await _daemon_served_models()
+    report["local_daemon"] = {
+        "url": daemon_url,
+        "reachable": served is not None,
+        "models": sorted(served) if served is not None else [],
+    }
+    if served is not None:
+        not_served = [
+            {
+                "kind": "not_served",
+                "severity": "error",
+                "role": var,
+                "model": configured[var],
+                "detail": (
+                    f"the local daemon at {daemon_url} does not serve this model — "
+                    f"it lists {', '.join(sorted(served)) or 'no models'}"
+                ),
+            }
+            for var in local_roles
+            if var in configured and _tag_key(configured[var]) not in served
+        ]
+        if not_served:
+            prior = report.get("findings")
+            findings = list(prior) if isinstance(prior, list) else []
+            findings.extend(not_served)
+            report["findings"] = findings
+            report["ok"] = not any(f["severity"] == "error" for f in findings)
+    return report
+
+
+def _tag_key(name: str) -> str:
+    """Comparable form of a local model name (``llama3.1-8b:latest`` → ``llama3.1-8b``)."""
+    base = name.strip().lower().split("/")[-1]
+    if base.endswith(":latest"):
+        base = base[: -len(":latest")]
+    return base.replace(":", "-").replace("_", "-")
+
+
+async def _daemon_served_models() -> tuple[set[str] | None, str]:
+    """``(served_model_keys, url)`` from the local daemon's ``/api/tags``.
+
+    Returns ``(None, url)`` when the provider is not local or the daemon is
+    unreachable — an unanswered probe must stay distinguishable from a clean one.
+    """
+    from core.routing.provider_state import is_local_provider, local_backend_url
+
+    url = local_backend_url()
+    if not is_local_provider():
+        return None, url
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            resp = await client.get(f"{url}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:  # noqa: BLE001 — probe boundary; report unreachable
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("app.routers.models.daemon_served_models", exc)
+        return None, url
+    return {
+        _tag_key(m.get("name", ""))
+        for m in data.get("models", [])
+        if m.get("name")
+    }, url

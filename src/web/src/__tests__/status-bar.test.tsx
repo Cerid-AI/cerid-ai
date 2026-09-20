@@ -53,7 +53,10 @@ describe("StatusBar", () => {
     expect(screen.getByText(/neo4j/i)).toBeInTheDocument()
   })
 
-  it("shows healthy status message when all services connected", async () => {
+  // The dot reads datastore transports and inference lanes — not latency or
+  // verification coverage, which Diagnostics grades separately. Its label
+  // states that scope instead of claiming the whole system is operational.
+  it("shows a scoped healthy status message when all services connected", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -63,7 +66,7 @@ describe("StatusBar", () => {
       }),
     )
     render(<StatusBar />, { wrapper })
-    expect(await screen.findByText("All systems operational")).toBeInTheDocument()
+    expect(await screen.findByText("All services connected")).toBeInTheDocument()
   })
 
   it("shows degraded status message when services have errors", async () => {

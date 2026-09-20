@@ -14,6 +14,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -31,6 +32,7 @@ from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
+from utils.domain_privacy import sensitive_domains_opted_in, visible_domains
 
 logger = logging.getLogger("ai-companion.query_agent")
 
@@ -587,6 +589,17 @@ async def multi_domain_query(
     """
     if domains is None:
         domains = config.DOMAINS
+
+    # M-PRIV chokepoint. Every retrieval path reaches Chroma through this
+    # function — the main scan, decomposed sub-queries, the adjacent-domain
+    # bleed, graph seeds and Self-RAG re-retrieval — so the sensitive-domain
+    # opt-in is enforced once at the door instead of by each caller
+    # remembering to ask. Do not hoist this into the callers.
+    domains = visible_domains(
+        list(domains), include_sensitive=sensitive_domains_opted_in(),
+    ) or []
+    if not domains:
+        return []
 
     # Custom/client-defined domains are allowed: external clients use Cerid as
     # a backend and ingest to their own domain names. Built-in DOMAINS are the
@@ -1309,6 +1322,96 @@ async def graph_expand_results_via_communities(
 # Reranking
 # ---------------------------------------------------------------------------
 
+# The rerank legs do not agree on a score scale on their own: a cross-encoder
+# sigmoid is ORDINAL (bge-reranker-v2-m3 puts a correct top answer near
+# sigmoid(-4) ≈ 0.02) while retrieval relevance is calibrated. The local ONNX
+# leg has always blended the two (core/retrieval/reranker.py); the remote legs
+# replaced relevance with the raw model score, which silently redefined both
+# ``confidence`` and the CRAG gate whenever RERANK_PROVIDER was flipped. Every
+# leg blends through here so the number downstream thresholds see is one scale.
+def _blend_rerank_score(model_score: float, original: float) -> float:
+    return round(
+        config.RERANK_CE_WEIGHT * float(model_score)
+        + config.RERANK_ORIGINAL_WEIGHT * float(original),
+        4,
+    )
+
+
+def _apply_rerank_scores(
+    results: list[dict[str, Any]],
+    scores: list[float],
+    leg: str,
+) -> list[dict[str, Any]]:
+    for r, s in zip(results, scores, strict=False):
+        original = r.get("retrieval_relevance", r.get("relevance", 0.0))
+        r["relevance"] = _blend_rerank_score(s, original)
+        r["reranker_status"] = leg
+    _rerank_served_leg.set(leg)
+    return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
+
+
+def _configured_rerank_leg() -> str:
+    """The rerank leg the configuration says should serve this request."""
+    mode = config.RERANK_MODE
+    if mode == "llm" and getattr(config, "RERANK_PREFER_LOCAL", False):
+        try:
+            from core.retrieval.reranker import _session
+            if _session is not None:
+                mode = "cross_encoder"
+        except (ImportError, AttributeError):
+            pass
+    if mode != "cross_encoder":
+        return mode
+    try:
+        from utils.quenchforge_client import is_rerank_provider_quenchforge
+        if is_rerank_provider_quenchforge():
+            return "quenchforge"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.configured_rerank_leg", exc)
+    try:
+        from utils.inference_config import get_inference_config
+        if get_inference_config().provider == "fastembed-sidecar":
+            return "sidecar"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.configured_rerank_leg", exc)
+    return "onnx"
+
+
+# Which leg actually served the most recent rerank in THIS request's context.
+# Call-scoped, not result-scoped: a ContextVar keeps concurrent retrievals from
+# reading each other's answer, and the per-result ``reranker_status`` stamps
+# were never a usable signal for "was this call degraded" (an untagged result
+# means both "ONNX served fine" and "reranking was switched off").
+_rerank_served_leg: ContextVar[str] = ContextVar("cerid_rerank_served_leg", default="")
+
+_RERANK_CROSS_ENCODER_LEGS = ("quenchforge", "sidecar", "onnx")
+
+
+def rerank_degraded_reason() -> str:
+    """User-facing reason when a weaker rerank leg served the request.
+
+    ``reranker_status`` has zero readers, so a query served on the in-process
+    ONNX path after the configured GPU leg 503'd was presented as a normal
+    result: operators saw the fallback on /health, users and SDK consumers
+    never did. Empty string = no degradation to report.
+    """
+    served = _rerank_served_leg.get()
+    if not served:
+        return ""
+    if served == "onnx_failed_no_fallback":
+        return (
+            "Reranking is unavailable — results are ordered by vector "
+            "similarity alone and may be less precise."
+        )
+    configured = _configured_rerank_leg()
+    if configured == served or configured not in _RERANK_CROSS_ENCODER_LEGS:
+        return ""
+    return (
+        f"Reranking fell back from {configured} to {served} — "
+        "ranking quality may be lower than usual."
+    )
+
+
 async def rerank_results(
     results: list[dict[str, Any]],
     query: str,
@@ -1322,6 +1425,7 @@ async def rerank_results(
     order and each is tagged with ``reranker_status = 'onnx_failed_no_fallback'``
     — see :func:`_rerank_cross_encoder` for the rationale.
     """
+    _rerank_served_leg.set("")
     if not use_reranking or len(results) == 0:
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
@@ -1383,7 +1487,9 @@ async def _rerank_cross_encoder(
 
         loop = asyncio.get_running_loop()
         with span("retrieval.rerank", "cross_encoder", k=len(results)):
-            return await loop.run_in_executor(None, ce_rerank, query, results)
+            reranked = await loop.run_in_executor(None, ce_rerank, query, results)
+        _rerank_served_leg.set("onnx")
+        return reranked
     except Exception as e:
         log_swallowed_error('core.agents.query_agent', e)
         logger.warning(
@@ -1393,6 +1499,7 @@ async def _rerank_cross_encoder(
         )
         for r in results:
             r["reranker_status"] = "onnx_failed_no_fallback"
+        _rerank_served_leg.set("onnx_failed_no_fallback")
         return results
 
 
@@ -1436,11 +1543,8 @@ async def _maybe_rerank_via_quenchforge(
         with span("retrieval.rerank", "quenchforge", k=len(results)):
             async with _RERANK_QUENCHFORGE_SEM:
                 scores = await quenchforge_rerank(query, documents)
-        for r, s in zip(results, scores, strict=False):
-            r["relevance"] = float(s)
-            r["reranker_status"] = "quenchforge"
         inference_health.record_success("rerank", provider="quenchforge")
-        return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
+        return _apply_rerank_scores(results, scores, "quenchforge")
     except Exception as exc:  # noqa: BLE001 — fall through to sidecar / local ONNX
         log_swallowed_error("core.agents.query_agent.quenchforge_rerank", exc)
         global _QUENCHFORGE_RERANK_FAIL_WARNED
@@ -1484,12 +1588,15 @@ async def _maybe_rerank_via_sidecar(
         documents = [r.get("content", "") for r in results]
         with span("retrieval.rerank", "sidecar", k=len(results)):
             scores = await sidecar_rerank(query, documents)
-        for r, s in zip(results, scores, strict=False):
-            r["relevance"] = float(s)
-            r["reranker_status"] = "sidecar"
-        return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
+        return _apply_rerank_scores(results, scores, "sidecar")
     except Exception as exc:  # noqa: BLE001 — fall through to local ONNX
         log_swallowed_error("core.agents.query_agent.sidecar_rerank", exc)
+        # Mirror the quenchforge handler: without this, sidecar degradation is
+        # invisible to /health.inference_routing as well as to the response.
+        from core.utils import inference_health
+        inference_health.record_fallback(
+            "rerank", configured="sidecar", served_by="onnx", detail=str(exc),
+        )
         return None
 
 
@@ -2165,6 +2272,22 @@ async def agent_query_full(
         redis_client=redis_client,
         model=model,
     )
+
+    # top_k is documented as "maximum results to return", and until this cap
+    # nothing enforced it: retrieval fans out at top_k PER DOMAIN and the
+    # union is never truncated, so a default /sdk/v1/query returned 63 results
+    # in a 410 KB body and /sdk/v1/search answered top_k=1 with 4. Applied
+    # here, at the single entry REST, MCP and A2A share, so no surface can be
+    # capped and another left uncapped — and after CRAG, whose external hits
+    # count toward the caller's budget too.
+    #
+    # This bounds the returned lists only. `context` stays as assembled: it is
+    # separately token-budgeted for the model, and top_k is a payload contract.
+    if isinstance(result, dict) and top_k > 0:
+        result["results"] = list(result.get("results") or [])[:top_k]
+        result["sources"] = list(result.get("sources") or [])[:top_k]
+        result["total_results"] = len(result["results"])
+
     return result
 
 
@@ -2181,6 +2304,67 @@ def _hype_retrieval_enabled() -> bool:
     import os as _os
     val = _os.getenv("RETRIEVAL_HYPE_ENABLED", "false").strip().lower()
     return val in ("true", "1", "yes", "on")
+
+
+async def _hydrate_hype_hits(
+    chroma_client: Any,
+    coll_name: str,
+    domain: str,
+    best_by_parent: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Resolve HyPE question hits to their parent chunks, under request scope.
+
+    The HyPE collections store the LLM-generated question as the document and
+    carry neither ``tenant_id`` nor ``cerid_state``, so a HyPE hit can be
+    neither tenant-scoped nor pending-excluded on its own — and its text must
+    never be handed to the context assembler as source knowledge. Both problems
+    have one answer: fetch the parent chunk through the same
+    ``_exclude_pending(with_tenant_scope(...))`` filter the content path uses,
+    and drop any hit whose parent that filter does not return.
+    """
+    where = _exclude_pending(with_tenant_scope(None))
+    try:
+        base_coll = await asyncio.to_thread(chroma_client.get_collection, coll_name)
+        parents = await asyncio.to_thread(
+            base_coll.get,
+            ids=list(best_by_parent),
+            where=where,
+            include=["documents", "metadatas"],
+        )
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "core.agents.query_agent._hydrate_hype_hits", exc,
+            context={"collection": coll_name},
+        )
+        return []
+
+    ids = parents.get("ids") or []
+    documents = parents.get("documents") or []
+    metadatas = parents.get("metadatas") or []
+    hydrated: list[dict[str, Any]] = []
+    for i, parent_id in enumerate(ids):
+        metadata = metadatas[i] if i < len(metadatas) else {}
+        hit = _format_chroma_result(
+            content=documents[i] if i < len(documents) else "",
+            relevance=best_by_parent.get(parent_id, 0.0),
+            chunk_id=parent_id,
+            domain=domain,
+            metadata=metadata,
+        )
+        # dedup_with_hype_results keys off the HyPE-side source ids.
+        hit["source_chunk_id"] = parent_id
+        hit["metadata"] = {
+            "source_chunk_id": parent_id,
+            "source_artifact_id": hit["artifact_id"],
+        }
+        hydrated.append(hit)
+    dropped = len(best_by_parent) - len(hydrated)
+    if dropped:
+        logger.info(
+            "HyPE: dropped %d hit(s) whose parent chunk is out of request scope",
+            dropped,
+        )
+    return hydrated
 
 
 async def _augment_with_hype(
@@ -2226,9 +2410,12 @@ async def _augment_with_hype(
             logger.debug("_augment_with_hype: no embed function available; skipping")
             return results
 
-        # Build the list of base collection names from the effective domains.
-        _domains = domains or config.DOMAINS
-        collection_names = [config.collection_name(d) for d in _domains]
+        # Build the list of base collections from the effective domains, under
+        # the same sensitive-domain gate the content path applies.
+        _domains = visible_domains(
+            list(domains) if domains else list(config.DOMAINS),
+            include_sensitive=sensitive_domains_opted_in(),
+        ) or []
 
         # Embed query once.  _ef returns list[list[float]]; take first row.
         _raw_embeddings: list[list[float]] = await asyncio.to_thread(_ef, [query])
@@ -2236,8 +2423,10 @@ async def _augment_with_hype(
 
         # Query each HyPE collection and collect hits.
         hype_hits: list[dict[str, Any]] = []
-        for coll_name in collection_names:
+        for _domain in _domains:
+            coll_name = config.collection_name(_domain)
             hype_coll_name = hype_collection_name(coll_name)
+            best_by_parent: dict[str, float] = {}
             try:
                 hype_coll = await asyncio.to_thread(
                     chroma_client.get_collection, hype_coll_name
@@ -2250,27 +2439,16 @@ async def _augment_with_hype(
                 )
                 if hype_results["ids"] and hype_results["ids"][0]:
                     from core.utils.embeddings import l2_distance_to_relevance
-                    for i, hype_doc_id in enumerate(hype_results["ids"][0]):
+                    for i, _hype_doc_id in enumerate(hype_results["ids"][0]):
                         distance = hype_results["distances"][0][i] if hype_results["distances"] else 1.0
-                        relevance = l2_distance_to_relevance(distance)
+                        relevance = round(l2_distance_to_relevance(distance), 4)
                         meta = hype_results["metadatas"][0][i] if hype_results["metadatas"] else {}
-                        hype_hits.append({
-                            "content": hype_results["documents"][0][i],
-                            "relevance": round(relevance, 4),
-                            "chunk_id": hype_doc_id,
-                            "source_chunk_id": meta.get("source_chunk_id", ""),
-                            "artifact_id": meta.get("source_artifact_id", ""),
-                            "filename": "",
-                            "domain": "",
-                            "chunk_index": 0,
-                            "collection": hype_coll_name,
-                            "ingested_at": "",
-                            "sub_category": "",
-                            "tags_json": "[]",
-                            "keywords": "[]",
-                            "memory_type": "",
-                            "metadata": meta,
-                        })
+                        parent_id = meta.get("source_chunk_id", "")
+                        if not parent_id:
+                            continue
+                        best_by_parent[parent_id] = max(
+                            best_by_parent.get(parent_id, 0.0), relevance,
+                        )
             except Exception as e:  # noqa: BLE001 — observability boundary
                 # HyPE collection missing (flag was off at index time) — not an error.
                 log_swallowed_error(
@@ -2278,6 +2456,10 @@ async def _augment_with_hype(
                     e,
                     context={"hype_collection": hype_coll_name},
                 )
+            if best_by_parent:
+                hype_hits.extend(await _hydrate_hype_hits(
+                    chroma_client, coll_name, _domain, best_by_parent,
+                ))
 
         if not hype_hits:
             return results
@@ -2641,6 +2823,31 @@ async def _agent_query_impl(
                 "surface_route": _surface_route,
             }
 
+    # M-PRIV: resolve the sensitive-domain opt-in here as well as at the
+    # multi_domain_query door, so `domains_searched` reports what was really
+    # scanned rather than what the caller asked for. "All domains" is expanded
+    # first — the filter can only subtract from an explicit list.
+    _visible = visible_domains(
+        list(effective_domains) if effective_domains is not None else list(config.DOMAINS),
+        include_sensitive=sensitive_domains_opted_in(),
+    ) or []
+    if not _visible:
+        logger.info("Sensitive-domain filter removed all requested domains")
+        return {
+            "context": "",
+            "sources": [],
+            "confidence": 0.0,
+            "domains_searched": [],
+            "total_results": 0,
+            "token_budget_used": 0,
+            "graph_results": 0,
+            "results": [],
+            "retrieval_skipped": True,
+            "retrieval_reason": "sensitive_domain_restricted",
+            "surface_route": _surface_route,
+        }
+    effective_domains = _visible
+
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
     # Domains whose collection exists but held zero documents at query time —
@@ -2726,6 +2933,11 @@ async def _agent_query_impl(
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
     if not strict_domains and domains and set(domains) != set(config.DOMAINS):
         adjacent = _get_adjacent_domains(domains)
+        # Consumer isolation is not conditional on strict_domains: allowed_domains
+        # reads as the isolation control, so the bleed stays inside it even when
+        # the separate strict flag is left at its default False.
+        if allowed_domains is not None:
+            adjacent = {d: w for d, w in adjacent.items() if d in allowed_domains}
         if adjacent:
             cross_results = await multi_domain_query(
                 query=search_query,
@@ -3062,6 +3274,14 @@ async def _agent_query_impl(
         "results": results,
         "surface_route": _surface_route,
     }
+
+    # A weaker rerank leg serving the request is a property of THIS answer, not
+    # just of the process — surface it beside the results instead of only in
+    # /health, which no user or SDK consumer polls.
+    _rerank_degraded = rerank_degraded_reason()
+    if _rerank_degraded:
+        result_dict["retrieval_degraded"] = True
+        result_dict["degraded_reason"] = _rerank_degraded
 
     timings = timer.result()
     if timings:

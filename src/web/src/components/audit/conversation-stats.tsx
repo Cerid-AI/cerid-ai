@@ -30,6 +30,7 @@ export function ConversationStats({ conversations }: ConversationStatsProps) {
         {conversations.total_cost_usd > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
             Total estimated cost: <span className="font-medium text-foreground">${conversations.total_cost_usd.toFixed(4)}</span>
+            {" "}from recorded token usage
           </p>
         )}
         {modelData.length > 0 ? (

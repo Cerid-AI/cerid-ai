@@ -2,18 +2,15 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 /**
- * useWizardPackInstall — pack installation for the setup-wizard surfaces
- * (Build Knowledge step + "Try a sample pack" tab).
+ * useWizardPackInstall — pack installation for every surface that installs a
+ * knowledge pack: the setup-wizard steps (Build Knowledge + "Try a sample
+ * pack") and the KB pane's Knowledge Library dialog.
  *
  * Speaks the async install contract: POST /knowledge_packs/{id}/install
  * returns 202 {job_id, status:"queued"} on new backends, and the hook then
  * polls GET /knowledge_packs/registry (~2s) until the pack's `installing`
  * flag clears. Two legacy/edge responses resolve immediately:
  * 200 {status:"already_installed"} and the old synchronous 200 body.
- *
- * Wizard-scoped on purpose — the KB-pane pack surfaces have their own
- * owners; this hook lives under components/setup/ so those surfaces are
- * untouched.
  */
 
 import { useCallback, useState } from "react"

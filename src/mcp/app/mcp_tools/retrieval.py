@@ -1044,6 +1044,13 @@ async def pkb_answer_with_citations(
             "answer": "I don't have any sources in the KB matching that question.",
             "citations": [],
             "unsupported_claims": [],
+            # No synthesis ran, so the gate did not either. Stated rather
+            # than omitted, so every answer shape carries the same key.
+            "inline_gate": {
+                "enabled": False,
+                "suppressed_count": 0,
+                "suppressed_sentences": [],
+            },
             "retrieval_meta": {
                 "domains_searched": retrieval.get("domains_searched", []),
                 "total_results": 0,
@@ -1095,6 +1102,10 @@ async def pkb_answer_with_citations(
     # removing the off-by-one / miscount errors that survive a strong reader.
     # Returns None when not answerable that way → fall through to synthesis.
     answer: str | None = None
+    # Sentences the inline gate dropped from the answer, so the response can
+    # say the answer was edited rather than just handing over the remainder.
+    suppressed: list[dict[str, Any]] = []
+    gate_enabled = False
     if _mode is AnswerMode.TEMPORAL:
         from core.utils.time import utcnow_iso
         # Production has the reference "now" for free — pass today so the
@@ -1120,13 +1131,32 @@ async def pkb_answer_with_citations(
             # sentence the retrieved evidence contradicts is suppressed
             # mid-generation, not just flagged post-hoc.
             from core.agents.hallucination.inline_gate import gated_synthesis
+
+            gate_enabled = True
+
+            def _record_suppression(sentence: str, scores: dict) -> None:
+                # Without this the only trace of an edited answer was a debug
+                # log line: sentences vanished mid-paragraph with no marker and
+                # no counter, so an over-aggressive gate and a terse model
+                # looked the same to the reader and to metrics.
+                suppressed.append({
+                    "sentence": sentence,
+                    "contradiction": round(float(scores.get("contradiction", 0.0)), 3),
+                })
+
             answer = await gated_synthesis(
                 _messages,
                 context=context,
                 stage="mcp_answer_with_citations",
                 temperature=0.1,
                 max_tokens=_max_tokens,
+                on_suppress=_record_suppression,
             )
+            if suppressed:
+                logger.info(
+                    "inline_nli_gate suppressed %d sentence(s) from an answer",
+                    len(suppressed),
+                )
         else:
             answer = await call_internal_llm(
                 _messages,
@@ -1174,6 +1204,11 @@ async def pkb_answer_with_citations(
         "answer": answer,
         "citations": citations,
         "unsupported_claims": unsupported,
+        "inline_gate": {
+            "enabled": gate_enabled,
+            "suppressed_count": len(suppressed),
+            "suppressed_sentences": suppressed,
+        },
         "retrieval_meta": {
             "domains_searched": retrieval.get("domains_searched", []),
             "total_results": retrieval.get("total_results", 0),

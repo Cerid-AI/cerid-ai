@@ -1654,10 +1654,20 @@ export function CartographerMap({
       {/* Sigma canvas container */}
       <div ref={containerRef} className="h-full w-full" aria-hidden="true" />
 
-      {/* Layout fallback notice — shown when requested layout not yet computed */}
-      {layoutFallback && (
-        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-amber-500/10 px-3 py-1.5 text-label-xs text-amber-700 dark:text-amber-400 backdrop-blur">
-          Wells layout not computed yet — showing force
+      {/* Server-side caveats about this payload — the requested layout was not
+          computed, and/or the edge set was capped before it was sent. */}
+      {(layoutFallback || data.links_truncated) && (
+        <div className="pointer-events-none absolute left-1/2 top-3 flex -translate-x-1/2 flex-col items-center gap-1">
+          {layoutFallback && (
+            <div className="rounded-md bg-amber-500/10 px-3 py-1.5 text-label-xs text-amber-700 dark:text-amber-400 backdrop-blur">
+              Wells layout not computed yet — showing force
+            </div>
+          )}
+          {data.links_truncated && (
+            <div className="rounded-md bg-amber-500/10 px-3 py-1.5 text-label-xs text-amber-700 dark:text-amber-400 backdrop-blur">
+              Edge set capped — not every connection is shown, so some entities may look isolated
+            </div>
+          )}
         </div>
       )}
 

@@ -253,12 +253,26 @@ def _sanitize_archive_path(raw: str) -> str:
     return path
 
 
+# A value carrying one of these becomes extra .env lines the next time
+# compose reads the file back as container environment — that is how a
+# "set my API key" request turns into CERID_TIER=enterprise.
+_ENV_VALUE_FORBIDDEN = ("\n", "\r", "\0")
+
+
 def _update_env_file(updates: dict[str, str]) -> None:
     """Update or add keys in the .env file, preserving comments and order.
 
     Only the keys present in *updates* are touched; everything else is kept
     verbatim (including blank lines and comments).
+
+    Raises ``ValueError`` — before writing anything — if any value contains a
+    newline or null byte, so a single poisoned value cannot smuggle extra
+    assignments in alongside its clean siblings.
     """
+    for key, value in updates.items():
+        if any(c in value for c in _ENV_VALUE_FORBIDDEN):
+            raise ValueError(f"Value for {key} contains invalid control characters")
+
     content = _read_env_file()
     lines = content.splitlines(keepends=True) if content else []
 
@@ -313,6 +327,49 @@ async def setup_status() -> SetupStatus:
     )
 
 
+#: Services whose failure must not block setup. Every name here MUST appear
+#: in ``setup_health()``'s ``services`` list — this set previously named a
+#: service the list never contained, which is how the omission survived.
+_OPTIONAL_SERVICES = {"verification_pipeline"}
+
+
+def _verification_pipeline_status() -> dict:
+    """Report the cached verification self-test as a health service.
+
+    ``run_verification_self_test`` already caches its verdict in Redis with a
+    1h TTL and ``/setup/retest-verification`` refreshes it; this reads that
+    same record rather than running an LLM call inside a health probe.
+
+    "degraded" means never run or not readable — during first-run setup that
+    is the normal state before an API key is configured, and the frontend
+    renders it with the "Requires API key" affordance.
+    """
+    try:
+        from app.agents.hallucination.startup_self_test import (
+            get_self_test_status_sync,
+        )
+        from app.deps import get_redis
+
+        result = get_self_test_status_sync(get_redis())
+    except Exception as exc:  # noqa: BLE001 — a probe must not 500 the panel
+        log_swallowed_error("app.routers.setup.verification_status", exc)
+        result = None
+
+    if not result:
+        status = "degraded"
+    elif result.get("status") == "pass":
+        status = "healthy"
+    else:
+        status = "error"
+
+    return {
+        "name": "verification_pipeline",
+        "status": status,
+        "port": 0,
+        "detail": result or {},
+    }
+
+
 @router.get("/health", response_model=SetupHealthResponse)
 async def setup_health() -> dict:
     """Detailed health dashboard for all services."""
@@ -346,12 +403,17 @@ async def setup_health() -> dict:
         },
     ]
 
+    # The wizard's HealthDashboard renders an "AI Pipeline" category built
+    # solely from this entry and drops the category when it is empty, so
+    # omitting it hid the verification self-test — and the Re-check button
+    # wired to POST /setup/retest-verification — for the whole of onboarding.
+    services.append(_verification_pipeline_status())
+
     # Required services must all be healthy
-    _OPTIONAL = {"verification_pipeline"}
     required_healthy = all(
         s["status"] in ("healthy", "connected")
         for s in services
-        if s["name"] not in _OPTIONAL
+        if s["name"] not in _OPTIONAL_SERVICES
     )
 
     return {
@@ -899,13 +961,17 @@ def _model_cache_status(
     repo_id: str,
     filenames: tuple[str, ...],
     cache_dir: str | None,
-    provider: str = "local",
+    provider: str = "sidecar",
+    *,
+    remote_primary: bool = False,
 ) -> dict:
-    """Probe whether a HuggingFace model is cached locally.
+    """Probe whether the local ONNX weights for a lane are cached.
 
-    When provider is non-local (quenchforge/cloud), the model is served
-    remotely and there's nothing to cache locally. Returns ``needs_local_cache=False``
-    so the GUI knows to hide the download-banner UI.
+    Always probes. The in-process ONNX model is the terminal fallback for
+    both the embed and rerank lanes — when the configured remote provider is
+    unreachable these weights are what serves the request — so "a remote
+    provider is configured" never means "nothing to cache locally". ``role``
+    says whether the local model is the primary or the fallback.
 
     Uses ``try_to_load_from_cache`` which is read-only and never
     triggers a download. Returns a dict with the per-file cache
@@ -913,26 +979,25 @@ def _model_cache_status(
     """
     from huggingface_hub import try_to_load_from_cache
 
-    needs_local_cache = provider == "local"
     files: dict[str, str | None] = {}
-    if needs_local_cache:
-        for filename in filenames:
-            try:
-                path = try_to_load_from_cache(
-                    repo_id=repo_id, filename=filename, cache_dir=cache_dir,
-                )
-            except Exception as exc:  # noqa: BLE001 — observability boundary
-                log_swallowed_error(
-                    "app.routers.setup.model_cache_probe",
-                    exc,
-                )
-                path = None
-            files[filename] = str(path) if path else None
+    for filename in filenames:
+        try:
+            path = try_to_load_from_cache(
+                repo_id=repo_id, filename=filename, cache_dir=cache_dir,
+            )
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.routers.setup.model_cache_probe",
+                exc,
+            )
+            path = None
+        files[filename] = str(path) if path else None
     return {
         "repo": repo_id,
         "provider": provider,
-        "needs_local_cache": needs_local_cache,
-        "cached": not needs_local_cache or all(p is not None for p in files.values()),
+        "role": "fallback" if remote_primary else "primary",
+        "needs_local_cache": True,
+        "cached": all(p is not None for p in files.values()),
         "files": files,
     }
 
@@ -973,18 +1038,26 @@ async def models_status() -> dict:
     cost rather than a hung query.
     """
     import config
+    from utils.quenchforge_client import (
+        is_embeddings_provider_quenchforge,
+        is_rerank_provider_quenchforge,
+    )
 
     rerank_cache = config.RERANK_MODEL_CACHE_DIR or None
     embed_cache = config.EMBEDDING_MODEL_CACHE_DIR or None
-    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
-    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
+    # Same default as every other reader (utils.quenchforge_client,
+    # core.utils.inference_routing) — "local" was this module's own invention.
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "sidecar").strip().lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "sidecar").strip().lower()
     reranker = _model_cache_status(
         config.RERANK_CROSS_ENCODER_MODEL, _RERANKER_FILES, rerank_cache,
         provider=rerank_provider,
+        remote_primary=is_rerank_provider_quenchforge(),
     )
     embedder = _model_cache_status(
         config.EMBEDDING_MODEL, _EMBEDDER_FILES, embed_cache,
         provider=embed_provider,
+        remote_primary=is_embeddings_provider_quenchforge(),
     )
     reranker["loading"] = _is_loading("reranker")
     embedder["loading"] = _is_loading("embedder")
@@ -1007,55 +1080,59 @@ async def models_preload() -> dict:
     import asyncio
     import time
 
+    from utils.quenchforge_client import (
+        is_embeddings_provider_quenchforge,
+        is_rerank_provider_quenchforge,
+    )
+
     started = time.perf_counter()
     result: dict = {"status": "ok"}
-    rerank_provider = (os.getenv("RERANK_PROVIDER") or "local").lower()
-    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "local").lower()
+    rerank_provider = (os.getenv("RERANK_PROVIDER") or "sidecar").strip().lower()
+    embed_provider = (os.getenv("EMBEDDINGS_PROVIDER") or "sidecar").strip().lower()
 
-    # Reranker
-    if rerank_provider != "local":
-        result["reranker_status"] = "remote_provider"
-        result["reranker_provider"] = rerank_provider
-        result["reranker_ms"] = 0.0
-    else:
-        try:
-            from core.retrieval.reranker import _load_model as _load_reranker
+    # Reranker — warmed whatever the configured provider is. The in-process
+    # ONNX cross-encoder is the end of the fallback chain, so a remote provider
+    # makes it the model that serves whenever the GPU lane is down; skipping
+    # the preload there charged that download to the first real query.
+    result["reranker_provider"] = rerank_provider
+    result["reranker_role"] = "fallback" if is_rerank_provider_quenchforge() else "primary"
+    try:
+        from core.retrieval.reranker import _load_model as _load_reranker
 
-            rt0 = time.perf_counter()
-            await asyncio.to_thread(_load_reranker)
-            result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
-            result["reranker_status"] = "loaded"
-        except Exception as exc:  # noqa: BLE001 — observability boundary
-            log_swallowed_error("app.routers.setup.preload_reranker", exc)
-            result["reranker_status"] = "failed"
-            result["reranker_error"] = str(exc)
-            result["status"] = "partial"
+        rt0 = time.perf_counter()
+        await asyncio.to_thread(_load_reranker)
+        result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
+        result["reranker_status"] = "loaded"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.setup.preload_reranker", exc)
+        result["reranker_status"] = "failed"
+        result["reranker_error"] = str(exc)
+        result["status"] = "partial"
 
     # Embedder — only when EMBEDDING_MODEL is a HuggingFace ONNX model
     # (when it equals the ChromaDB server default the embedding happens
     # server-side and there's nothing to preload here).
-    if embed_provider != "local":
-        result["embedder_status"] = "remote_provider"
-        result["embedder_provider"] = embed_provider
-        result["embedder_ms"] = 0.0
-    else:
-        try:
-            from core.utils.embeddings import get_embedding_function
+    result["embedder_provider"] = embed_provider
+    result["embedder_role"] = (
+        "fallback" if is_embeddings_provider_quenchforge() else "primary"
+    )
+    try:
+        from core.utils.embeddings import get_embedding_function
 
-            ef = await asyncio.to_thread(get_embedding_function)
-            if ef is None:
-                result["embedder_status"] = "skipped_server_side"
-                result["embedder_ms"] = 0.0
-            else:
-                et0 = time.perf_counter()
-                await asyncio.to_thread(ef._load)
-                result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
-                result["embedder_status"] = "loaded"
-        except Exception as exc:  # noqa: BLE001 — observability boundary
-            log_swallowed_error("app.routers.setup.preload_embedder", exc)
-            result["embedder_status"] = "failed"
-            result["embedder_error"] = str(exc)
-            result["status"] = "partial"
+        ef = await asyncio.to_thread(get_embedding_function)
+        if ef is None:
+            result["embedder_status"] = "skipped_server_side"
+            result["embedder_ms"] = 0.0
+        else:
+            et0 = time.perf_counter()
+            await asyncio.to_thread(ef._load)
+            result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
+            result["embedder_status"] = "loaded"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.setup.preload_embedder", exc)
+        result["embedder_status"] = "failed"
+        result["embedder_error"] = str(exc)
+        result["status"] = "partial"
 
     result["total_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return result

@@ -10,13 +10,19 @@ router's env-file writer (the file compose feeds back into the container
 environment via ``env_file:``), and ``config/features.py`` boots
 ``FEATURE_TIER = os.getenv("CERID_TIER", "community")`` — so a restart
 re-derives the persisted tier.
+
+The endpoint only persists a tier the server is entitled to (F034), so these
+tests run with an active enterprise license in Redis; the unentitled case has
+its own file, ``test_settings_tier_entitlement.py``.
 """
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -52,12 +58,38 @@ def env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return env_file
 
 
-@pytest.fixture()
-def client() -> TestClient:
-    from app.routers.settings import router
+class _LicensedRedis:
+    """Minimal Redis stand-in holding an active enterprise license."""
 
+    def __init__(self) -> None:
+        import app.routers.license as lic
+
+        self._data = {
+            lic._LICENSE_STATUS: json.dumps({
+                "active": True,
+                "tier": "enterprise",
+                "expires_at": int(time.time()) + 86400,
+            }),
+        }
+
+    def get(self, key: str):
+        return self._data.get(key)
+
+    def set(self, key: str, value) -> None:
+        self._data[key] = str(value)
+
+    def delete(self, *keys: str) -> None:
+        for k in keys:
+            self._data.pop(k, None)
+
+
+@pytest.fixture()
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    import app.routers.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "get_redis", _LicensedRedis)
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(settings_mod.router)
     return TestClient(app)
 
 

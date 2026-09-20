@@ -112,3 +112,179 @@ async def test_confidence_clamped_to_unit_interval():
         out = await agent_query_full(query="q", external_augmentation=False)
 
     assert 0.0 <= out["confidence"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# The wired CRAG merge (F111)
+#
+# Every test above that touches external augmentation neutralises it first:
+# the registry is set to None, or agent_query_full is replaced wholesale, or
+# source_breakdown is hand-seeded before the assert. So the suite has 7801
+# green tests and zero of them ever run the merge with a registry attached —
+# which is the only configuration a real deployment runs in.
+#
+# These wire a registry and let the real augment_external_crag execute against
+# the shape agent_query actually returns (`results` + `sources`, no
+# `source_breakdown` — see _agent_query_impl's result_dict).
+# ---------------------------------------------------------------------------
+
+
+class _FakeExternalRegistry:
+    """Minimal stand-in for the app-layer DataSourceRegistry."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.calls = 0
+
+    async def query_all(self, search_terms, domain=None, timeout=None):
+        self.calls += 1
+        return self._rows
+
+
+@pytest.fixture
+def wired_crag():
+    """Attach an external registry + extractor, and detach afterwards.
+
+    The DI seam is module-global; leaving it wired would silently change every
+    later test in the session.
+    """
+    from core.agents import crag
+
+    def _wire(rows):
+        registry = _FakeExternalRegistry(rows)
+        crag.set_external_source_registry(registry)
+        crag.set_search_term_extractor(lambda q: q)
+        return registry
+
+    yield _wire
+    crag.set_external_source_registry(None)
+    crag.set_search_term_extractor(None)
+
+
+def _legacy_kb_result():
+    """The shape ``_agent_query_impl`` returns: no ``source_breakdown`` key.
+
+    Relevance is below the CRAG threshold so the gate fires — that is the
+    configuration in which the merge runs.
+    """
+    kb_rows = [
+        {"content": "vesting schedule", "relevance": 0.30, "artifact_id": "a1",
+         "filename": "equity.md", "source_type": "kb", "domain": "documents"},
+        {"content": "cliff date", "relevance": 0.22, "artifact_id": "a2",
+         "filename": "equity.md", "source_type": "kb", "domain": "documents"},
+    ]
+    return {
+        "context": "vesting schedule\ncliff date",
+        "sources": kb_rows,
+        "results": kb_rows,
+        "confidence": 0.26,
+        "total_results": 2,
+        "domains_searched": ["documents"],
+    }
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "F104: augment_external_crag rebuilds the envelope with "
+        "QueryEnvelope.from_legacy_result, which reads kb/memory/external "
+        "ONLY from result['source_breakdown']. agent_query does not emit that "
+        "key, so every KB result is dropped and the response contains the "
+        "external hits alone. Remove this marker in the commit that fixes "
+        "crag.py."
+    ),
+)
+@pytest.mark.asyncio
+async def test_wired_crag_merge_keeps_every_kb_result(wired_crag):
+    from core.agents.query_agent import agent_query_full
+
+    wired_crag([
+        {"content": "IRS 83(b) overview", "title": "83(b)", "url": "https://x/1",
+         "source_name": "irs", "relevance": 0.9},
+    ])
+
+    with patch(
+        "core.agents.query_agent.agent_query",
+        new=AsyncMock(return_value=_legacy_kb_result()),
+    ):
+        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+
+    kept = {r.get("artifact_id") for r in out["results"] if r.get("source_type") == "kb"}
+    assert kept == {"a1", "a2"}, (
+        "the KB hits the query already found were dropped by the external merge"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="F104 — same root cause as the test above; see crag.py.",
+)
+@pytest.mark.asyncio
+async def test_wired_crag_merge_holds_the_flatten_invariant(wired_crag):
+    """``results == flatten(source_breakdown)`` asserted against a real merge.
+
+    The envelope tests assert this against hand-built dicts, which cannot
+    fail: they seed both sides from the same literal.
+    """
+    from core.agents.query_agent import agent_query_full
+
+    wired_crag([
+        {"content": "IRS 83(b) overview", "title": "83(b)", "url": "https://x/1",
+         "source_name": "irs", "relevance": 0.9},
+    ])
+
+    with patch(
+        "core.agents.query_agent.agent_query",
+        new=AsyncMock(return_value=_legacy_kb_result()),
+    ):
+        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+
+    breakdown = out["source_breakdown"]
+    assert len(out["results"]) == sum(len(v) for v in breakdown.values())
+    assert len(breakdown["kb"]) == 2
+    assert len(breakdown["external"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_wired_crag_fires_and_appends_the_external_hit(wired_crag):
+    """Control for the two above: the registry IS reached and its rows do
+    arrive. Without this, a merge that returned the KB results untouched by
+    never firing at all would look like a fix."""
+    from core.agents.query_agent import agent_query_full
+
+    registry = wired_crag([
+        {"content": "IRS 83(b) overview", "title": "83(b)", "url": "https://x/1",
+         "source_name": "irs", "relevance": 0.9},
+    ])
+
+    with patch(
+        "core.agents.query_agent.agent_query",
+        new=AsyncMock(return_value=_legacy_kb_result()),
+    ):
+        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+
+    assert registry.calls == 1
+    external = [r for r in out["results"] if r.get("source_type") == "external"]
+    assert len(external) == 1
+    assert external[0]["source_url"] == "https://x/1"
+
+
+@pytest.mark.asyncio
+async def test_wired_crag_does_not_fire_on_a_strong_kb_hit(wired_crag):
+    """The gate's other half: a confident KB answer must not pay for network
+    I/O, and must come back byte-identical."""
+    from core.agents.query_agent import agent_query_full
+
+    registry = wired_crag([{"content": "unused", "source_name": "irs"}])
+    strong = _legacy_kb_result()
+    for row in strong["results"]:
+        row["relevance"] = 0.95
+
+    with patch(
+        "core.agents.query_agent.agent_query",
+        new=AsyncMock(return_value=strong),
+    ):
+        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+
+    assert registry.calls == 0
+    assert [r["artifact_id"] for r in out["results"]] == ["a1", "a2"]
