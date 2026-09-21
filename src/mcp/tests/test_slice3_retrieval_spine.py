@@ -268,3 +268,26 @@ async def test_non_streaming_summary_includes_overall_confidence():
     assert summary["assessed"] == 2  # uncertain excluded
     # (0.9 + 0.8) / 2 = 0.85
     assert summary["overall_confidence"] == pytest.approx(0.85, abs=1e-3)
+
+
+def test_crag_gate_holds_a_long_intent_to_its_own_window():
+    """"This month" is answered by anything from this month. The fixed 7-day
+    floor treated a 20-day-old KB hit as stale and fired external over it."""
+    from core.agents.crag import should_fire_external_crag
+
+    strong = {"results": [{"relevance": 0.9}]}
+    common = dict(ext_on=True, kb_result=strong, threshold=0.5,
+                  temporal_intent_days=30, staleness_window_days=7)
+    assert should_fire_external_crag(**common, freshest_kb_age_days=20.0) is False
+    assert should_fire_external_crag(**common, freshest_kb_age_days=40.0) is True
+
+
+def test_crag_gate_keeps_the_floor_for_a_short_intent():
+    """"Today" still means a week-old KB row is stale."""
+    from core.agents.crag import should_fire_external_crag
+
+    strong = {"results": [{"relevance": 0.9}]}
+    assert should_fire_external_crag(
+        ext_on=True, kb_result=strong, threshold=0.5,
+        temporal_intent_days=1, freshest_kb_age_days=10.0, staleness_window_days=7,
+    ) is True

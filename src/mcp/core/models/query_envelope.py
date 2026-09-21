@@ -130,10 +130,17 @@ class QueryEnvelope:
     def from_legacy_result(cls, result: dict[str, Any]) -> "QueryEnvelope":
         """Reconstruct envelope from an already-assembled result dict.
 
-        Used when a downstream call (`agent_query`) produced a dict that we
-        need to mutate via the envelope API. Idempotent when the result was
-        already produced by ``to_dict``.
+        Idempotent for a dict that ``to_dict`` produced. It rebuilds the
+        kb/memory/external lists ONLY from ``source_breakdown``, so a dict that
+        carries rows without one — the shape ``agent_query`` returns — would
+        come back empty. That silent total loss was F104; refuse instead.
         """
+        if not result.get("source_breakdown") and (result.get("results") or result.get("sources")):
+            raise ValueError(
+                "from_legacy_result needs source_breakdown to rebuild kb/memory/"
+                "external; this dict has rows but no breakdown, so rebuilding it "
+                "would drop every one of them (F104). Append to the dict instead."
+            )
         sb = result.get("source_breakdown") or {}
         ss = result.get("source_status") or {}
 

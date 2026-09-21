@@ -55,6 +55,8 @@ RETURN count(v) AS orphans
 
 def _collection_name(c: Any) -> str | None:
     """Pull the collection name regardless of driver return shape."""
+    if isinstance(c, str):  # chromadb clients that list names, not Collection objects
+        return c
     if isinstance(c, dict):
         return c.get("name")
     return getattr(c, "name", None)
@@ -360,6 +362,108 @@ def run_startup_dim_check() -> list[dict[str, Any]]:
         log_swallowed_error('app.startup.invariants', exc)
         _startup_logger.info("startup dim check skipped (non-fatal): %s", exc)
         return []
+
+
+# Measured 2026-09-21 across every non-empty collection on the personal stack:
+# a stored chunk re-embedded by the serving model scores 0.999-1.000, while the
+# same text through the other 768-dim model (nomic vs snowflake-arctic) scores
+# -0.05 to 0.03. Same width, orthogonal spaces — which is why the dim check
+# above cannot see a provider flip. 0.9 sits far from both.
+_VECTOR_SPACE_MIN_SELF_SIM = 0.9
+_VECTOR_SPACE_SAMPLE = 3
+
+_vector_space_snapshot: dict[str, Any] = {"status": "pending"}
+
+
+def _cosine(a: Any, b: Any) -> float:
+    import numpy as np
+
+    va, vb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
+    return float(va @ vb / denom) if denom else 0.0
+
+
+def probe_vector_space(client: Any, embed: Any, sample: int = _VECTOR_SPACE_SAMPLE) -> dict[str, Any]:
+    """Re-embed a few stored chunks per collection with the serving embedder and
+    require each lands back on its own stored vector.
+
+    This checks the invariant that the per-chunk ``embedding_model`` stamp and
+    the ONNX revision pin only assert: that queries and documents share one
+    vector space. The stamps cannot be trusted for it — chunks written before
+    ``serving_embedding_model`` existed record the ONNX config name even when
+    Quenchforge produced the vector.
+    """
+    import statistics
+
+    checked = 0
+    mismatched: list[dict[str, Any]] = []
+    for c in client.list_collections():
+        name = _collection_name(c) or "<unknown>"
+        try:
+            # Keyword-only: app.deps' _EmbeddingAwareClient takes **kwargs, so a
+            # positional name raised, was swallowed, and left every collection
+            # unprobed — the check reported "unverified" forever.
+            got = client.get_collection(name=name).get(limit=sample, include=["documents", "embeddings"])
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("app.startup.invariants.probe_vector_space", exc)
+            continue
+        docs = got.get("documents") or []
+        raw = got.get("embeddings")
+        embs = list(raw) if raw is not None else []
+        pairs = [(d, e) for d, e in zip(docs, embs) if d and e is not None]
+        if not pairs:
+            continue
+        fresh = embed([d for d, _ in pairs])
+        median = round(statistics.median(_cosine(e, f) for (_, e), f in zip(pairs, fresh)), 3)
+        checked += 1
+        if median < _VECTOR_SPACE_MIN_SELF_SIM:
+            mismatched.append({"collection": name, "median_self_similarity": median})
+    if not checked:
+        return {"status": "unverified", "reason": "no stored chunks to sample", "collections_checked": 0}
+    return {
+        "status": "mismatch" if mismatched else "ok",
+        "collections_checked": checked,
+        "mismatched": mismatched,
+    }
+
+
+def run_startup_vector_space_check() -> dict[str, Any]:
+    """Boot-time vector-space check; soft-fail like ``run_startup_dim_check``.
+
+    A mismatch means retrieval compares queries against documents from another
+    model and returns near-noise with no error anywhere — the failure a flip of
+    ``EMBEDDINGS_PROVIDER`` would cause on an index built under the other leg.
+    An embedder that cannot run (daemon down at boot) is "unverified", not a
+    mismatch.
+    """
+    global _vector_space_snapshot
+    try:
+        from app.deps import get_chroma
+        from core.utils.embeddings import get_embedding_function
+
+        embed = get_embedding_function()
+        if embed is None:
+            result: dict[str, Any] = {"status": "unverified", "reason": "server-side embedding"}
+        else:
+            result = probe_vector_space(get_chroma(), embed)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("app.startup.invariants.vector_space", exc)
+        result = {"status": "unverified", "reason": str(exc)[:200]}
+    if result.get("status") == "mismatch":
+        _startup_logger.error(
+            "embedding_vector_space_mismatch: %s — the serving embedder does not reproduce "
+            "the stored vectors; queries are being compared across two models. Restore the "
+            "embedder the index was built with, or re-embed.",
+            result.get("mismatched"),
+        )
+    _vector_space_snapshot = result
+    return result
+
+
+def get_vector_space_snapshot() -> dict[str, Any]:
+    return dict(_vector_space_snapshot)
 
 
 def _probe_nli() -> dict[str, Any]:

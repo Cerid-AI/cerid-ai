@@ -183,17 +183,6 @@ def _legacy_kb_result():
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "F104: augment_external_crag rebuilds the envelope with "
-        "QueryEnvelope.from_legacy_result, which reads kb/memory/external "
-        "ONLY from result['source_breakdown']. agent_query does not emit that "
-        "key, so every KB result is dropped and the response contains the "
-        "external hits alone. Remove this marker in the commit that fixes "
-        "crag.py."
-    ),
-)
 @pytest.mark.asyncio
 async def test_wired_crag_merge_keeps_every_kb_result(wired_crag):
     from core.agents.query_agent import agent_query_full
@@ -215,10 +204,6 @@ async def test_wired_crag_merge_keeps_every_kb_result(wired_crag):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F104 — same root cause as the test above; see crag.py.",
-)
 @pytest.mark.asyncio
 async def test_wired_crag_merge_holds_the_flatten_invariant(wired_crag):
     """``results == flatten(source_breakdown)`` asserted against a real merge.
@@ -288,3 +273,35 @@ async def test_wired_crag_does_not_fire_on_a_strong_kb_hit(wired_crag):
 
     assert registry.calls == 0
     assert [r["artifact_id"] for r in out["results"]] == ["a1", "a2"]
+
+
+@pytest.mark.asyncio
+async def test_wired_crag_merge_keeps_every_field_the_envelope_does_not_model(wired_crag):
+    """The merge must not launder KB rows through SourceItem either.
+
+    ``sources`` (context-included citations) and ``results`` (raw chunks) are
+    different lists in the shape agent_query returns, and both carry fields
+    SourceItem drops — chunk_index, pack_id, custom metadata, and ``wiki`` as a
+    source_type. A fix that rebuilt the rows through the envelope would keep
+    the artifact ids and still lose these.
+    """
+    from core.agents.query_agent import agent_query_full
+
+    wired_crag([{"content": "web", "url": "https://x/1", "source_name": "irs", "relevance": 0.5}])
+    kb = _legacy_kb_result()
+    kb["results"] = [
+        {**kb["results"][0], "chunk_index": 3, "pack_id": "p1", "metadata": {"k": "v"}},
+        {**kb["results"][1], "source_type": "wiki"},
+    ]
+    kb["sources"] = [{**kb["results"][0], "content": "vesting…"}]
+
+    with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=kb)):
+        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+
+    assert out["results"][0]["chunk_index"] == 3
+    assert out["results"][0]["pack_id"] == "p1"
+    assert out["results"][0]["metadata"] == {"k": "v"}
+    assert out["results"][1]["source_type"] == "wiki"
+    assert out["sources"][0]["content"] == "vesting…", "sources collapsed into results"
+    assert len(out["sources"]) == 2 and len(out["results"]) == 3
+    assert [r["artifact_id"] for r in out["source_breakdown"]["kb"]] == ["a1", "a2"]

@@ -113,7 +113,13 @@ def should_fire_external_crag(
     if temporal_intent_days is not None:
         if staleness_window_days is None:
             staleness_window_days = getattr(config, "CRAG_STALENESS_WINDOW_DAYS", 7)
-        if freshest_kb_age_days is None or freshest_kb_age_days > staleness_window_days:
+        # A query that names its own window ("this month", "this year") is
+        # answered by anything inside that window, so hold it to that window
+        # rather than the 7-day floor, which treated in-window KB rows as stale
+        # and fired external over a strong hit. Short intents (today, this
+        # week, recent) still sit on the floor.
+        window = max(staleness_window_days, temporal_intent_days)
+        if freshest_kb_age_days is None or freshest_kb_age_days > window:
             return True
 
     return False
@@ -185,7 +191,6 @@ async def augment_external_crag(
         from core.models.external_evidence import ExternalEvidence
         from core.models.query_envelope import QueryEnvelope, SourceItem
 
-        env = QueryEnvelope.from_legacy_result(result)
         items = []
         for r in ext_results:
             ev = ExternalEvidence.from_mapping(r)
@@ -202,6 +207,40 @@ async def augment_external_crag(
                 source_url=ev.url,
                 source_name=ev.source_name or ev.title,
             ))
-        env.merge_external(items)
-        result = env.to_dict()
+        if result.get("source_breakdown"):
+            env = QueryEnvelope.from_legacy_result(result)
+            env.merge_external(items)
+            result = env.to_dict()
+        else:
+            result = _append_external(result, [i.to_dict() for i in items])
     return result
+
+
+def _append_external(result: dict, external: list[dict]) -> dict:
+    """Merge external rows into the dict ``agent_query`` returns, dropping nothing.
+
+    That dict carries no ``source_breakdown``. Its ``results`` are the raw
+    chunks and its ``sources`` the context-included citations — two different
+    lists, both carrying fields ``SourceItem`` does not model (chunk_index,
+    created_at, pack_id, custom metadata, table provenance, and ``wiki`` as a
+    source_type). Rebuilding it through ``QueryEnvelope.from_legacy_result``
+    found no breakdown to read, so every KB row vanished and the caller got the
+    external hits alone (F104). Append instead, and derive the breakdown from
+    ``results`` so ``results == flatten(source_breakdown)`` holds.
+    """
+    results = [*result.get("results", []), *external]
+    sources = [*result.get("sources", []), *external]
+    out = dict(result)
+    out["results"] = results
+    out["sources"] = sources
+    out["total_results"] = len(results)
+    out["source_breakdown"] = {
+        "kb": [r for r in results if r.get("source_type", "kb") not in ("memory", "external")],
+        "memory": [r for r in results if r.get("source_type") == "memory"],
+        "external": [r for r in results if r.get("source_type") == "external"],
+    }
+    if sources:
+        out["confidence"] = round(
+            sum(float(s.get("relevance", 0.0)) for s in sources) / len(sources), 4,
+        )
+    return out

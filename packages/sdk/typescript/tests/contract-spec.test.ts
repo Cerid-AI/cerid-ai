@@ -207,7 +207,7 @@ const FREE_FORM_SERVER_KEYS: Record<string, string[]> = {
   // app/routers/sdk.py::sdk_ingest
   "/sdk/v1/ingest": ["content", "domain", "tags", "metadata"],
   // app/routers/sdk.py::sdk_ingest_file
-  "/sdk/v1/ingest/file": ["file_path", "domain", "tags"],
+  "/sdk/v1/ingest/file": ["file_path", "domain", "tags", "categorize_mode"],
 };
 
 interface MaximalCase {
@@ -234,13 +234,27 @@ const MAXIMAL_CASES: MaximalCase[] = [
     label: "kb.ingestFile",
     path: "/sdk/v1/ingest/file",
     responseFixture: { status: "success", artifact_id: "a2", chunks: 1, domain: "databases" },
-    invoke: (c) => c.kb.ingestFile({ file_path: "/archive/notes.md", domain: "databases", tags: "pg" }),
+    invoke: (c) =>
+      c.kb.ingestFile({ file_path: "/archive/notes.md", domain: "databases", tags: "pg", categorize_mode: "manual" }),
   },
   {
     label: "kb.search",
     path: "/sdk/v1/search",
     responseFixture: { results: [], total_results: 0, confidence: 0 },
     invoke: (c) => c.kb.search({ query: "q", domain: "general", top_k: 3, exclude_packs: true }),
+  },
+  {
+    // context_sources is the only field that keeps open-web rows out. It was in
+    // the spec and missing from QueryRequest, while source_config (read only in
+    // custom_smart mode) was there — so consumers set the inert one.
+    label: "kb.query source gates",
+    path: "/sdk/v1/query",
+    responseFixture: { context: "c", sources: [], confidence: 0.5 },
+    invoke: (c) =>
+      c.kb.query({
+        query: "q", domains: ["finance"], strict_domains: true,
+        context_sources: { kb: true, memory: true, external: false },
+      }),
   },
 ];
 

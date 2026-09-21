@@ -2,6 +2,84 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [1.0.7] — 2026-09-21
+
+A correctness release. Two changes decide what a caller gets back. When the
+knowledge base answered weakly and web augmentation stepped in, the
+knowledge-base results were thrown away instead of kept beside the web ones.
+And a consumer scoped to one domain could read every other domain through
+`/sdk/v1/search`.
+
+### Retrieval
+
+- **Web augmentation no longer discards the knowledge-base results.** When the
+  best knowledge-base match scored below `RETRIEVAL_QUALITY_THRESHOLD`, external
+  sources were fetched and merged by rebuilding the response from a field the
+  query path never emits, so every knowledge-base row was dropped and the caller
+  got the web rows alone. External rows are now appended beside the
+  knowledge-base results, with every field of those results intact (chunk index,
+  pack, custom metadata, table provenance, and `wiki` as a source type). On eight
+  representative personal-finance questions, six had been answered from web
+  results only while the knowledge base held one to six relevant rows. The
+  response rebuild now refuses such input rather than returning an empty result.
+- **A query that names its own time window is held to that window.** "This
+  month", "last month" and "this year" were compared against the fixed 7-day
+  staleness floor, so a knowledge-base hit from earlier in the window counted as
+  stale and web sources were fetched over it. The window is now the longer of
+  the floor and the query's own; "today", "this week" and "recent" are
+  unchanged.
+- **`/sdk/v1/search` honours the consumer's domain grant.** It took the
+  requested domain verbatim, so a consumer scoped to one domain read every
+  domain by calling search instead of query — including operational domains the
+  taxonomy deliberately leaves out. It now resolves the same request context as
+  `/sdk/v1/query`: a domain outside the grant returns 403
+  `consumer_domain_restricted`, and `top_k` is honoured.
+- A consumer that is not in the registry is scoped to `general`, where it
+  previously received every domain.
+
+### Health and startup
+
+- **A boot-time check that queries and stored documents share one vector
+  space.** Two different 768-dimension embedding models produce vectors the
+  dimension check cannot tell apart, and comparing across them returns
+  near-random results without an error. At startup a few stored chunks per
+  collection are re-embedded with the serving embedder and must reproduce their
+  stored vectors. The result is reported on `/health` under
+  `invariants.embedding_vector_space`; a mismatch marks the status degraded at
+  HTTP 200, because a restart cannot change which model built the index.
+- **`/health` requires the API key when the service is bound off-loopback.**
+  Part of a fail-closed auth boundary: on a non-loopback bind without a
+  configured key the service refuses to start instead of serving openly. Use
+  `/health/ping` as the unauthenticated liveness probe.
+
+### SDK — `cerid-sdk` / `@cerid-ai/sdk` 0.2.0, wire protocol 1.2.0
+
+- `context_sources` on query (`{"kb": true, "memory": true, "external": false}`)
+  keeps web results out. It is the only request field that gates a whole
+  retrieval surface; `strict_domains` narrows the knowledge base's own domain
+  bleed and never touches the web.
+- A 403 on a restricted domain raises `DomainRestrictedError` instead of reading
+  as an empty result. Memory recall carries `degraded: true` when recall failed,
+  so an outage is no longer indistinguishable from "no memories".
+- Query no longer accepts `conversation_id`, which the server ignored; file
+  ingest accepts `categorize_mode`, which the route now reads. Full notes in
+  each package's own changelog.
+
+### Setup
+
+- `./scripts/start-cerid.sh --build` works where the system `python3` is older
+  than 3.11 and where the install path contains a space. Three separate
+  defects: the version file was generated with the system interpreter, a
+  compose file list was split at the space in the path, and a failed version
+  write blanked the existing file instead of leaving it.
+
+### Dependencies
+
+- `structlog` 26.1.0, `uvicorn` 0.53.0 and `apscheduler` floors; the web app's
+  npm group including `lucide-react` 1.45; `@playwright/test` 1.63.0; the
+  widget and browser-extension npm groups; `cloudflared` 2026.9.1 and `searxng`
+  2026.9.16 images.
+
 ## [1.0.6] — 2026-09-13
 
 A maintenance release. The retrieval fix is the one that changes behaviour a

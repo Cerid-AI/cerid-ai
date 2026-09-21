@@ -466,6 +466,18 @@ DEAD_PARAM_CASES: list[tuple[str, str, Callable[[CeridClient], Any], dict[str, A
         {"context": "c", "sources": [], "confidence": 0.5},
     ),
     (
+        # context_sources is the only field that keeps open-web rows out; it was
+        # in the spec and missing from both SDKs, so consumers reached for
+        # source_config, which the server reads only in custom_smart mode.
+        "kb.query source gates",
+        "/sdk/v1/query",
+        lambda c: c.kb.query(
+            "q", domains=["finance"], strict_domains=True,
+            context_sources={"kb": True, "memory": True, "external": False},
+        ),
+        {"context": "c", "sources": [], "confidence": 0.5},
+    ),
+    (
         "kb.search",
         "/sdk/v1/search",
         lambda c: c.kb.search("q", domain="general", top_k=3),
@@ -671,3 +683,17 @@ def test_sdk_protocol_version_matches_spec_version() -> None:
         "docs/openapi-sdk-v1.json's info.version — bump both together "
         "(see CONTRIBUTING.md 'SDK contract & versioning')."
     )
+
+
+@pytest.mark.parametrize("method", ["query"])
+def test_query_takes_no_conversation_id(method: str) -> None:
+    """f7b6f499 took conversation_id off kb.query() because the server's query
+    request has no such field and dropped it silently; the 2026-09-20 merge of
+    two independently built 0.2.0 trees put it back. The dead-param test only
+    fires when a caller passes it, so pin the signature itself."""
+    import inspect
+
+    from cerid.resources.kb import AsyncKBResource, KBResource
+
+    for cls in (KBResource, AsyncKBResource):
+        assert "conversation_id" not in inspect.signature(getattr(cls, method)).parameters, cls

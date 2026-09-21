@@ -46,20 +46,26 @@ class KBResource:
         *,
         domains: Optional[List[str]] = None,
         top_k: int = 5,
-        conversation_id: Optional[str] = None,
         rag_mode: Optional[str] = None,
         strict_domains: Optional[bool] = None,
+        context_sources: Optional[Dict[str, bool]] = None,
         model: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> QueryResponse:
-        """Multi-domain KB search with hybrid BM25+vector retrieval."""
+        """Multi-domain KB search with hybrid BM25+vector retrieval.
+
+        ``context_sources`` gates whole retrieval surfaces, e.g.
+        ``{"kb": True, "memory": True, "external": False}`` to keep open-web
+        results out. It is the only request field that does: ``strict_domains``
+        narrows the KB's own domain bleed and never touches the web.
+        """
         body = self._client._build_json(
             query=query,
             domains=domains,
             top_k=top_k,
-            conversation_id=conversation_id,
             rag_mode=rag_mode,
             strict_domains=strict_domains,
+            context_sources=context_sources,
             model=model,
         )
         resp = self._http.post(
@@ -237,20 +243,26 @@ class AsyncKBResource:
         *,
         domains: Optional[List[str]] = None,
         top_k: int = 5,
-        conversation_id: Optional[str] = None,
         rag_mode: Optional[str] = None,
         strict_domains: Optional[bool] = None,
+        context_sources: Optional[Dict[str, bool]] = None,
         model: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> QueryResponse:
-        """Multi-domain KB search with hybrid BM25+vector retrieval."""
+        """Multi-domain KB search with hybrid BM25+vector retrieval.
+
+        ``context_sources`` gates whole retrieval surfaces, e.g.
+        ``{"kb": True, "memory": True, "external": False}`` to keep open-web
+        results out. It is the only request field that does: ``strict_domains``
+        narrows the KB's own domain bleed and never touches the web.
+        """
         body = self._client._build_json(
             query=query,
             domains=domains,
             top_k=top_k,
-            conversation_id=conversation_id,
             rag_mode=rag_mode,
             strict_domains=strict_domains,
+            context_sources=context_sources,
             model=model,
         )
         resp = await self._http.post(

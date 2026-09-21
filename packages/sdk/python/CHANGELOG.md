@@ -16,8 +16,6 @@ quickstart, so the practical advice is to upgrade rather than pin.
   passing `claims=[...]` believed it was skipping claim extraction; it was not.
 - **`kb.query()` no longer accepts `conversation_id`.** Not a field on the
   query request either — queries were never correlated per conversation.
-- **`kb.ingest_file()` no longer accepts `categorize_mode`.** The route reads
-  `file_path`, `domain` and `tags` and nothing else.
 - **`conversation_id` is now required** on `verify.check()` and
   `memory.extract()`. The server requires it (`min_length=1`), so the previous
   optional parameter made the documented default call a guaranteed 422.
@@ -39,6 +37,14 @@ quickstart, so the practical advice is to upgrade rather than pin.
 
 ### Added
 
+- `context_sources` on `kb.query()` — e.g. `{"kb": True, "memory": True,
+  "external": False}` keeps open-web rows out. It is the only request field
+  that gates a whole retrieval surface; `strict_domains` narrows the KB's own
+  domain bleed and never touches the web. The server has always read it; no
+  SDK exposed it, so consumers reached for fields that do nothing here.
+- `categorize_mode` on `kb.ingest_file()` is read by the route again (an
+  earlier draft of this release said it was removed while the server ignored
+  it; the route now honours it).
 - `mode` and `nli_skipped` on `HallucinationResponse` — `nli_skipped` is the
   server's signal for whether to render a hedged or an authoritative verdict.
 - `exclude_packs` on `kb.search()` — personal-first retrieval, previously
