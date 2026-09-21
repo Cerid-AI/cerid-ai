@@ -22,7 +22,12 @@ else
 fi
 
 # MCP health check (fast, non-blocking)
-if curl -sf --max-time 2 http://localhost:8888/health >/dev/null 2>&1; then
+# /health/ping, not /health: the fail-closed auth boundary requires X-API-Key
+# on /health when the stack is bound off-loopback (LAN mode), so an
+# unauthenticated probe there 401s and `curl -sf` reports a healthy stack as
+# down. /health/ping is the unauthenticated liveness probe, and is what CI and
+# start-cerid.sh already use.
+if curl -sf --max-time 2 http://localhost:8888/health/ping >/dev/null 2>&1; then
   echo "MCP Server: healthy (port 8888)"
 else
   echo "MCP Server: not responding (port 8888)"

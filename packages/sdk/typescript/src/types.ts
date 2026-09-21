@@ -45,6 +45,13 @@ export interface QueryRequest {
   model?: string | null;
   enable_self_rag?: boolean | null;
   strict_domains?: boolean | null;
+  /**
+   * Gates whole retrieval surfaces, e.g. `{ kb: true, memory: true, external: false }`
+   * to keep open-web results out. The only request field that does:
+   * `strict_domains` narrows the KB's own domain bleed and never touches the web,
+   * and `source_config` only tunes weights for `rag_mode: "custom_smart"`.
+   */
+  context_sources?: { kb?: boolean; memory?: boolean; external?: boolean } | null;
   rag_mode?: string | null;
   source_config?: Record<string, unknown> | null;
 }
@@ -101,6 +108,8 @@ export interface IngestFileRequest {
   file_path: string;
   domain?: string;
   tags?: string;
+  /** Categorization tier, e.g. "manual", "smart" or "pro". Empty uses the server default. */
+  categorize_mode?: string;
 }
 
 export interface SearchRequest {

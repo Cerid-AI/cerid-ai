@@ -642,7 +642,12 @@ def _invariants_snapshot() -> dict:
             except Exception as exc:
                 log_swallowed_error('app.routers.health', exc)
                 snap["source_ingest_fn_wired"] = False
-            from app.startup.invariants import _probe_chroma, _probe_nli, healthy_from
+            from app.startup.invariants import (
+                _probe_chroma,
+                _probe_nli,
+                get_vector_space_snapshot,
+                healthy_from,
+            )
             try:
                 if chroma is not None:
                     snap.update(_probe_chroma(chroma))
@@ -653,6 +658,7 @@ def _invariants_snapshot() -> dict:
                     errs.append(f"chroma: {exc}")
             snap.update(_probe_nli())
             snap["healthy_invariants"] = healthy_from(snap)
+            snap["embedding_vector_space"] = get_vector_space_snapshot()
             snap["mcp"] = _mcp_tool_summary()
             return snap
         # Task 5: run_invariants() (the divergence probe's Chroma gets) runs
@@ -662,12 +668,18 @@ def _invariants_snapshot() -> dict:
         # recomputed on every rebuild below, so a background snapshot frozen
         # mid-refresh (e.g. a cold model cache at boot) can't pin /health at
         # 503 for a whole INVARIANTS_REFRESH_S cycle after the model loads.
-        from app.startup.invariants import _probe_nli, get_invariants_snapshot, healthy_from
+        from app.startup.invariants import (
+            _probe_nli,
+            get_invariants_snapshot,
+            get_vector_space_snapshot,
+            healthy_from,
+        )
         snap = get_invariants_snapshot()
         pending = snap.get("status") == "pending"
         snap.update(_probe_nli())
         if not pending:
             snap["healthy_invariants"] = healthy_from(snap)
+        snap["embedding_vector_space"] = get_vector_space_snapshot()
         snap["mcp"] = _mcp_tool_summary()
         return snap
     except Exception as exc:
@@ -1137,6 +1149,12 @@ async def health_check_endpoint():
         result["degraded_lanes"] = degraded_lanes
         if result.get("status") == "healthy":
             result["status"] = "degraded"
+    # A vector-space mismatch returns near-noise retrieval with no error, so it
+    # must be visible — but as "degraded" at 200, never 503: a restart cannot
+    # change which model built the index, so a 503 would restart-loop the stack.
+    space = (result.get("invariants") or {}).get("embedding_vector_space") or {}
+    if space.get("status") == "mismatch" and result.get("status") == "healthy":
+        result["status"] = "degraded"
     if http_status == HTTPStatus.OK:
         return result
     return JSONResponse(content=result, status_code=503)

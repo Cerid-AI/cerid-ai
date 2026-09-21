@@ -82,8 +82,12 @@ _QUERY_PREFIX_MAP: dict[str, str] = {
 # ``main`` moves, and these weights decide every vector in the index: a repo
 # owner retagging silently changes retrieval semantics on the next cold start.
 # EMBEDDING_MODEL_VERSION cannot notice, because it tracks a config string
-# rather than the artifact. The SHA below is the revision the live index was
-# built with. Bump it deliberately, and re-embed when you do.
+# rather than the artifact. The SHA below pins what the in-process ONNX leg
+# loads; bump it deliberately, and re-embed when you do. It says nothing about
+# an index built through Quenchforge (EMBEDDINGS_PROVIDER=quenchforge serves
+# QUENCHFORGE_EMBED_MODEL instead — a different, orthogonal vector space at the
+# same width). What verifies that queries and stored chunks share one space is
+# the boot-time probe in app/startup/invariants.py, not this pin.
 _PINNED_REVISIONS: dict[str, str] = {
     "Snowflake/snowflake-arctic-embed-m-v1.5":
         "e58a8f756156a1293d763f17e3aae643474e9b8a",  # pragma: allowlist secret

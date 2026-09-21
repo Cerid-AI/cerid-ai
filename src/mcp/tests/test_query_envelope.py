@@ -1,3 +1,5 @@
+import pytest
+
 from app.models.query_envelope import QueryEnvelope, SourceItem
 from core.agents.query_agent import _format_chroma_result, assemble_context
 
@@ -225,3 +227,16 @@ def test_assemble_context_does_not_clobber_existing_source_type():
     _, sources, _ = assemble_context(results, max_chars=10000)
     assert sources[0]["source_type"] == "memory"
     assert sources[0]["created_at"] == "2026-06-07"
+
+
+def test_from_legacy_result_refuses_rows_without_a_breakdown():
+    """F104: a dict carrying rows but no source_breakdown used to come back
+    empty — every KB result silently dropped. It must fail loudly instead."""
+    legacy = {
+        "context": "ctx",
+        "results": [{"content": "c", "relevance": 0.5, "artifact_id": "a1",
+                     "filename": "f.md", "source_type": "kb"}],
+        "sources": [],
+    }
+    with pytest.raises(ValueError, match="F104"):
+        QueryEnvelope.from_legacy_result(legacy)

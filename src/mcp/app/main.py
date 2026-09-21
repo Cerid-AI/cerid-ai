@@ -1096,6 +1096,16 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning("Startup dim check errored (non-fatal): %s", e)
 
+    # The dim check cannot see a provider flip: nomic and snowflake-arctic are
+    # both 768-dim. Re-embed a few stored chunks and require they land on
+    # themselves, so a query/document model mismatch is reported, not served.
+    try:
+        from app.startup import run_startup_vector_space_check
+        await asyncio.get_running_loop().run_in_executor(None, run_startup_vector_space_check)
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+        logger.warning("Startup vector-space check errored (non-fatal): %s", e)
+
     # CL-7/AF-012: restore operator-created :Domain nodes into runtime config so a
     # domain added via POST /taxonomy/domain survives a restart — without this its
     # live consumers (ingest domain-clamp, clear_domain, reembed) reverted to the

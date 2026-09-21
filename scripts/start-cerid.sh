@@ -305,11 +305,26 @@ preflight_checks() {
     # self-reports 0.0.0 (or whatever stale artifact the host tree carries).
     # Same logic as `make version-file`; fail-soft: version display is not
     # worth blocking a boot over.
-    if command -v python3 >/dev/null 2>&1; then
-        python3 -c "import tomllib,sys; sys.stdout.write(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" \
-            > src/mcp/VERSION 2>/dev/null \
-            && echo "  Version file: $(cat src/mcp/VERSION)" \
-            || echo "  Warning: could not generate src/mcp/VERSION (python3 <3.11?); /health will show a fallback version"
+    # Write to a temp file, not straight to VERSION: `> src/mcp/VERSION` is
+    # truncated by the shell BEFORE python runs, so on an interpreter without
+    # tomllib this "fail-soft" branch used to BLANK the version file rather
+    # than leave it alone. Pick an interpreter that can actually parse the
+    # file (the repo venv is 3.12; /usr/bin/python3 on macOS is 3.9).
+    _version_py=""
+    for _p in .venv/bin/python python3.12 python3.11 python3; do
+        if command -v "$_p" >/dev/null 2>&1 && "$_p" -c 'import tomllib' >/dev/null 2>&1; then
+            _version_py="$_p"; break
+        fi
+    done
+    if [ -n "$_version_py" ] \
+       && "$_version_py" -c "import tomllib,sys; sys.stdout.write(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" \
+            > src/mcp/VERSION.tmp 2>/dev/null \
+       && [ -s src/mcp/VERSION.tmp ]; then
+        mv src/mcp/VERSION.tmp src/mcp/VERSION
+        echo "  Version file: $(cat src/mcp/VERSION)"
+    else
+        rm -f src/mcp/VERSION.tmp
+        echo "  Warning: could not generate src/mcp/VERSION (no Python with tomllib, needs 3.11+); keeping existing file"
     fi
 
     # Check required env vars are non-empty
@@ -810,9 +825,14 @@ echo "[build] Generating src/mcp/VERSION file..."
 make version-file
 
 if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
-    COMPOSE_FILES="-f $UNIFIED_COMPOSE"
+    # An ARRAY, not a string: these hold absolute paths, and this repo lives
+    # under "/Volumes/Level 1/…". A string expanded unquoted below splits at
+    # that space and docker receives "/Volumes/Level" as the compose file —
+    # "unknown docker command: compose 1/Develop/…". The flag-only variables
+    # further down carry no paths and stay word-split on purpose.
+    COMPOSE_FILES=(-f "$UNIFIED_COMPOSE")
     if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
-        COMPOSE_FILES="$COMPOSE_FILES -f $LIGHTWEIGHT_OVERRIDE"
+        COMPOSE_FILES+=(-f "$LIGHTWEIGHT_OVERRIDE")
         echo "[unified] Starting services via docker-compose.yml + lightweight override..."
         echo "  Startup order: ChromaDB, Redis → MCP → Web (Neo4j SKIPPED)"
     else
@@ -820,7 +840,7 @@ if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
         echo "  Startup order: Neo4j, ChromaDB, Redis → MCP → Web"
     fi
     echo "  (depends_on healthchecks enforce correct ordering)"
-    docker compose $COMPOSE_FILES --env-file "$ENV_FILE" $OLLAMA_PROFILE up -d $BUILD_FLAG $WEB_RECREATE
+    docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" $OLLAMA_PROFILE up -d $BUILD_FLAG $WEB_RECREATE
 else
     # --- Legacy 4-step startup (preserved for backward compatibility) ---
     echo "[legacy] Starting services in 4-step order..."

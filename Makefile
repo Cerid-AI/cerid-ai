@@ -32,9 +32,19 @@ push: ## Validate FIRST, then push (avoids the hook holding the remote connectio
 	@bash scripts/safe-push.sh $(ARGS)
 
 # -- Build artifacts --
+# `tomllib` is stdlib only on Python 3.11+, and /usr/bin/python3 on macOS is
+# 3.9 — so a bare `python3` here fails with ModuleNotFoundError and takes
+# `start-cerid.sh --build` down with it, which is how this was found. Every
+# other Python call in this file already uses the repo venv; pick the first
+# interpreter that can actually parse the file rather than assuming.
+VERSION_PY := $(shell for p in .venv/bin/python python3.12 python3.11 python3; do \
+	  command -v $$p >/dev/null 2>&1 && $$p -c 'import tomllib' >/dev/null 2>&1 && { echo $$p; break; }; \
+	done)
+
 version-file:
-	@python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" > src/mcp/VERSION
-	@echo "[version-file] wrote $$(cat src/mcp/VERSION)"
+	@[ -n "$(VERSION_PY)" ] || { echo "[version-file] no Python with tomllib (needs 3.11+); tried .venv/bin/python, python3.12, python3.11, python3" >&2; exit 1; }
+	@$(VERSION_PY) -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" > src/mcp/VERSION
+	@echo "[version-file] wrote $$(cat src/mcp/VERSION) (via $(VERSION_PY))"
 
 # -- Validation --
 deps-check:

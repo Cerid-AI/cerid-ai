@@ -11,8 +11,6 @@ quickstart, so the practical advice is to upgrade rather than pin.
 
 ### Breaking
 
-- **`IngestFileRequest.categorize_mode` removed.** The route reads `file_path`,
-  `domain` and `tags`; the field was dropped on arrival.
 - **`memory.extract()` returns a union** of `MemoryExtractResponse` and the new
   `MemoryExtractAcceptedResponse`. On a server with the extraction queue
   enabled the call returns the 202 envelope; narrow with
@@ -32,6 +30,13 @@ quickstart, so the practical advice is to upgrade rather than pin.
 
 ### Added
 
+- `context_sources` on `QueryRequest` — e.g. `{ kb: true, memory: true,
+  external: false }` keeps open-web rows out. It is the only request field that
+  gates a whole retrieval surface: `strict_domains` narrows the KB's own domain
+  bleed and never touches the web, and `source_config` only tunes weights under
+  `rag_mode: "custom_smart"`. The server has always read it; `QueryRequest`
+  exposed only `source_config`, so consumers set the field that does nothing.
+- `categorize_mode` on `IngestFileRequest` — the route reads it.
 - `retryAfter` on `RateLimitError` and `ServiceUnavailableError`, parsed from
   the server's `Retry-After` header (the Python client has always exposed it).
 - `mode` and `nli_skipped` on `HallucinationResponse` — `nli_skipped` says
