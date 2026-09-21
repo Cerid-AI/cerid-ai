@@ -88,7 +88,7 @@ resolve_mcp_network() {
 
 mcp_reachable() {  # $1 = docker network name
   docker run --rm --network "$1" python:3.11-slim \
-    python -c "import urllib.request; urllib.request.urlopen('http://ai-companion-mcp:8888/health', timeout=10)" \
+    python -c "import urllib.request; urllib.request.urlopen('http://ai-companion-mcp:8888/health/ping', timeout=10)" \
     >/dev/null 2>&1
 }
 
@@ -102,7 +102,7 @@ mcp_network_or_skip() {
     return 1
   fi
   if ! mcp_reachable "$net"; then
-    echo "ai-companion-mcp:8888/health unreachable on network '$net' — stack unhealthy or misattached network." >&2
+    echo "ai-companion-mcp:8888/health/ping unreachable on network '$net' — stack unhealthy or misattached network." >&2
     return 1
   fi
   echo "$net"

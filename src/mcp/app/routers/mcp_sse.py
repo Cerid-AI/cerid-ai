@@ -18,6 +18,7 @@ import uuid
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
+import config
 from app.tool_registry import ToolError
 from app.tools import execute_tool, get_all_tools
 from core.utils.version import get_version
@@ -34,6 +35,53 @@ _sessions: dict[str, asyncio.Queue] = {}
 _session_last_seen: dict[str, float] = {}
 _MAX_SESSIONS = 100
 _IDLE_TIMEOUT_S = 5 * 60  # 5 minutes — Claude Code reconnects faster than this
+
+
+# The MCP transport executes tools without an API key, so a browser must
+# never be able to reach it from a page the user merely visited. Two things
+# make that safe: the route sets no CORS headers of its own (CORSMiddleware
+# in main.py owns origin policy, and it only grants origins on this list),
+# and an Origin the policy would not grant is refused outright — a browser
+# always sends one cross-origin, while the MCP clients this transport exists
+# for (Claude Code, the SDK) send none at all.
+#
+# Content-Type matters for the same reason: text/plain and form encodings are
+# CORS-simple, so a page can POST them with no preflight. JSON-RPC is JSON;
+# anything else on this surface is someone dodging the preflight.
+_SIMPLE_REQUEST_TYPES = frozenset({
+    "text/plain",
+    "application/x-www-form-urlencoded",
+    "multipart/form-data",
+})
+
+
+def _origin_allowed(request: Request) -> bool:
+    """True unless the request carries an Origin the app's CORS policy rejects."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return True  # non-browser client — the normal case for MCP transport
+    allowed = {
+        o.strip() for o in getattr(config, "CORS_ORIGINS", "").split(",") if o.strip()
+    }
+    return "*" in allowed or origin in allowed
+
+
+def _guard(request: Request, *, require_json: bool = False) -> Response | None:
+    """Return the refusal to send, or ``None`` when the request may proceed."""
+    if not _origin_allowed(request):
+        logger.warning(
+            "[MCP] Refused %s %s from disallowed origin %r",
+            request.method, request.url.path, request.headers.get("origin"),
+        )
+        return Response(status_code=403, content="origin not allowed")
+    if require_json:
+        content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if content_type in _SIMPLE_REQUEST_TYPES:
+            return Response(
+                status_code=415,
+                content="JSON-RPC requires Content-Type: application/json",
+            )
+    return None
 
 
 def _touch_session(session_id: str) -> None:
@@ -201,6 +249,8 @@ async def mcp_sse_head():
 @router.get("/mcp/sse")
 async def mcp_sse_endpoint(request: Request):
     """SSE endpoint — responses to POSTs come through here."""
+    if (refusal := _guard(request)) is not None:
+        return refusal
     session_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     # Evict oldest-IDLE session if at capacity. Prior versions used
@@ -271,9 +321,6 @@ async def mcp_sse_endpoint(request: Request):
             "Expires": "0",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type",
             "Transfer-Encoding": "chunked",
         },
     )
@@ -282,6 +329,8 @@ async def mcp_sse_endpoint(request: Request):
 @router.post("/mcp/sse")
 async def mcp_sse_post(request: Request):
     """Handle probes to /mcp/sse."""
+    if (refusal := _guard(request)) is not None:
+        return refusal
     return Response(status_code=200, content="", media_type="text/plain")
 
 
@@ -305,6 +354,8 @@ async def mcp_call_sync(request: Request):
     should put it behind a reverse-proxy auth layer until the Phase 8.2
     bearer-token model lands.
     """
+    if (refusal := _guard(request, require_json=True)) is not None:
+        return refusal
     try:
         body = await request.body()
         body_text = body.decode("utf-8").strip()
@@ -332,6 +383,8 @@ async def mcp_call_sync(request: Request):
 @router.post("/mcp/messages")
 async def mcp_messages(request: Request):
     """Receive JSON-RPC, send response via SSE stream."""
+    if (refusal := _guard(request, require_json=True)) is not None:
+        return refusal
     session_id = request.query_params.get("sessionId")
     try:
         body = await request.body()

@@ -248,7 +248,77 @@ def tier_source_ids() -> list[str]:
 _ollama_available: bool | None = None
 _ollama_checked_at: float = 0
 _OLLAMA_CHECK_INTERVAL = 60  # seconds
+# Full /api/tags catalog — every slot the daemon exposes, chat or not. The
+# routing selector filters it through ``_is_chat_capable``; ``/providers/routing``
+# reports it raw.
 _ollama_models: list[str] = []
+
+# Substrings that mark a slot as an embedder / reranker rather than a chat
+# model. K1: the live Quenchforge catalog is
+# ``["nomic-embed-text-v1.5", "qwen2.5-7b-instruct-q4_k_m"]`` and the router
+# took index 0 whenever its preferred-name list matched nothing — dispatching
+# completions to an EMBEDDING model and stamping its name on the response.
+_NON_CHAT_MARKERS: tuple[str, ...] = (
+    "embed", "rerank", "splade", "nomic", "arctic",
+    "minilm", "bge-", "gte-", "e5-",
+)
+
+# Local chat models we prefer when the operator has not pinned one that the
+# daemon actually serves.
+_PREFERRED_LOCAL_CHAT: tuple[str, ...] = ("llama3.2", "phi3", "mistral", "gemma2")
+# Same list ordered smallest-first for the complexity classifier.
+_PREFERRED_CLASSIFIER: tuple[str, ...] = ("phi3", "gemma2", "llama3.2", "mistral")
+
+
+def _is_chat_capable(name: str) -> bool:
+    """False for embedding / reranking slots advertised on ``/api/tags``.
+
+    Also false for ``sha256-...`` layer digests, which some backends list
+    alongside real models — ``app.routers.setup._clean_ollama_models`` already
+    strips them for the wizard's picker.
+    """
+    lowered = name.lower()
+    if not lowered or lowered.startswith("sha256-"):
+        return False
+    return not any(m in lowered for m in _NON_CHAT_MARKERS)
+
+
+def _select_local_chat_model(preferred: tuple[str, ...] = _PREFERRED_LOCAL_CHAT) -> str | None:
+    """The local model to ask for, or ``None`` when nothing local can serve.
+
+    Resolution order:
+
+    1. ``INTERNAL_LLM_MODEL`` — the one pin every other surface (chat, sdk,
+       settings, provider_state) reads — but ONLY when the daemon's catalog
+       actually contains it. The live box pins ``llama3.1-8b`` while the slot
+       serves ``qwen2.5-7b-instruct-q4_k_m``; asking for the pin is a 400 on
+       any daemon that validates the request against the loaded slot.
+    2. A ``preferred`` family name present in the catalog.
+    3. The sole chat-capable slot, when the daemon exposes exactly one — that
+       is not a guess, it is the only thing the daemon can answer with.
+
+    Returns ``None`` when the catalog is empty or ambiguous. The caller must
+    then route to OpenRouter rather than stamping ``provider="ollama"`` on a
+    model the backend never agreed to serve.
+    """
+    catalog = [m for m in _ollama_models if _is_chat_capable(m)]
+    if not catalog:
+        return None
+
+    configured = os.getenv("INTERNAL_LLM_MODEL", "").strip()
+    if configured and "/" not in configured:
+        for name in catalog:
+            if name == configured or name.split(":")[0] == configured:
+                return name
+
+    for pref in preferred:
+        matching = [m for m in catalog if pref in m]
+        if matching:
+            return matching[0]
+
+    if len(catalog) == 1:
+        return catalog[0]
+    return None
 
 
 async def _check_ollama() -> bool:
@@ -445,20 +515,22 @@ async def _classify_with_best_available(query: str) -> Complexity:
 
     # For simple/moderate (ambiguous), try Ollama classification if available
     ollama_ok = await _check_ollama()
-    if not ollama_ok or not _ollama_models:
+    if not ollama_ok:
+        return heuristic_result
+
+    # Prefer the smallest chat-capable slot (fastest). ``None`` means the
+    # daemon has nothing that can answer a chat prompt — the heuristic stands.
+    classifier_model = _select_local_chat_model(_PREFERRED_CLASSIFIER)
+    if not classifier_model:
         return heuristic_result
 
     try:
+        from core.routing.provider_state import local_backend_url
 
-        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        # Pick smallest available model for classification (fastest)
-        small_models = ["phi3", "gemma2", "llama3.2", "mistral"]
-        classifier_model = _ollama_models[0]
-        for pref in small_models:
-            matching = [m for m in _ollama_models if pref in m]
-            if matching:
-                classifier_model = matching[0]
-                break
+        # E1 CR-098: the probe above resolves QUENCHFORGE_URL on a quenchforge
+        # box; reading OLLAMA_URL here validated one daemon and POSTed to
+        # another, so the classifier silently died into the heuristic.
+        ollama_url = local_backend_url()
 
         prompt = (
             "Classify this user query into exactly one category.\n"
@@ -596,20 +668,18 @@ async def route(
                 # the 503 from there.
                 pass
             else:
-                preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
-                model = _ollama_models[0]  # default to first available
-                for pref in preferred:
-                    matching = [m for m in _ollama_models if pref in m]
-                    if matching:
-                        model = matching[0]
-                        break
-                return RouteDecision(
-                    model=model,
-                    provider="ollama",
-                    reason="local model (free, instant)",
-                    estimated_cost_per_1k=0.0,
-                    tier_p95_ms=p95,
-                )
+                local_model = _select_local_chat_model()
+                if local_model:
+                    return RouteDecision(
+                        model=local_model,
+                        provider="ollama",
+                        reason="local model (free, instant)",
+                        estimated_cost_per_1k=0.0,
+                        tier_p95_ms=p95,
+                    )
+                # Reachable, but nothing it serves can answer a chat prompt.
+                # Fall through to OpenRouter instead of labelling a cloud-free
+                # local serve that would 400 or return an embedding.
 
         # No Ollama -- use free OpenRouter model
         p95 = _check_budget("openrouter_free", slo_budget_ms)
@@ -683,20 +753,15 @@ async def route(
                 except BudgetUnsatisfiableError:
                     pass
                 else:
-                    preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
-                    model = _ollama_models[0]
-                    for pref in preferred:
-                        matching = [m for m in _ollama_models if pref in m]
-                        if matching:
-                            model = matching[0]
-                            break
-                    return RouteDecision(
-                        model=model,
-                        provider="ollama",
-                        reason="simple query — local cascade (ENABLE_MODEL_CASCADE)",
-                        estimated_cost_per_1k=0.0,
-                        tier_p95_ms=p95,
-                    )
+                    local_model = _select_local_chat_model()
+                    if local_model:
+                        return RouteDecision(
+                            model=local_model,
+                            provider="ollama",
+                            reason="simple query — local cascade (ENABLE_MODEL_CASCADE)",
+                            estimated_cost_per_1k=0.0,
+                            tier_p95_ms=p95,
+                        )
         p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),

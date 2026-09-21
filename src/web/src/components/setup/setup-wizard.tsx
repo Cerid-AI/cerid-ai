@@ -357,27 +357,17 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
     fetchSetupStatus()
       .then((status) => {
         setBackendConfigured(!!status.configured)
-        // Use unified provider_status map when available (WP2 fix)
-        const ps = status.provider_status
-        if (ps && Object.keys(ps).length > 0) {
-          for (const [provider, info] of Object.entries(ps)) {
-            if (info.configured) {
-              dispatch({ type: "SET_KEY", provider, key: "(from .env)", valid: true })
-            }
-          }
-        } else if (status.configured && status.missing_keys.length === 0) {
-          // Fallback: legacy detection for older backends
-          dispatch({ type: "SET_KEY", provider: "openrouter", key: "(configured)", valid: true })
-          const optionalProviders = ["openai", "anthropic", "xai"]
-          const optionalKeyNames: Record<string, string> = {
-            openai: "OPENAI_API_KEY",
-            anthropic: "ANTHROPIC_API_KEY",
-            xai: "XAI_API_KEY",
-          }
-          for (const p of optionalProviders) {
-            if (!status.optional_keys.includes(optionalKeyNames[p])) {
-              dispatch({ type: "SET_KEY", provider: p, key: "(configured)", valid: true })
-            }
+        // configured_providers is the server's list of providers whose key is
+        // actually set. The previous branch read optional_keys as if it were
+        // "optional keys still missing"; it is the static catalogue of every
+        // optional key name the build knows about, so a user who already had
+        // OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY in .env was always
+        // shown as unconfigured and re-prompted. Only the four providers the
+        // wizard renders an input for are adopted — the server also reports
+        // keyless local providers (ollama) that this step does not manage.
+        for (const provider of status.configured_providers ?? []) {
+          if (provider in PROVIDER_LABELS) {
+            dispatch({ type: "SET_KEY", provider, key: "(from .env)", valid: true })
           }
         }
         // Fetch credits if any provider is configured

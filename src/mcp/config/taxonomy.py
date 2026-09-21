@@ -19,10 +19,10 @@ TAXONOMY = {
     "finance": {
         "description": "Financial documents, tax records, budgets",
         "icon": "dollar-sign",
-        # `trading` (Phase 5.2): trade logs / signals / positions are a finance
-        # sub_category, NOT a new top-level domain — the 12-domain graph
-        # backbone + per-domain Chroma collections assume the existing set.
-        "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "general"],
+        # Trading agent memory is NOT a finance sub_category. It is an
+        # operational domain (`trading`) granted only to `trading-agent` and
+        # kept out of TAXONOMY (suite-contracts 2026-09-17), same as anneal_*.
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
     },
     "projects": {
         "description": "Project plans, meeting notes, specifications",
@@ -33,7 +33,7 @@ TAXONOMY = {
         "description": "Personal notes, journal entries, health records",
         "icon": "user",
         # `career` (Phase 5.2): resumes / job notes / reviews are a personal
-        # sub_category, not a top-level domain (see finance.trading note).
+        # sub_category, not a top-level domain.
         "sub_categories": ["notes", "health", "travel", "career", "general"],
     },
     "general": {

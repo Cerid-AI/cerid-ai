@@ -3,9 +3,12 @@
 
 """Tests for webhook notifications."""
 
+import hashlib
+import hmac
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from utils.webhooks import fire_event
@@ -193,3 +196,63 @@ async def test_fire_event_skips_inactive_subscriptions(monkeypatch):
         result = await fire_event("ingestion.complete", {"artifact_id": "a1"})
         assert result == 0
         mock_client.post.assert_not_called()
+
+
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_signature_verifies_against_the_body_on_the_wire(monkeypatch):
+    """Sign the exact bytes the receiver hashes.
+
+    A receiver follows the documented convention — HMAC-SHA256 over the raw
+    request body, the same rule Cerid's own inbound verifier applies in
+    app/services/webhook_tokens.py. This test captures the request at the
+    transport layer rather than asserting against a mocked client, so a
+    signature computed over a different serialisation than httpx emits is
+    caught.
+    """
+    secret = "receiver-shared-secret"  # pragma: allowlist secret
+    sub = {
+        "id": "sub-1",
+        "url": "https://example.com/crud-hook",
+        "events": [],
+        "secret": secret,
+        "active": True,
+    }
+    redis_client = MagicMock()
+    redis_client.keys.return_value = ["cerid:webhooks:sub:sub-1"]
+    redis_client.get.return_value = json.dumps(sub)
+
+    monkeypatch.setattr("config.WEBHOOK_ENDPOINTS", [])
+
+    captured: dict[str, object] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        captured["signature"] = request.headers.get("X-Cerid-Signature", "")
+        captured["content_type"] = request.headers.get("Content-Type", "")
+        return httpx.Response(200)
+
+    def _client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(_handler)
+        return _REAL_ASYNC_CLIENT(*args, **kwargs)
+
+    fake_public = [(2, 1, 6, "", ("93.184.216.34", 0))]
+    with patch("utils.webhooks.get_redis", return_value=redis_client), \
+         patch("socket.getaddrinfo", return_value=fake_public), \
+         patch("utils.webhooks.httpx.AsyncClient", _client_factory):
+        delivered = await fire_event("ingestion.complete", {"artifact_id": "a1"})
+
+    assert delivered == 1
+    body = captured["body"]
+    assert isinstance(body, bytes) and body
+
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    assert captured["signature"] == f"sha256={expected}", (
+        "the receiver hashes the raw body; the signature must be computed "
+        "over those same bytes"
+    )
+    # The envelope must still be JSON the receiver can parse.
+    assert captured["content_type"].startswith("application/json")
+    assert json.loads(body)["data"] == {"artifact_id": "a1"}

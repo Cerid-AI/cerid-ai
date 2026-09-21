@@ -38,12 +38,14 @@ describe("paneFromLocation", () => {
     expect(paneFromLocation("/api/mcp/health")).toBeNull()
   })
 
-  it("returns null for legacy pane names (never written as paths)", () => {
-    // Legacy panes are goTo()-only targets rewritten by NavigationProvider;
-    // the app never writes them as pathnames, so a cold load of one is an
-    // unknown URL, not a crash on an unmounted pane.
-    expect(paneFromLocation("/wiki")).toBeNull()
-    expect(paneFromLocation("/knowledge")).toBeNull()
+  it("resolves legacy pane names to the pane that replaced them (F370)", () => {
+    // The app no longer writes these as pathnames, but bookmarks, shared
+    // links and browser history from before the pane consolidation still do.
+    // Dropping them to null landed the user on Chat with the address bar
+    // still reading /wiki; see url-state-legacy-paths.test.ts for the URL
+    // rewrite that goes with each.
+    expect(paneFromLocation("/wiki")).toBe("subjects")
+    expect(paneFromLocation("/knowledge")).toBe("sources")
   })
 
   it("returns null for Electron file:// style paths", () => {

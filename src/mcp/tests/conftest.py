@@ -15,6 +15,22 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+@pytest.fixture(autouse=True)
+def _declare_loopback_bind(monkeypatch):
+    """A test process serves nothing on the network; say so.
+
+    ``app.middleware.auth`` refuses to build an unauthenticated app inside a
+    container that has declared no ``CERID_BIND_ADDR``, because a container
+    cannot see its own publish mapping. CI runs this suite in a container, so
+    without a declaration every test that builds the middleware stack answers
+    500. Tests of the boundary itself set or delete the variable explicitly.
+    """
+    import os
+
+    if "CERID_BIND_ADDR" not in os.environ:
+        monkeypatch.setenv("CERID_BIND_ADDR", "127.0.0.1")
+
+
 # ---------------------------------------------------------------------------
 # Stub heavy native dependencies before any test module imports
 # ---------------------------------------------------------------------------

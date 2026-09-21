@@ -15,10 +15,23 @@ import {
 } from "lucide-react"
 type Phase = "input" | "scanning" | "preview" | "importing" | "complete" | "error"
 
+/**
+ * What POST /admin/scan/preview actually serves. Its `response_model` is
+ * PreviewResponse (src/mcp/app/routers/scanner.py), which declares only the
+ * four fields below — pydantic drops the rest, including the
+ * `estimated_chunks` the scanner computes. `ScanPreview` in lib/api/kb.ts
+ * still declares all seven as required, so the estimates are modelled here as
+ * optional: dereferencing one unconditionally threw a TypeError mid-render
+ * and the pane error boundary swallowed the whole Knowledge pane with it.
+ */
+type ScanPreviewView =
+  Pick<ScanPreview, "total_files" | "total_size_mb" | "by_extension" | "by_domain"> &
+  Partial<Pick<ScanPreview, "estimated_chunks" | "estimated_storage_mb" | "skipped">>
+
 export function ImportDialog({ onClose }: { onClose: () => void }) {
   const [folderPath, setFolderPath] = useState("~/cerid-archive")
   const [phase, setPhase] = useState<Phase>("input")
-  const [preview, setPreview] = useState<ScanPreview | null>(null)
+  const [preview, setPreview] = useState<ScanPreviewView | null>(null)
   const [error, setError] = useState("")
   const [progress, setProgress] = useState<Record<string, unknown> | null>(null)
 
@@ -59,6 +72,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       setPhase("error")
     }
   }, [folderPath])
+
+  const sk = preview?.skipped
+  const skippedTotal = sk ? sk.junk + sk.archives + sk.unsupported + sk.oversized : 0
 
   return (
     <Card className="mb-4 border-brand/30">
@@ -119,16 +135,20 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
                 <span className="font-medium">{preview.total_size_mb} MB</span>
                 <span className="text-muted-foreground">total</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="font-medium">~{preview.estimated_chunks.toLocaleString()}</span>
-                <span className="text-muted-foreground">chunks</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="font-medium">~{preview.estimated_storage_mb} MB</span>
-                <span className="text-muted-foreground">storage</span>
-              </div>
+              {preview.estimated_chunks != null && (
+                <div className="flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="font-medium">~{preview.estimated_chunks.toLocaleString()}</span>
+                  <span className="text-muted-foreground">chunks</span>
+                </div>
+              )}
+              {preview.estimated_storage_mb != null && (
+                <div className="flex items-center gap-1.5">
+                  <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="font-medium">~{preview.estimated_storage_mb} MB</span>
+                  <span className="text-muted-foreground">storage</span>
+                </div>
+              )}
             </div>
 
             {/* File types */}
@@ -152,11 +172,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             )}
 
             {/* Skipped summary */}
-            {(preview.skipped.junk > 0 || preview.skipped.archives > 0 || preview.skipped.unsupported > 0 || preview.skipped.oversized > 0) && (
+            {preview.skipped != null && skippedTotal > 0 && (
               <div className="rounded border bg-muted/30 px-2.5 py-1.5 text-label-xs text-muted-foreground space-y-0.5">
                 <p className="font-medium flex items-center gap-1">
                   <Ban className="h-3 w-3" />
-                  Skipping {preview.skipped.junk + preview.skipped.archives + preview.skipped.unsupported + preview.skipped.oversized} files:
+                  Skipping {skippedTotal} files:
                 </p>
                 {preview.skipped.junk > 0 && <p>{preview.skipped.junk} junk/system files</p>}
                 {preview.skipped.archives > 0 && <p>{preview.skipped.archives} archives (zip/tar)</p>}

@@ -93,7 +93,7 @@ Each platform follows a strict priority order. The system tries Option 1 first; 
 
 | Priority | Provider | Backend | Expected Perf | Detection |
 |----------|----------|---------|---------------|-----------|
-| **Option 1** | Quenchforge | Metal GPU on AMD discrete (patched llama.cpp) | ~38ms/batch-10 embed, ~118ms/8-doc rerank | `curl -s http://127.0.0.1:11434/health` returns 200; Cerid's `EMBEDDINGS_PROVIDER=quenchforge` + `RERANK_PROVIDER=quenchforge` |
+| **Option 1** | Quenchforge | Metal GPU on AMD discrete (patched llama.cpp) | ~38ms/batch-10 embed; the ~118ms/8-doc rerank figure is a target — measure it on your own box | See **Quenchforge readiness** below. A 200 from `/health` is NOT sufficient: the gateway answers it whenever the process is up, including with no embed or rerank slot serving |
 | **Option 2** | Ollama | CPU (stock Ollama doesn't reach AMD discrete on Intel Mac per [ollama/ollama#1016](https://github.com/ollama/ollama/issues/1016)) | ~20ms/batch-10 | Health check |
 | **Option 3** | FastEmbed sidecar | `onnxruntime` (CPU, AVX2) | ~12ms/batch-10 | Sidecar health |
 | **Option 4** | ONNX in-process | `CPUExecutionProvider` | ~15ms/batch-10 | Always available |
@@ -104,6 +104,55 @@ Each platform follows a strict priority order. The system tries Option 1 first; 
 Hardware-aware chat-slot flags on AMD profiles dodge a flash-attention CPU-fallback throttle and the prompt-cache state-save `GGML_ASSERT(buf_dst)` crash (`--flash-attn off --cache-ram 0 --no-cache-prompt`). The embed / code-embed / rerank slots additionally get `GGML_METAL_CONCURRENCY_DISABLE=1` and a 1024 ubatch cap on AMD discrete (v0.8.0) to keep Metal staging-buffer pressure bounded under sustained load.
 
 For vetted GGUF model picks by VRAM tier see [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](AMD_GPU_MODEL_RECOMMENDATIONS.md). Cerid honours the routing via three env vars: `INTERNAL_LLM_PROVIDER=quenchforge`, `EMBEDDINGS_PROVIDER=quenchforge`, `RERANK_PROVIDER=quenchforge` — all live-mutable via `PATCH /settings` as of v0.93.9.
+
+#### Quenchforge readiness
+
+**Two independent configuration surfaces have to line up.** Setting the three
+Cerid env vars only says where to send the request; whether the daemon can
+answer it is configured in the daemon.
+
+1. **Daemon side** — the LaunchAgent (or your service manager) sets
+   `QUENCHFORGE_DEFAULT_MODEL`, `QUENCHFORGE_EMBED_MODEL` and
+   `QUENCHFORGE_RERANK_MODEL`, and the matching GGUF files must be present in
+   the models directory. A slot whose model is unset or whose file is missing
+   simply does not come up — and the gateway still answers `/health` with 200.
+2. **Cerid side** — the three `*_PROVIDER` env vars above.
+
+**Verify per slot, not per daemon:**
+
+```bash
+# Which slots are actually configured and serving?
+curl -s http://127.0.0.1:11434/ | jq '.slots | with_entries(select(.value.configured))'
+
+# Exercise the rerank slot itself — this is the one that fails silently,
+# because the rerank lane falls back to an in-process CPU cross-encoder.
+curl -s -X POST http://127.0.0.1:11434/v1/rerank \
+  -H 'content-type: application/json' \
+  -d '{"model":"bge-reranker-v2-m3","query":"ping","documents":["pong"]}'
+```
+
+**Then check what Cerid observed, not what it was told:**
+
+```bash
+curl -s http://localhost:8888/health \
+  | jq '{status, degraded_lanes, rerank: .inference_routing.rerank}'
+```
+
+* `status: "degraded"` with `degraded_lanes: ["rerank"]` means the lane has
+  fallen back. Transports are fine, so the HTTP code stays 200 — the status
+  field and the lane list are the signal, not the response code.
+* `inference_routing.<lane>.serving` names what actually answered last and
+  `fallback_count` how often; `degraded_detail` carries the upstream error.
+* `pipeline_providers` reports the serving provider per stage;
+  `pipeline_providers_configured` is the intent. When they disagree, the
+  first one is the truth.
+* `GET /models/doctor` raises a `not_served` finding when a pinned local
+  model is absent from the daemon's `/api/tags`.
+
+A degraded lane is not cosmetic: the in-process fallback is a different, CPU
+cross-encoder, so ranking quality and latency both change. Its ONNX weights
+must be cached whatever provider is configured — `/setup/models/status`
+reports them with `role: "fallback"`.
 
 #### Linux — NVIDIA GPU
 
@@ -421,22 +470,27 @@ This banner appears once per session (dismissed via localStorage, 24h expiry mat
 
 ## 4. Function Offloading Matrix
 
-Ten compute-heavy functions benefit from tiered acceleration. The table maps each function to its optimal provider per platform.
+Nine compute-heavy functions benefit from tiered acceleration. The table maps each function to its optimal provider per platform.
+
+Paths are relative to `src/mcp/` and carry no line numbers — line pins rot
+faster than the code moves; grep the symbol.
 
 ### 4.1 Complete Matrix
 
-| # | Function | File:Line | Workload | Current Provider |
-|---|----------|-----------|----------|-----------------|
-| 1 | `OnnxEmbeddingFunction.__call__()` | `utils/embeddings.py:112` | Bi-encoder embedding (768-dim) | ONNX CPUExecutionProvider |
-| 2 | `_score_pairs()` / `rerank()` | `utils/reranker.py:78` / `:129` | Cross-encoder scoring | ONNX CPUExecutionProvider |
-| 3 | `_extract_claims_llm()` | `agents/hallucination/extraction.py:362` | Claim extraction (LLM) | OpenRouter |
-| 4 | `decompose_query()` | `utils/query_decomposer.py:97` | Query decomposition (LLM) | OpenRouter |
-| 5 | `extract_memories()` | `agents/memory.py:44` | Memory extraction (LLM) | OpenRouter |
-| 6 | `resolve_memory_conflict()` | `agents/memory.py:386` | Conflict resolution (LLM) | OpenRouter |
-| 7 | `ai_categorize()` | `utils/metadata.py:182` | Document classification (LLM) | OpenRouter |
-| 8 | `contextualize_chunks()` | `utils/contextual.py:34` | Chunk context generation (LLM) | OpenRouter |
-| 9 | `_rerank_llm()` | `agents/assembler.py:115` | LLM reranking (fallback) | OpenRouter |
-| 10 | `generate_hypothetical_document()` | `utils/hyde.py:43` | HyDE generation (LLM) | Ollama / OpenRouter |
+| # | Function | File | Workload | Current Provider |
+|---|----------|------|----------|-----------------|
+| 1 | `OnnxEmbeddingFunction` | `core/utils/embeddings.py` | Bi-encoder embedding (768-dim) | ONNX CPUExecutionProvider |
+| 2 | `_score_pairs` | `core/retrieval/reranker.py` | Cross-encoder scoring | ONNX CPUExecutionProvider |
+| 3 | `_extract_claims_llm` | `core/agents/hallucination/extraction.py` | Claim extraction (LLM) | OpenRouter |
+| 4 | `decompose_query` | `core/retrieval/query_decomposer.py` | Query decomposition (LLM) | OpenRouter |
+| 5 | `extract_memories` | `core/agents/memory.py` | Memory extraction (LLM) | OpenRouter |
+| 6 | `resolve_memory_conflict` | `core/agents/memory.py` | Conflict resolution (LLM) | OpenRouter |
+| 7 | `ai_categorize` | `utils/metadata.py` | Document classification (LLM) | OpenRouter |
+| 8 | `contextualize_chunks` | `core/utils/contextual.py` | Chunk context generation (LLM) | OpenRouter |
+| 9 | `_rerank_llm` | `core/agents/query_agent.py` | LLM reranking (fallback) | OpenRouter |
+
+HyDE generation was removed; HyPE (`core/retrieval/hype_index.py`) replaced it
+and is indexed offline rather than per query.
 
 ### 4.2 Provider Selection Per Platform
 
@@ -663,6 +717,10 @@ When the system detects a provider change, it communicates via:
 
 ## 6. Implementation Phases
 
+> Historical plan, kept for the reasoning. Its file paths predate the
+> `core/` split and its line numbers are long gone — §4.1 and Appendix B
+> are the maps of the current tree.
+
 ### Phase 1: Infrastructure — InferenceConfig + Detection (Week 1)
 
 **New files:**
@@ -863,23 +921,27 @@ echo "Done. Start the sidecar with: cerid-sidecar --daemon"
 
 All source files referenced in this document:
 
-| File | Key Lines | Role |
-|------|-----------|------|
-| `config/settings.py` | 158, 200, 492, 496, 510, 522 | Provider config, model IDs, stage routing |
-| `utils/embeddings.py` | 44, 94, 112 | ONNX embedding function, CPUExecutionProvider |
-| `utils/reranker.py` | 60, 78, 129 | ONNX cross-encoder, CPUExecutionProvider |
-| `utils/internal_llm.py` | 61, 97 | Internal LLM router, Ollama caller |
-| `utils/llm_client.py` | 91, 281, 320 | External LLM dispatch, Ollama direct |
-| `utils/metadata.py` | 53, 108, 182 | Metadata extraction, AI categorization |
-| `utils/contextual.py` | 34 | Contextual chunk generation |
-| `utils/hyde.py` | 43 | HyDE generation |
-| `utils/query_decomposer.py` | 97 | Query decomposition |
-| `agents/hallucination/extraction.py` | 362, 468 | Claim extraction |
-| `agents/hallucination/verification.py` | 336, 864 | Claim verification |
-| `agents/hallucination/streaming.py` | 137 | Verification orchestrator |
-| `agents/memory.py` | 44, 386 | Memory extraction, conflict resolution |
-| `agents/assembler.py` | 64, 100, 115, 395 | Reranking, context assembly |
-| `agents/decomposer.py` | 171 | Multi-domain query execution |
-| `main.py` | (lifespan) | Startup detection, background recheck |
-| `routers/health.py` | (health endpoint) | Inference status reporting |
-| `scripts/start-cerid.sh` | (phase 0) | Sidecar startup integration |
+Paths are relative to `src/mcp/` (`scripts/` to the repo root).
+
+| File | Role |
+|------|------|
+| `config/settings.py` | Provider config, model IDs, stage routing |
+| `core/utils/embeddings.py` | ONNX embedding function, execution providers |
+| `core/retrieval/reranker.py` | ONNX cross-encoder, execution providers |
+| `core/utils/internal_llm.py` | Internal LLM router, local-daemon caller |
+| `core/utils/llm_client.py` | External LLM dispatch |
+| `core/utils/inference_routing.py` | Per-workload routing snapshot served on `/health` |
+| `core/utils/inference_health.py` | Live serving/degraded state recorded by the call sites |
+| `utils/metadata.py` | Metadata extraction, AI categorization |
+| `core/utils/contextual.py` | Contextual chunk generation |
+| `core/retrieval/query_decomposer.py` | Query decomposition |
+| `core/retrieval/hype_index.py` | HyPE index (replaced HyDE) |
+| `core/agents/hallucination/extraction.py` | Claim extraction |
+| `core/agents/hallucination/verification.py` | Claim verification |
+| `core/agents/hallucination/streaming.py` | Verification orchestrator |
+| `core/agents/memory.py` | Memory extraction, conflict resolution |
+| `core/agents/query_agent.py` | Rerank dispatch, multi-domain query execution |
+| `utils/quenchforge_client.py` | Quenchforge embed/rerank transport + provider predicates |
+| `main.py` | Startup detection, background recheck (lifespan) |
+| `app/routers/health.py` | Inference status reporting |
+| `scripts/start-cerid.sh` | Sidecar startup integration (phase 0) |

@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.routers.sdk import router
+from app.routers.sdk_version import SDK_VERSION
 
 
 def _make_app() -> FastAPI:
@@ -212,9 +213,10 @@ class TestSDKHealth:
             "tier": "community",
             "services": {},
         }
-        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_PROVIDER", "ollama")
-        monkeypatch.setattr("app.routers.sdk.config.INTERNAL_LLM_MODEL", "")
-        monkeypatch.setattr("app.routers.sdk.config.OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
+        # Resolved from the live routing state, not from an import-time config
+        # copy — /sdk/v1/health used to name a model the backend never served.
+        monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 
         with patch("config.features.FEATURE_TOGGLES", {}):
             client = TestClient(_make_app())
@@ -224,6 +226,7 @@ class TestSDKHealth:
         data = resp.json()
         assert "internal_llm" in data
         assert data["internal_llm"]["provider"] == "ollama"
+        assert data["internal_llm"]["model"] == "llama3.2:3b"
 
 
 # ---------------------------------------------------------------------------
@@ -390,10 +393,13 @@ class TestSDKCollections:
 
 
 class TestSDKTaxonomy:
-    """GET /sdk/v1/taxonomy delegates to config.taxonomy.DOMAINS/TAXONOMY."""
+    """GET /sdk/v1/taxonomy reads config.taxonomy.TAXONOMY at request time.
 
-    @patch("app.routers.sdk.TAXONOMY", {"coding": {"tags": ["python", "rust"]}, "finance": {"tags": ["budget"]}})
-    @patch("app.routers.sdk.DOMAINS", ["coding", "finance", "general"])
+    Patched on the source module, not on a name inside ``app.routers.sdk``:
+    the router holds no copy to patch, which is the point of F340.
+    """
+
+    @patch("config.taxonomy.TAXONOMY", {"coding": {"tags": ["python", "rust"]}, "finance": {"tags": ["budget"]}})
     def test_taxonomy_success(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/taxonomy")
@@ -404,8 +410,7 @@ class TestSDKTaxonomy:
         assert "coding" in data["domains"]
         assert isinstance(data["taxonomy"], dict)
 
-    @patch("app.routers.sdk.TAXONOMY", {})
-    @patch("app.routers.sdk.DOMAINS", [])
+    @patch("config.taxonomy.TAXONOMY", {})
     def test_taxonomy_empty(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/taxonomy")
@@ -462,21 +467,21 @@ class TestSDKHealthDetailed:
 
 
 class TestSDKSettings:
-    """GET /sdk/v1/settings delegates to config.features.FEATURE_FLAGS/FEATURE_TIER."""
+    """GET /sdk/v1/settings reads config.features at request time."""
 
-    @patch("app.routers.sdk.FEATURE_TIER", "pro")
-    @patch("app.routers.sdk.FEATURE_FLAGS", {"hallucination_check": True, "workflow_engine": True})
+    @patch("config.features.FEATURE_TIER", "pro")
+    @patch("config.features.FEATURE_FLAGS", {"hallucination_check": True, "workflow_engine": True})
     def test_settings_success(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/settings")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "1.1.0"
+        assert data["version"] == SDK_VERSION
         assert data["tier"] == "pro"
         assert isinstance(data["features"], dict)
 
-    @patch("app.routers.sdk.FEATURE_TIER", "community")
-    @patch("app.routers.sdk.FEATURE_FLAGS", {})
+    @patch("config.features.FEATURE_TIER", "community")
+    @patch("config.features.FEATURE_FLAGS", {})
     def test_settings_community_tier(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/settings")
@@ -489,20 +494,32 @@ class TestSDKSettings:
 # ---------------------------------------------------------------------------
 
 
+# A scoped consumer, pinned here rather than read from the shipped registry so
+# the isolation assertions cannot be softened by a registry edit elsewhere.
+_SCOPED_REGISTRY = {
+    "_default": {"description": "unrestricted"},
+    "trading-agent": {"allowed_domains": ["trading"], "strict_domains": True},
+}
+
+
+def _scoped_consumers():
+    return patch(
+        "app.services.request_policy.CONSUMER_REGISTRY", _SCOPED_REGISTRY,
+    )
+
+
 class TestSDKSearch:
     """POST /sdk/v1/search routes through the canonical agent_query_full path."""
 
     def test_search_success(self):
+        spy = AsyncMock(return_value={
+            "sources": [
+                {"title": "auth.py", "chunk_text": "JWT token validation", "similarity": 0.88}
+            ],
+            "confidence": 0.88,
+        })
         with (
-            patch(
-                "core.agents.query_agent.agent_query_full",
-                new=AsyncMock(return_value={
-                    "sources": [
-                        {"title": "auth.py", "chunk_text": "JWT token validation", "similarity": 0.88}
-                    ],
-                    "confidence": 0.88,
-                }),
-            ),
+            patch("core.agents.query_agent.agent_query_full", new=spy),
             patch("app.deps.get_chroma", return_value=None),
             patch("app.deps.get_redis", return_value=None),
             patch("app.deps.get_neo4j", return_value=None),
@@ -518,6 +535,107 @@ class TestSDKSearch:
         assert "results" in data
         assert "total_results" in data
         assert data["total_results"] == 1
+        # K4: the endpoint must forward the consumer scoping, not just the
+        # caller-supplied domain. Asserting only the status code is what let
+        # the isolation gap survive three audits.
+        kwargs = spy.await_args.kwargs
+        assert kwargs["domains"] == ["coding"]
+        assert "allowed_domains" in kwargs
+        assert "strict_domains" in kwargs
+
+    def test_search_scopes_to_consumer_allowed_domains(self):
+        """A restricted consumer cannot reach an out-of-allowlist domain."""
+        spy = AsyncMock(return_value={"sources": [], "confidence": 0.0})
+        with (
+            patch("core.agents.query_agent.agent_query_full", new=spy),
+            _scoped_consumers(),
+            patch("app.deps.get_chroma", return_value=None),
+            patch("app.deps.get_redis", return_value=None),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.deps.get_graph_store", return_value=None),
+        ):
+            client = TestClient(_make_app())
+            resp = client.post(
+                "/sdk/v1/search",
+                json={"query": "invoice receipt", "domain": "mail", "top_k": 2},
+                headers={"X-Client-ID": "trading-agent"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+        kwargs = spy.await_args.kwargs
+        assert kwargs["allowed_domains"] == ["trading"], (
+            f"consumer allow-list not threaded into retrieval: {kwargs!r}"
+        )
+        assert kwargs["strict_domains"] is True
+
+    def test_search_blocked_by_private_mode_l2(self):
+        """Private Mode L2 ("skip KB") is enforced server-side on /search too."""
+        spy = AsyncMock(return_value={"sources": [{"title": "x"}], "confidence": 0.9})
+        with (
+            patch("core.agents.query_agent.agent_query_full", new=spy),
+            patch("app.routers.sdk.private_blocks", return_value=True),
+            patch("app.deps.get_chroma", return_value=None),
+            patch("app.deps.get_redis", return_value=None),
+            patch("app.deps.get_neo4j", return_value=None),
+            patch("app.deps.get_graph_store", return_value=None),
+        ):
+            client = TestClient(_make_app())
+            resp = client.post(
+                "/sdk/v1/search",
+                json={"query": "anything", "domain": "coding"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["total_results"] == 0
+        spy.assert_not_awaited()
+
+    def test_collections_scoped_to_consumer(self):
+        """/collections must not enumerate domains the consumer cannot read."""
+        with (
+            patch(
+                "app.routers.sdk.list_collections",
+                return_value={
+                    "total": 3,
+                    "collections": ["domain_trading", "domain_mail", "domain_personal"],
+                },
+            ),
+            _scoped_consumers(),
+        ):
+            client = TestClient(_make_app())
+            resp = client.get(
+                "/sdk/v1/collections", headers={"X-Client-ID": "trading-agent"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["collections"] == ["domain_trading"], data
+        assert data["total"] == 1
+
+    def test_taxonomy_scoped_to_consumer(self):
+        with _scoped_consumers():
+            client = TestClient(_make_app())
+            resp = client.get(
+                "/sdk/v1/taxonomy", headers={"X-Client-ID": "trading-agent"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["domains"] == ["trading"], data
+        assert set(data["taxonomy"]) <= {"trading"}
+
+    def test_taxonomy_unrestricted_consumer_sees_all(self):
+        """Every live domain, taken from the taxonomy rather than a snapshot.
+
+        This used to compare against ``config.DOMAINS``, which is rebound by
+        the taxonomy writers and so froze at whatever the config package
+        star-imported at boot — the very snapshot F340 is about. Once the
+        internal taxonomy has loaded, that list is 7 domains short of the one
+        the endpoint must publish.
+        """
+        import config.taxonomy as taxonomy_mod
+
+        with _scoped_consumers():
+            client = TestClient(_make_app())
+            resp = client.get("/sdk/v1/taxonomy")
+        assert resp.status_code == 200
+        assert resp.json()["domains"] == list(taxonomy_mod.TAXONOMY.keys())
 
     def test_search_no_results(self):
         with (

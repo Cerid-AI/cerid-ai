@@ -102,6 +102,26 @@ describe("ArtifactCard", () => {
     expect(screen.queryByText("fastapi")).not.toBeInTheDocument()
   })
 
+  // F223: the expanded card offered "Re-generate synopsis", which POSTed to
+  // /artifacts/{id}/regenerate-synopsis — a path no router declares — and
+  // cleared its spinner without checking the response, so a 404 read as
+  // "done". No per-artifact synopsis endpoint exists; the batch control in
+  // Settings -> Knowledge -> Maintenance is the one that works.
+  it("offers no synopsis regeneration on the expanded card", async () => {
+    const user = userEvent.setup()
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    render(
+      <ArtifactCard result={makeResult()} isSelected={false} onSelect={vi.fn()} onInject={vi.fn()} />,
+    )
+    await user.click(screen.getByText("test-document.py"))
+
+    expect(screen.queryByRole("button", { name: /re-generate synopsis/i })).not.toBeInTheDocument()
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]).includes("regenerate-synopsis")),
+    ).toBe(false)
+    fetchSpy.mockRestore()
+  })
+
   it("shows quality badge with Q-score format for excellent scores", () => {
     render(
       <ArtifactCard

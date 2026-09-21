@@ -198,7 +198,13 @@ class SDKLLMCompleteRequest(BaseModel):
     )
     cost_sensitivity: str = Field(
         default="medium",
-        description="Cost preference: low (cheapest) | medium | high (best quality)",
+        description=(
+            "How sensitive the caller is to spend — not a spend preference: "
+            "high (cheapest) | medium | low (best quality). High sensitivity "
+            "means minimise cost, so it routes to the cheapest tier that can "
+            "do the job; low sensitivity lets the router pick the most capable "
+            "model."
+        ),
     )
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tokens: int = Field(default=500, ge=1, le=8000)
@@ -243,3 +249,32 @@ class SDKLLMCompleteResponse(_SDKBase):
             "side adaptive timeout tuning."
         ),
     )
+
+
+class SDKMemoryRecallRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/memory/recall``."""
+
+    query: str = Field(description="Query to recall memories against")
+    top_k: int = Field(default=5, ge=1, le=50, description="Maximum memories to return")
+    min_score: float = Field(default=0.4, ge=0.0, le=1.0, description="Minimum adjusted score")
+
+
+class SDKMemoryRecallResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/memory/recall`` — object envelope, never a bare list."""
+
+    memories: list[dict[str, Any]] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    degraded: bool = Field(
+        default=False,
+        description="True when recall failed and the empty list is an outage, not an empty memory",
+    )
+
+
+class SDKDeleteArtifactResponse(_SDKBase):
+    """Response from ``DELETE /sdk/v1/artifacts/{artifact_id}``."""
+
+    deleted: bool = Field(default=False)
+    artifact_id: str = Field(default="")
+    filename: str = Field(default="")
+    chunks_removed: int = Field(default=0, ge=0)
+    message: str = Field(default="")

@@ -53,6 +53,13 @@ export interface GraphMapResponse {
    * and the server fell back to "force". Absent/undefined when not applicable.
    */
   layout_fallback?: boolean
+  /**
+   * True when the in-scope edge set hit GRAPH_EMBEDDINGS_3D_MAX_LINKS and the
+   * server returned a capped `links` array. Without it a capped payload is
+   * indistinguishable from a sparse graph, and nodes whose edges were cut
+   * render as orphans that isolated_count does not count.
+   */
+  links_truncated?: boolean
   /** Number of isolated (degree-0) entities excluded when include_isolated=false */
   isolated_count: number
 }

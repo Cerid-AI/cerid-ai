@@ -233,17 +233,32 @@ async def supported_extensions_endpoint():
     }
 
 
+def _resolve_domain_dir(archive_root: Path, domain: str) -> Path:
+    """Resolve ``archive/{domain}``, refusing anything that leaves the root.
+
+    ``domain`` arrives as a query parameter, so it must name exactly one
+    directory directly beneath the archive root — never a path, never a
+    symlink out of it.
+    """
+    if domain in (".", "..") or any(c in domain for c in ("/", "\\", "\0")):
+        raise HTTPException(status_code=422, detail=f"Invalid domain: {domain!r}")
+    candidate = (archive_root / domain).resolve()
+    if candidate == archive_root or not candidate.is_relative_to(archive_root):
+        raise HTTPException(status_code=422, detail=f"Invalid domain: {domain!r}")
+    return candidate
+
+
 @router.get("/archive/files", response_model=dict[str, Any])
 async def list_archive_files(
     domain: str = Query("", description="Filter by domain folder (empty = all)"),
 ):
     """List files in the archive directory, grouped by domain folder."""
-    archive_root = Path(config.ARCHIVE_PATH)
-    if not archive_root.exists():
+    if not Path(config.ARCHIVE_PATH).exists():
         return {"files": [], "total": 0, "storage_mode": config.STORAGE_MODE}
+    archive_root = Path(config.ARCHIVE_PATH).resolve()
 
     files: list[dict[str, str | int]] = []
-    scan_dirs = [archive_root / domain] if domain else [
+    scan_dirs = [_resolve_domain_dir(archive_root, domain)] if domain else [
         d for d in sorted(archive_root.iterdir())
         if d.is_dir() and not d.name.startswith(("_", "."))
     ]

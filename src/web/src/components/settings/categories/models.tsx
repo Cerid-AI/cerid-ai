@@ -574,6 +574,23 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
   const isActive = settings.internal_llm_provider === "ollama"
   const ollamaReachable = ollamaStatus?.reachable ?? false
 
+  // Reachable is not ready. The daemon answering /api/tags says nothing about
+  // whether it serves the model the pipeline is configured to call — the state
+  // /health reports as model "unset" with a rising fallback count. Two probes
+  // matter: the daemon's own default (default_model_installed, produced by the
+  // backend and previously read by nothing) and cerid's configured pin.
+  const servedModels = ollamaStatus?.models ?? []
+  const configuredModel = settings.internal_llm_model ?? ""
+  const defaultMissing =
+    ollamaReachable && ollamaStatus?.default_model_installed === false
+      ? ollamaStatus.default_model
+      : ""
+  const configuredMissing =
+    ollamaReachable && configuredModel && !servedModels.includes(configuredModel)
+      ? configuredModel
+      : ""
+  const missingModels = [...new Set([defaultMissing, configuredMissing].filter(Boolean))]
+
   const statusDef = getDef("models.localInference.ollamaStatus")
   if (!statusDef) return null
 
@@ -588,8 +605,19 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
               Status check failed
             </Badge>
           ) : ollamaStatus?.reachable ? (
-            <Badge variant="default" className="bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30 text-label-xs">
-              Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
+            <Badge
+              data-testid="local-backend-status-badge"
+              variant={missingModels.length > 0 ? "outline" : "default"}
+              className={cn(
+                "text-label-xs",
+                missingModels.length > 0
+                  ? "border-yellow-500/30 text-amber-600 dark:text-amber-400"
+                  : "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30",
+              )}
+            >
+              {missingModels.length > 0
+                ? "Connected, model not installed"
+                : `Connected (${ollamaStatus.models.length} model${ollamaStatus.models.length !== 1 ? "s" : ""})`}
             </Badge>
           ) : ollamaStatus?.enabled ? (
             <Badge variant="outline" className="text-label-xs text-amber-600 border-yellow-500/30">
@@ -614,6 +642,19 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
             </Button>
           )}
         </div>
+
+        {missingModels.length > 0 && (
+          <p
+            data-testid="local-backend-model-warning"
+            role="status"
+            className="text-label-xs text-amber-600 dark:text-amber-400"
+          >
+            The daemon is running but does not serve{" "}
+            {missingModels.map((m) => `"${m}"`).join(" or ")}. Calls routed to
+            {missingModels.length === 1 ? " it" : " them"} fall back to the cloud
+            provider or fail. Served: {servedModels.length > 0 ? servedModels.join(", ") : "none"}.
+          </p>
+        )}
 
         {wizardError && (
           <p role="alert" className="text-label-xs text-destructive">{wizardError}</p>

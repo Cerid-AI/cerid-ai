@@ -40,7 +40,7 @@ async def test_unknown_task_type_defaults_to_internal():
 
     with (
         patch("core.routing.smart_router.route", new=fake_route),
-        patch("core.utils.llm_client._call_ollama_direct", new=AsyncMock(return_value="ok")),
+        patch("core.utils.llm_client._call_ollama_direct", new=AsyncMock(return_value=("ok", ""))),
     ):
         content, _ = await route_and_call(
             [{"role": "user", "content": "hi"}], task_type="gtm_creative_custom"
@@ -61,7 +61,7 @@ async def test_known_task_type_is_preserved():
 
     with (
         patch("core.routing.smart_router.route", new=fake_route),
-        patch("core.utils.llm_client._call_ollama_direct", new=AsyncMock(return_value="ok")),
+        patch("core.utils.llm_client._call_ollama_direct", new=AsyncMock(return_value=("ok", ""))),
     ):
         await route_and_call(
             [{"role": "user", "content": "hi"}], task_type="verification"

@@ -15,8 +15,10 @@ import fakeredis
 import numpy as np
 import pytest
 
+from core.context.identity import tenant_id_var
 from core.retrieval.semantic_cache import (
     _LAST_INVALIDATED_KEY,
+    _scope_token,
     cache_lookup,
     cache_store,
     flush_cache,
@@ -845,3 +847,52 @@ class TestSizeBoundEviction:
             )
 
         assert _reset_backend.count() == 1
+
+
+class TestTenantScope:
+    """Multi-user mode: the cache is the one retrieval surface that could
+    hand tenant A's answer — and A's source filenames and chunk text — to
+    tenant B. Every other surface fuses tenant_id into its where-clause."""
+
+    def _store_as(self, tenant: str, redis, emb, payload) -> None:
+        token = tenant_id_var.set(tenant)
+        try:
+            cache_store("what is our runway", emb, payload, redis, ttl=300)
+        finally:
+            tenant_id_var.reset(token)
+
+    def _lookup_as(self, tenant: str, redis, emb):
+        token = tenant_id_var.set(tenant)
+        try:
+            return cache_lookup(emb, redis, threshold=0.9)
+        finally:
+            tenant_id_var.reset(token)
+
+    def test_other_tenant_gets_a_miss(self, monkeypatch, _reset_backend):
+        monkeypatch.setenv("CERID_MULTI_USER", "true")
+        redis = _mock_redis()
+        emb = _random_embedding(seed=77)
+        payload = {
+            "context": "runway is 14 months",
+            "sources": [{"filename": "acme-board-deck.md"}],
+        }
+        self._store_as("tenant-a", redis, emb, payload)
+
+        assert self._lookup_as("tenant-b", redis, emb) is None
+
+    def test_same_tenant_still_hits(self, monkeypatch, _reset_backend):
+        monkeypatch.setenv("CERID_MULTI_USER", "true")
+        redis = _mock_redis()
+        emb = _random_embedding(seed=78)
+        payload = {"context": "own answer", "sources": [{"filename": "own.md"}]}
+        self._store_as("tenant-a", redis, emb, payload)
+
+        result = self._lookup_as("tenant-a", redis, emb)
+        assert result is not None
+        assert result["context"] == "own answer"
+
+    def test_single_user_token_is_unchanged(self, monkeypatch):
+        """Default deployments must not lose their cache to this fix."""
+        monkeypatch.delenv("CERID_MULTI_USER", raising=False)
+        assert _scope_token(None) == "__all__"
+        assert _scope_token(["finance"], ["finance"]) == "finance|allow=finance"

@@ -648,3 +648,63 @@ class TestSourceActivityStream:
         chunks = [c async for c in resp.body_iterator]
 
         assert any(c == b": keepalive\n\n" for c in chunks)
+
+
+class TestKnowledgeStatsOutageIsNotAnEmptyCorpus:
+    """A dead graph store must not render as a corpus of zero.
+
+    ``_empty_knowledge_stats()`` returned every node/edge/chunk count as 0
+    with a fresh ``captured_at`` and no error field, so the Sources hero
+    card confidently reported an empty knowledge base during an outage —
+    the one case where the right message is "stats unavailable".
+    """
+
+    def _client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.routers.observability import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_stats_report_the_outage_instead_of_zeros(self, monkeypatch):
+        import app.deps as deps
+
+        def _boom():
+            raise RuntimeError("neo4j unreachable")
+
+        monkeypatch.setattr(deps, "get_neo4j", _boom)
+        monkeypatch.setattr(deps, "get_redis", lambda: None)
+
+        resp = self._client().get("/observability/knowledge-stats")
+
+        assert resp.status_code == 503, resp.text
+        assert "unavailable" in resp.json()["detail"].lower()
+
+    def test_history_reports_the_outage_instead_of_no_snapshots(self, monkeypatch):
+        import app.deps as deps
+
+        def _boom():
+            raise RuntimeError("neo4j unreachable")
+
+        monkeypatch.setattr(deps, "get_neo4j", _boom)
+
+        resp = self._client().get("/observability/knowledge-stats/history?days=7")
+
+        assert resp.status_code == 503, resp.text
+
+    def test_a_healthy_read_still_returns_the_snapshot(self, monkeypatch):
+        import app.db.neo4j.stats as stats
+        import app.deps as deps
+
+        snapshot = {"nodes": {"artifacts": 3}, "chunks": 9}
+        monkeypatch.setattr(deps, "get_neo4j", lambda: object())
+        monkeypatch.setattr(deps, "get_redis", lambda: None)
+        monkeypatch.setattr(stats, "fetch_current_stats", lambda driver: snapshot)
+
+        resp = self._client().get("/observability/knowledge-stats")
+
+        assert resp.status_code == 200
+        assert resp.json() == snapshot

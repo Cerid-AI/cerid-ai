@@ -42,6 +42,7 @@ baseline is red (mutation results against a red baseline are meaningless).
 from __future__ import annotations
 
 import fcntl
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -89,11 +90,11 @@ MUTANTS: list[tuple[str, str, str, str]] = [
     # --- app/middleware/auth.py — the LAN auth hole ------------------------
     ("auth: exempt /api/ from the API-key check",
      "src/mcp/app/middleware/auth.py",
-     'EXEMPT_PREFIXES = ("/health/", "/mcp/", "/auth/", "/a2a/")',
-     'EXEMPT_PREFIXES = ("/health/", "/mcp/", "/auth/", "/a2a/", "/api/")'),
+     'EXEMPT_PREFIXES = ("/auth/",)',
+     'EXEMPT_PREFIXES = ("/auth/", "/api/")'),
     ("auth: treat every bind address as loopback (reopens the LAN hole)",
      "src/mcp/app/middleware/auth.py",
-     '    return bind in ("127.0.0.1", "::1", "localhost", "")',
+     "    return declared in _LOOPBACK_ADDRS",
      "    return True"),
     ("auth: accept any non-empty key (skip constant-time compare)",
      "src/mcp/app/middleware/auth.py",
@@ -180,12 +181,29 @@ MUTANTS: list[tuple[str, str, str, str]] = [
 ]
 
 
+def _pytest_cmd() -> list[str]:
+    """The dev ``.venv`` when there is one, else the interpreter running us.
+
+    CI installs into the job's own Python rather than a repo-local ``.venv``,
+    and the hardcoded path made every mutant SKIP with a FileNotFoundError the
+    harness would have reported as a clean run.
+    """
+    venv_pytest = REPO / ".venv/bin/pytest"
+    if venv_pytest.exists():
+        return [str(venv_pytest)]
+    return [sys.executable, "-m", "pytest"]
+
+
 def run_tests() -> bool:
     """True when the suite passes."""
     proc = subprocess.run(
-        [str(REPO / ".venv/bin/pytest"), "-x", "-q", "-p", "no:randomly", *TESTS],
+        [*_pytest_cmd(), "-x", "-q", "-p", "no:randomly", *TESTS],
         cwd=REPO,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": "src/mcp", "HOME": str(Path.home())},
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PYTHONPATH": "src/mcp",
+            "HOME": str(Path.home()),
+        },
         capture_output=True,
         text=True,
         timeout=600,
@@ -221,11 +239,13 @@ def _run() -> int:
     print(f"baseline green · {len(MUTANTS)} mutants\n")
 
     survived: list[str] = []
+    stale: list[str] = []
     for label, relpath, original, mutated in MUTANTS:
         path = REPO / relpath
         src = path.read_text(encoding="utf-8")
         if original not in src:
-            print(f"  SKIP    {label}\n          (anchor not found in {relpath})")
+            print(f"  STALE   {label}\n          (anchor not found in {relpath})")
+            stale.append(label)
             continue
         path.write_text(src.replace(original, mutated, 1), encoding="utf-8")
         try:
@@ -237,12 +257,21 @@ def _run() -> int:
             survived.append(label)
 
     total = len(MUTANTS)
-    print(f"\nkilled {total - len(survived)}/{total}")
+    print(f"\nkilled {total - len(survived) - len(stale)}/{total}")
     if survived:
         print("\nBLIND SPOTS — these changes broke nothing:")
         for s in survived:
             print(f"  · {s}")
-    return 0
+    # A stale anchor is not a pass. The mutant never got injected, so the
+    # invariant it stands for went unchecked — the same silent-skip shape this
+    # harness was built to catch. Re-anchor it or delete it deliberately.
+    if stale:
+        print("\nNOT INJECTED — the anchor has drifted out of the source:")
+        for s in stale:
+            print(f"  · {s}")
+    # Exit non-zero so a CI job wrapping this actually gates. Returning 0 with
+    # survivors made the harness a report, not a check.
+    return 1 if (survived or stale) else 0
 
 
 if __name__ == "__main__":

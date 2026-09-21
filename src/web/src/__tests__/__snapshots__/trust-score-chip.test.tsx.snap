@@ -67,7 +67,7 @@ exports[`TrustScoreChip > snapshots > snapshot low band 1`] = `
 >
   <svg
     aria-hidden="true"
-    class="lucide lucide-shield-x h-3.5 w-3.5 shrink-0"
+    class="lucide lucide-shield-x lucide-shield-close h-3.5 w-3.5 shrink-0"
     fill="none"
     height="24"
     stroke="currentColor"

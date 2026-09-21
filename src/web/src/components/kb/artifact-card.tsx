@@ -118,7 +118,6 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const [reIngesting, setReIngesting] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState("")
-  const [regeneratingSynopsis, setRegeneratingSynopsis] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   // Scroll card into view when expanded. Gated by useEffect so React Compiler
@@ -406,25 +405,6 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
               </div>
             )}
-            {/* Re-generate synopsis action */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-2 text-label-xs"
-              disabled={regeneratingSynopsis}
-              onClick={async (e) => {
-                e.stopPropagation()
-                setRegeneratingSynopsis(true)
-                await fetch(`${MCP_BASE}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
-                  method: "POST",
-                  headers: mcpHeaders(),
-                }).catch(() => {})
-                setRegeneratingSynopsis(false)
-              }}
-            >
-              {regeneratingSynopsis ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
-              Re-generate synopsis
-            </Button>
           </div>
         )}
 

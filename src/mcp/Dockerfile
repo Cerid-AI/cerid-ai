@@ -126,6 +126,19 @@ RUN python -c "import tomllib,sys; v=tomllib.load(open('/tmp/pyproject.toml','rb
 
 USER cerid
 EXPOSE 8888
+
+# The image always binds 0.0.0.0 inside its network namespace, so the
+# middleware's loopback check cannot be inferred from the absence of
+# CERID_BIND_ADDR (compose always sets it; `docker run -p 0.0.0.0:8888:8888`
+# does not). This marker makes "I am in a container" true even on runtimes
+# that write neither /.dockerenv nor /run/.containerenv.
+ENV CERID_IN_CONTAINER=1
+
+# --lifespan on, not the default auto: auto downgrades a failing lifespan to
+# "ASGI 'lifespan' protocol appears unsupported", logs "Application startup
+# complete" and serves 500s from a bound port. With restart: unless-stopped and
+# a 300s start_period that is ~6 minutes of a broken container looking healthy.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888", \
+     "--lifespan", "on", \
      "--timeout-keep-alive", "30", \
      "--timeout-graceful-shutdown", "30"]

@@ -71,31 +71,38 @@ class PluginListResponse(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _plugin_dir() -> Path:
-    """Resolve the plugin directory."""
-    return Path(config.PLUGIN_DIR)
+def _plugin_dirs() -> list[Path]:
+    """Every directory the loader installs plugins from.
+
+    Delegates to ``plugins.plugin_search_dirs()`` so this router and
+    ``load_plugins()`` cannot disagree about where plugins live — they did,
+    and every community plugin under the top-level ``plugins/`` tree loaded
+    and served while being 404 to this API.
+    """
+    from plugins import plugin_search_dirs
+
+    return plugin_search_dirs()
 
 
 def _discover_manifests() -> dict[str, dict[str, Any]]:
-    """Scan the plugin directory and return name→manifest mapping."""
-    base = _plugin_dir()
-    if not base.exists() or not base.is_dir():
-        return {}
-
+    """Scan the plugin directories and return name→manifest mapping."""
     results: dict[str, dict[str, Any]] = {}
-    for entry in sorted(base.iterdir()):
-        if not entry.is_dir() or entry.name.startswith(("_", ".")):
+    for base in _plugin_dirs():
+        if not base.exists() or not base.is_dir():
             continue
-        manifest_path = entry / "manifest.json"
-        if not manifest_path.exists():
-            continue
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            name = manifest.get("name", entry.name)
-            manifest["_dir"] = str(entry)
-            results[name] = manifest
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to read manifest at %s: %s", manifest_path, exc)
+        for entry in sorted(base.iterdir()):
+            if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                continue
+            manifest_path = entry / "manifest.json"
+            if not manifest_path.exists():
+                continue
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                name = manifest.get("name", entry.name)
+                manifest["_dir"] = str(entry)
+                results[name] = manifest
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to read manifest at %s: %s", manifest_path, exc)
     return results
 
 
@@ -259,7 +266,10 @@ def update_plugin_config(name: str, body: PluginConfig) -> PluginConfig:
 @router.post("/plugins/scan", response_model=PluginListResponse)
 def scan_plugins() -> PluginListResponse:
     """Re-scan plugin directories and return updated list."""
-    logger.info("Rescanning plugin directory: %s", _plugin_dir())
+    logger.info(
+        "Rescanning plugin directories: %s",
+        ", ".join(str(d) for d in _plugin_dirs()),
+    )
     manifests = _discover_manifests()
     plugins: list[PluginInfo] = []
     for name, manifest in manifests.items():

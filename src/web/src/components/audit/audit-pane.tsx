@@ -46,6 +46,10 @@ export function AuditPane() {
   const queryClient = useQueryClient()
 
   const activeReports = REPORT_OPTIONS.filter((r) => enabledReports[r.key]).map((r) => r.key)
+  // core/agents/audit.py forwards `hours` to the activity and verification
+  // reports only. The ingestion and cost reports use their own fixed windows,
+  // so they are handed the selection as a disclaimer, never as a scope.
+  const selectedRangeLabel = TIME_RANGES.find((r) => r.hours === hours)?.label ?? `${hours}h`
 
   const {
     data: audit,
@@ -168,7 +172,7 @@ export function AuditPane() {
                 )}
                 {enabledReports.costs && (
                   <PaneErrorBoundary label="Cost Breakdown" queryClient={queryClient}>
-                    <CostBreakdown costs={audit?.costs} hours={hours} />
+                    <CostBreakdown costs={audit?.costs} selectedRangeLabel={selectedRangeLabel} />
                   </PaneErrorBoundary>
                 )}
                 {enabledReports.conversations && (
@@ -183,7 +187,7 @@ export function AuditPane() {
                 )}
                 {enabledReports.ingestion && (
                   <PaneErrorBoundary label="Ingestion Stats" queryClient={queryClient}>
-                    <IngestionStats ingestion={audit?.ingestion} />
+                    <IngestionStats ingestion={audit?.ingestion} selectedRangeLabel={selectedRangeLabel} />
                   </PaneErrorBoundary>
                 )}
                 <PaneErrorBoundary label="Recent Failures" queryClient={queryClient}>

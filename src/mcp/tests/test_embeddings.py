@@ -5,6 +5,7 @@
 
 import logging
 import math
+import re
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -344,9 +345,10 @@ class TestEmbeddingCacheIntegration:
             backend_calls.append(list(texts))
             return [[float(len(t)), 0.0, 0.0] for t in texts]
 
-        monkeypatch.setattr(ef, "_embed_uncached", lambda inp: [
-            np.asarray(row, dtype=np.float32) for row in _stub_backend(inp)
-        ])
+        monkeypatch.setattr(ef, "_embed_uncached", lambda inp: (
+            [np.asarray(row, dtype=np.float32) for row in _stub_backend(inp)],
+            ef._active_namespace(),
+        ))
         first = ef(["alpha", "beta"])
         second = ef(["alpha", "beta"])
         assert len(backend_calls) == 1, "second call should be served from cache"
@@ -363,7 +365,7 @@ class TestEmbeddingCacheIntegration:
 
         def _tracked(inp):
             backend_calls.append(list(inp))
-            return _stub(inp)
+            return _stub(inp), ef._active_namespace()
 
         monkeypatch.setattr(ef, "_embed_uncached", _tracked)
 
@@ -387,8 +389,9 @@ class TestEmbeddingCacheIntegration:
         backend_calls: list[str] = []
 
         def _stub(inp):
-            backend_calls.append(_current_namespace_for_test(ef))
-            return [np.asarray([1.0], dtype=np.float32) for _ in inp]
+            ns = _current_namespace_for_test(ef)
+            backend_calls.append(ns)
+            return [np.asarray([1.0], dtype=np.float32) for _ in inp], ns
 
         monkeypatch.setattr(ef, "_embed_uncached", _stub)
 
@@ -416,7 +419,10 @@ class TestEmbeddingCacheIntegration:
 
         def _stub(inp):
             calls[0] += 1
-            return [np.asarray([1.0], dtype=np.float32) for _ in inp]
+            return (
+                [np.asarray([1.0], dtype=np.float32) for _ in inp],
+                ef._active_namespace(),
+            )
 
         monkeypatch.setattr(ef, "_embed_uncached", _stub)
         ef(["x"])
@@ -633,3 +639,56 @@ class TestEmbeddingStamp:
         # An untouched domain still gets the global version.
         other = embedding_stamp("finance")
         assert other["embedding_model_version"] == _settings.EMBEDDING_MODEL_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Supply chain: the weights behind every embedding in the index
+# ---------------------------------------------------------------------------
+
+
+def _mock_onnx_load(mock_session_cls, mock_tok_cls):
+    mock_session = MagicMock()
+    mock_session.get_outputs.return_value = [MagicMock(shape=[None, None, 768])]
+    mock_session_cls.return_value = mock_session
+    mock_tok_cls.return_value = MagicMock()
+
+
+class TestModelRevisionPinning:
+    @patch("core.utils.hf_cache.hf_hub_download")
+    @patch("core.utils.embeddings.ort.InferenceSession")
+    @patch("core.utils.embeddings.Tokenizer.from_file")
+    def test_shipped_model_is_pinned_to_a_commit(
+        self, mock_tok_cls, mock_session_cls, mock_dl,
+    ):
+        """A moved tag would swap the vector space under a live index, and
+        EMBEDDING_MODEL_VERSION tracks a config string, not the artifact."""
+        import config
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        mock_dl.return_value = "/fake/model.onnx"
+        _mock_onnx_load(mock_session_cls, mock_tok_cls)
+
+        OnnxEmbeddingFunction(model_id=config.EMBEDDING_MODEL)._load()
+
+        assert mock_dl.call_count == 2, "weights + tokenizer"
+        for call in mock_dl.call_args_list:
+            revision = call.kwargs.get("revision")
+            assert revision is not None and re.fullmatch(
+                r"[0-9a-f]{40}", revision,
+            ), f"unpinned download: {call.kwargs}"
+
+    @patch("core.utils.hf_cache.hf_hub_download")
+    @patch("core.utils.embeddings.ort.InferenceSession")
+    @patch("core.utils.embeddings.Tokenizer.from_file")
+    def test_operator_supplied_model_says_it_is_unpinned(
+        self, mock_tok_cls, mock_session_cls, mock_dl, caplog,
+    ):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        mock_dl.return_value = "/fake/model.onnx"
+        _mock_onnx_load(mock_session_cls, mock_tok_cls)
+
+        with caplog.at_level(logging.WARNING, logger="ai-companion.embeddings"):
+            OnnxEmbeddingFunction(model_id="org/operator-choice")._load()
+
+        assert "not revision-pinned" in caplog.text

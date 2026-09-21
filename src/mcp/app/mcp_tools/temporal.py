@@ -25,6 +25,7 @@ from app.tool_registry import (
     UpstreamUnavailableError,
     register_tool,
 )
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.mcp_tools.temporal")
@@ -404,16 +405,102 @@ _PII_PATTERNS = {
 }
 
 
+# Chroma caps the id list per ``get``; scan in batches so a 500-artifact
+# sample with large documents still issues a bounded number of round-trips.
+_PRIVACY_AUDIT_CHUNK_BATCH = 200
+
+
+def _fetch_artifact_bodies(
+    artifacts: list[dict[str, Any]],
+) -> tuple[dict[str, str], int, list[str]]:
+    """Read the ingested body text for each artifact from ChromaDB.
+
+    Returns ``(body_by_artifact_id, chunks_scanned, domains_unscanned)``.
+    A domain whose collection cannot be read is reported rather than
+    swallowed: for a leak audit, "I could not look" and "I looked and it
+    was clean" must not produce the same output.
+    """
+    import json
+
+    from app.deps import get_chroma
+
+    by_domain: dict[str, dict[str, str]] = {}
+    for a in artifacts:
+        raw = a.get("chunk_ids") or "[]"
+        try:
+            chunk_ids = json.loads(raw) if isinstance(raw, str) else list(raw)
+        except (TypeError, ValueError):
+            chunk_ids = []
+        domain = a.get("domain") or ""
+        if not domain or not chunk_ids:
+            continue
+        owners = by_domain.setdefault(domain, {})
+        for cid in chunk_ids:
+            owners[cid] = a["id"]
+
+    if not by_domain:
+        return {}, 0, []
+
+    try:
+        chroma = get_chroma()
+    except Exception as exc:
+        raise UpstreamUnavailableError(f"ChromaDB unreachable: {exc}") from exc
+
+    parts: dict[str, list[str]] = {}
+    chunks_scanned = 0
+    domains_unscanned: list[str] = []
+    for domain, owners in by_domain.items():
+        try:
+            collection = chroma.get_collection(name=config.collection_name(domain))
+        except Exception as exc:
+            log_swallowed_error(
+                "app.mcp_tools.temporal", exc,
+                context={"op": "privacy_audit_body_scan", "domain": domain},
+            )
+            domains_unscanned.append(domain)
+            continue
+        ids = list(owners)
+        for start in range(0, len(ids), _PRIVACY_AUDIT_CHUNK_BATCH):
+            batch = ids[start:start + _PRIVACY_AUDIT_CHUNK_BATCH]
+            try:
+                fetched = collection.get(ids=batch, include=["documents"])
+            except Exception as exc:
+                log_swallowed_error(
+                    "app.mcp_tools.temporal", exc,
+                    context={"op": "privacy_audit_chunk_batch", "domain": domain},
+                )
+                if domain not in domains_unscanned:
+                    domains_unscanned.append(domain)
+                continue
+            documents = fetched.get("documents") or []
+            for i, cid in enumerate(fetched.get("ids") or []):
+                text = documents[i] if i < len(documents) else ""
+                if not text:
+                    continue
+                parts.setdefault(owners[cid], []).append(str(text))
+                chunks_scanned += 1
+
+    return (
+        {aid: "\n".join(texts) for aid, texts in parts.items()},
+        chunks_scanned,
+        domains_unscanned,
+    )
+
+
 @register_tool(
     name="pkb_privacy_audit",
     description=(
         "Scan a sample of the KB for PII / credentials / sensitive "
-        "content. Patterns checked: email, US SSN, US phone, credit "
-        "card, generic API keys (sk-, pk-, api_key=), AWS access keys, "
-        "PEM private keys, JWTs. **Use when** auditing the KB for "
-        "leaks before sharing / exporting. **Returns** `{findings: "
-        "[{artifact_id, filename, pattern, count, sample}], "
-        "artifacts_scanned, patterns_checked}`. Read-only — no "
+        "content, covering both artifact metadata (filename, summary, "
+        "keywords) and the ingested document bodies. Patterns checked: "
+        "email, US SSN, US phone, credit card, generic API keys (sk-, "
+        "pk-, api_key=), AWS access keys, PEM private keys, JWTs. "
+        "**Use when** auditing the KB for leaks before sharing / "
+        "exporting. **Returns** `{findings: [{artifact_id, filename, "
+        "pattern, count, sample, location}], artifacts_scanned, "
+        "chunks_scanned, domains_unscanned, patterns_checked}`. "
+        "`domains_unscanned` lists domains whose bodies could not be "
+        "read — findings are NOT a clearance for those. Read-only — no "
         "mutations. Cap on artifacts scanned (default 500)."
     ),
     input_schema={
@@ -445,10 +532,16 @@ _PII_PATTERNS = {
                         "pattern": {"type": "string"},
                         "count": {"type": "integer"},
                         "sample": {"type": "string"},
+                        "location": {"type": "string"},
                     },
                 },
             },
             "artifacts_scanned": {"type": "integer"},
+            "chunks_scanned": {"type": "integer"},
+            "domains_unscanned": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
             "patterns_checked": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -473,9 +566,6 @@ async def pkb_privacy_audit(
             f"Unknown pattern(s): {sorted(bad)!r}. Valid: {sorted(_PII_PATTERNS.keys())}"
         )
 
-    # Pull artifact summaries via the existing graph helper; that
-    # gives us a small, scannable text representative per artifact
-    # without paying the cost of full chunk fetch.
     from app.db import neo4j as graph
 
     driver = get_neo4j()
@@ -492,24 +582,27 @@ async def pkb_privacy_audit(
     except Exception as exc:
         raise UpstreamUnavailableError(f"Neo4j unreachable: {exc}") from exc
 
+    bodies, chunks_scanned, domains_unscanned = await asyncio.to_thread(
+        _fetch_artifact_bodies, artifacts,
+    )
+
     findings: list[dict[str, Any]] = []
     for a in artifacts:
-        # Build search corpus from filename + summary + keywords.
-        # Full chunk content would be more thorough but multiplies
-        # scan cost; if false-negatives surface, callers can pass a
-        # smaller max_artifacts and we extend to chunks per-artifact.
-        corpus_parts = [
-            a.get("filename") or "",
-            a.get("summary") or "",
-            a.get("keywords") or "",
-        ]
-        corpus = "\n".join(p for p in corpus_parts if p)
-        if not corpus:
-            continue
-
-        for pname in pattern_subset:
-            matches = _PII_PATTERNS[pname].findall(corpus)
-            if matches:
+        metadata_corpus = "\n".join(
+            p for p in (
+                a.get("filename") or "",
+                a.get("summary") or "",
+                a.get("keywords") or "",
+            ) if p
+        )
+        body_corpus = bodies.get(a["id"], "")
+        for location, corpus in (("metadata", metadata_corpus), ("content", body_corpus)):
+            if not corpus:
+                continue
+            for pname in pattern_subset:
+                matches = _PII_PATTERNS[pname].findall(corpus)
+                if not matches:
+                    continue
                 # Redact the sample to first 30 chars so finding output
                 # doesn't itself become a leak channel.
                 sample_raw = matches[0] if isinstance(matches[0], str) else str(matches[0])
@@ -520,11 +613,14 @@ async def pkb_privacy_audit(
                     "pattern": pname,
                     "count": len(matches),
                     "sample": sample,
+                    "location": location,
                 })
 
     return {
         "findings": findings,
         "artifacts_scanned": len(artifacts),
+        "chunks_scanned": chunks_scanned,
+        "domains_unscanned": domains_unscanned,
         "patterns_checked": pattern_subset,
     }
 

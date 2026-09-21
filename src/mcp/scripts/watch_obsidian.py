@@ -37,12 +37,13 @@ from pathlib import Path
 
 import httpx
 
-from errors import CeridError
-
-# Add parent dir so we can import config
+# Add src/mcp to the path BEFORE any in-tree import, so the documented
+# `python src/mcp/scripts/watch_obsidian.py` invocation resolves them.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import config
-from parsers.structured import parse_markdown
+from core.ingest.parsers.markdown_header import parse_markdown
+from errors import CeridError
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")  # env-capture-allowed: CLI entrypoint script — one-shot process
 
@@ -213,22 +214,23 @@ def ingest_note(file_path: str, domain: str, mode: str):
     filename = Path(file_path).name
     _log("INFO", f"Ingesting: {filename} → domain={domain}")
 
-    # Use the structured parser to extract frontmatter and content
+    # Same parser the server-side ingest pipeline uses, so the watcher's view
+    # of a note matches what /ingest will make of it.
     try:
-        parsed = parse_markdown(file_path)
-    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        sections = parse_markdown(file_path)
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError, ImportError) as e:
         _log("ERROR", f"  Failed to parse: {filename}: {e}")
         return
 
-    text = parsed.get("text", "")
+    text = "\n\n".join(s.get("text", "") for s in sections)
 
     # Convert Obsidian wikilinks to plain text
     text = _convert_wikilinks(text)
 
-    # Extract and map frontmatter
+    # Extract and map frontmatter — the parser attaches it to the first section.
     effective_domain = domain
     extra_metadata: dict = {}
-    fm_json = parsed.get("frontmatter", "")
+    fm_json = sections[0].get("metadata", {}).get("frontmatter_json", "") if sections else ""
     if fm_json:
         try:
             frontmatter = json.loads(fm_json)

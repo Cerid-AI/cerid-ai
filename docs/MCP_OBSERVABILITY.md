@@ -97,5 +97,5 @@ Tools that consistently exceed their budget should either:
 * Be reclassified upward in the next release
 * Surface degradation through `_warnings` (see [`MCP_TOOL_STYLE.md`])
 
-See [`MCP_TOOL_TESTS.md`](MCP_TOOL_TESTS.md) § Latency budget tests for the
-shipped CI enforcement (`benchmark-slo`) and its scope.
+The shipped CI enforcement is the `benchmark-slo` job, which runs the latency
+budget tests against a live stack.

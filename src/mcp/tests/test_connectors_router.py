@@ -250,6 +250,73 @@ class TestSiblingReachability:
         assert "not been contacted yet" in detail
         assert "not reachable" not in detail
 
+    def test_failing_calls_are_not_reported_as_never_contacted(self, client, monkeypatch):
+        """Four failures an hour is evidence, and the breaker is still closed.
+
+        The breaker needs three CONSECUTIVE failures inside its window to
+        open, so a connector failing every call can sit at circuit_open=False
+        indefinitely. _build_status read only circuit_open and ever_succeeded,
+        so it reported "never contacted" and the wizard told the operator to
+        go run a query that cannot succeed.
+        """
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 4,
+             "circuit_open": False, "ever_succeeded": False},
+        ])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is False
+        assert outlook["sibling_failures"] == 4
+
+    def test_never_contacted_reports_zero_failures(self, client, monkeypatch):
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 0,
+             "circuit_open": False, "ever_succeeded": False},
+        ])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is None
+        assert outlook["sibling_failures"] == 0
+
+    def test_an_unregistered_sibling_reports_no_failure_count(self, client, monkeypatch):
+        """Nothing in the pool means no call history to count."""
+        self._with_pool(monkeypatch, [])
+        outlook = next(
+            c for c in client.get("/connectors").json()["connectors"]
+            if c["slug"] == "outlook"
+        )
+        assert outlook["sibling_reachable"] is False
+        assert outlook["sibling_failures"] is None
+
+    def test_auth_status_tells_the_operator_the_calls_are_failing(
+        self, client, monkeypatch,
+    ):
+        monkeypatch.setenv("CERID_CONNECTORS_BEARER", "test-bearer")
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 4,
+             "circuit_open": False, "ever_succeeded": False},
+        ])
+        detail = client.get("/connectors/outlook/auth/status").json()["detail"]
+        assert "not been contacted yet" not in detail
+        assert "4" in detail
+
+    def test_auth_status_does_not_claim_a_broken_sibling_never_worked(
+        self, client, monkeypatch,
+    ):
+        """An open breaker on a sibling that HAS succeeded is a different story."""
+        monkeypatch.setenv("CERID_CONNECTORS_BEARER", "test-bearer")
+        self._with_pool(monkeypatch, [
+            {"name": "ms365", "url": "http://x", "failures": 3,
+             "circuit_open": True, "ever_succeeded": True},
+        ])
+        detail = client.get("/connectors/outlook/auth/status").json()["detail"]
+        assert "never succeeded" not in detail
+        assert "circuit-broken" in detail
+
 
 class TestGetConnector:
     def test_unknown_slug_returns_404(self, client):

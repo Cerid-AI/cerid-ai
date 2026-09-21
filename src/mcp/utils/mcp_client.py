@@ -46,6 +46,7 @@ class MCPServerConfig:
     headers: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """Summary for API responses — deliberately omits env and headers."""
         return {
             "name": self.name,
             "transport": self.transport,
@@ -54,6 +55,108 @@ class MCPServerConfig:
             "args": self.args,
             "url": self.url,
         }
+
+    def to_persisted(self) -> dict[str, Any]:
+        """Everything needed to reconnect after a restart.
+
+        Unlike :meth:`to_dict` this carries ``env`` and ``headers``: without
+        them a rehydrated stdio server has no environment and an SSE server
+        loses its Authorization header, so the reconnect fails.
+        """
+        return {**self.to_dict(), "env": self.env, "headers": self.headers}
+
+
+# ---------------------------------------------------------------------------
+# stdio spawn policy
+# ---------------------------------------------------------------------------
+
+# A stdio server config can arrive in a POST /mcp-servers body, so the command
+# it names is untrusted input. There is no safe way to sanitise "run this
+# binary with these arguments" — the only control is an operator naming, out
+# of band, which launchers this host may spawn. Empty (the default) means no
+# host process is started for anyone.
+STDIO_ALLOWLIST_ENV = "CERID_MCP_STDIO_ALLOWED_COMMANDS"
+
+# Variables that turn any allowlisted launcher back into an arbitrary-code
+# loader, so they are never taken from a caller-supplied env block.
+_FORBIDDEN_ENV_KEYS = frozenset({
+    "BASH_ENV",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "ENV",
+    "LD_AUDIT",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+})
+
+
+def stdio_allowlist() -> set[str]:
+    """Command names this host is permitted to spawn for stdio MCP servers."""
+    raw = os.getenv(STDIO_ALLOWLIST_ENV, "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
+
+
+def validate_stdio_config(cfg: MCPServerConfig) -> None:
+    """Raise ``ValueError`` unless *cfg* names a launcher the operator allowed."""
+    allowed = stdio_allowlist()
+    if not allowed:
+        raise ValueError(
+            "stdio MCP servers are disabled on this host — set "
+            f"{STDIO_ALLOWLIST_ENV} to the command names it may spawn"
+        )
+    command = cfg.command.strip()
+    if not command or command != os.path.basename(command) or os.sep in cfg.command:
+        raise ValueError(
+            f"stdio command must be a bare command name, not a path: {cfg.command!r}"
+        )
+    if command not in allowed:
+        raise ValueError(
+            f"stdio command {command!r} is not listed in {STDIO_ALLOWLIST_ENV}"
+        )
+    forbidden = sorted(set(cfg.env or {}) & _FORBIDDEN_ENV_KEYS)
+    if forbidden:
+        raise ValueError(
+            f"stdio env may not set loader variables: {', '.join(forbidden)}"
+        )
+
+
+#: Redis hash holding every server registered through ``POST /mcp-servers``.
+#: Without it a registration lived only in the process that received it, so a
+#: restart silently dropped the server and all of its ``ext_*`` tools.
+MCP_SERVERS_KEY = "cerid:mcp_servers"
+
+
+def _store() -> Any:
+    """Redis handle for persisted server configs, or ``None`` when unavailable.
+
+    Imported lazily: ``utils`` must not depend on ``app`` at module scope.
+    """
+    try:
+        from app.deps import get_redis
+
+        return get_redis()
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        logger.warning("MCP server store unavailable: %s", exc)
+        return None
+
+
+def _config_from_entry(entry: dict[str, Any]) -> MCPServerConfig:
+    """Build a config from a persisted or env-supplied JSON object."""
+    return MCPServerConfig(
+        name=entry["name"],
+        transport=entry.get("transport", "stdio"),
+        enabled=entry.get("enabled", True),
+        command=entry.get("command", ""),
+        args=entry.get("args", []),
+        env=entry.get("env", {}),
+        url=entry.get("url", ""),
+        headers=entry.get("headers", {}),
+    )
 
 
 @dataclass
@@ -93,14 +196,69 @@ class MCPClientManager:
 
     # -- Configuration -------------------------------------------------------
 
-    def add_server(self, config: MCPServerConfig) -> None:
-        """Register a server config (does not connect yet)."""
+    def add_server(self, config: MCPServerConfig, *, persist: bool = True) -> None:
+        """Register a server config (does not connect yet).
+
+        Writes through to Redis so the registration outlives this process.
+        ``persist=False`` is for configs that already have a durable home —
+        the ``MCP_SERVERS_CONFIG`` env var and rehydration itself.
+        """
         self._configs[config.name] = config
+        if not persist:
+            return
+        store = _store()
+        if store is None:
+            logger.warning(
+                "MCP server '%s' registered in memory only — no store available; "
+                "it will not survive a restart", config.name,
+            )
+            return
+        try:
+            store.hset(
+                MCP_SERVERS_KEY, config.name, json.dumps(config.to_persisted()),
+            )
+        except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+            logger.warning("Failed to persist MCP server '%s': %s", config.name, exc)
+
+    def hydrate_from_store(self) -> int:
+        """Load persisted server configs into this process. Returns the count.
+
+        Called from the app lifespan: before this existed nothing read the
+        registrations back, so every one was lost on restart.
+        """
+        store = _store()
+        if store is None:
+            return 0
+        try:
+            raw = store.hgetall(MCP_SERVERS_KEY) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to read persisted MCP servers: %s", exc)
+            return 0
+
+        loaded = 0
+        for name, blob in raw.items():
+            key = name.decode() if isinstance(name, bytes) else str(name)
+            try:
+                entry = json.loads(blob.decode() if isinstance(blob, bytes) else blob)
+                entry.setdefault("name", key)
+                self.add_server(_config_from_entry(entry), persist=False)
+                loaded += 1
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                logger.warning("Skipping unreadable MCP server '%s': %s", key, exc)
+        if loaded:
+            logger.info("Rehydrated %d persisted MCP server config(s)", loaded)
+        return loaded
 
     def remove_server(self, name: str) -> bool:
         """Remove a server config and disconnect if connected."""
         if name in self._configs:
             del self._configs[name]
+            store = _store()
+            if store is not None:
+                try:
+                    store.hdel(MCP_SERVERS_KEY, name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to drop MCP server '%s': %s", name, exc)
             self._connected.discard(name)
             self._errors.pop(name, None)
             # Remove discovered tools for this server
@@ -130,17 +288,8 @@ class MCPClientManager:
                 return 0
 
             for entry in configs:
-                cfg = MCPServerConfig(
-                    name=entry["name"],
-                    transport=entry.get("transport", "stdio"),
-                    enabled=entry.get("enabled", True),
-                    command=entry.get("command", ""),
-                    args=entry.get("args", []),
-                    env=entry.get("env", {}),
-                    url=entry.get("url", ""),
-                    headers=entry.get("headers", {}),
-                )
-                self.add_server(cfg)
+                # persist=False: the env var IS the durable record for these.
+                self.add_server(_config_from_entry(entry), persist=False)
 
             logger.info("Loaded %d MCP server configs", len(configs))
             return len(configs)
@@ -161,6 +310,13 @@ class MCPClientManager:
         connected: list[str] = []
         for name, cfg in self._configs.items():
             if not cfg.enabled:
+                continue
+            if name in self._connected:
+                # POST /mcp-servers calls connect_all() on every add. Without
+                # this, _connect_one ran again for servers already up, replaced
+                # self._sessions[name], and leaked the previous stdio
+                # subprocess into the exit stack.
+                connected.append(name)
                 continue
             try:
                 session = await asyncio.wait_for(
@@ -196,6 +352,7 @@ class MCPClientManager:
         if cfg.transport == "stdio":
             from mcp.client.stdio import stdio_client
 
+            validate_stdio_config(cfg)
             params = StdioServerParameters(
                 command=cfg.command,
                 args=cfg.args,
@@ -359,3 +516,14 @@ class MCPClientManager:
 
 # Module-level singleton
 mcp_client_manager = MCPClientManager()
+
+
+async def restore_and_connect() -> list[str]:
+    """Startup entry point: load env config, rehydrate the store, connect.
+
+    Nothing called this before, so ``MCP_SERVERS_CONFIG`` was never read and
+    user-registered servers were never restored.
+    """
+    mcp_client_manager.load_config()
+    mcp_client_manager.hydrate_from_store()
+    return await mcp_client_manager.connect_all()

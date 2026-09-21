@@ -20,10 +20,12 @@ vi.mock("@/lib/api/sources", async (orig) => ({
 
 const migrateNotionExport = vi.fn()
 const fetchMigrationStatus = vi.fn()
+const isNotionMigrationAvailable = vi.fn(async () => true)
 
 vi.mock("@/lib/api/migration", () => ({
   migrateNotionExport: (...args: unknown[]) => migrateNotionExport(...args),
   fetchMigrationStatus: (...args: unknown[]) => fetchMigrationStatus(...args),
+  isNotionMigrationAvailable: () => isNotionMigrationAvailable(),
 }))
 
 function renderWizard() {
@@ -37,6 +39,7 @@ function renderWizard() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  isNotionMigrationAvailable.mockResolvedValue(true)
 })
 
 describe("SourceAddWizard — Notion migration", () => {
@@ -83,5 +86,28 @@ describe("SourceAddWizard — Notion migration", () => {
 
     expect(await screen.findByText(/2\/5 pages/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^done$/i })).toBeDisabled()
+  })
+})
+
+// F182/F221: /api/migrate/* is served by an internal-only router, so an
+// edition that does not mount it 404s every import. The tile must not be
+// offered where the endpoint does not exist.
+describe("SourceAddWizard — Notion tile on a build without the migration router", () => {
+  it("hides the tile when the server has no /api/migrate route", async () => {
+    isNotionMigrationAvailable.mockResolvedValue(false)
+    renderWizard()
+    await waitFor(() => expect(isNotionMigrationAvailable).toHaveBeenCalled())
+    expect(
+      screen.queryByRole("button", { name: /import a notion export/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("hides the tile when the probe itself fails", async () => {
+    isNotionMigrationAvailable.mockRejectedValue(new Error("offline"))
+    renderWizard()
+    await waitFor(() => expect(isNotionMigrationAvailable).toHaveBeenCalled())
+    expect(
+      screen.queryByRole("button", { name: /import a notion export/i }),
+    ).not.toBeInTheDocument()
   })
 })

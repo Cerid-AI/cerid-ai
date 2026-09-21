@@ -172,6 +172,38 @@ def test_flag_already_on_skips_recommendation():
     assert "sparse_retrieval" not in ids
 
 
+def test_chat_virtualization_reason_reports_messages_not_artifacts():
+    """The banner promises a message count; it printed the artifact count.
+
+    ``evaluate`` formatted every reason from ``stats.artifact_count`` while
+    the chat-virtualization condition reads ``longest_conversation_length``,
+    so an operator with a 210-message thread and 4,000 artifacts was told
+    "One of your conversations has 4000 messages".
+    """
+    stats = CorpusStats(
+        artifact_count=4000,
+        flags_enabled=frozenset(),
+        longest_conversation_length=210,
+    )
+    reason = next(
+        reason for spec, reason in evaluate(stats) if spec.id == "chat_virtualization"
+    )
+    assert "210 messages" in reason
+    assert "4000" not in reason
+
+
+def test_corpus_size_cards_still_report_the_corpus_size():
+    stats = CorpusStats(
+        artifact_count=4000,
+        flags_enabled=frozenset(),
+        longest_conversation_length=210,
+    )
+    reason = next(
+        reason for spec, reason in evaluate(stats) if spec.id == "hype_indexing"
+    )
+    assert "4000" in reason
+
+
 def test_reason_template_substitutes_count():
     stats = CorpusStats(artifact_count=250, flags_enabled=frozenset())
     hits = evaluate(stats)

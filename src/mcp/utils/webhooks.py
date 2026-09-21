@@ -141,6 +141,14 @@ async def fire_event(
         "timestamp": utcnow_iso(),
         "data": payload,
     }
+    # Serialised once, here: the receiver verifies X-Cerid-Signature over the
+    # raw request body (the convention app/services/webhook_tokens.py applies
+    # to inbound calls), so the bytes we sign have to be the bytes we send.
+    # httpx's ``json=`` re-serialises the dict with its own key order and
+    # separators, which is what made every signature we ever sent unverifiable.
+    body_bytes = json.dumps(
+        body, separators=(",", ":"), sort_keys=True, default=str,
+    ).encode("utf-8")
 
     delivered = 0
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -168,14 +176,12 @@ async def fire_event(
                 # CRUD-registered subscriptions carry a per-subscription HMAC
                 # secret so receivers can verify authenticity.
                 signature = hmac.new(
-                    secret.encode("utf-8"),
-                    json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8"),
-                    hashlib.sha256,
+                    secret.encode("utf-8"), body_bytes, hashlib.sha256,
                 ).hexdigest()
                 headers["X-Cerid-Signature"] = f"sha256={signature}"
             sub_id = hook.get("id", "")
             try:
-                resp = await client.post(url, json=body, headers=headers)
+                resp = await client.post(url, content=body_bytes, headers=headers)
                 if resp.status_code < HTTPStatus.BAD_REQUEST:
                     delivered += 1
                     logger.debug(f"Webhook delivered: {event_type} -> {url} ({resp.status_code})")

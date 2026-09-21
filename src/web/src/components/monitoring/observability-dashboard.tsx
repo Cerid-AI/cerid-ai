@@ -28,6 +28,12 @@ import {
   fetchHealthStatus,
 } from "@/lib/api"
 import type { MetricAggregation, PipelineStage } from "@/lib/types"
+import {
+  isOnBoxServing,
+  readInferenceLanes,
+  type InferenceLane,
+  type InferenceLaneName,
+} from "@/components/monitoring/inference-lanes"
 
 // ---------------------------------------------------------------------------
 // Time window options
@@ -229,6 +235,18 @@ const ALL_STAGES: PipelineStage[] = [
   "reranking", "chat_generation",
 ]
 
+/** Which inference lane answers each stage — mirrors health.py's _STAGE_LANES. */
+const STAGE_LANE: Record<PipelineStage, InferenceLaneName> = {
+  claim_extraction: "llm",
+  query_decomposition: "llm",
+  topic_extraction: "llm",
+  memory_resolution: "llm",
+  verification_simple: "llm",
+  verification_complex: "llm",
+  reranking: "rerank",
+  chat_generation: "llm",
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -280,13 +298,26 @@ export function ObservabilityDashboard() {
     return result
   }, [metrics])
 
-  // Pipeline routing stats
+  // Pipeline routing stats. Local-ness is resolved through the same helper the
+  // status bar uses — counting only the literal "ollama" reported a
+  // quenchforge box as 0/8 local while the bar beside it said 8/8, and the
+  // Diagnostics number is the one an operator acts on for cost and privacy.
+  const laneByStage = useMemo(() => {
+    const lanes = readInferenceLanes(healthStatus?.inference_routing)
+    const byName = new Map(lanes.map((l) => [l.lane, l]))
+    const map = new Map<PipelineStage, InferenceLane | undefined>()
+    for (const [stage, lane] of Object.entries(STAGE_LANE) as [PipelineStage, InferenceLaneName][]) {
+      map.set(stage, byName.get(lane))
+    }
+    return map
+  }, [healthStatus?.inference_routing])
+
   const pipelineStats = useMemo(() => {
     const providers = healthStatus?.pipeline_providers
     if (!providers) return null
     const total = ALL_STAGES.length
-    const ollamaCount = ALL_STAGES.filter((s) => providers[s] === "ollama").length
-    return { total, ollamaCount, providers }
+    const localCount = ALL_STAGES.filter((s) => isOnBoxServing(providers[s])).length
+    return { total, localCount, providers }
   }, [healthStatus?.pipeline_providers])
 
   // Cost: sum from the llm_cost_usd metric
@@ -340,15 +371,20 @@ export function ObservabilityDashboard() {
             </CardHeader>
             <CardContent className="p-3 pt-0">
               {(() => {
+                // Scoped labels: this badge reports the DegradationManager's
+                // feature tier, which cannot see latency, verification
+                // coverage or a fallen-back lane. A bare "Healthy" beside a
+                // system-health grade of F read as a third, contradictory
+                // whole-system verdict.
                 const TIER_DISPLAY: Record<string, string> = {
-                  full: "Healthy",
+                  full: "Full feature tier",
                   lite: "Lite Mode",
                   direct: "Direct",
                   cached: "Cache Only",
                   offline: "Offline",
                 }
                 return (
-                  <span className={cn(
+                  <span data-testid="degradation-tier-badge" className={cn(
                     "inline-block rounded-md px-2 py-0.5 text-lg font-bold",
                     healthStatus.degradation_tier === "full" && "bg-green-500/15 text-green-700 dark:text-green-400",
                     healthStatus.degradation_tier === "lite" && "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
@@ -386,18 +422,35 @@ export function ObservabilityDashboard() {
               <Cpu className="h-4 w-4 text-purple-500" />
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <div className="text-xl font-bold tabular-nums leading-tight">
-                {pipelineStats ? `${pipelineStats.ollamaCount}/${pipelineStats.total} local` : "—"}
+              <div
+                data-testid="pipeline-local-count"
+                className="text-xl font-bold tabular-nums leading-tight"
+              >
+                {pipelineStats ? `${pipelineStats.localCount}/${pipelineStats.total} local` : "—"}
               </div>
               {pipelineStats && (
                 <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-label-xs text-muted-foreground">
                   {ALL_STAGES.map((stage) => {
                     const provider = pipelineStats.providers[stage] ?? "\u2014"
+                    const degraded = laneByStage.get(stage)?.degraded === true
                     return (
                       <span key={stage}>
                         <span className="font-medium">{stage.replace(/_/g, " ")}</span>
                         {" "}
-                        <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
+                        <span
+                          data-testid={`pipeline-stage-${stage}`}
+                          className={cn(
+                            degraded
+                              ? "text-amber-600 dark:text-amber-400"
+                              : isOnBoxServing(provider)
+                                ? "text-green-500"
+                                : "text-blue-500",
+                          )}
+                          title={degraded ? laneByStage.get(stage)?.degradedDetail : undefined}
+                        >
+                          {provider}
+                          {degraded ? " (fallback)" : ""}
+                        </span>
                       </span>
                     )
                   })}

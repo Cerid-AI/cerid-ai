@@ -29,7 +29,10 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["src"],
-  // The entrypoint test drives a shell script via node APIs, so it typechecks
-  // in tsconfig.node.json (node types) instead of the browser-typed app project.
-  "exclude": ["src/__tests__/docker-entrypoint.test.ts"]
+  // These tests read repo files through node APIs, so they typecheck in
+  // tsconfig.node.json (node types) instead of the browser-typed app project.
+  "exclude": [
+    "src/__tests__/docker-entrypoint.test.ts",
+    "src/__tests__/setup-response-contract.test.ts"
+  ]
 }

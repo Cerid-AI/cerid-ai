@@ -26,6 +26,7 @@ def _clear(monkeypatch) -> None:
         "QUENCHFORGE_URL",
         "OLLAMA_URL",
         "QUENCHFORGE_DEFAULT_MODEL",
+        "INTERNAL_LLM_MODEL",
         "QUENCHFORGE_EMBED_MODEL",
         "QUENCHFORGE_RERANK_MODEL",
         "LLM_INTERNAL_MODEL",
@@ -49,7 +50,7 @@ def test_quenchforge_everywhere(monkeypatch):
     monkeypatch.setenv("EMBEDDINGS_PROVIDER", "quenchforge")
     monkeypatch.setenv("RERANK_PROVIDER", "quenchforge")
     monkeypatch.setenv("QUENCHFORGE_URL", "http://qf:11434")
-    monkeypatch.setenv("QUENCHFORGE_DEFAULT_MODEL", "qwen2.5:14b-instruct-q4_k_m")
+    monkeypatch.setenv("INTERNAL_LLM_MODEL", "qwen2.5:14b-instruct-q4_k_m")
     monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "nomic-embed-text-v1.5")
     monkeypatch.setenv("QUENCHFORGE_RERANK_MODEL", "bge-reranker-v2-m3")
 

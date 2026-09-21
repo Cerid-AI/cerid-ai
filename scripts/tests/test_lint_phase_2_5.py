@@ -139,6 +139,82 @@ class TestModuleEnvCapture:
         assert "module-env-capture" in out.err
 
 
+class TestMutableConfigValueImport:
+    """G-B extension: a value-import freezes a boot-time copy of a name the
+    running process mutates. `from config.features import FEATURE_TIER` binds
+    the value, not the module attribute, so `setattr(config.features, ...)`
+    at runtime never reaches this reader — the same defect as a module-level
+    os.getenv, one import statement further away."""
+
+    def test_value_import_from_config_features_flagged(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("from config.features import FEATURE_TIER\n")
+        caps = env_lint.check_file(f)
+        assert len(caps) == 1
+        assert caps[0].name == "FEATURE_TIER"
+        assert caps[0].kind == "config-value-import"
+
+    def test_value_import_from_config_taxonomy_flagged(self, tmp_path: Path) -> None:
+        """DOMAINS is rebound from TAXONOMY.keys() by the runtime writers."""
+        f = tmp_path / "code.py"
+        f.write_text("from config.taxonomy import DOMAINS, TAXONOMY\n")
+        caps = env_lint.check_file(f)
+        assert {c.name for c in caps} == {"DOMAINS", "TAXONOMY"}
+        assert {c.kind for c in caps} == {"config-value-import"}
+
+    def test_value_import_from_config_settings_flagged(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("from config.settings import MEMORY_RECALL_TOP_K, MEMORY_RECALL_MIN_SCORE\n")
+        assert {c.name for c in env_lint.check_file(f)} == {
+            "MEMORY_RECALL_TOP_K",
+            "MEMORY_RECALL_MIN_SCORE",
+        }
+
+    def test_module_import_not_flagged(self, tmp_path: Path) -> None:
+        """`import config.features as f` then `f.X` re-reads the attribute
+        every call — the fix shape, not the defect."""
+        f = tmp_path / "code.py"
+        f.write_text("import config.features as features_mod\n")
+        assert env_lint.check_file(f) == []
+
+    def test_function_import_not_flagged(self, tmp_path: Path) -> None:
+        """Functions and classes are not values that drift."""
+        f = tmp_path / "code.py"
+        f.write_text("from config.features import is_feature_enabled, FeatureTier\n")
+        assert env_lint.check_file(f) == []
+
+    def test_import_from_unrelated_module_not_flagged(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("from core.utils.text import MAX_CHUNK_TOKENS\n")
+        assert env_lint.check_file(f) == []
+
+    def test_function_scope_import_not_flagged(self, tmp_path: Path) -> None:
+        """A deferred import inside a function re-executes per call."""
+        f = tmp_path / "code.py"
+        f.write_text("def f():\n    from config.features import FEATURE_TIER\n    return FEATURE_TIER\n")
+        assert env_lint.check_file(f) == []
+
+    def test_opt_out_token_silences(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text(
+            "from config.features import DEFAULT_TENANT_ID  "
+            "# env-capture-allowed: single-tenant constant, never mutated\n"
+        )
+        assert env_lint.check_file(f) == []
+
+    def test_strict_mode_reports_the_import(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("from config.features import MMR_LAMBDA\n")
+        rc = env_lint.main([str(f), "--strict"])
+        out = capsys.readouterr()
+        assert rc == 1
+        assert "config-value-import" in out.err
+
+
 # ---------------------------------------------------------------------------
 # lint-http-singleton-thread-guard
 # ---------------------------------------------------------------------------

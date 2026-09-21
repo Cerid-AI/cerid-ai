@@ -275,6 +275,50 @@ describe("CartographerMap — loading state", () => {
 })
 
 // ---------------------------------------------------------------------------
+// CartographerMap — capped edge set (F225)
+// ---------------------------------------------------------------------------
+
+// /graph/map sets links_truncated when the in-scope edge set hit
+// GRAPH_EMBEDDINGS_3D_MAX_LINKS. Without surfacing it, a capped payload is
+// indistinguishable from a sparse graph and nodes whose edges were cut render
+// as orphans that isolated_count does not count.
+describe("CartographerMap — truncated edge set", () => {
+  it("tells the user when the server capped the edge set", () => {
+    render(
+      <CartographerMap
+        lens="cluster"
+        typeFilter={new Set()}
+        config={DEFAULT_CONFIG}
+        data={makeGraphMapData({ links_truncated: true })}
+        isLoading={false}
+        isError={false}
+        onInspect={vi.fn()}
+        onCommunityClick={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    )
+    expect(screen.getByText(/not every connection is shown/i)).toBeTruthy()
+  })
+
+  it("shows no such notice for a complete edge set", () => {
+    render(
+      <CartographerMap
+        lens="cluster"
+        typeFilter={new Set()}
+        config={DEFAULT_CONFIG}
+        data={makeGraphMapData({ links_truncated: false })}
+        isLoading={false}
+        isError={false}
+        onInspect={vi.fn()}
+        onCommunityClick={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    )
+    expect(screen.queryByText(/not every connection is shown/i)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // CartographerMap — renders with data
 // ---------------------------------------------------------------------------
 

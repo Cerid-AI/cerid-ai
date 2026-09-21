@@ -1,6 +1,7 @@
 {
   "name": "outlook-connector",
   "version": "1.0.0",
+  "type": "connector",
   "description": "Outlook/Microsoft Graph connector for importing emails into Cerid KB",
   "tier": "pro",
   "license": "BUSL-1.1",

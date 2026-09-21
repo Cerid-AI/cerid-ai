@@ -40,11 +40,13 @@ TEST_RESIDUE_MEMORY_CONVO_PREFIXES: tuple[str, ...] = (
     "audit-tr",
 )
 
-# Seeded demo/test notes observed verbatim in the live KB (UX-20).
-TEST_RESIDUE_EXACT_NAMES: tuple[str, ...] = (
-    "Project Aurora",
-    "GreenTech Inc.",
-)
+# There is deliberately no exact-name arm. The seeded demo notes observed in
+# the live KB ("Project Aurora", "GreenTech Inc.") are ordinary titles a user
+# could pick, and this namespace feeds an unattended hard-delete sweep — a
+# literal name carries no evidence that test tooling wrote the row. Residue is
+# identified by the tooling markers below (name prefix, or a concrete marker
+# token in the content); seeded demo content that carries neither is removed
+# by hand, by id.
 
 
 # Probe suites ingest content WITHOUT a filename (the artifact is stored as
@@ -75,8 +77,6 @@ def is_test_residue_name(name: str) -> bool:
     if not stripped:
         return False
     if any(stripped.startswith(p) for p in TEST_RESIDUE_PREFIXES):
-        return True
-    if stripped in TEST_RESIDUE_EXACT_NAMES:
         return True
     if stripped.startswith("memory_"):
         return any(

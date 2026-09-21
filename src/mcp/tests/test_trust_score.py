@@ -444,3 +444,54 @@ def test_trust_component_model_validation_rejects_bad_status() -> None:
             status="garbage",  # type: ignore[arg-type]
             source="t",
         )
+
+
+# ------------------------------------------------- basis disclosure (F039)
+
+
+def test_score_discloses_how_many_components_it_was_computed_from(tmp_path: Path) -> None:
+    """The mean's denominator has to travel with the score.
+
+    Four of the six components read files under tests/eval/baselines, which
+    is internal-only — a public install computes the same headline number
+    from at most two inputs. /observability/trust-score returned the score
+    with no way to see that, so 73-from-six and 11-from-two rendered as the
+    same kind of fact.
+    """
+    (tmp_path / "ragas.json").write_text(json.dumps({"metrics": {"faithfulness": 0.93}}))
+
+    with patch("app.services.trust_score._RAGAS_PATH", tmp_path / "ragas.json"), \
+         patch("app.services.trust_score._RETRIEVAL_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._LONGMEMEVAL_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._PRESERVATION_PATH", tmp_path / "missing.json"):
+        ts = compute_trust_score(neo4j_driver=None)
+
+    assert ts.available_components == 1
+    assert ts.total_components == 6
+    assert ts.model_dump()["available_components"] == 1
+
+
+def test_available_components_tracks_the_components_that_contributed(tmp_path: Path) -> None:
+    (tmp_path / "ragas.json").write_text(json.dumps({"metrics": {"faithfulness": 0.93}}))
+    (tmp_path / "retrieval.json").write_text(json.dumps({"metrics": {"avg_ndcg_10": 0.88}}))
+
+    with patch("app.services.trust_score._RAGAS_PATH", tmp_path / "ragas.json"), \
+         patch("app.services.trust_score._RETRIEVAL_PATH", tmp_path / "retrieval.json"), \
+         patch("app.services.trust_score._LONGMEMEVAL_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._PRESERVATION_PATH", tmp_path / "missing.json"):
+        ts = compute_trust_score(neo4j_driver=None)
+
+    contributing = [c for c in ts.components if c.status != "not_available"]
+    assert ts.available_components == len(contributing) == 2
+
+
+def test_no_components_reports_a_zero_basis(tmp_path: Path) -> None:
+    with patch("app.services.trust_score._RAGAS_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._RETRIEVAL_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._LONGMEMEVAL_PATH", tmp_path / "missing.json"), \
+         patch("app.services.trust_score._PRESERVATION_PATH", tmp_path / "missing.json"):
+        ts = compute_trust_score(neo4j_driver=None)
+
+    assert ts.score is None
+    assert ts.available_components == 0
+    assert ts.total_components == 6

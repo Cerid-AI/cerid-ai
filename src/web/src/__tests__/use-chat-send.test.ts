@@ -6,6 +6,7 @@ import { renderHook, act } from "@testing-library/react"
 import { useChatSend } from "@/hooks/use-chat-send"
 import type { ChatMessage, KBQueryResult } from "@/lib/types"
 import { MODELS } from "@/lib/types"
+import { estimateTokenCount, TOKEN_CHARS_RATIO } from "@/lib/utils"
 
 // Mock API module
 vi.mock("@/lib/api", () => ({
@@ -241,39 +242,153 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).not.toContain("below.py")
   })
 
-  // The token budget bounds which chunks are SELECTED (they become the
-  // assistant message's sources). A second, much tighter per-model char
-  // budget (selectDocsWithinBudget) then decides which of those survive into
-  // the rendered system message, and any chunk large enough to exhaust the
-  // token budget is far too large to clear that char budget. Asserting on the
-  // system message therefore cannot observe this loop at all — which is why
-  // this test sat skipped. It asserts on the selection instead.
-  it("stops adding chunks when token budget is exhausted", async () => {
-    const modelObj = MODELS[0]
-    // estimateTokenCount = Math.ceil(chars / 3.5), so chars = tokens * 3.5.
-    // reservedTokens is history + user message + 1200; 2000 covers it here.
-    const budgetTokens = modelObj.effectiveContextWindow - 2000
-    const firstContent = "a".repeat(Math.floor(budgetTokens * 3.5 * 0.8)) // uses 80% of budget
-    const secondContent = "b".repeat(Math.floor(budgetTokens * 3.5 * 0.5)) // needs 50%, 20% left → breaks
-    const small = makeKBResult({ artifact_id: "a1", relevance: 0.95, filename: "first.py", content: firstContent })
-    const overBudget = makeKBResult({ artifact_id: "a2", relevance: 0.90, filename: "overbudget.py", content: secondContent })
-    const trailing = makeKBResult({ artifact_id: "a3", relevance: 0.85, filename: "trailing.py", content: "Trailing chunk" })
-    mockQueryKB.mockResolvedValue({ results: [small, overBudget, trailing] })
+  it("stops adding chunks when the token budget is exhausted — and stops for good", async () => {
+    // A small model window keeps the fixture strings sane. The reserve the hook
+    // subtracts is history + user message + already-injected + 1200, so filling
+    // history to within a known margin of the window pins `remainingBudget`.
+    const model = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    const userText = "which chunk survives the budget"
+    const HEADROOM_TOKENS = 200
+    const fillerTokens = model.effectiveContextWindow - 1200 - estimateTokenCount(userText) - HEADROOM_TOKENS
+    const filler = "x".repeat(Math.floor(fillerTokens * TOKEN_CHARS_RATIO))
+
+    const remaining =
+      model.effectiveContextWindow -
+      estimateTokenCount(filler) -
+      estimateTokenCount(userText) -
+      1200
+    expect(remaining).toBeGreaterThan(60)
+    expect(remaining).toBeLessThan(HEADROOM_TOKENS + 5)
+
+    // Sized so: fits.py consumes all but ~20 tokens, toobig.py needs far more
+    // than that, and trailing.py would comfortably fit in what's left. Only a
+    // `break` (not a `continue`) drops trailing.py too.
+    const fits = makeKBResult({
+      artifact_id: "a1", relevance: 0.95, filename: "fits.py",
+      content: "f".repeat(Math.floor((remaining - 20) * TOKEN_CHARS_RATIO)),
+    })
+    const tooBig = makeKBResult({
+      artifact_id: "a2", relevance: 0.9, filename: "toobig.py",
+      content: "b".repeat(Math.floor(60 * TOKEN_CHARS_RATIO)),
+    })
+    const trailing = makeKBResult({
+      artifact_id: "a3", relevance: 0.85, filename: "trailing.py",
+      content: "tiny",
+    })
+    mockQueryKB.mockResolvedValue({ results: [fits, tooBig, trailing] })
 
     const opts = makeOptions({
       autoInject: true,
       autoInjectThreshold: 0.5,
+      selectedModel: model.id,
+      activeMessages: [makeMessage("assistant", filler)],
     })
     const { result } = renderHook(() => useChatSend(opts))
 
     await act(async () => {
-      await result.current.handleSend("test budget")
+      await result.current.handleSend(userText)
     })
 
-    // first.py fits; overbudget.py exceeds the remainder, and the loop breaks
-    // rather than skipping — so trailing.py is not reached either.
-    const filenames = (sentSources(opts._sendSpy) ?? []).map((s: { filename?: string }) => s.filename)
-    expect(filenames).toEqual(["first.py"])
+    // Assert on the sources handed to send(): those are the chunks the budget
+    // loop actually admitted, before the separate per-model char budget trims
+    // the rendered system message.
+    const sources = sentSources(opts._sendSpy) ?? []
+    const names = sources.map((s: { filename: string }) => s.filename)
+    expect(names).toContain("fits.py")
+    expect(names).not.toContain("toobig.py")
+    expect(names).not.toContain("trailing.py")
+    expect(result.current.lastAutoInjectCount).toBe(1)
+  })
+
+  it("keeps injecting while chunks fit — the budget loop is not a one-shot", async () => {
+    // Control for the test above: same wiring, chunks that all fit, so a
+    // spurious `break` (or an off-by-one in remainingBudget) shows up as a
+    // missing chunk rather than passing silently.
+    const a = makeKBResult({ artifact_id: "a1", relevance: 0.95, filename: "one.py", content: "one" })
+    const b = makeKBResult({ artifact_id: "a2", relevance: 0.9, filename: "two.py", content: "two" })
+    const c = makeKBResult({ artifact_id: "a3", relevance: 0.85, filename: "three.py", content: "three" })
+    mockQueryKB.mockResolvedValue({ results: [a, b, c] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("everything fits")
+    })
+
+    const names = (sentSources(opts._sendSpy) ?? []).map((s: { filename: string }) => s.filename)
+    expect(names).toEqual(["one.py", "two.py", "three.py"])
+    expect(result.current.lastAutoInjectCount).toBe(3)
+  })
+
+  it("a rejected queryKB does not abort the send — the message still goes out", async () => {
+    // A general-knowledge question: the model can answer it without KB
+    // grounding, so a KB outage must not swallow the turn. (The
+    // personal-data counterpart defers instead — see below.)
+    mockQueryKB.mockRejectedValue(new Error("KB backend 503"))
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("explain the oauth device flow")
+    })
+
+    expect(opts._sendSpy).toHaveBeenCalled()
+    const msgs = sentMessages(opts._sendSpy)
+    expect(msgs.some((m) => m.role === "user" && m.content === "explain the oauth device flow")).toBe(true)
+  })
+
+  it("a rejected queryKB reports a degraded reason, not an empty KB (F330)", async () => {
+    // The whole point: a 5xx and a knowledge base with nothing relevant used
+    // to produce the same send. They must not.
+    mockQueryKB.mockRejectedValue(new Error("KB backend 503"))
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("tell me about auth protocols")
+    })
+
+    expect(sentSources(opts._sendSpy)).toBeUndefined()
+    expect(result.current.lastAutoInjectCount).toBe(0)
+    // The 5th send() arg is the degraded reason.
+    expect(opts._sendSpy.mock.calls[0][4]).toBe("KB search failed")
+  })
+
+  it("an empty KB result leaves the degraded reason unset — the control", async () => {
+    // Without this, a fix that always sets a degraded reason would pass the
+    // test above while lying in the far more common case.
+    mockQueryKB.mockResolvedValue({ results: [] })
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("tell me about auth protocols")
+    })
+
+    expect(opts._sendSpy.mock.calls[0][4]).toBeUndefined()
+  })
+
+  it("a KB failure on a personal-data question defers instead of fabricating", async () => {
+    // The degraded reason is not decoration: it is what arms the honest-
+    // deferral path, so an outage stops producing "I don't have access to
+    // your mail" as though it were an answer.
+    mockQueryKB.mockRejectedValue(new Error("KB backend 503"))
+
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("what did I write about auth")
+    })
+
+    expect(opts._sendSpy).not.toHaveBeenCalled()
+    const deferral = opts.addMessage.mock.calls.at(-1)?.[1] as ChatMessage
+    expect(deferral.role).toBe("assistant")
+    expect(deferral.degradedReason).toBe("KB search failed")
   })
 
   it("deduplicates chunks already injected in prior turns (session dedup via injectedHistoryRef)", async () => {

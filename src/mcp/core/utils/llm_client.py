@@ -26,6 +26,7 @@ import logging
 import os
 import threading
 import uuid
+from dataclasses import replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -875,13 +876,20 @@ async def route_and_call(
         # Call the local backend directly; own the fallback here (not inside the
         # transport) so the returned decision can be corrected to match the serve.
         try:
-            content = await _call_ollama_direct(
+            content, served_model = await _call_ollama_direct(
                 messages,
                 model=decision.model,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            inference_health.record_success("llm", provider="ollama")
+            inference_health.record_success(
+                "llm", provider="ollama", model=served_model,
+            )
+            if served_model and served_model != decision.model:
+                # K1: the daemon substituted its loaded slot for the requested
+                # name. Report what generated the bytes, not what we asked for —
+                # SDK consumers do per-model cost/quality accounting on this field.
+                decision = replace(decision, model=served_model)
             return content, decision
         except Exception as exc:  # noqa: BLE001 — any local transport failure falls back
             from core.utils.swallowed import log_swallowed_error
@@ -924,31 +932,70 @@ async def _call_ollama_direct(
     model: str,
     temperature: float,
     max_tokens: int,
-) -> str:
+) -> tuple[str, str]:
     """Direct local-backend call for smart-routed queries.
+
+    Returns ``(content, served_model)``. ``served_model`` is the model name the
+    daemon reports on the response — Quenchforge forwards the request verbatim to
+    whichever slot is loaded and answers with the slot's real name (asking for
+    ``llama3.1-8b`` yields ``qwen2.5-7b-instruct-q4_k_m.gguf``), so the request
+    model is a statement of intent and the response model is the fact. Empty when
+    the backend does not report one.
 
     Pure transport: raises on failure. The caller (``route_and_call``) owns the
     OpenRouter fallback so it can correct the returned RouteDecision to match the
     actual serve (E1 CR-013) — pre-fix this swallowed the failure and fell back
     internally, leaving the decision reporting the local plan for cloud bytes.
-    """
-    import httpx as _httpx
 
-    from core.routing.provider_state import local_backend_url
+    Runs through the SAME back-pressure machinery as ``call_internal_llm``: the
+    per-workload circuit breaker, the shared timeout cooldown and the shared
+    keep-alive client. Pre-fix this opened a fresh AsyncClient per call outside
+    both, so SDK traffic was invisible to the breaker protecting the single chat
+    slot and a dead slot failed slowly on every request.
+    """
+    from core.routing.provider_state import active_provider, local_backend_url
+    from core.utils.internal_llm import (
+        _get_ollama_client,
+        _get_pacing_gate,
+        _record_pacing_success,
+        _record_pacing_timeout,
+        _wait_pacing_cooldown,
+    )
+
+    provider = active_provider()
     # E1 CR-098: honor QUENCHFORGE_URL on a quenchforge box — pre-fix this read
     # OLLAMA_URL only, so the probe validated one daemon and the call hit another.
-    ollama_url = local_backend_url()
-    async with _httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{ollama_url}/api/chat",
-            json={
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "options": {"temperature": temperature, "num_predict": max_tokens},
-            },
-        )
+    ollama_url = local_backend_url(provider)
+    breaker = get_breaker("quenchforge-chat") if provider == "quenchforge" else get_breaker("ollama")
+
+    async def _do_call() -> tuple[str, str]:
+        client = await _get_ollama_client()
+        # A smart-routed query has a caller waiting on it, so it takes the
+        # interactive side of the gate rather than queueing behind sweeps.
+        await _wait_pacing_cooldown(interactive=True)
+        async with _get_pacing_gate().slot(interactive=True):
+            try:
+                resp = await client.post(
+                    f"{ollama_url}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"temperature": temperature, "num_predict": max_tokens},
+                    },
+                )
+            except httpx.TimeoutException:
+                # Arm the shared cooldown so CONCURRENT callers back off too.
+                _record_pacing_timeout(interactive=True)
+                raise
         resp.raise_for_status()
-        return resp.json().get("message", {}).get("content", "")
+        _record_pacing_success(interactive=True)
+        data = resp.json()
+        return (
+            data.get("message", {}).get("content", ""),
+            str(data.get("model") or ""),
+        )
+
+    return await breaker.call(_do_call)
 
 

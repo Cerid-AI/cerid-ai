@@ -107,7 +107,10 @@ def test_sdk_collections_returns_listable(http_client):
 
 
 def test_sdk_taxonomy_returns_domain_tree(http_client):
-    r = http_client.get("/sdk/v1/taxonomy")
+    # Asked as the unrestricted ``gui`` consumer: the harness's per-test client
+    # ids are unregistered, and an unregistered consumer is scoped to the closed
+    # default (pinned below), not shown the whole tree.
+    r = http_client.get("/sdk/v1/taxonomy", headers={"X-Client-ID": "gui"})
     assert r.status_code == 200, f"HTTP {r.status_code}: {r.text[:200]}"
     body = r.json()
     assert isinstance(body, dict), f"/sdk/v1/taxonomy must be dict; got {type(body).__name__}"
@@ -124,6 +127,17 @@ def test_sdk_taxonomy_returns_domain_tree(http_client):
         assert required_domain in body["taxonomy"], (
             f"/sdk/v1/taxonomy 'taxonomy' tree missing {required_domain!r}"
         )
+
+
+def test_sdk_taxonomy_is_scoped_for_an_unregistered_consumer(http_client):
+    """An X-Client-ID nobody registered must not be shown every domain (F347)."""
+    r = http_client.get("/sdk/v1/taxonomy")
+    assert r.status_code == 200, f"HTTP {r.status_code}: {r.text[:200]}"
+    domain_names = set(r.json()["domains"])
+    assert "general" in domain_names
+    assert not domain_names & {"finance", "trading", "personal", "messages", "mail"}, (
+        f"an unregistered consumer was shown restricted domains: {sorted(domain_names)}"
+    )
 
 
 def test_sdk_prefix_is_exclusively_v1(http_client):

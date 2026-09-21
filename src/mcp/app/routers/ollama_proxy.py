@@ -78,12 +78,41 @@ def _ollama_enabled() -> bool:
     return os.getenv("INTERNAL_LLM_PROVIDER", "").strip().lower() == "quenchforge"
 
 
+def _backend_name() -> str:
+    """Name of the backend this proxy is actually talking to.
+
+    ``_ollama_base_url()`` already switches to Quenchforge; the operator-facing
+    text has to follow it, or a failure points the operator at the daemon whose
+    ``ollama serve`` would take the port Quenchforge needs.
+    """
+    provider = os.getenv("INTERNAL_LLM_PROVIDER", "").strip().lower()
+    return "Quenchforge" if provider == "quenchforge" else "Ollama"
+
+
+def _connect_hint(base_url: str) -> str:
+    """Remediation text for an unreachable backend, named correctly."""
+    if _backend_name() == "Quenchforge":
+        return (
+            f"Cannot connect to Quenchforge at {base_url}. Is the Quenchforge "
+            "service running? Start it with `quenchforge serve` (or restart its "
+            "service manager). Do not run `ollama serve` — it would bind the "
+            "port Quenchforge needs."
+        )
+    return (
+        f"Cannot connect to Ollama at {base_url}. "
+        "Is Ollama running? Try: ollama serve"
+    )
+
+
 def _require_enabled() -> None:
-    """Raise 503 if Ollama is not enabled."""
+    """Raise 503 if the local-model proxy is not enabled."""
     if not _ollama_enabled():
         raise HTTPException(
             status_code=503,
-            detail="Ollama integration is disabled. Set OLLAMA_ENABLED=true to enable.",
+            detail=(
+                "Local model integration is disabled. Set OLLAMA_ENABLED=true "
+                "or INTERNAL_LLM_PROVIDER=quenchforge to enable."
+            ),
         )
 
 
@@ -158,23 +187,21 @@ async def list_ollama_models():
     except CircuitOpenError:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is temporarily unavailable (circuit breaker open). "
-            "Is Ollama running? Try: ollama serve",
+            detail=(
+                f"{_backend_name()} is temporarily unavailable (circuit breaker "
+                f"open). {_connect_hint(base_url)}"
+            ),
         )
     except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to Ollama at {base_url}. "
-            "Is Ollama running? Try: ollama serve",
-        )
+        raise HTTPException(status_code=503, detail=_connect_hint(base_url))
     except httpx.TimeoutException:
         raise HTTPException(
             status_code=504,
-            detail=f"Ollama request timed out ({_CONNECT_TIMEOUT}s connect).",
+            detail=f"{_backend_name()} request timed out ({_CONNECT_TIMEOUT}s connect).",
         )
     except Exception as exc:
-        logger.error("Ollama model list failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
+        logger.error("%s model list failed: %s", _backend_name(), exc)
+        raise HTTPException(status_code=502, detail=f"{_backend_name()} error: {exc}")
 
     raw_models = data.get("models", [])
     models = [
@@ -235,18 +262,20 @@ async def _sync_chat(
     except CircuitOpenError:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is temporarily unavailable (circuit breaker open).",
+            detail=(
+                f"{_backend_name()} is temporarily unavailable (circuit breaker "
+                f"open). {_connect_hint(base_url)}"
+            ),
         )
     except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to Ollama at {base_url}. "
-            "Is Ollama running? Try: ollama serve",
-        )
+        raise HTTPException(status_code=503, detail=_connect_hint(base_url))
     except httpx.TimeoutException:
         raise HTTPException(
             status_code=504,
-            detail="Ollama chat request timed out. Model may still be loading.",
+            detail=(
+                f"{_backend_name()} chat request timed out. "
+                "Model may still be loading."
+            ),
         )
     except httpx.HTTPStatusError as exc:
         logger.warning("Ollama chat HTTP error: %s", exc)
@@ -286,13 +315,13 @@ async def _stream_chat(
             # 200 SSE error event must still count toward tripping the breaker
             # this endpoint gates on, or it can never open (CR-068).
             await breaker.record_failure(exc)
-            error_payload = json.dumps(
-                {"error": f"Cannot connect to Ollama at {base_url}"}
-            )
+            error_payload = json.dumps({"error": _connect_hint(base_url)})
             yield f"data: {error_payload}\n\n"
         except httpx.TimeoutException as exc:
             await breaker.record_failure(exc)
-            error_payload = json.dumps({"error": "Ollama stream timed out"})
+            error_payload = json.dumps(
+                {"error": f"{_backend_name()} stream timed out"}
+            )
             yield f"data: {error_payload}\n\n"
         except Exception as exc:
             await breaker.record_failure(exc)
@@ -309,7 +338,10 @@ async def _stream_chat(
     if current_state == CircuitState.OPEN:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is temporarily unavailable (circuit breaker open).",
+            detail=(
+                f"{_backend_name()} is temporarily unavailable (circuit breaker "
+                f"open). {_connect_hint(base_url)}"
+            ),
         )
 
     return StreamingResponse(
@@ -383,9 +415,7 @@ async def pull_model(req: PullRequest):
                             continue
                         yield f"data: {line}\n\n"
         except httpx.ConnectError:
-            error_payload = json.dumps(
-                {"error": f"Cannot connect to Ollama at {base_url}"}
-            )
+            error_payload = json.dumps({"error": _connect_hint(base_url)})
             yield f"data: {error_payload}\n\n"
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error

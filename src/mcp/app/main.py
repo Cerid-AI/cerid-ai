@@ -1171,6 +1171,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log_swallowed_error("app.main.lifespan.register_sibling_mcp", exc)
 
+    # External MCP servers (F060). MCP_SERVERS_CONFIG was never read at
+    # startup and POST /mcp-servers only wrote an in-process dict, so every
+    # registration — and every ext_* tool it contributed — disappeared on
+    # restart with no reconnect path.
+    try:
+        from utils.mcp_client import restore_and_connect
+
+        _ext_mcp = await restore_and_connect()
+        if _ext_mcp:
+            logger.info(
+                "External MCP servers connected: %s", ", ".join(_ext_mcp),
+            )
+    except Exception as exc:
+        log_swallowed_error("app.main.lifespan.restore_external_mcp", exc)
+
     # F-PERF-04: pre-warm the /health cache so the first request after
     # boot doesn't pay the ~700ms cold-cache cost while concurrent
     # /agent/query loads compete for the executor's thread pool.
@@ -1321,12 +1336,16 @@ app.add_middleware(MetricsMiddleware)
 app.add_middleware(RateLimitMiddleware)
 # 4. API key auth (rejects unauthenticated before rate check)
 app.add_middleware(APIKeyMiddleware)
-# 5. JWT auth (only active when CERID_MULTI_USER=true — validates Bearer tokens, sets request.state)
+# 5. Tenant context (sets tenant_id/user_id contextvars from request.state for
+#    downstream code). Registered BEFORE the JWT layer so it runs AFTER it:
+#    Starlette executes last-registered first, and JWTAuthMiddleware is the only
+#    writer of request.state.tenant_id. The other order left the contextvar
+#    pinned to DEFAULT_TENANT_ID on every request, whatever the caller's token.
+app.add_middleware(TenantContextMiddleware)
+# 6. JWT auth (only active when CERID_MULTI_USER=true — validates Bearer tokens, sets request.state)
 if CERID_MULTI_USER:
     from app.middleware.jwt_auth import JWTAuthMiddleware
     app.add_middleware(JWTAuthMiddleware)
-# 6. Tenant context (sets tenant_id/user_id contextvars from request.state for downstream code)
-app.add_middleware(TenantContextMiddleware)
 # 7. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
 app.add_middleware(RequestIDMiddleware)
 

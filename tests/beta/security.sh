@@ -5,7 +5,24 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Resolve the MCP API key before assert.sh snapshots it. /health and the /api
+# routes require X-API-Key once the server binds off loopback (LAN mode), and a
+# standalone run of this script — outside run.sh — never inherited the
+# operator's key. Same .env read run.sh does.
+if [[ -z "${CERID_API_KEY:-}" && -f "${SCRIPT_DIR}/../../.env" ]]; then
+  CERID_API_KEY=$(grep -E '^CERID_API_KEY=' "${SCRIPT_DIR}/../../.env" | head -1 | cut -d= -f2-)
+  export CERID_API_KEY
+fi
+
 source "${SCRIPT_DIR}/lib/assert.sh"
+
+# The checks below curl the health surface directly instead of going through
+# assert.sh's helpers, so they carry the header themselves. Word-split as two
+# curl args, matching performance.sh: bash 3.2 (the macOS system shell) has no
+# safe empty-array expansion under `set -u`.
+KEY_HDR=""
+[ -n "${CERID_API_KEY:-}" ] && KEY_HDR="-H X-API-Key:${CERID_API_KEY}"
 
 export RESULTS_FILE="${SCRIPT_DIR}/reports/security.results"
 > "$RESULTS_FILE"
@@ -26,7 +43,7 @@ sec01_check() {
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
   local headers
-  headers=$(curl -s -H 'Origin: http://evil.com' -D- -o /dev/null --connect-timeout 5 --max-time 10 "${MCP_BASE}/health" 2>/dev/null || echo "")
+  headers=$(curl -s -H 'Origin: http://evil.com' -D- -o /dev/null --connect-timeout 5 --max-time 10 $KEY_HDR "${MCP_BASE}/health" 2>/dev/null || echo "")
 
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")
@@ -56,7 +73,7 @@ sec02_check() {
   start=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
   local body
-  body=$(curl -s --connect-timeout 5 --max-time 10 "${MCP_BASE}/health" 2>/dev/null || echo "")
+  body=$(curl -s --connect-timeout 5 --max-time 10 $KEY_HDR "${MCP_BASE}/health" 2>/dev/null || echo "")
 
   end=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")

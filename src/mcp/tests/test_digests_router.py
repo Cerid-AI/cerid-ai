@@ -202,3 +202,98 @@ class TestRunNow:
         ):
             resp = client.post("/digests/run-now")
         assert resp.status_code == 500
+
+
+class TestSummaryFieldsAreMeasurements:
+    """top_categories / has_action_items were literals dressed as data.
+
+    Both were hard-coded in ``_artifact_to_summary`` — ``[]`` and ``False``
+    for every digest ever generated — so a client rendering "no action
+    items" was reporting a code default, indistinguishable from a digest
+    that genuinely had none.
+    """
+
+    def test_reads_categories_and_action_items_from_the_digest_tags(self, client):
+        artifact = _sample_artifact("2026-05-22")
+        artifact["tags"]["top_categories"] = (
+            '[{"domain": "email", "count": 9, "highlight": "invoices"}]'
+        )
+        artifact["tags"]["action_item_count"] = "3"
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.routers.digests._list_digest_artifacts", return_value=[artifact]),
+        ):
+            body = client.get("/digests/latest").json()
+        assert body["top_categories"] == [
+            {"domain": "email", "count": 9, "highlight": "invoices"}
+        ]
+        assert body["has_action_items"] is True
+
+    def test_zero_action_items_is_distinct_from_an_unrecorded_count(self, client):
+        artifact = _sample_artifact("2026-05-22")
+        artifact["tags"]["action_item_count"] = "0"
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch("app.routers.digests._list_digest_artifacts", return_value=[artifact]),
+        ):
+            body = client.get("/digests/latest").json()
+        assert body["has_action_items"] is False
+
+    def test_unrecorded_fields_are_null_not_empty(self, client):
+        """A digest written before the tags existed reports "unknown"."""
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch(
+                "app.routers.digests._list_digest_artifacts",
+                return_value=[_sample_artifact("2026-05-22")],
+            ),
+        ):
+            body = client.get("/digests/latest").json()
+        assert body["top_categories"] is None
+        assert body["has_action_items"] is None
+
+
+class TestStoreOutageIsNotAnEmptyDigestList:
+    """Gate G-E: a failing read may not answer with a successful empty.
+
+    All three read endpoints turned an unreachable graph store into
+    ``null`` / ``[]`` with a 200, so "no digest has been generated yet"
+    and "Neo4j is down" rendered identically.
+    """
+
+    def test_latest_reports_the_outage(self, client):
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", side_effect=RuntimeError("neo4j down")),
+        ):
+            resp = client.get("/digests/latest")
+        assert resp.status_code == 503
+        assert "unavailable" in resp.json()["detail"].lower()
+
+    def test_recent_reports_the_outage(self, client):
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", side_effect=RuntimeError("neo4j down")),
+        ):
+            assert client.get("/digests/recent").status_code == 503
+
+    def test_by_date_reports_the_outage(self, client):
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", side_effect=RuntimeError("neo4j down")),
+        ):
+            assert client.get("/digests/2026-05-21").status_code == 503
+
+    def test_a_failing_artifact_read_is_not_an_empty_list(self, client):
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.deps.get_neo4j", return_value=object()),
+            patch(
+                "app.db.neo4j.list_artifacts",
+                side_effect=RuntimeError("cypher exploded"),
+            ),
+        ):
+            assert client.get("/digests/recent").status_code == 503

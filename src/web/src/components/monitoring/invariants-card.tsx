@@ -22,6 +22,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ShieldCheck, ShieldAlert, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -69,12 +71,11 @@ function totalSwallowed(by_module?: Record<string, number>): number {
   return Object.values(by_module).reduce((a, b) => a + b, 0)
 }
 
-function summarize(inv: HealthInvariants | undefined): {
+function summarize(inv: HealthInvariants): {
   rollupOk: boolean
   rollupLabel: string
   problemCount: number
 } {
-  if (!inv) return { rollupOk: false, rollupLabel: "Unknown", problemCount: 0 }
   let problems = 0
   if (inv.healthy_invariants === false) problems += 1
   if (inv.nli_model_loaded === false) problems += 1
@@ -90,7 +91,11 @@ function summarize(inv: HealthInvariants | undefined): {
 }
 
 export function InvariantsCard() {
-  const { data, isLoading, isError } = useQuery({
+  // ``["health"]`` here fetches GET /health; the status bar keys its
+  // GET /health/status query separately. React Query caches on the key alone,
+  // so when both used ["health"] one component was served the other's payload
+  // and every row below rendered its no-data fallback.
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
     refetchInterval: 30_000,
@@ -100,15 +105,41 @@ export function InvariantsCard() {
     return <Skeleton className="h-44 w-full rounded-lg" />
   }
   if (isError || !data) {
-    return null
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        <AlertDescription>
+          Operational invariants unavailable — /health did not answer.{" "}
+          <button type="button" onClick={() => void refetch()} className="underline">
+            Retry
+          </button>
+        </AlertDescription>
+      </Alert>
+    )
   }
   const inv = data.invariants
+  if (!inv) {
+    // Zeroes and dashes here are indistinguishable from a healthy card. An
+    // absent block means this backend reports no invariants, which is a
+    // different fact and has to look different.
+    return (
+      <Card>
+        <CardContent className="p-3">
+          <EmptyState
+            icon={ShieldAlert}
+            title="No invariants reported"
+            description="This backend build does not publish an invariants block on /health, so nothing here can be checked."
+          />
+        </CardContent>
+      </Card>
+    )
+  }
   const summary = summarize(inv)
 
-  const swallowedTotal = totalSwallowed(inv?.swallowed_errors_last_hour)
-  const memFails = inv?.memory_consolidation_failures_last_24h ?? 0
-  const orphans = inv?.verification_report_orphans ?? 0
-  const nli = inv?.nli_model_loaded
+  const swallowedTotal = totalSwallowed(inv.swallowed_errors_last_hour)
+  const memFails = inv.memory_consolidation_failures_last_24h ?? 0
+  const orphans = inv.verification_report_orphans ?? 0
+  const nli = inv.nli_model_loaded
 
   return (
     <TooltipProvider>

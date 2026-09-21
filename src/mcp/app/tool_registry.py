@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 logger = logging.getLogger("ai-companion.tool_registry")
@@ -126,8 +126,29 @@ class ToolDef:
     # to gate, or experimental tools that aren't ready for default-on.
     feature_flag: str | None = None
 
-    # Populated by ``_resolve_enabled``; never set by callers directly.
-    enabled: bool = field(default=True, init=False)
+    @property
+    def enabled(self) -> bool:
+        """Whether this tool may be dispatched. Evaluated per call.
+
+        Deliberately not a field resolved at startup. It was one until
+        2026-09-03: ``resolve_enabled()`` set it and was documented as
+        "called once at app startup (app/main.py lifespan)", but nothing in
+        src/mcp ever called it. Every tool therefore kept its ``True``
+        default, and both operator controls — ``MCP_DISABLED_TOOLS`` and
+        ``feature_flag`` — silently did nothing in the running server.
+
+        The suite could not see that, because every test called
+        ``resolve_enabled()`` itself first: the one thing production never
+        did. Reading the environment here removes the startup hook from the
+        contract entirely, so the gate cannot be defeated by nobody calling
+        it, and an operator's change takes effect on the next dispatch
+        instead of the next restart.
+        """
+        if self.name in _disabled_tool_names():
+            return False
+        if self.feature_flag is not None:
+            return _truthy(os.getenv(self.feature_flag, ""))
+        return True
 
     def to_mcp_schema(self) -> dict[str, Any]:
         """Return the MCP ``tools/list`` shape for this tool.
@@ -255,32 +276,36 @@ def _truthy(v: str) -> bool:
     return v.lower() in ("1", "true", "yes", "on")
 
 
-def resolve_enabled() -> None:
-    """Apply ``MCP_DISABLED_TOOLS`` + per-tool ``feature_flag`` gating.
+def _disabled_tool_names() -> frozenset[str]:
+    """Tool names listed in ``MCP_DISABLED_TOOLS=tool_a,tool_b``.
 
-    Called once at app startup (``app/main.py`` lifespan) so the
-    enabled state is stable across requests. Operators can disable
-    individual tools by listing them in ``MCP_DISABLED_TOOLS=tool_a,tool_b``;
-    tools with ``feature_flag`` set load only when their named env var
-    is truthy (``"1"``, ``"true"``, ``"yes"``, ``"on"`` — case-insensitive).
+    Read from the environment on every call. A module-level capture here
+    would freeze the operator's kill switch at import time — the failure
+    mode ``scripts/lint-no-module-env-captures.py`` exists to catch.
     """
-    disabled = {s.strip() for s in os.getenv("MCP_DISABLED_TOOLS", "").split(",")}
-    disabled.discard("")
+    raw = os.getenv("MCP_DISABLED_TOOLS", "")
+    return frozenset(part for part in (s.strip() for s in raw.split(",")) if part)
+
+
+def resolve_enabled() -> None:
+    """Log which tools are gated off, for startup observability.
+
+    Enablement itself is decided per dispatch by ``ToolDef.enabled``, so
+    calling this is optional and skipping it cannot leave a tool ungated —
+    which is what happened while this function *was* the gate and had no
+    caller. Kept because "pkb_artifact_delete gated off" in the boot log is
+    worth having when an operator wonders where a tool went.
+    """
+    disabled = _disabled_tool_names()
     for name, t in TOOL_REGISTRY.items():
         if name in disabled:
-            t.enabled = False
             logger.info("tool_registry: %s disabled via MCP_DISABLED_TOOLS", name)
-            continue
-        if t.feature_flag is not None:
-            t.enabled = _truthy(os.getenv(t.feature_flag, ""))
-            if not t.enabled:
-                logger.info(
-                    "tool_registry: %s gated off (feature_flag=%s not set)",
-                    name,
-                    t.feature_flag,
-                )
-            continue
-        t.enabled = True
+        elif t.feature_flag is not None and not t.enabled:
+            logger.info(
+                "tool_registry: %s gated off (feature_flag=%s not set)",
+                name,
+                t.feature_flag,
+            )
 
 
 # ---------------------------------------------------------------- public API

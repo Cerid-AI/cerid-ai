@@ -932,12 +932,14 @@ SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * sun")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
-# UX-14/20 — weekly purge of crashed test runs' leftovers (e2e-marker-*,
+# UX-14/20 — purge of crashed test runs' leftovers (e2e-marker-*,
 # preservation-probe-* etc., namespace in core/utils/test_residue.py). The
 # sweep skips anything written in the last hour so an in-flight live-stack
-# test run keeps its probes. Empty string disables the cron; the manual
-# trigger is POST /admin/kb/purge-test-residue.
-SCHEDULE_TEST_RESIDUE_SWEEP = os.getenv("SCHEDULE_TEST_RESIDUE_SWEEP", "15 4 * * sun")
+# test run keeps its probes. Off by default (empty disables the cron): it
+# runs unattended with apply=True and hard-deletes across Neo4j, Chroma and
+# the lexical indexes, so an operator opts in per install. The manual,
+# dry-runnable trigger is POST /admin/kb/purge-test-residue.
+SCHEDULE_TEST_RESIDUE_SWEEP = os.getenv("SCHEDULE_TEST_RESIDUE_SWEEP", "")
 # AF-030 (CL-8) — background KB quality re-scoring. curate() in audit mode is
 # cheap (local scoring + one graph write per artifact, NO LLM calls; synopsis
 # generation stays off), but it is never re-run after ingest, so quality scores
@@ -1268,15 +1270,26 @@ QUENCHFORGE_URL = os.getenv(
 # collapses retrieval. Switching the embed model requires re-embedding the corpus.
 # Leaving it empty makes the client raise + fall back to the ONNX embedder.
 QUENCHFORGE_EMBED_MODEL = os.getenv("QUENCHFORGE_EMBED_MODEL", "")
-# Rerank is a cross-encoder score (no stored vectors), so a sensible default is
-# safe. Must be a reranking model Quenchforge serves.
-QUENCHFORGE_RERANK_MODEL = os.getenv("QUENCHFORGE_RERANK_MODEL", "bge-reranker-v2-m3")
+# QUENCHFORGE_RERANK_MODEL has NO default either, for a different reason than
+# the embed model: Quenchforge's own RerankModel defaults to "" ("empty disables
+# /v1/rerank"), so a friendly default here guarantees we POST a model name at a
+# daemon that is not serving rerank — a permanent silent fallback instead of the
+# loud "operator must set it" the client raises when the value is empty. Must be
+# a reranking model Quenchforge is actually serving.
+QUENCHFORGE_RERANK_MODEL = os.getenv("QUENCHFORGE_RERANK_MODEL", "")
 
-# Cached hardware-profile token, populated by scripts/detect-gpu.sh and read
-# by the setup wizard / /system-check endpoint. One of:
+# Cached hardware-profile token, read by the setup wizard / /system-check and
+# by the model-compatibility gate (core.routing.model_compat). One of:
 #   nvidia | amd | amd-mac | metal | cpu | "" (empty = re-detect on next call)
 # Not authoritative; the source of truth is a fresh detect-gpu.sh invocation.
-CERID_HARDWARE_PROFILE = os.getenv("CERID_HARDWARE_PROFILE", "")
+#
+# The producer is scripts/start-cerid.sh, which re-exports detect-gpu.sh's
+# CERID_GPU_TYPE as HOST_GPU_TYPE (same vocabulary) and persists it for the
+# container. Nothing ever exported CERID_HARDWARE_PROFILE itself, so the gate
+# saw "" — and is_incompatible is fail-open on an empty profile — meaning the
+# amd-mac denylist never fired on the hardware it was written for. Read the
+# variable the launcher actually sets, keeping the explicit name as an override.
+CERID_HARDWARE_PROFILE = os.getenv("CERID_HARDWARE_PROFILE") or os.getenv("HOST_GPU_TYPE", "")
 
 # ---------------------------------------------------------------------------
 # Advanced RAG feature flags (per docs/TIERED_INFERENCE_ARCHITECTURE.md and
@@ -1468,6 +1481,25 @@ ENCRYPT_SYNC: bool = os.getenv("CERID_ENCRYPT_SYNC", "").lower() in ("true", "1"
     os.getenv("CERID_ENCRYPTION_KEY", "")
 )
 
+if ENCRYPT_SYNC:
+    # Fail closed. encrypt_field() returns its input unchanged when the
+    # encryptor is None — a missing or malformed CERID_ENCRYPTION_KEY used to
+    # leave ENCRYPT_SYNC reporting True while user state went to the sync
+    # directory in cleartext, with one DEBUG line as the only trace.
+    from errors import ConfigError as _ConfigError
+    from utils.encryption import get_encryptor as _get_encryptor
+
+    if _get_encryptor() is None:
+        raise _ConfigError(
+            "Sync encryption was requested (CERID_ENCRYPT_SYNC or "
+            "CERID_ENCRYPTION_KEY is set) but no usable key is available. "
+            "Set CERID_ENCRYPTION_KEY to a valid Fernet key — python -c "
+            '"from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())" — or unset '
+            "CERID_ENCRYPT_SYNC. Refusing to write sync files in cleartext "
+            "while reporting encryption as enabled."
+        )
+
 # ---------------------------------------------------------------------------
 # Startup validation — normalize and warn on unrecognized values
 # ---------------------------------------------------------------------------
@@ -1489,7 +1521,8 @@ if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
 #   strict_domains  — when True, disables cross-domain affinity bleed
 #
 # "gui" is the default for the cerid-ai React GUI (no header sent).
-# "_default" is the fallback for unrecognized consumer IDs.
+# "_default" is the fallback for unrecognized consumer IDs, and is scoped to
+# the "general" domain — an unregistered consumer must not read the whole KB.
 # See docs/INTEGRATION_GUIDE.md for adding new cerid-series consumers.
 
 CONSUMER_REGISTRY: dict[str, dict] = {
@@ -1534,17 +1567,8 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/agent/": (40, 60),     # 40 req/min — dashboard + AI chat
             "/sdk/": (40, 60),
         },
-        "allowed_domains": ["finance", "general"],
-        "strict_domains": True,      # No bleed into personal/trading/coding data
-    },
-    "trading-agent": {
-        "description": "Cerid Trading Agent — autonomous crypto trading",
-        "rate_limits": {
-            "/sdk/": (80, 60),       # 80 req/min — 5 concurrent sessions burst
-            "/agent/": (80, 60),
-        },
-        "allowed_domains": ["trading"],
-        "strict_domains": True,      # No bleed into personal/finance/coding data
+        "allowed_domains": ["finance"],
+        "strict_domains": True,      # No bleed into personal/trading/coding/general
     },
     "cerid-anneal": {
         "description": "cerid-anneal orchestrator — lessons/outcomes push (Lane A) and hub reads",
@@ -1572,7 +1596,6 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "anneal_decisions",
             "anneal_runs",
             "anneal_conversations",
-            "general",
         ],
         "strict_domains": True,      # No bleed into personal/finance/trading/coding data
     },
@@ -1624,8 +1647,16 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             # a leaked refresh token can't be replayed at high rate either.
             "/auth/": (5, 60),
         },
-        "allowed_domains": None,
-        "strict_domains": False,
+        # Deny-by-default retrieval scope. None here would mean "every domain",
+        # so any integration that forgot to register its X-Client-ID — or
+        # typo'd it — read the whole knowledge base, mail and iMessage
+        # included, while /sdk/v1/query documents results as scoped by the
+        # consumer's allowed_domains. An unrecognized consumer gets the
+        # non-personal general domain and nothing else; widening it is what
+        # registering an entry above is for. Ingest is unaffected: the
+        # allow-list is read on the retrieval paths only.
+        "allowed_domains": ["general"],
+        "strict_domains": True,
     },
 }
 

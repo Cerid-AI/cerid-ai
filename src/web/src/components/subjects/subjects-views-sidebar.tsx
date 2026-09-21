@@ -71,6 +71,7 @@ async function fetchViewsHealth(): Promise<ViewsHealth> {
 }
 
 const KEY_FOR = (mode: SubjectsMode) => ["subjects-views", mode] as const
+const ALL_MODES_KEY = ["subjects-views", "__all__"] as const
 const HEALTH_KEY = ["subjects-views-health"] as const
 
 export function SubjectsViewsSidebar({
@@ -88,6 +89,17 @@ export function SubjectsViewsSidebar({
     staleTime: 30_000,
   })
 
+  // The free-tier cap is enforced on the user's TOTAL saved views --
+  // create_view counts the whole per-user Redis hash before it 402s -- so the
+  // cap hint has to count the same thing, not the mode-filtered list this
+  // sidebar renders. Counting the visible rows told a community user with
+  // three timeline views that a constellation slot was free.
+  const { data: allViews } = useQuery({
+    queryKey: ALL_MODES_KEY,
+    queryFn: () => listAtlasViews(),
+    staleTime: 30_000,
+  })
+
   // Tier + free-tier cap come from the backend so the UI hint never
   // drifts from the actual policy (the backend is the source of truth
   // for cap enforcement; see /atlas/views/health, Phase M Day 6).
@@ -99,14 +111,18 @@ export function SubjectsViewsSidebar({
 
   const del = useMutation({
     mutationFn: (id: string) => deleteAtlasView(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY_FOR(mode) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY_FOR(mode) })
+      qc.invalidateQueries({ queryKey: ALL_MODES_KEY })
+    },
   })
 
   const isPro = health?.pro_unlocked ?? false
   const freeTierCap = health?.free_tier_max_views ?? 3
   const list = views ?? []
   const { goTo } = useNavigation()
-  const showCapHint = !isPro && list.length >= freeTierCap
+  const savedTotal = allViews?.length ?? list.length
+  const showCapHint = !isPro && savedTotal >= freeTierCap
 
   return (
     <Card
@@ -118,9 +134,16 @@ export function SubjectsViewsSidebar({
         <h3 className="text-xs font-semibold uppercase tracking-wider">
           {mode} views
         </h3>
-        <span className="ml-auto text-label-xs text-muted-foreground font-mono tabular-nums">
+        <span
+          className="ml-auto text-label-xs text-muted-foreground font-mono tabular-nums"
+          title={
+            isPro
+              ? undefined
+              : `${savedTotal} of ${freeTierCap} free-tier saved views used across all modes`
+          }
+        >
           {list.length}
-          {!isPro && `/${freeTierCap}`}
+          {!isPro && ` · ${savedTotal}/${freeTierCap} all modes`}
         </span>
       </header>
 
@@ -207,7 +230,8 @@ export function SubjectsViewsSidebar({
 
       {showCapHint && (
         <footer className="border-t border-border bg-amber-500/5 px-3 py-2 text-label-xs text-amber-700 dark:text-amber-400">
-          Free tier supports {freeTierCap} pinned views.{" "}
+          Free tier supports {freeTierCap} pinned views across all modes, and{" "}
+          {savedTotal} {savedTotal === 1 ? "is" : "are"} saved.{" "}
           {/* Was plain prose naming an upgrade with no way to reach it. Points
               in-app rather than to the website: the free trial lives here. */}
           <button

@@ -86,10 +86,21 @@ class RecommendationSpec:
     """Body the Settings PATCH receives when the user clicks "Enable now"."""
 
     reason_template: str = ""
-    """Short rationale; ``{count}`` is substituted with the live corpus size."""
+    """Short rationale; ``{count}`` is substituted with :attr:`count_fn`."""
 
     condition_fn: Callable[[CorpusStats], bool] = field(default=lambda _: False)
     """Returns True when this recommendation should fire."""
+
+    count_fn: Callable[[CorpusStats], int] = field(
+        default=lambda stats: stats.artifact_count,
+    )
+    """Which measurement ``{count}`` reports.
+
+    Must be the same field :attr:`condition_fn` tests, or the banner cites
+    evidence it did not fire on — the chat-virtualization card fires on
+    conversation length and used to print the corpus size, telling an
+    operator with a 210-message thread that it had 4,000 messages.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +231,7 @@ RECOMMENDATIONS: tuple[RecommendationSpec, ...] = (
             stats.longest_conversation_length >= _THRESHOLD_VIRTUALIZATION
             and "ENABLE_CHAT_VIRTUALIZATION" not in stats.flags_enabled
         ),
+        count_fn=lambda stats: stats.longest_conversation_length,
     ),
 )
 
@@ -233,6 +245,6 @@ def evaluate(stats: CorpusStats) -> list[tuple[RecommendationSpec, str]]:
     result: list[tuple[RecommendationSpec, str]] = []
     for spec in RECOMMENDATIONS:
         if spec.condition_fn(stats):
-            reason = spec.reason_template.format(count=stats.artifact_count)
+            reason = spec.reason_template.format(count=spec.count_fn(stats))
             result.append((spec, reason))
     return result

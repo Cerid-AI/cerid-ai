@@ -73,7 +73,25 @@ def _skip(path: Path) -> bool:
     return any(part in SKIP_PARTS for part in path.parts)
 
 
-def _dependabot_dirs() -> dict[str, set[str]]:
+def _dependabot_dirs() -> dict[str, set[str]] | None:
+    """What dependabot.yml watches, or None when there is no dependabot.yml.
+
+    NONE IS NOT AN EMPTY DICT, and collapsing the two is what broke this gate on
+    the public mirror. Empty means "the file is there and watches nothing", which
+    is a coverage failure worth every error this gate prints. None means the file
+    is absent, and on the mirror that is DELIBERATE: dependency bumps are merged
+    in the internal tree and synced across, so the version-update PRs that file
+    opened were never mergeable on their own and it was removed on purpose. The
+    gate read it unconditionally and died with FileNotFoundError — a crash, not a
+    verdict, so `make drift-check` failed for everyone on a repo where the
+    coverage invariant simply does not apply.
+
+    The PINNING half still runs either way. It asks a different question — are
+    image refs pinned — and that question is just as live on a repo nothing
+    watches.
+    """
+    if not DEPENDABOT.exists():
+        return None
     cfg = yaml.safe_load(DEPENDABOT.read_text())
     out: dict[str, set[str]] = {}
     for u in cfg.get("updates", []):
@@ -157,16 +175,20 @@ def main() -> int:
         for eco in sorted(found):
             print(f"{eco}:")
             for d in sorted(found[eco]):
-                print(f"  {'OK  ' if d in watched.get(eco, set()) else 'GAP '} {d}")
+                if watched is None:
+                    print(f"  n/a  {d}")
+                else:
+                    print(f"  {'OK  ' if d in watched.get(eco, set()) else 'GAP '} {d}")
         return 0
 
     errors: list[str] = []
-    for eco in sorted(found):
-        for d in sorted(found[eco] - watched.get(eco, set())):
-            errors.append(
-                f"{eco}: {d} holds a manifest but no dependabot.yml entry watches it — "
-                f"its pins will age with nothing reporting"
-            )
+    if watched is not None:
+        for eco in sorted(found):
+            for d in sorted(found[eco] - watched.get(eco, set())):
+                errors.append(
+                    f"{eco}: {d} holds a manifest but no dependabot.yml entry watches it — "
+                    f"its pins will age with nothing reporting"
+                )
     for path, ref in sorted(_floating()):
         errors.append(f"floating image `{ref}` in {path} — pin it, or allowlist it with a reason")
 
@@ -177,8 +199,22 @@ def main() -> int:
         return 1
 
     n = sum(len(v) for v in found.values())
+    plural = "y" if n == 1 else "ies"
+    if watched is None:
+        # SAID OUT LOUD, never silent. A skipped check and a passed one are
+        # indistinguishable in a green log, and that is the whole failure class
+        # this repo keeps finding.
+        print(
+            # Not `DEPENDABOT.relative_to(REPO)`: that raises ValueError for any path
+            # outside the repo, so the line reporting the skip could itself crash.
+            f"[dependency-currency] OK — no .github/dependabot.yml, so the "
+            f"COVERAGE check does not apply here and {n} manifest director{plural} went unchecked "
+            f"for it; pinning checked as usual, {len(FLOATING_ALLOWLIST)} allowlisted floating "
+            f"ref(s) (may only shrink)"
+        )
+        return 0
     print(
-        f"[dependency-currency] OK — {n} manifest director{'y' if n == 1 else 'ies'} all watched by "
+        f"[dependency-currency] OK — {n} manifest director{plural} all watched by "
         f"dependabot; {len(FLOATING_ALLOWLIST)} allowlisted floating ref(s) (may only shrink)"
     )
     return 0

@@ -9,4 +9,4 @@ Imported by `app.routers.sdk` (routes), `app.routers.sdk_openapi`
 and is caught by the sdk-openapi-drift CI job."""
 from __future__ import annotations
 
-SDK_VERSION = "1.1.0"
+SDK_VERSION = "1.2.0"

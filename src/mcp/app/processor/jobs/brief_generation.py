@@ -193,17 +193,38 @@ def _vault_write_brief(
         return False
 
 
+def _inbox_line(row: dict[str, Any]) -> str:
+    """One ingested artifact as a prompt line, or "" if it carries nothing.
+
+    An artifact with no summary is still evidence that something landed, so
+    it is represented by its filename rather than dropped.
+    """
+    summary = (row.get("summary") or "").strip()
+    filename = (row.get("filename") or "").strip()
+    domain = (row.get("domain") or "").strip()
+    label = filename or domain
+    if summary and label:
+        return f"- [{label}] {summary}"
+    if summary:
+        return f"- {summary}"
+    if label:
+        return f"- {label}"
+    return ""
+
+
 def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str, int]:
     """Query Neo4j for inbox items and recent notes for the given date.
 
     Returns ``(inbox_recent, notes_recent_7d, new_items_24h)``. The third
-    element is the day's delta — inbox items plus artifacts ingested in
-    the 24 h before ``target_date`` — and drives the UX-18 nothing-new
-    decision: the 7-day notes window still holds old content on a quiet
-    day, so "notes are non-empty" is NOT evidence that anything new
-    happened. This is intentionally a cheap stub that pages through
-    persisted :Brief and :Claim nodes. A richer implementation can
-    replace this function once the inbox graph schema is finalised.
+    element is the day's delta — artifacts ingested in the 24 h before
+    ``target_date`` — and drives the UX-18 nothing-new decision: the 7-day
+    notes window still holds old content on a quiet day, so "notes are
+    non-empty" is NOT evidence that anything new happened.
+
+    The inbox arm reads those same Artifacts. Counting one node type and
+    prompting from another is what let has_new_data=True and a corpus of
+    "(empty)" co-occur, which is the state the nothing-new guard exists to
+    prevent.
 
     RAG C3.3 loop-breaker
     ---------------------
@@ -252,20 +273,29 @@ def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str, int]:
                     exc,
                     context={"target_date": target_date},
                 )
-            # Inbox: items created in last 24 h (approximated by generated_at)
+            # Inbox: what actually landed in the window — the same Artifacts
+            # the delta above counts. This used to read
+            # (:Brief {kind: 'inbox'}), a node no producer writes
+            # (BriefRecord.kind only validates to 'daily' or 'weekly'), so
+            # the count and the prompt corpus were drawn from different
+            # node types: 183 artifacts ingested, "(empty)" sent to the LLM,
+            # and a brief that told the user nothing had landed.
             inbox_rows = session.run(
                 """
-                MATCH (b:Brief {kind: 'inbox'})
-                WHERE b.generated_at >= datetime($target_date) - duration('P1D')
-                RETURN b.sections AS sections
-                ORDER BY b.generated_at DESC
+                MATCH (a:Artifact)
+                WHERE a.ingested_at >= $window_start
+                RETURN coalesce(a.summary, '') AS summary,
+                       coalesce(a.filename, '') AS filename,
+                       coalesce(a.domain, '') AS domain
+                ORDER BY a.ingested_at DESC
                 LIMIT 50
                 """,
-                target_date=target_date,
+                window_start=window_start,
             ).data()
             for row in inbox_rows:
-                if row.get("sections"):
-                    inbox_items.append(str(row["sections"]))
+                line = _inbox_line(row)
+                if line:
+                    inbox_items.append(line)
 
             # Notes: recent vault entries from last 7 days.  The OPTIONAL
             # MATCH lets the loop-breaker filter consider the upstream
@@ -298,9 +328,9 @@ def _assemble_corpus(driver: Any, target_date: str) -> tuple[str, str, int]:
         )
 
     return (
-        "\n\n".join(inbox_items),
+        "\n".join(inbox_items),
         "\n\n".join(notes_items),
-        len(inbox_items) + new_artifacts_24h,
+        new_artifacts_24h,
     )
 
 
@@ -443,7 +473,11 @@ class BriefGenerationJob(BaseJob):
         inbox_recent, notes_recent_7d, new_items_24h = await asyncio.to_thread(
             _assemble_corpus, driver, self._target_date
         )
-        has_new_data = new_items_24h > 0
+        # Both halves have to agree: a delta the corpus cannot show the LLM
+        # can only be synthesised into filler.
+        has_new_data = new_items_24h > 0 and bool(
+            inbox_recent.strip() or notes_recent_7d.strip()
+        )
         await progress_cb(0.3)
 
         # --- 2. LLM synthesis ----------------------------------------------

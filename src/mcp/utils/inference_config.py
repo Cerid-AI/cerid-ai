@@ -588,20 +588,50 @@ def expectations_for(cfg: InferenceConfig) -> dict:
 
 
 def inference_health_payload() -> dict:
-    """Return inference status for the /health endpoint."""
+    """Return inference status for the /health endpoint.
+
+    ``detect_embedding_provider`` runs at boot and caches, so the platform and
+    provider facts below are a snapshot. The tier is NOT: a workload that has
+    fallen back is a live fact recorded by ``core.utils.inference_health``, and
+    reporting tier "good" while the ``inference_routing`` block in the same
+    payload says the rerank lane is degraded gave an operator two opposite
+    answers about one lane. The tier is reconciled against that signal here.
+
+    The latency fields are ``None`` when nothing has measured them. They are
+    only ever written by the Quenchforge and sidecar clients, never by the
+    in-process ONNX leg, so an outage that pushes every rerank onto ONNX leaves
+    them unwritten — and ``0.0`` reads as "instant" rather than "unmeasured".
+    """
     cfg = get_inference_config()
+    tier = cfg.tier
+    degraded_workloads = sorted(
+        name for name, st in _degradation_snapshot().items() if st.get("degraded")
+    )
+    if degraded_workloads and _tier_rank(tier) > _tier_rank(InferenceTier.DEGRADED):
+        tier = InferenceTier.DEGRADED
     return {
         "provider": cfg.provider,
-        "tier": cfg.tier.value,
+        "tier": tier.value,
         "gpu": cfg.gpu_available,
         "gpu_name": cfg.gpu_name,
         "platform": cfg.platform.value,
         "onnx_providers": cfg.onnx_providers,
         "ollama_available": cfg.ollama_available,
         "sidecar_available": cfg.sidecar_available,
-        "embed_latency_ms": round(cfg.embed_latency_ms, 2),
-        "rerank_latency_ms": round(cfg.rerank_latency_ms, 2),
+        "embed_latency_ms": round(cfg.embed_latency_ms, 2) if cfg.embed_latency_ms else None,
+        "rerank_latency_ms": round(cfg.rerank_latency_ms, 2) if cfg.rerank_latency_ms else None,
+        "degraded_workloads": degraded_workloads,
         "message": cfg.message,
         "expectations": expectations_for(cfg),
         "contended": cfg.local_probe_contended,
     }
+
+
+def _degradation_snapshot() -> dict:
+    """Live per-workload degradation state. Never raises — /health must answer."""
+    try:
+        from core.utils import inference_health
+        return inference_health.snapshot()
+    except Exception as exc:  # noqa: BLE001 — observability fallback
+        log_swallowed_error("utils.inference_config.degradation_snapshot", exc)
+        return {}

@@ -5,12 +5,14 @@
 
 from cerid._async_client import AsyncCeridClient
 from cerid.client import CeridClient
-from cerid.errors import CeridSDKError
+from cerid.errors import CeridSDKError, DomainRestrictedError, ProtocolVersionError
 
 __all__ = [
     "CeridClient",
     "AsyncCeridClient",
     "CeridSDKError",
+    "DomainRestrictedError",
+    "ProtocolVersionError",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

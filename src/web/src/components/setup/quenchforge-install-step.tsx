@@ -2,11 +2,19 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useCallback, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Cpu, Copy, Check, ExternalLink, Loader2, RefreshCw } from "lucide-react"
 import { logSwallowedError } from "@/lib/log-swallowed"
-import { fetchSystemCheck } from "@/lib/api"
+import { fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
+import { cn } from "@/lib/utils"
+import {
+  laneLabel,
+  laneModelUnset,
+  readInferenceLanes,
+  type InferenceLane,
+} from "@/components/monitoring/inference-lanes"
 import type { SystemCheckResponse } from "@/lib/types"
 
 interface QuenchforgeInstallStepProps {
@@ -18,6 +26,23 @@ interface QuenchforgeInstallStepProps {
 const INSTALL_COMMAND = "brew install cerid-ai/tap/quenchforge"
 const START_COMMAND = "brew services start quenchforge"
 
+/** Why a quenchforge-configured slot is not usable yet, in operator words. */
+function slotProblem(lane: InferenceLane): string | null {
+  if (lane.provider !== "quenchforge") return null
+  if (lane.degraded) {
+    return `${laneLabel(lane.lane)}: falling back to ${lane.serving}${
+      lane.degradedDetail ? ` — ${lane.degradedDetail}` : ""
+    }`
+  }
+  if (laneModelUnset(lane)) {
+    return `${laneLabel(lane.lane)}: no model pinned, so the slot serves whatever it loaded`
+  }
+  if (lane.serving === "unknown") {
+    return `${laneLabel(lane.lane)}: configured but nothing has been served yet`
+  }
+  return null
+}
+
 /**
  * Step 2 — Quenchforge Install (skippable, conditional).
  *
@@ -25,6 +50,13 @@ const START_COMMAND = "brew services start quenchforge"
  * commands, give a one-click copy button, and provide a "Re-detect" action
  * that hits ``/system-check`` again so the wizard sees a freshly installed
  * quenchforge service. The user runs the install in Terminal themselves.
+ *
+ * "Installed" used to mean ``ollama_detected`` — any daemon on the shared
+ * wire answering /api/tags with at least one model. Neither of the two
+ * commands above pulls a GGUF or pins a slot model, and nothing here probed
+ * the rerank slot, so a half-configured daemon (LLM model unset, rerank
+ * 503ing to the CPU fallback) showed a green badge and the wizard advanced.
+ * Readiness is now per-slot, read from the /health routing snapshot.
  */
 export function QuenchforgeInstallStep({
   systemCheck,
@@ -57,9 +89,37 @@ export function QuenchforgeInstallStep({
       .finally(() => setRedetecting(false))
   }, [onSystemCheckRefresh])
 
-  // Heuristic: if /system-check reports an ollama_url and at least one model,
-  // quenchforge (sharing the wire) is reachable; treat that as "installed".
-  const installed = systemCheck?.ollama_detected ?? false
+  const { data: health } = useQuery({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 15_000,
+    retry: 1,
+  })
+
+  // A daemon on the shared wire answering /api/tags. Necessary, not sufficient.
+  const daemonAnswering = systemCheck?.ollama_detected ?? false
+  const lanes = readInferenceLanes(health?.inference_routing)
+  const quenchforgeLanes = lanes.filter((l) => l.provider === "quenchforge")
+  const problems = quenchforgeLanes
+    .map(slotProblem)
+    .filter((p): p is string => p !== null)
+  const observed = quenchforgeLanes.some((l) => l.serving !== "unknown")
+  const ready = daemonAnswering && observed && problems.length === 0
+
+  const status: "ready" | "not-ready" | "unverified" | "absent" = !daemonAnswering
+    ? "absent"
+    : ready
+      ? "ready"
+      : problems.length > 0
+        ? "not-ready"
+        : "unverified"
+
+  const STATUS_TEXT = {
+    ready: "Ready",
+    "not-ready": "Detected, not ready",
+    unverified: "Detected, not verified",
+    absent: "Not detected yet",
+  } as const
 
   return (
     <>
@@ -90,22 +150,18 @@ export function QuenchforgeInstallStep({
         <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium">Status:</span>
-            {installed ? (
-              <Badge
-                variant="outline"
-                className="border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400"
-              >
-                <Check className="mr-1 h-3 w-3" />
-                Detected
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
-              >
-                Not detected yet
-              </Badge>
-            )}
+            <Badge
+              data-testid="quenchforge-status-badge"
+              variant="outline"
+              className={cn(
+                status === "ready"
+                  ? "border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400"
+                  : "border-yellow-500/30 bg-yellow-500/10 text-amber-600 dark:text-amber-400",
+              )}
+            >
+              {status === "ready" && <Check className="mr-1 h-3 w-3" />}
+              {STATUS_TEXT[status]}
+            </Badge>
           </div>
           <Button
             size="sm"
@@ -122,6 +178,37 @@ export function QuenchforgeInstallStep({
             Re-detect
           </Button>
         </div>
+
+        {status === "not-ready" && (
+          <div
+            data-testid="quenchforge-slot-problems"
+            role="status"
+            className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-label-xs text-amber-700 dark:text-amber-400"
+          >
+            <p className="mb-1 font-medium">The daemon is up, but not every slot is usable</p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              {problems.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-muted-foreground">
+              Pin the slot models in the quenchforge LaunchAgent
+              (QUENCHFORGE_DEFAULT_MODEL / _EMBED_MODEL / _RERANK_MODEL), restart
+              the service, then Re-detect.
+            </p>
+          </div>
+        )}
+
+        {status === "unverified" && daemonAnswering && (
+          <div
+            data-testid="quenchforge-slot-unverified"
+            role="status"
+            className="rounded-lg border border-dashed border-muted-foreground/30 p-3 text-label-xs text-muted-foreground"
+          >
+            The daemon answered, but no inference call has run through it yet, so
+            no slot has been confirmed serving.
+          </div>
+        )}
 
         <div className="rounded-lg border bg-muted/30 p-3 text-label-xs text-muted-foreground">
           <p className="mb-1 font-medium text-foreground">First-launch on macOS Sonoma+</p>

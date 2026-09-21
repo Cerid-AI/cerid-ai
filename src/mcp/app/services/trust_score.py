@@ -91,17 +91,27 @@ class TrustScore(BaseModel):
     Score is the simple mean of normalized component values, scaled to
     [0, 100]. Components with ``status='not_available'`` are excluded.
     A score of 0 with no components is reported as ``score=None``.
+    ``available_components`` / ``total_components`` report the basis so a
+    low score can be read as "few inputs" rather than "poor quality".
     """
 
     score: int | None
     band: ScoreBand | None
     updated_at: str
     components: list[TrustComponent]
+    # The mean's denominator, carried with the score. Four of the six
+    # components read baseline files that only exist in an internal
+    # checkout, so the same build scores ~73 from six inputs internally and
+    # ~11 from two publicly. A consumer that shows the number without the
+    # basis is presenting those as the same kind of fact.
+    available_components: int
+    total_components: int
     note: str = Field(
         default=(
             "Score is the straight mean of normalized component values. "
             "No learned weights. Components with 'not_available' status "
-            "are excluded from the mean."
+            "are excluded from the mean — see available_components for how "
+            "many of total_components actually contributed."
         ),
     )
 
@@ -401,6 +411,8 @@ def compute_trust_score(neo4j_driver: Any | None = None) -> TrustScore:
         band=_band_for(score),
         updated_at=utcnow_iso(),
         components=components,
+        available_components=len(normalized_values),
+        total_components=len(components),
     )
 
 
@@ -410,11 +422,10 @@ def trust_score_24h_summary(neo4j_driver: Any | None = None) -> dict[str, Any]:
     Returns ``{score, band, available_components, total_components}``.
     """
     ts = compute_trust_score(neo4j_driver)
-    available = sum(1 for c in ts.components if c.status != "not_available")
     return {
         "score": ts.score,
         "band": ts.band,
-        "available_components": available,
-        "total_components": len(ts.components),
+        "available_components": ts.available_components,
+        "total_components": ts.total_components,
         "updated_at": ts.updated_at,
     }

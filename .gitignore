@@ -164,3 +164,9 @@ scripts/out/
 # Extension build output (vite). Never tracked; a stray `npm run build`
 # during dependency work put it in a commit once.
 packages/extension/dist/
+
+# Hub UI build output. Rebuild with `make -C stacks/gateway/hub web`.
+stacks/gateway/hub/web/dist/
+stacks/gateway/hub/desktop/node_modules/
+stacks/gateway/hub/desktop/out/
+stacks/gateway/hub/desktop/release/

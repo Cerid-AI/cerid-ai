@@ -1,6 +1,7 @@
 {
   "name": "cerid-workflow-builder",
   "version": "0.1.0",
+  "type": "agent",
   "description": "Visual Workflow Builder — DAG composition and execution engine for agent pipelines",
   "tier": "pro",
   "license": "BUSL-1.1",

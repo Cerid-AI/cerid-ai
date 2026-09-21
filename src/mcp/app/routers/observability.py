@@ -670,7 +670,14 @@ async def get_knowledge_stats() -> dict:
         snapshot = fetch_current_stats(driver)
     except Exception as exc:  # noqa: BLE001 — observability boundary
         log_swallowed_error("observability.knowledge_stats.compute", exc)
-        return _empty_knowledge_stats()
+        # A shape-stable zero snapshot with a fresh captured_at is
+        # indistinguishable from a genuinely empty corpus, and the Sources
+        # hero card renders it as one. Fail loudly so fetchKnowledgeStats()
+        # rejects and the pane shows its stats-unavailable banner instead.
+        raise HTTPException(
+            status_code=503,
+            detail="Knowledge stats unavailable — the graph store could not be read.",
+        ) from exc
 
     # Warm the cache for the next 60s.
     try:
@@ -702,7 +709,13 @@ async def get_knowledge_stats_history(
         snapshots = fetch_stats_history(driver, days=days)
     except Exception as exc:  # noqa: BLE001 — observability boundary
         log_swallowed_error("observability.knowledge_stats.history", exc)
-        snapshots = []
+        # Same class as the current-snapshot read above: "no snapshots
+        # recorded yet" is a real answer this endpoint gives, so an outage
+        # must not borrow it.
+        raise HTTPException(
+            status_code=503,
+            detail="Knowledge stats history unavailable — the graph store could not be read.",
+        ) from exc
 
     return {"days": days, "snapshots": snapshots}
 
@@ -789,21 +802,3 @@ async def source_activity_stream(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-def _empty_knowledge_stats() -> dict:
-    """Fallback when Neo4j is unreachable — shape-stable zero snapshot."""
-    return {
-        "nodes": {"artifacts": 0, "entities": 0, "memories": 0, "sources": 0},
-        "edges": {
-            "mentions": 0, "relates_to": 0, "wikilinks": 0,
-            "from_source": 0, "has_contradiction": 0,
-        },
-        "chunks": 0,
-        "diversity": {"source_kinds": 0, "domains": 0},
-        "growth": {
-            "artifacts_24h": 0, "artifacts_7d": 0,
-            "first_artifact_at": None, "corpus_age_days": 0,
-        },
-        "captured_at": utcnow_iso(),
-    }

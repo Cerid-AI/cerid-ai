@@ -9,16 +9,20 @@ a 422 and the lifecycle contract was half-shipped.  These tests verify
 the three deliverables of the v0.93.5 L4 enforcement pass:
 
 1. ``PrivateModeRequest`` accepts levels 0–4 and rejects 5+ / -1.
-2. ``POST /settings/private-mode/session-wipe`` clears the global flag
-   + the per-session override and returns a stable confirmation shape.
+2. ``POST /settings/private-mode/session-wipe`` clears the per-session
+   override, winds the global flag back to an explicit ``"0"`` once no
+   other L4 session is registered (F021 — it used to DELETE the shared
+   key, dropping every other tab), and returns a stable confirmation
+   shape.
 3. The wipe endpoint is idempotent — re-firing on the same conversation
-   doesn't raise, and the global flag stays cleared.
+   doesn't raise, and the global flag stays off.
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import fakeredis
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -30,50 +34,19 @@ from app.routers.settings import (
 )
 
 
-class _FakePipeline:
-    def __init__(self, owner) -> None:
-        self._owner = owner
-
-    def delete(self, key):
-        self._owner.store.pop(key, None)
-        return self
-
-    def execute(self):
-        return None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
-
-class _FakeRedis:
-    def __init__(self) -> None:
-        self.store: dict[str, str] = {}
-
-    def get(self, key):
-        return self.store.get(key)
-
-    def set(self, key, value):
-        self.store[key] = value
-
-    def delete(self, key):
-        self.store.pop(key, None)
-
-    def pipeline(self):
-        return _FakePipeline(self)
-
-
 @pytest.fixture
 def client(monkeypatch):
     app = FastAPI()
     app.include_router(router)
-    fake = _FakeRedis()
+    # fakeredis rather than a hand-rolled stub: the wipe endpoint drives the
+    # L4 session registry with sorted-set commands a get/set/delete stub can't
+    # model, and the scope contract depends on them.
+    fake = fakeredis.FakeStrictRedis(decode_responses=True)
     # Patch BOTH the canonical source and the router-local import; FastAPI's
     # route handlers resolve to the symbol that was imported at module load.
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
     monkeypatch.setattr("app.routers.settings.get_redis", lambda: fake)
+    monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake)
     return TestClient(app), fake
 
 
@@ -82,7 +55,7 @@ def test_validator_accepts_l4(client):
     r = tc.post("/settings/private-mode", json={"level": 4})
     assert r.status_code == 200
     assert r.json() == {"level": 4}
-    assert fake.store[_PRIVATE_MODE_KEY] == "4"
+    assert fake.get(_PRIVATE_MODE_KEY) == "4"
 
 
 def test_validator_still_accepts_l0_through_l3(client):
@@ -100,7 +73,7 @@ def test_validator_rejects_l5_and_negative(client):
         assert r.status_code == 422
 
 
-def test_session_wipe_clears_global_flag(client, monkeypatch):
+def test_session_wipe_winds_the_global_flag_back_to_zero(client, monkeypatch):
     tc, fake = client
     # WB-45: "wiped" now reflects whether Neo4j was reachable and the
     # orchestrator ran — mock both to a deterministic success so this test
@@ -111,7 +84,7 @@ def test_session_wipe_clears_global_flag(client, monkeypatch):
         "app.routers.settings.wipe_conversation_state",
         lambda *a, **k: fake_summary,
     )
-    fake.store[_PRIVATE_MODE_KEY] = "4"
+    fake.set(_PRIVATE_MODE_KEY, "4")
     r = tc.post(
         "/settings/private-mode/session-wipe",
         json={"conversation_id": "conv-123"},
@@ -124,22 +97,22 @@ def test_session_wipe_clears_global_flag(client, monkeypatch):
         "conversation_id": "conv-123",
         "summary": fake_summary,
     }
-    assert _PRIVATE_MODE_KEY not in fake.store
+    assert fake.get(_PRIVATE_MODE_KEY) == "0"
 
 
 def test_session_wipe_clears_per_session_override(client):
     tc, fake = client
     session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}conv-abc"
-    fake.store[session_key] = "4"
-    fake.store[_PRIVATE_MODE_KEY] = "4"
+    fake.set(session_key, "4")
+    fake.set(_PRIVATE_MODE_KEY, "4")
 
     r = tc.post(
         "/settings/private-mode/session-wipe",
         json={"conversation_id": "conv-abc"},
     )
     assert r.status_code == 200
-    assert session_key not in fake.store
-    assert _PRIVATE_MODE_KEY not in fake.store
+    assert fake.get(session_key) is None
+    assert fake.get(_PRIVATE_MODE_KEY) == "0"
 
 
 def test_session_wipe_is_idempotent(client):
@@ -155,7 +128,7 @@ def test_session_wipe_is_idempotent(client):
     )
     assert r1.status_code == 200
     assert r2.status_code == 200
-    assert _PRIVATE_MODE_KEY not in fake.store
+    assert fake.get(_PRIVATE_MODE_KEY) == "0"
 
 
 def test_session_wipe_rejects_missing_conversation_id(client):
@@ -176,12 +149,12 @@ def test_session_wipe_rejects_overlong_conversation_id(client):
 def test_session_wipe_does_not_touch_other_sessions(client):
     """A wipe scoped to conv-A must NOT clear conv-B's session key."""
     tc, fake = client
-    fake.store[f"{_PRIVATE_MODE_SESSION_PREFIX}conv-A"] = "4"
-    fake.store[f"{_PRIVATE_MODE_SESSION_PREFIX}conv-B"] = "4"
+    fake.set(f"{_PRIVATE_MODE_SESSION_PREFIX}conv-A", "4")
+    fake.set(f"{_PRIVATE_MODE_SESSION_PREFIX}conv-B", "4")
 
     tc.post(
         "/settings/private-mode/session-wipe",
         json={"conversation_id": "conv-A"},
     )
-    assert f"{_PRIVATE_MODE_SESSION_PREFIX}conv-A" not in fake.store
-    assert f"{_PRIVATE_MODE_SESSION_PREFIX}conv-B" in fake.store
+    assert fake.get(f"{_PRIVATE_MODE_SESSION_PREFIX}conv-A") is None
+    assert fake.get(f"{_PRIVATE_MODE_SESSION_PREFIX}conv-B") == "4"

@@ -4,8 +4,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   CeridClient,
+  SDK_PROTOCOL_VERSION,
+  ProtocolVersionError,
+  isMemoryExtractAccepted,
   CeridSDKError,
   AuthenticationError,
+  DomainRestrictedError,
   RateLimitError,
   ValidationError,
   NotFoundError,
@@ -407,6 +411,22 @@ describe("Error mapping", () => {
     }
   });
 
+  it("throws DomainRestrictedError on 403 with retrieval_reason", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { detail: { retrieval_reason: "consumer_domain_restricted", retrieval_skipped: true } },
+        403,
+      ),
+    );
+    const client = createClient(mockFetch);
+    try {
+      await client.kb.query({ query: "x", domains: ["finance"] });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(DomainRestrictedError);
+    }
+  });
+
   it("throws ValidationError on 422", async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       jsonResponse({ detail: "query is required" }, 422),
@@ -460,5 +480,163 @@ describe("Error mapping", () => {
       expect((err as RateLimitError).status).toBe(429);
       expect((err as RateLimitError).body).toEqual(errorBody);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Async memory extract: 200 vs 202 are different shapes, not the same one.
+// ---------------------------------------------------------------------------
+
+describe("memory.extract discriminates the 202 accepted envelope", () => {
+  it("returns the accepted envelope with its job_id on 202", async () => {
+    const accepted = {
+      job_id: "job-42",
+      status: "queued",
+      status_url: "/sdk/v1/memory/extract/jobs/job-42",
+      conversation_id: "conv-1",
+    };
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse(accepted, 202));
+    const client = createClient(mockFetch);
+
+    const result = await client.memory.extract({
+      response_text: "I prefer dark mode.",
+      conversation_id: "conv-1",
+    });
+
+    expect(
+      isMemoryExtractAccepted(result),
+      "202 parsed as a finished extraction — the caller never learns a job_id exists",
+    ).toBe(true);
+    if (!isMemoryExtractAccepted(result)) throw new Error("unreachable");
+    expect(result.job_id).toBe("job-42");
+    expect(result.status_url).toContain("job-42");
+  });
+
+  it("does not let a caller read extraction counts without branching", async () => {
+    // Layer 1 (compile-time): `extract()` returns a union, so reaching for a
+    // sync-only field without narrowing is a type error. Before the 202 was
+    // given its own return type this compiled fine and silently reported
+    // "0 memories stored" for work that was queued and would succeed.
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse({}, 202));
+    const client = createClient(mockFetch);
+    const result = await client.memory.extract({
+      response_text: "x",
+      conversation_id: "conv-1",
+    });
+
+    // @ts-expect-error - on the union this is `unknown`, not `number`
+    const stored: number = result.memories_stored;
+    void stored;
+
+    expect(result).toBeDefined();
+  });
+
+  it("returns the sync result on 200", async () => {
+    const body = {
+      conversation_id: "conv-1", timestamp: "", memories_extracted: 2,
+      memories_stored: 2, skipped_duplicates: 0, results: [],
+    };
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse(body));
+    const client = createClient(mockFetch);
+
+    const result = await client.memory.extract({
+      response_text: "I prefer dark mode.",
+      conversation_id: "conv-1",
+    });
+
+    expect(isMemoryExtractAccepted(result)).toBe(false);
+    if (isMemoryExtractAccepted(result)) throw new Error("unreachable");
+    expect(result.memories_stored).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry-After: the server sets it on both the 429 rate-limit path and the 503
+// SLO-budget path, and the guide tells consumers to back off on it. The
+// Response is consumed inside raiseForStatus, so if the typed error doesn't
+// carry the header the value is gone by the time the caller sees the failure.
+// ---------------------------------------------------------------------------
+
+function errorResponse(body: unknown, status: number, headers: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...headers },
+  });
+}
+
+describe("Retry-After reaches the caller", () => {
+  it("RateLimitError carries the parsed Retry-After", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      errorResponse({ detail: "Rate limited" }, 429, { "Retry-After": "30" }),
+    );
+    const client = createClient(mockFetch);
+
+    await expect(client.system.health()).rejects.toMatchObject({
+      name: "RateLimitError",
+      retryAfter: 30,
+    });
+  });
+
+  it("ServiceUnavailableError carries the parsed Retry-After", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      errorResponse({ detail: "SLO budget exhausted" }, 503, { "Retry-After": "12.5" }),
+    );
+    const client = createClient(mockFetch);
+
+    await expect(client.system.health()).rejects.toMatchObject({
+      name: "ServiceUnavailableError",
+      retryAfter: 12.5,
+    });
+  });
+
+  it("leaves retryAfter null when the server sends no header", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse({ detail: "Rate limited" }, 429));
+    const client = createClient(mockFetch);
+
+    await expect(client.system.health()).rejects.toMatchObject({ retryAfter: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Protocol-version enforcement. The constant is the compatibility contract;
+// the health / settings responses are the only place the server states its own
+// protocol version, so that is where the comparison happens — no extra round
+// trip, and no silent payload skew against a server that moved on.
+// ---------------------------------------------------------------------------
+
+const SDK_MAJOR = Number(SDK_PROTOCOL_VERSION.split(".")[0]);
+const OTHER_MAJOR = SDK_MAJOR + 1;
+
+describe("Protocol version enforcement", () => {
+  for (const method of ["health", "healthDetailed", "settings"] as const) {
+    it(`system.${method}() rejects a different major protocol version`, async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        jsonResponse({ status: "healthy", version: `${OTHER_MAJOR}.0.0`, services: {}, features: {}, tier: "community" }),
+      );
+      const client = createClient(mockFetch);
+
+      await expect(client.system[method]()).rejects.toMatchObject({
+        name: "ProtocolVersionError",
+        serverVersion: `${OTHER_MAJOR}.0.0`,
+      });
+    });
+  }
+
+  it("accepts any minor/patch on the same major", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      jsonResponse({ status: "healthy", version: `${SDK_MAJOR}.99.4`, services: {}, features: {} }),
+    );
+    const client = createClient(mockFetch);
+    await expect(client.system.health()).resolves.toMatchObject({ version: `${SDK_MAJOR}.99.4` });
+  });
+
+  it("treats an unstated version as unknown, not incompatible", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse({ tier: "community", features: {} }));
+    const client = createClient(mockFetch);
+    await expect(client.system.settings()).resolves.toBeDefined();
+  });
+
+  it("exports ProtocolVersionError as a CeridSDKError", () => {
+    expect(new ProtocolVersionError("x", "2.0.0")).toBeInstanceOf(CeridSDKError);
   });
 });

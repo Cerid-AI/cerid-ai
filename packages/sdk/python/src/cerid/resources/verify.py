@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from cerid.errors import _raise_for_status
 from cerid.models import HallucinationResponse
@@ -27,23 +27,18 @@ class VerifyResource:
         self,
         response: str,
         *,
-        context: str = "",
-        conversation_id: Optional[str] = None,
-        claims: Optional[List[str]] = None,
+        conversation_id: str,
     ) -> HallucinationResponse:
         """Verify factual claims in a response against the KB.
 
         Args:
             response: The LLM response text to verify.
-            context: Original context/query used to generate the response.
-            conversation_id: Optional conversation identifier.
-            claims: Pre-extracted claims to verify (skips extraction step).
+            conversation_id: Conversation identifier the verification is filed
+                under. Required by the server (``min_length=1``).
         """
         body = self._client._build_json(
             response_text=response,
-            context=context,
             conversation_id=conversation_id,
-            claims=claims,
         )
         resp = self._http.post(self._client._url("/hallucination"), json=body)
         _raise_for_status(resp)
@@ -61,16 +56,12 @@ class AsyncVerifyResource:
         self,
         response: str,
         *,
-        context: str = "",
-        conversation_id: Optional[str] = None,
-        claims: Optional[List[str]] = None,
+        conversation_id: str,
     ) -> HallucinationResponse:
         """Verify factual claims in a response against the KB."""
         body = self._client._build_json(
             response_text=response,
-            context=context,
             conversation_id=conversation_id,
-            claims=claims,
         )
         resp = await self._http.post(self._client._url("/hallucination"), json=body)
         _raise_for_status(resp)

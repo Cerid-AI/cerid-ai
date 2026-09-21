@@ -371,13 +371,61 @@ describe("KnowledgePane", () => {
     mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
     render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => {
-      expect(screen.getByText(/Showing 3 of 3 artifacts$/)).toBeInTheDocument()
+      expect(screen.getByText(/Showing 3 of 3 artifacts from Personal$/)).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByTestId("taxonomy-set-coding"))
     await waitFor(() => {
-      expect(screen.getByText(/Showing 3 of 3 artifacts in coding/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Showing 3 of 3 artifacts in coding, from Personal/),
+      ).toBeInTheDocument()
     })
+  })
+
+  // F375 — Live Sources → Library opened on "Showing 50 of 220 artifacts"
+  // with an empty scope label, directly under a hero reading "1,006
+  // ARTIFACTS". Two things were hidden: the source dropdown defaults to
+  // "Personal", a filter that is applied on first paint and was not named,
+  // and fetchAllArtifacts' backend total was fetched and then discarded in
+  // favour of the post-filter array length. Three totals, no explanation.
+  it("names the source filter that is applied by default (F375)", async () => {
+    const artifacts = Array.from({ length: 3 }, (_, i) =>
+      makeArtifact({ id: `art-${i}`, filename: `file-${i}.pdf` }),
+    )
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage(artifacts))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 3 of 3 artifacts from Personal/)).toBeInTheDocument()
+    })
+  })
+
+  it("reconciles the filtered count with the library total (F375)", async () => {
+    const artifacts = Array.from({ length: 3 }, (_, i) =>
+      makeArtifact({ id: `art-${i}`, filename: `file-${i}.pdf` }),
+    )
+    // The backend paged 912 rows; only 3 survive the default Personal filter.
+    mockFetchAllArtifacts.mockResolvedValue({ artifacts, total: 912 })
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/912 in the library/)).toBeInTheDocument()
+    })
+  })
+
+  it("drops the source clause once the filter is broadened (F375)", async () => {
+    mockFetchAllArtifacts.mockResolvedValue(artifactsPage([
+      makeArtifact({ id: "a1", filename: "personal.pdf" }),
+    ]))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/from Personal/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("trigger-pack-installed"))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/from Personal/)).not.toBeInTheDocument()
+    })
+    expect(screen.getByText(/Showing 1 of 1 artifacts$/)).toBeInTheDocument()
   })
 
   // ---- Search results count ----

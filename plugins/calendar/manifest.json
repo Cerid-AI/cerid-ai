@@ -1,7 +1,7 @@
 {
   "name": "cerid-calendar",
   "version": "0.1.0",
-  "type": "ingestion",
+  "type": "parser",
   "tier": "pro",
   "description": "Calendar integration — ICS file parsing and Apple Calendar reader",
   "license": "BUSL-1.1",

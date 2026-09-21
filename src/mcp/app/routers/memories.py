@@ -73,6 +73,108 @@ class MemoryDedupResponse(BaseModel):
 # GET /memories — list memories with filtering
 # ---------------------------------------------------------------------------
 
+# Plural/hyphenated API names → the singular values both stores write:
+# ``memory_{type}_...`` in an :Artifact filename, ``memory_type`` on a :Memory.
+_MEMORY_TYPE_MAP = {
+    "facts": "fact",
+    "fact": "fact",
+    "decisions": "decision",
+    "decision": "decision",
+    "preferences": "preference",
+    "preference": "preference",
+    "action-items": "action_item",
+    "action_items": "action_item",
+    "action_item": "action_item",
+}
+
+
+def _conversation_memory_queries(
+    memory_type: str | None,
+    convo_prefix: str | None,
+) -> tuple[str, str]:
+    """List + count Cypher for ``memory_``-prefixed :Artifact memories.
+
+    ``superseded_by IS NULL`` matches what recall does at read time
+    (``core.agents.memory``) and what /memories/dedup already scopes to —
+    without it the pane kept rendering duplicates the system had retired.
+    """
+    conditions = ["a.filename STARTS WITH 'memory_'", "a.superseded_by IS NULL"]
+    if memory_type:
+        conditions.append("a.filename STARTS WITH $memory_type_prefix")
+    if convo_prefix:
+        conditions.append("a.filename CONTAINS $convo_prefix")
+    match = (
+        "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
+        "WHERE " + " AND ".join(conditions) + " "
+    )
+    listing = match + (
+        "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, "
+        "a.ingested_at AS created_at "
+        "ORDER BY a.ingested_at DESC LIMIT $fetch"
+    )
+    return listing, match + "RETURN count(a) AS total"
+
+
+def _verified_memory_queries(
+    memory_type: str | None,
+    convo_prefix: str | None,
+) -> tuple[str, str]:
+    """List + count Cypher for :Memory nodes (verified-claim promotions).
+
+    These are the memories /observability/knowledge-stats counts and
+    /sync/status backs up; before this they had no listing path at all, so
+    the pane's count disagreed with every other count in the app. Merged
+    (``status='merged'``) and superseded nodes are dropped for the same
+    reason their :Artifact counterparts are.
+    """
+    conditions = [
+        "coalesce(m.status, 'active') = 'active'",
+        "NOT (m)<-[:SUPERSEDES]-(:Memory)",
+    ]
+    if memory_type:
+        conditions.append("m.memory_type = $memory_type")
+    convo_filter = "WHERE c.id STARTS WITH $convo_prefix " if convo_prefix else ""
+    match = (
+        "MATCH (m:Memory) "
+        "WHERE " + " AND ".join(conditions) + " "
+        "OPTIONAL MATCH (m)-[:EXTRACTED_FROM]->(c:Conversation) "
+        f"WITH m, c {convo_filter}"
+    )
+    listing = match + (
+        "RETURN m.id AS id, m.text AS text, m.memory_type AS memory_type, "
+        "m.created_at AS created_at, c.id AS conversation_id "
+        "ORDER BY m.created_at DESC LIMIT $fetch"
+    )
+    return listing, match + "RETURN count(DISTINCT m) AS total"
+
+
+def _artifact_row_to_memory(record: Any) -> dict[str, Any]:
+    # memory_{type}_{convo_prefix}_{timestamp}_{idx}
+    filename = record["filename"] or ""
+    parts = filename.split("_")
+    return {
+        "id": record["id"],
+        "type": parts[1] if len(parts) > 1 else "unknown",
+        "content": record["summary"] or "",
+        "conversation_id": parts[2] if len(parts) > 2 else "",
+        "created_at": record["created_at"],
+        "source_filename": filename,
+        "source": "conversation",
+    }
+
+
+def _memory_row_to_memory(record: Any) -> dict[str, Any]:
+    return {
+        "id": record["id"],
+        "type": record["memory_type"] or "unknown",
+        "content": record["text"] or "",
+        "conversation_id": record["conversation_id"] or "",
+        "created_at": record["created_at"],
+        "source_filename": None,
+        "source": "verified",
+    }
+
+
 @router.get("/memories", response_model=ListMemoriesResponse)
 async def list_memories(
     type: str | None = Query(None, description="Filter by memory type (facts/decisions/preferences/action-items)"),
@@ -80,91 +182,64 @@ async def list_memories(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List extracted conversation memories with optional filtering."""
+    """List extracted conversation memories with optional filtering.
+
+    Reads BOTH memory representations — ``memory_``-prefixed :Artifact rows
+    in the conversations domain and :Memory nodes — because the user owns
+    both and every other counter in the app (knowledge-stats, sync status)
+    already sums them. Each row carries a ``source`` so the pane can tell
+    a conversational extraction from a verified promotion.
+    """
     try:
         driver = get_neo4j()
 
-        # Build Cypher query with optional filters
-        base_query = (
-            "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
-        )
-        conditions = []
-        params: dict = {"limit": limit, "offset": offset}
-
-        conditions.append("a.filename STARTS WITH 'memory_'")
         memory_type = None
-
         if type:
-            # Map plural/hyphenated API names to stored memory_type values
-            type_map = {
-                "facts": "fact",
-                "fact": "fact",
-                "decisions": "decision",
-                "decision": "decision",
-                "preferences": "preference",
-                "preference": "preference",
-                "action-items": "action_item",
-                "action_items": "action_item",
-                "action_item": "action_item",
-            }
-            memory_type = type_map.get(type.lower())
+            memory_type = _MEMORY_TYPE_MAP.get(type.lower())
             if not memory_type:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid memory type: {type}. Valid: facts, decisions, preferences, action-items",
                 )
-            conditions.append("a.filename STARTS WITH $memory_type_prefix")
-            params["memory_type_prefix"] = f"memory_{memory_type}_"
 
-        if conversation_id:
-            convo_prefix = conversation_id[:8]
-            conditions.append("a.filename CONTAINS $convo_prefix")
+        convo_prefix = conversation_id[:8] if conversation_id else None
+        # Both stores are ordered independently, so each has to yield enough
+        # rows to cover the requested page before they are merged.
+        params: dict[str, Any] = {"fetch": offset + limit}
+        if memory_type:
+            params["memory_type"] = memory_type
+            params["memory_type_prefix"] = f"memory_{memory_type}_"
+        if convo_prefix:
             params["convo_prefix"] = convo_prefix
 
-        if conditions:
-            base_query += "WHERE " + " AND ".join(conditions) + " "
-
-        base_query += (
-            "RETURN a.id AS id, a.filename AS filename, a.domain AS domain, "
-            "a.summary AS summary, a.ingested_at AS created_at, "
-            "a.chunk_ids AS chunk_ids "
-            "ORDER BY a.ingested_at DESC "
-            "SKIP $offset LIMIT $limit"
+        artifact_query, artifact_count_query = _conversation_memory_queries(
+            memory_type, convo_prefix,
+        )
+        verified_query, verified_count_query = _verified_memory_queries(
+            memory_type, convo_prefix,
         )
 
         with driver.session() as session:
-            result = session.run(base_query, **params)
-            memories = []
-            for record in result:
-                # Extract memory_type and conversation_id from filename pattern:
-                # memory_{type}_{convo_prefix}_{timestamp}_{idx}
-                filename = record["filename"] or ""
-                parts = filename.split("_")
-                memory_type = parts[1] if len(parts) > 1 else "unknown"
-                convo_id_part = parts[2] if len(parts) > 2 else ""
+            rows = [
+                _artifact_row_to_memory(r) for r in session.run(artifact_query, **params)
+            ]
+            rows += [
+                _memory_row_to_memory(r) for r in session.run(verified_query, **params)
+            ]
+            total = int(session.run(artifact_count_query, **params).single()["total"])
+            total += int(session.run(verified_count_query, **params).single()["total"])
 
-                memories.append({
-                    "id": record["id"],
-                    "type": memory_type,
-                    "content": record["summary"] or "",
-                    "conversation_id": convo_id_part,
-                    "created_at": record["created_at"],
-                    "source_filename": filename,
-                })
-
-        # Get total count for pagination
-        count_conditions = ["a.filename STARTS WITH 'memory_'"]
-        if type and memory_type:
-            count_conditions.append("a.filename STARTS WITH $memory_type_prefix")
-        if conversation_id:
-            count_conditions.append("a.filename CONTAINS $convo_prefix")
-        count_query = (
-            "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
-            "WHERE " + " AND ".join(count_conditions) + " "
-            "RETURN count(a) AS total"
-        )
-        with driver.session() as count_session:
-            total = count_session.run(count_query, **params).single()["total"]
+        # A :Memory extracted from more than one conversation yields one row
+        # per EXTRACTED_FROM edge; the pane wants the memory once.
+        seen: set[str] = set()
+        merged: list[dict[str, Any]] = []
+        for row in rows:
+            if row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            merged.append(row)
+        merged.sort(key=lambda m: m["created_at"] or "", reverse=True)
+        memories = merged[offset:offset + limit]
 
         return {"memories": memories, "total": total, "limit": limit, "offset": offset}
 
@@ -246,8 +321,26 @@ async def delete_memory(memory_id: str):
                 memory_id=memory_id,
             )
             record = check.single()
-            if not record:
+
+        if not record:
+            # A verified-claim promotion is a :Memory node, not an
+            # :Artifact — it is listed by the same pane, so it has to be
+            # deletable from it. The wipe helper is the one path that
+            # knows the deterministic Chroma companion id and busts the
+            # query caches afterwards; duplicating it here would leak
+            # orphan documents.
+            from app.services.session_wipe import _delete_verified_memory
+
+            with driver.session() as session:
+                verified = session.run(
+                    "MATCH (m:Memory {id: $memory_id}) RETURN m.id AS id",
+                    memory_id=memory_id,
+                ).single()
+            if not verified:
                 raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+            _delete_verified_memory(driver, memory_id)
+            logger.info(f"Deleted verified memory node {memory_id[:8]}")
+            return {"status": "deleted", "memory_id": memory_id}
 
         # Delete chunks from ChromaDB
         chunk_ids_raw = record["chunk_ids"]

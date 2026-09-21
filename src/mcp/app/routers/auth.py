@@ -8,15 +8,19 @@ endpoints. Only registered when ``CERID_MULTI_USER=true``.
 """
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import jwt as pyjwt
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.db.neo4j.users import (
+    any_user_exists,
     create_tenant,
     create_user,
     get_tenant,
@@ -155,6 +159,41 @@ def _is_refresh_valid(redis_client, jti: str) -> bool:
     return redis_client.exists(f"refresh_token:{jti}") == 1
 
 
+def _admin_caller(request: Request, driver) -> dict | None:
+    """The existing administrator behind this request, if there is one.
+
+    Read straight off the Authorization header rather than ``request.state``:
+    ``JWTAuthMiddleware`` exempts the whole ``/auth/`` prefix, so on this route
+    the state is never populated. A check written against it would refuse every
+    real admin and wave through everyone else.
+
+    The role is taken from the graph, not from the token's own claim, so a
+    stale token cannot assert a role its user no longer holds.
+    """
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None
+    try:
+        payload = decode_access_token(header[7:])
+    except pyjwt.PyJWTError:
+        return None
+    user = get_user_by_id(driver, payload.get("sub") or "")
+    return user if user and user.get("role") == "admin" else None
+
+
+def _bootstrap_token_ok(request: Request) -> bool:
+    """True when the caller presents the operator's bootstrap token.
+
+    Read from the environment per request so rotating it does not need a
+    restart. Unset means "no such door" — never "any token matches".
+    """
+    expected = os.getenv("CERID_BOOTSTRAP_TOKEN", "").strip()
+    provided = request.headers.get("X-Bootstrap-Token", "")
+    if not expected or not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
 def _get_authenticated_user(request: Request) -> dict:
     """Extract authenticated user_id from request.state (set by JWTAuthMiddleware)."""
     user_id = getattr(request.state, "user_id", None)
@@ -171,8 +210,18 @@ def _get_authenticated_user(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/register", response_model=TokenResponse)
-def register(body: RegisterRequest):
-    """Register a new user. Creates a new tenant if tenant_name is provided."""
+def register(body: RegisterRequest, request: Request):
+    """Register a new user. Creates a new tenant if tenant_name is provided.
+
+    ``tenant_name`` mints an administrator, so it is not a self-service field.
+    Three things can authorise it, and the API key is deliberately not among
+    them: the key is shipped to every browser that loads the GUI
+    (VITE_CERID_API_KEY), and on loopback this route needs no key at all.
+
+      * genuine first run — the graph holds no users yet;
+      * an existing administrator's access token;
+      * the operator's ``CERID_BOOTSTRAP_TOKEN`` via ``X-Bootstrap-Token``.
+    """
     driver = get_neo4j()
 
     # Check for existing user
@@ -180,17 +229,41 @@ def register(body: RegisterRequest):
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    first_run = not any_user_exists(driver)
+    may_mint_admin = (
+        first_run
+        or _bootstrap_token_ok(request)
+        or _admin_caller(driver=driver, request=request) is not None
+    )
+
     # Determine tenant
     if body.tenant_name:
+        if not may_mint_admin:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Creating a tenant provisions an administrator. Present an "
+                    "existing administrator's access token, or the operator's "
+                    "bootstrap token in X-Bootstrap-Token."
+                ),
+            )
         tenant_id = uuid.uuid4().hex
         create_tenant(driver, name=body.tenant_name, tenant_id=tenant_id)
-        role = "admin"  # First user of a new tenant is admin
+        role = "admin"
     else:
         tenant_id = DEFAULT_TENANT_ID
         # Ensure default tenant exists
         if not get_tenant(driver, tenant_id):
             create_tenant(driver, name="Default", tenant_id=tenant_id)
-        role = "member"
+        # The very first account has to be able to administer the install;
+        # every later one is a plain member until an admin says otherwise.
+        role = "admin" if first_run else "member"
+
+    if role == "admin":
+        logger.warning(
+            "Registering %s as admin of tenant %s (first_run=%s)",
+            body.email, tenant_id, first_run,
+        )
 
     # Create user
     hashed = _hash_password(body.password)

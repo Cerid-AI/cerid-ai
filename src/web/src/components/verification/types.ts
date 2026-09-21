@@ -13,11 +13,19 @@
  * - `sources` (plural) is the canonical field via `source_urls`; the
  *   singular `source_artifact_id` / `source_filename` remain for KB provenance
  *
- * The three linguistic bands derived here:
+ * The four linguistic bands derived here:
  * - "verified":   status === "verified" AND at least 1 source
  * - "partial":    status === "verified" with no strong source OR status === "uncertain"
- * - "unverified": status === "unverified" with no source
+ * - "refuted":    status === "unverified" from an independent check that
+ *                 actively contradicted the claim (cross-model / web search)
+ * - "unverified": status === "unverified" with no evidence either way
+ *
+ * "refuted" is a *derived* band, not a backend status: the ClaimVerification
+ * enum below stays a field-for-field mirror of models.py, which has no
+ * "refuted" member. The distinction lives in `verification_method`.
  */
+
+import { getClaimDisplayStatus } from "@/lib/verification-utils"
 
 export type ClaimStatus =
   | "verified"
@@ -28,7 +36,7 @@ export type ClaimStatus =
 
 export type ClaimType = "factual" | "evasion" | "ignorance" | "citation"
 
-export type VerificationBand = "verified" | "partial" | "unverified"
+export type VerificationBand = "verified" | "partial" | "refuted" | "unverified"
 
 /**
  * Canonical per-claim verification type for frontend components.
@@ -76,10 +84,16 @@ export interface ClaimVerificationFE {
 /**
  * Derive the linguistic band for a claim.
  *
- * Three bands as per the plan:
  * - "verified"   → status=verified with ≥1 source
  * - "partial"    → status=uncertain OR status=verified but no source
- * - "unverified" → status=unverified OR status=error OR status=skipped
+ * - "refuted"    → status=unverified from a check that contradicted the claim
+ * - "unverified" → status=unverified with no evidence, OR error, OR skipped
+ *
+ * The refuted branch delegates to getClaimDisplayStatus so this badge and the
+ * hallucination-audit report classify the same payload the same way. Only the
+ * status + method are passed: claim_type routing (evasion / citation) belongs
+ * to the audit surface, which has dedicated treatments for it, and has no band
+ * of its own here.
  */
 export function deriveBand(claim: ClaimVerificationFE): VerificationBand {
   const hasSource =
@@ -90,6 +104,9 @@ export function deriveBand(claim: ClaimVerificationFE): VerificationBand {
   }
   if (claim.status === "uncertain") {
     return "partial"
+  }
+  if (getClaimDisplayStatus(claim.status, claim.verification_method) === "refuted") {
+    return "refuted"
   }
   return "unverified"
 }

@@ -267,12 +267,29 @@ const SERVICE_COLORS = {
 function statusColor(status: string): string {
   if (status === "critical") return "text-red-500"
   if (status === "warning") return "text-yellow-500"
+  if (status === "partial") return "text-amber-500"
   return "text-emerald-500"
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const variant = status === "critical" ? "destructive" : status === "warning" ? "outline" : "secondary"
-  return <Badge variant={variant}>{status}</Badge>
+  const variant =
+    status === "critical" ? "destructive" : status === "warning" || status === "partial" ? "outline" : "secondary"
+  return (
+    <Badge data-testid="storage-status-badge" variant={variant}>
+      {status}
+    </Badge>
+  )
+}
+
+/**
+ * A store holding content cannot occupy zero bytes: the probe could not stat
+ * the volume (Neo4j is never measured at all — see _neo4j_metrics). Reporting
+ * the failure as the number 0 sums it into the budget as free space, so the
+ * usage bar and its warn/critical thresholds are computed over the stores that
+ * did answer while the two largest contribute nothing.
+ */
+function isUnmeasured(diskMb: number, contentCount: number): boolean {
+  return diskMb <= 0 && contentCount > 0
 }
 
 function StorageSection() {
@@ -307,20 +324,43 @@ function StorageSection() {
 
   const { chromadb, neo4j, redis, bm25, total_mb, limit_mb, usage_pct, status } = data
   const segments = [
-    { key: "chromadb" as const, pct: limit_mb > 0 ? (chromadb.disk_mb / limit_mb) * 100 : 0, mb: chromadb.disk_mb, detail: `${chromadb.collections} collections, ${chromadb.chunks.toLocaleString()} chunks` },
-    { key: "neo4j" as const, pct: limit_mb > 0 ? (neo4j.disk_mb / limit_mb) * 100 : 0, mb: neo4j.disk_mb, detail: `${neo4j.nodes.toLocaleString()} nodes, ${neo4j.relationships.toLocaleString()} rels` },
-    { key: "redis" as const, pct: limit_mb > 0 ? (redis.memory_mb / limit_mb) * 100 : 0, mb: redis.memory_mb, detail: `${redis.keys.toLocaleString()} keys, peak ${redis.peak_mb} MB` },
-    { key: "bm25" as const, pct: limit_mb > 0 ? (bm25.disk_mb / limit_mb) * 100 : 0, mb: bm25.disk_mb, detail: `${bm25.index_count} indexes` },
-  ]
+    { key: "chromadb" as const, mb: chromadb.disk_mb, unmeasured: isUnmeasured(chromadb.disk_mb, chromadb.chunks), detail: `${chromadb.collections} collections, ${chromadb.chunks.toLocaleString()} chunks` },
+    { key: "neo4j" as const, mb: neo4j.disk_mb, unmeasured: isUnmeasured(neo4j.disk_mb, neo4j.nodes), detail: `${neo4j.nodes.toLocaleString()} nodes, ${neo4j.relationships.toLocaleString()} rels` },
+    { key: "redis" as const, mb: redis.memory_mb, unmeasured: false, detail: `${redis.keys.toLocaleString()} keys, peak ${redis.peak_mb} MB` },
+    { key: "bm25" as const, mb: bm25.disk_mb, unmeasured: false, detail: `${bm25.index_count} indexes` },
+  ].map((seg) => ({
+    ...seg,
+    pct: limit_mb > 0 && !seg.unmeasured ? (seg.mb / limit_mb) * 100 : 0,
+  }))
+  const unmeasuredCount = segments.filter((seg) => seg.unmeasured).length
+  const measuredCount = segments.length - unmeasuredCount
+  // A partial total is not a healthy total. Never report a green verdict for a
+  // budget the two largest stores did not contribute to.
+  const effectiveStatus = unmeasuredCount > 0 && status !== "critical" && status !== "warning"
+    ? "partial"
+    : status
 
   return (
     <SectionCard title="Storage">
       <SettingRow def={def}>
-        <div className="flex items-center gap-2">
-          <span className={cn("font-mono text-sm font-medium", statusColor(status))}>
-            {total_mb.toFixed(1)} / {limit_mb} MB
-          </span>
-          <StatusBadge status={status} />
+        <div className="density-stack w-full">
+          <div className="flex items-center gap-2">
+            <span
+              data-testid="storage-total"
+              className={cn("font-mono text-sm font-medium", statusColor(effectiveStatus))}
+            >
+              {total_mb.toFixed(1)} / {limit_mb} MB
+              {unmeasuredCount > 0 ? ` (${measuredCount} of ${segments.length} stores measured)` : ""}
+            </span>
+            <StatusBadge status={effectiveStatus} />
+          </div>
+          {unmeasuredCount > 0 && (
+            <p className="text-label-xs text-amber-600 dark:text-amber-400">
+              {unmeasuredCount === 1 ? "One store holds" : `${unmeasuredCount} stores hold`} data
+              this deployment cannot measure, so the total and its thresholds are a
+              lower bound.
+            </p>
+          )}
         </div>
       </SettingRow>
       <div>
@@ -340,17 +380,27 @@ function StorageSection() {
             <Tooltip key={seg.key}>
               <TooltipTrigger asChild>
                 <div
+                  data-testid={`storage-segment-${seg.key}`}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                  aria-label={`${SERVICE_COLORS[seg.key].label}: ${seg.mb.toFixed(1)} MB — ${seg.detail}`}
+                  aria-label={`${SERVICE_COLORS[seg.key].label}: ${seg.unmeasured ? "size not measurable" : `${seg.mb.toFixed(1)} MB`} — ${seg.detail}`}
                 >
-                  <div className={cn("h-2 w-2 rounded-full shrink-0", SERVICE_COLORS[seg.key].bg)} />
+                  <div className={cn("h-2 w-2 rounded-full shrink-0", seg.unmeasured ? "bg-muted-foreground/40" : SERVICE_COLORS[seg.key].bg)} />
                   <span>{SERVICE_COLORS[seg.key].label}</span>
-                  <span className="font-mono">{seg.mb.toFixed(1)} MB</span>
+                  <span className={cn("font-mono", seg.unmeasured && "text-amber-600 dark:text-amber-400")}>
+                    {seg.unmeasured ? "\u2014" : `${seg.mb.toFixed(1)} MB`}
+                  </span>
                 </div>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                <p className="font-medium">{SERVICE_COLORS[seg.key].label}: {seg.mb.toFixed(1)} MB</p>
+                <p className="font-medium">
+                  {SERVICE_COLORS[seg.key].label}: {seg.unmeasured ? "\u2014" : `${seg.mb.toFixed(1)} MB`}
+                </p>
                 <p className="text-muted-foreground">{seg.detail}</p>
+                {seg.unmeasured && (
+                  <p className="text-amber-600 dark:text-amber-400">
+                    Not measurable in this deployment — excluded from the total.
+                  </p>
+                )}
               </TooltipContent>
             </Tooltip>
           ))}

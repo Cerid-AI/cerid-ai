@@ -471,3 +471,56 @@ def test_source_enable_disable():
     get_breaker("datasource-toggle_test").reset()
     results = asyncio.run(test_registry.query_all("test"))
     assert len(results) == 1
+
+
+class TestEmailStatusReadFailure:
+    """A failed status read must not render as a healthy zero state.
+
+    The router's ``@handle_errors`` fallback returned
+    ``{"last_poll": None, "messages_ingested": 0, "errors": []}`` — the
+    exact shape of a correctly-configured mailbox that has not polled yet,
+    with the one field that would reveal the problem emptied.
+    """
+
+    def _client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.routers.data_sources import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_status_read_failure_is_marked(self, monkeypatch):
+        import app.data_sources.email_imap as email_imap
+
+        async def _boom():
+            raise RuntimeError("redis connection reset")
+
+        monkeypatch.setattr(email_imap, "get_email_status", _boom)
+
+        resp = self._client().get("/data-sources/email/status")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status_read_failed"] is True
+        assert body["errors"], "a failed read must not report an empty error list"
+
+    def test_a_healthy_read_is_not_marked(self, monkeypatch):
+        import app.data_sources.email_imap as email_imap
+
+        async def _status():
+            return {
+                "last_poll": None,
+                "messages_ingested": 0,
+                "errors": [],
+                "configured": True,
+            }
+
+        monkeypatch.setattr(email_imap, "get_email_status", _status)
+
+        body = self._client().get("/data-sources/email/status").json()
+
+        assert body.get("status_read_failed") in (None, False)
+        assert body["errors"] == []

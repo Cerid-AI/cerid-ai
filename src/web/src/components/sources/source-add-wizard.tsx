@@ -41,6 +41,7 @@ import {
 import {
   migrateNotionExport,
   fetchMigrationStatus,
+  isNotionMigrationAvailable,
   type MigrationStatusResponse,
 } from "@/lib/api/migration"
 import type { SourceKindMetaExt } from "./source-kind-meta"
@@ -148,6 +149,18 @@ function SourceAddWizardInner({
   // Folder kind: container-side roots a watched-folder path must live under.
   const allowedRoots = selectedMeta?.allowed_roots ?? []
 
+  // /api/migrate/* comes from a Pro/Enterprise router the public edition does
+  // not mount, so the tile has to be gated on whether this server actually
+  // serves it — otherwise the advertised on-ramp 404s after the user has
+  // already uploaded their workspace zip.
+  const { data: notionMigrationAvailable } = useQuery({
+    queryKey: ["notion-migration-available"],
+    queryFn: isNotionMigrationAvailable,
+    enabled: open,
+    staleTime: Infinity,
+    retry: false,
+  })
+
   const createMut = useMutation({
     mutationFn: () => {
       if (!kind) throw new Error("kind required")
@@ -200,7 +213,11 @@ function SourceAddWizardInner({
               setKind(k)
               setStep("configure")
             }}
-            onPickNotionMigration={initialFamily ? undefined : () => setStep("migrate-notion")}
+            onPickNotionMigration={
+              initialFamily || notionMigrationAvailable !== true
+                ? undefined
+                : () => setStep("migrate-notion")
+            }
           />
         )}
 

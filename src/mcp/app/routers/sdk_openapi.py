@@ -39,6 +39,27 @@ def _build_sdk_spec() -> dict:
     # against. It is the SDK surface, not the FSL-1.1-ALv2 server that serves it,
     # so the advertised license is the SDK's. Do not "fix" this to FSL.
     spec["info"]["license"] = {"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"}
+    # FastAPI cannot infer these: both headers are read by middleware, not by
+    # any route signature, so without them a client generated from this spec
+    # sends neither — it lands in the unregistered rate bucket and 401s on any
+    # server with CERID_API_KEY set. X-Client-ID is required on every call;
+    # X-API-Key is conditional, so it is offered as an alternative scheme
+    # rather than a second mandatory one.
+    spec.setdefault("components", {})["securitySchemes"] = {
+        "client_id": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Client-ID",
+            "description": "Consumer identity — per-client rate limiting and domain scoping.",
+        },
+        "api_key": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Required only when the server sets CERID_API_KEY.",
+        },
+    }
+    spec["security"] = [{"client_id": []}, {"client_id": [], "api_key": []}]
     return spec
 
 

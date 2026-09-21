@@ -33,6 +33,7 @@ from config.features import (
     SEMANTIC_CACHE_THRESHOLD,
     SEMANTIC_CACHE_TTL,
 )
+from core.context.identity import _is_multi_user_mode, get_tenant_id
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.semantic_cache")
@@ -216,8 +217,16 @@ def _scope_token(
     served to the same query with Memory OFF. Default True keeps the historical
     token so unrestricted+memory-on entries stay backward-compatible.
 
-    Backward-compatible by construction: when ``allowed_domains is None`` and
-    memory is on, the token is the historical domain-only string.
+    In multi-user mode the active ``tenant_id`` is folded in as well: the
+    payload carries the answer text AND the ``sources`` array (filenames and
+    chunk content), so a cross-tenant hit is a straight bypass of the wall
+    ``with_tenant_scope`` fuses into every other retrieval path. Gated on the
+    mode so single-user tokens stay byte-identical and no cache is invalidated
+    by this scoping.
+
+    Backward-compatible by construction: when ``allowed_domains is None``,
+    memory is on and the deployment is single-user, the token is the
+    historical domain-only string.
     """
     domain_part = ",".join(sorted(domains)) if domains else "__all__"
     if allowed_domains is None:
@@ -225,6 +234,8 @@ def _scope_token(
     else:
         allow_part = ",".join(sorted(allowed_domains)) if allowed_domains else "__all__"
         base = f"{domain_part}|allow={allow_part}"
+    if _is_multi_user_mode():
+        base = f"{base}|tenant={get_tenant_id()}"
     if not memory_enabled:
         return f"{base}|mem=0"
     return base

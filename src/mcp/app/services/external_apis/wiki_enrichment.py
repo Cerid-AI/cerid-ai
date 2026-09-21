@@ -25,6 +25,9 @@ Design decisions
   does not block others.
 * ``WIKI_ENRICHMENT_ENABLED`` is NOT checked here — callers (WikiRefreshJob)
   own that feature flag so the orchestrator stays testable in isolation.
+  Private Mode IS checked here: it is a user-facing guarantee about outbound
+  data, not a deployment toggle, so it belongs at the egress point every
+  caller shares rather than in each job that happens to call it.
 """
 from __future__ import annotations
 
@@ -43,6 +46,7 @@ from app.services.wiki_pages import ExternalReference
 from core.agents.entity_extraction import ends_with_doc_extension, is_junk_entity_name
 from core.agents.entity_extraction import is_codec_alias_shaped as _is_codec_alias_shaped
 from core.agents.entity_extraction import is_shouty_acronym_shaped as _is_shouty_single_token
+from core.agents.request_context import PRIVATE_MODE_SKIP_KB_LEVEL
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.external_apis.wiki_enrichment")
@@ -492,6 +496,21 @@ async def enrich(
         One entry per successfully retrieved adapter result.  An empty
         list means all adapters were either disabled or failed.
     """
+    # Private Mode L2+ ("skip KB") closes this channel. ``entity_name`` is
+    # lifted from the user's own KB content and this is the only path in the
+    # service layer that ships user-derived strings off-box, to six third-party
+    # services. The gate lives here rather than in the calling job because the
+    # job is not the only caller, and a background caller has no client-side
+    # guard — the same reasoning as strip_injected_context, applied to egress.
+    from app.services.private_mode import private_blocks
+
+    if private_blocks(PRIVATE_MODE_SKIP_KB_LEVEL):
+        logger.info(
+            "wiki_enrichment.private_mode_blocked level>=%d entity_type=%s",
+            PRIVATE_MODE_SKIP_KB_LEVEL, entity_type,
+        )
+        return []
+
     # Adapter instances created per-call so tests can patch adapter classes
     # at module level (e.g. patch("...wiki_enrichment.WikipediaAdapter")).
     _ADAPTER_INSTANCES: dict[str, Any] = {

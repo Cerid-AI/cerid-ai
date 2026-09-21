@@ -1,0 +1,13 @@
+# route_registered_once_allowlist.txt — grandfathered (method, path) collisions
+# Enforced by scripts/lint-route-registered-once.py --check (gate G-A,
+# tasks/2026-09-02-audit-findings.json).
+#
+# Format: <METHOD> <normalised path>  # <one-line reason citing a finding id>
+# The path is normalised: every {param} becomes {} because Starlette matches
+# on shape, not on the name bound to the handler argument.
+#
+# Shrink-only — removing one router's decorator removes its line; the gate
+# fails on any stale entry (no longer a collision) or any new collision.
+#
+# Regenerate (preserves reasons for still-live keys) with:
+#   python scripts/lint-route-registered-once.py --update

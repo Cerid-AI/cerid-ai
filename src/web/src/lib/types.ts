@@ -1224,19 +1224,16 @@ export interface SetupStatus {
   missing_keys: string[]
   optional_keys: string[]
   configured_providers: string[]
-  provider_status?: Record<string, { configured: boolean; key_env_var: string; key_present: boolean }>
   services?: Record<string, string>
   /** Server-side first-run flag; optional so older backends still parse. */
   onboarding_complete?: boolean
 }
 
+/** Response of POST /setup/validate-key (KeyValidationResponse in setup.py). */
 export interface KeyValidation {
   valid: boolean
-  provider: string
   error?: string
-  error_type?: string
-  suggestion?: string
-  provider_name?: string
+  models_available?: number
 }
 
 export interface SetupConfig {
