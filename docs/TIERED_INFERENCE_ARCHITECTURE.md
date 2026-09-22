@@ -134,7 +134,7 @@ curl -s -X POST http://127.0.0.1:11434/v1/rerank \
 **Then check what Cerid observed, not what it was told:**
 
 ```bash
-curl -s http://localhost:8888/health \
+curl -s -H "X-API-Key: $CERID_API_KEY" http://localhost:8888/health \
   | jq '{status, degraded_lanes, rerank: .inference_routing.rerank}'
 ```
 

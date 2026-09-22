@@ -98,7 +98,7 @@ print(result.results[0]["content"])
 health = client.system.health()
 print(health.version, health.services)
 
-# Ingest content — any domain name works; attach provenance metadata
+# Ingest content — any domain in your consumer's grant works; attach provenance metadata
 resp = client.kb.ingest(
     "PostgreSQL uses MVCC for concurrency.",
     domain="databases",
@@ -167,7 +167,7 @@ if (isMemoryExtractAccepted(extracted)) {
 const health = await client.system.health();
 console.log(health.version, health.services);
 
-// Ingest content with provenance metadata (any domain name works)
+// Ingest content with provenance metadata (any domain in your consumer's grant works)
 const resp = await client.kb.ingest({
   content: "PostgreSQL uses MVCC for concurrency.",
   domain: "databases",
@@ -185,11 +185,17 @@ server-side configuration and no compatibility shims**.
 
 ### Custom knowledge domains
 
-Ingest to and query **any domain name** — not just the built-in set. A custom
-domain needs no pre-registration: ingest creates its collection on first use,
-and queries against it return your content. An unknown domain with no data
-degrades to empty results (never a 400). List your domain explicitly so your
-private context is searched first.
+Ingest to and query **any domain in your consumer's grant** — not just the
+built-in set. A custom domain needs no pre-registration of the domain itself:
+ingest creates its collection on first use, and queries against it return your
+content. An unknown domain with no data degrades to empty results (never a
+400). List your domain explicitly so your private context is searched first.
+
+The grant is your consumer's `allowed_domains` in `CONSUMER_REGISTRY`, keyed by
+the `X-Client-ID` you send. Reading or writing a domain outside it returns
+**403** `consumer_domain_restricted` (the SDKs raise `DomainRestrictedError`),
+and a client ID that is not in the registry is granted `general` only — so a new
+integration needs a registry entry naming its domains.
 
 ```python
 client.kb.ingest("Q3 launch plan: target accounts and sequence.", domain="my_gtm")
@@ -198,6 +204,33 @@ result = client.kb.query("Q3 launch sequence", domains=["my_gtm", "general"])
 
 > Operators: built-in domains can carry descriptions/icons via the
 > `CERID_CUSTOM_DOMAINS` env var, but ad-hoc client domains work without it.
+
+### Keeping web results out
+
+When the knowledge base answers weakly (best match below
+`RETRIEVAL_QUALITY_THRESHOLD`) or a time-scoped question finds nothing inside its
+window, the query also consults external web sources and **appends** those rows
+beside yours, tagged `source_type`/`domain` `"external"`. To keep them out, gate
+the surface with `context_sources`:
+
+```python
+result = client.kb.query(
+    "net worth and safe to spend", domains=["finance"], strict_domains=True,
+    context_sources={"kb": True, "memory": True, "external": False},
+)
+```
+
+```typescript
+await client.kb.query({
+  query: "net worth and safe to spend", domains: ["finance"], strict_domains: true,
+  context_sources: { kb: true, memory: true, external: false },
+});
+```
+
+`context_sources` is the only field that does this, in every `rag_mode`. It is
+easy to reach for the wrong one: `strict_domains` only narrows the knowledge
+base's own cross-domain bleed and never touches the web, and `source_config`'s
+toggles are read only under `rag_mode: "custom_smart"`.
 
 ### Rich provenance metadata
 

@@ -319,10 +319,11 @@ SCHEDULE_EMAIL_POLL = os.getenv("SCHEDULE_EMAIL_POLL", "*/15 * * * *")
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
 
-# Staleness window for current/recency-intent queries — when the query asks
-# about "current/now/today" and the freshest KB result is older than this,
-# fire external regardless of relevance score (Phase 3.2 — answerability over
-# relevance for time-scoped queries).
+# Staleness FLOOR for time-scoped queries — when the query names a window
+# ("today", "this week", "this month") and the freshest KB result is older than
+# that window, fire external regardless of relevance score (Phase 3.2 —
+# answerability over relevance). The window used is the longer of this floor and
+# the query's own, so "this month" is held to 30 days, not 7.
 CRAG_STALENESS_WINDOW_DAYS = int(os.getenv("CRAG_STALENESS_WINDOW_DAYS", "7"))
 
 # Staleness window for claim VERIFICATION (Phase 4.2). When a temporal

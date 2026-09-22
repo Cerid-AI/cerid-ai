@@ -50,11 +50,18 @@ export async function guideQuickstart(client: CeridClient): Promise<void> {
   const health = await client.system.health();
   console.log(health.version, health.services);
 
-  // Ingest content with provenance metadata (any domain name works)
+  // Ingest content with provenance metadata (any domain in your consumer's grant works)
   const resp = await client.kb.ingest({
     content: "PostgreSQL uses MVCC for concurrency.",
     domain: "databases",
     metadata: { title: "MVCC note", provenance: "design_review" },
   });
   console.log(resp.artifact_id, resp.chunks);
+}
+
+export async function guideKeepWebOut(client: CeridClient): Promise<void> {
+  await client.kb.query({
+    query: "net worth and safe to spend", domains: ["finance"], strict_domains: true,
+    context_sources: { kb: true, memory: true, external: false },
+  });
 }

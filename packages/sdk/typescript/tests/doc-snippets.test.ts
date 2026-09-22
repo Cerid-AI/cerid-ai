@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { CeridClient } from "../src/index.js";
-import { guideQuickstart, readmeUsage } from "./doc-snippets.js";
+import { guideKeepWebOut, guideQuickstart, readmeUsage } from "./doc-snippets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
@@ -99,5 +99,9 @@ describe("published TypeScript snippets run", () => {
 
   it("SDK_GUIDE quickstart round-trips", async () => {
     await expect(guideQuickstart(mockedClient())).resolves.toBeUndefined();
+  });
+
+  it("SDK_GUIDE web-exclusion example round-trips", async () => {
+    await expect(guideKeepWebOut(mockedClient())).resolves.toBeUndefined();
   });
 });

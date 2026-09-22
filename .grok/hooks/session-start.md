@@ -22,7 +22,9 @@ fi
 
 ### 2. Knowledge Base MCP Health
 ```bash
-if curl -sf --max-time 2 http://localhost:8888/health >/dev/null 2>&1; then
+# /health/ping, not /health: /health requires X-API-Key when the stack is bound
+# off-loopback (LAN mode), so `curl -sf` on it reports a healthy stack as down.
+if curl -sf --max-time 2 http://localhost:8888/health/ping >/dev/null 2>&1; then
   echo "✓ cerid-kb MCP healthy (port 8888)"
 else
   echo "✗ cerid-kb MCP not responding — RAG will be degraded"
