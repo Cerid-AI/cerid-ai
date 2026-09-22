@@ -49,7 +49,7 @@ var is unset.
 Verify what actually resolved at runtime:
 
 ```bash
-curl -s http://localhost:8888/health | jq .inference_routing
+curl -s -H "X-API-Key: $CERID_API_KEY" http://localhost:8888/health | jq .inference_routing
 ```
 
 ## Per-stage overrides
