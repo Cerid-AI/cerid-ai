@@ -4,7 +4,7 @@
 # Receives tool input as JSON on stdin; exit non-zero to block
 
 INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+COMMAND=$(echo "$INPUT" | jq -r '(.tool_input // .toolInput // {}).command // empty')
 
 # Patterns that warrant blocking (user gets prompted to approve)
 DESTRUCTIVE_PATTERNS=(

@@ -4,7 +4,7 @@
 # Receives tool input as JSON on stdin
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(echo "$INPUT" | jq -r '(.tool_input // .toolInput // {}).file_path // empty')
 
 # Only check Python files in src/mcp/
 if [[ "$FILE_PATH" == *.py ]]; then
