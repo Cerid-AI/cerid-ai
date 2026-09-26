@@ -21,10 +21,10 @@
 | File | Purpose |
 |------|---------|
 | `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (26 `pkb_*` tools) -- Claude Code runs on the host so `localhost` is correct here |
-| `.claude/settings.json` | Hooks config (session-start, safety-check, typecheck, pythonlint) |
+| `.claude/settings.json` | Hooks config (session-start, safety-check, pythonlint, stop-verify) |
 | `.claude/hooks/session-start.sh` | SessionStart -- Docker + MCP + GUI health check |
 | `.claude/hooks/safety-check.sh` | PreToolUse/Bash -- blocks destructive commands |
-| `.claude/hooks/typecheck.sh` | PostToolUse/Edit\|Write -- `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/` |
+| `.claude/hooks/stop-verify.sh` | Stop -- ruff + mypy for `src/mcp/`, eslint + `tsc -b` for `src/web/`, once per turn when matching files changed |
 | `.claude/hooks/pythonlint.sh` | PostToolUse/Edit\|Write -- `ruff check` for `.py` in `src/mcp/` |
 | `.claude/commands/` | Custom commands: stack, test, sync, lock |
 | `.claude/launch.json` | Dev server configs (cerid-web, react-gui, marketing) |
