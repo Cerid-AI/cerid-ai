@@ -18,7 +18,7 @@
 # dirtying the tree.
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(echo "$INPUT" | jq -r '(.tool_input // .toolInput // {}).file_path // empty')
 
 # Only check TypeScript files in src/web/
 if [[ "$FILE_PATH" == *.ts || "$FILE_PATH" == *.tsx ]]; then
