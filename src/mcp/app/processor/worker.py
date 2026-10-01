@@ -488,12 +488,12 @@ def build_default_registry() -> dict[str, type[BaseJob]]:
         importlib.import_module(f"{_jobs_pkg.__name__}.{mod.name}")
 
     registry: dict[str, type[BaseJob]] = {}
-    _walk_subclasses(BaseJob, registry)  # type: ignore[arg-type]
+    _walk_subclasses(BaseJob, registry)  # type: ignore[type-abstract]  # walks from the abstract root on purpose
     logger.info("processor.registry built: %s", list(registry.keys()))
     return registry
 
 
-def _walk_subclasses(cls: type, registry: dict[str, type[BaseJob]]) -> None:
+def _walk_subclasses(cls: type[BaseJob], registry: dict[str, type[BaseJob]]) -> None:
     """Recursively collect non-abstract BaseJob subclasses into registry."""
     for sub in cls.__subclasses__():
         # Skip abstract intermediaries (they have __abstractmethods__ set)
