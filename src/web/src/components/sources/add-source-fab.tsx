@@ -45,24 +45,27 @@ interface FamilyMeta {
   family: SourceFamily
   label: string
   icon: LucideIcon
-  angle: number // degrees, 0 = east, counter-clockwise
+  angle: number // degrees, 0 = east, clockwise on screen (180 = left, 270 = up)
+  radius: number // px from the FAB's centre
 }
 
-// 9 families arranged on an arc above + around the FAB.
-// 270° (top) ↺ 270 - 180 = 90° (left side). FAB at bottom-right.
-const FAMILY_PETALS: FamilyMeta[] = [
-  { family: "files", label: "Files", icon: Files, angle: 175 },
-  { family: "feeds", label: "Feeds", icon: Rss, angle: 195 },
-  { family: "mail", label: "Mail", icon: Mail, angle: 215 },
-  { family: "calendar", label: "Calendar", icon: Calendar, angle: 235 },
-  { family: "chat", label: "Chat", icon: MessageCircle, angle: 255 },
-  { family: "media", label: "Media", icon: Mic, angle: 275 },
-  { family: "webhook", label: "Webhook", icon: Webhook, angle: 295 },
-  { family: "adapter", label: "Adapter", icon: Plug, angle: 315 },
-  { family: "pack", label: "Packs", icon: Library, angle: 335 },
-]
+// The FAB sits in the bottom-right corner, so the only room is up and to the
+// left: every petal stays between 180° and 270°. Nine 44 px petals do not fit
+// on one arc of that quadrant without overlapping, hence two rings.
+const INNER_PX = 110
+const OUTER_PX = 170
 
-const RADIUS_PX = 110
+const FAMILY_PETALS: FamilyMeta[] = [
+  { family: "files", label: "Files", icon: Files, angle: 180, radius: INNER_PX },
+  { family: "feeds", label: "Feeds", icon: Rss, angle: 210, radius: INNER_PX },
+  { family: "mail", label: "Mail", icon: Mail, angle: 240, radius: INNER_PX },
+  { family: "calendar", label: "Calendar", icon: Calendar, angle: 270, radius: INNER_PX },
+  { family: "chat", label: "Chat", icon: MessageCircle, angle: 180, radius: OUTER_PX },
+  { family: "media", label: "Media", icon: Mic, angle: 202.5, radius: OUTER_PX },
+  { family: "webhook", label: "Webhook", icon: Webhook, angle: 225, radius: OUTER_PX },
+  { family: "adapter", label: "Adapter", icon: Plug, angle: 247.5, radius: OUTER_PX },
+  { family: "pack", label: "Packs", icon: Library, angle: 270, radius: OUTER_PX },
+]
 
 interface AddSourceFabProps {
   onSelectFamily: (family: SourceFamily) => void
@@ -98,8 +101,8 @@ export function AddSourceFab({ onSelectFamily }: AddSourceFabProps) {
       {open &&
         FAMILY_PETALS.map((p, i) => {
           const rad = (p.angle * Math.PI) / 180
-          const dx = Math.cos(rad) * RADIUS_PX
-          const dy = Math.sin(rad) * RADIUS_PX
+          const dx = Math.cos(rad) * p.radius
+          const dy = Math.sin(rad) * p.radius
           const Icon = p.icon
           return (
             <button

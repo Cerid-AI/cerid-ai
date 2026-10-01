@@ -4,6 +4,9 @@
 """Tests for /digests REST surface — Phase K Day 2."""
 from __future__ import annotations
 
+import json
+from contextlib import ExitStack
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -24,13 +27,17 @@ def client():
     return TestClient(_make_app())
 
 
-# Sample artifact rows as returned by graph_db.list_artifacts
+# Sample artifact rows as returned by graph_db.list_artifacts. ``tags`` is
+# the JSON list of tag names the graph holds; ``meta`` is the digest metadata
+# ingest keeps on the artifact's chunks, served here by ``_chunk_store``.
 def _sample_artifact(date: str = "2026-05-22", urgent: int = 0):
     return {
         "id": f"art:{date}",
         "domain": "digests",
         "filename": f"Daily Digest — {date}",
-        "tags": {
+        "tags": "[]",
+        "chunk_ids": json.dumps([f"art:{date}_chunk_0"]),
+        "meta": {
             "digest_id": f"did-{date}",
             "generated_at": f"{date}T07:00:00Z",
             "window_hours": "24",
@@ -39,6 +46,30 @@ def _sample_artifact(date: str = "2026-05-22", urgent: int = 0):
             "inbox_urgent_count": str(urgent),
         },
     }
+
+
+class _ChunkStore:
+    def __init__(self, artifacts: list[dict[str, Any]]) -> None:
+        self._meta = {json.loads(a["chunk_ids"])[0]: a["meta"] for a in artifacts}
+
+    def get_collection(self, name: str) -> _ChunkStore:
+        return self
+
+    def get(self, ids: list[str], include: list[str]) -> dict[str, Any]:
+        found = [i for i in ids if i in self._meta]
+        return {"ids": found, "metadatas": [self._meta[i] for i in found]}
+
+
+def _list_digests(artifacts: list[dict[str, Any]]):
+    """Serve ``artifacts`` from the graph and their metadata from the chunks."""
+    stack = ExitStack()
+    stack.enter_context(
+        patch("app.routers.digests._list_digest_artifacts", return_value=artifacts)
+    )
+    stack.enter_context(
+        patch("app.deps.get_chroma", return_value=_ChunkStore(artifacts))
+    )
+    return stack
 
 
 class TestFeatureGate:
@@ -68,10 +99,7 @@ class TestLatest:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch(
-                "app.routers.digests._list_digest_artifacts",
-                return_value=[_sample_artifact("2026-05-22", urgent=3)],
-            ),
+            _list_digests([_sample_artifact("2026-05-22", urgent=3)]),
         ):
             resp = client.get("/digests/latest")
         body = resp.json()
@@ -84,10 +112,7 @@ class TestLatest:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch(
-                "app.routers.digests._list_digest_artifacts",
-                return_value=[_sample_artifact(urgent=0)],
-            ),
+            _list_digests([_sample_artifact(urgent=0)]),
         ):
             body = client.get("/digests/latest").json()
         assert body["has_urgent"] is False
@@ -103,7 +128,7 @@ class TestRecent:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch("app.routers.digests._list_digest_artifacts", return_value=artifacts),
+            _list_digests(artifacts),
         ):
             resp = client.get("/digests/recent")
         body = resp.json()
@@ -131,10 +156,7 @@ class TestByDate:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch(
-                "app.routers.digests._list_digest_artifacts",
-                return_value=[_sample_artifact("2026-05-21"), _sample_artifact("2026-05-20")],
-            ),
+            _list_digests([_sample_artifact("2026-05-21"), _sample_artifact("2026-05-20")]),
         ):
             resp = client.get("/digests/2026-05-21")
         body = resp.json()
@@ -144,10 +166,7 @@ class TestByDate:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch(
-                "app.routers.digests._list_digest_artifacts",
-                return_value=[_sample_artifact("2026-05-20")],
-            ),
+            _list_digests([_sample_artifact("2026-05-20")]),
         ):
             resp = client.get("/digests/2026-05-01")
         assert resp.json() is None
@@ -215,14 +234,14 @@ class TestSummaryFieldsAreMeasurements:
 
     def test_reads_categories_and_action_items_from_the_digest_tags(self, client):
         artifact = _sample_artifact("2026-05-22")
-        artifact["tags"]["top_categories"] = (
+        artifact["meta"]["top_categories"] = (
             '[{"domain": "email", "count": 9, "highlight": "invoices"}]'
         )
-        artifact["tags"]["action_item_count"] = "3"
+        artifact["meta"]["action_item_count"] = "3"
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch("app.routers.digests._list_digest_artifacts", return_value=[artifact]),
+            _list_digests([artifact]),
         ):
             body = client.get("/digests/latest").json()
         assert body["top_categories"] == [
@@ -232,11 +251,11 @@ class TestSummaryFieldsAreMeasurements:
 
     def test_zero_action_items_is_distinct_from_an_unrecorded_count(self, client):
         artifact = _sample_artifact("2026-05-22")
-        artifact["tags"]["action_item_count"] = "0"
+        artifact["meta"]["action_item_count"] = "0"
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch("app.routers.digests._list_digest_artifacts", return_value=[artifact]),
+            _list_digests([artifact]),
         ):
             body = client.get("/digests/latest").json()
         assert body["has_action_items"] is False
@@ -246,10 +265,7 @@ class TestSummaryFieldsAreMeasurements:
         with (
             patch("config.features.is_feature_enabled", return_value=True),
             patch("app.deps.get_neo4j", return_value=object()),
-            patch(
-                "app.routers.digests._list_digest_artifacts",
-                return_value=[_sample_artifact("2026-05-22")],
-            ),
+            _list_digests([_sample_artifact("2026-05-22")]),
         ):
             body = client.get("/digests/latest").json()
         assert body["top_categories"] is None

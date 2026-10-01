@@ -26,6 +26,7 @@ from app.db.neo4j.artifacts import (
 from app.deps import get_chroma, get_neo4j, get_redis
 from config.features import CERID_MULTI_USER
 from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
+from core.retrieval.hype_index import hype_collection_name
 from core.retrieval.semantic_cache import invalidate_cache as invalidate_semantic_cache
 from core.utils import audit_log
 from core.utils.swallowed import log_swallowed_error
@@ -776,6 +777,14 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         except Exception as e:
             log_swallowed_error('app.routers.kb_admin', e)
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
+        # Its HyPE companion holds questions generated from the same content.
+        hype_name = hype_collection_name(coll_name)
+        try:
+            if hype_name in {c.name for c in chroma.list_collections()}:
+                chroma.delete_collection(name=hype_name)
+        except Exception as e:
+            log_swallowed_error('app.routers.kb_admin', e)
+            logger.warning("Failed to delete collection %s: %s", hype_name, e)
 
         # Every artifact removed was in `domain` — scope both caches to it
         # instead of flushing every domain's cached results.

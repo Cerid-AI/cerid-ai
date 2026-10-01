@@ -156,7 +156,9 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     <TooltipProvider delayDuration={0}>
       <div
         className={cn(
-          "flex h-full flex-col border-r bg-muted/40 transition-all duration-200",
+          // The sidebar scrolls as a whole when the window is too short for
+          // its fixed parts and a usable history; nothing may draw outside it.
+          "flex h-full flex-col overflow-y-auto overflow-x-hidden border-r bg-muted/40 transition-all duration-200",
           collapsed ? "w-14" : "w-52"
         )}
       >
@@ -203,11 +205,12 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                         : undefined
                     }
                     onClick={() => triggerPaneChange(pane)}
+                    aria-label={collapsed ? label : undefined}
                   >
                     <span className="relative shrink-0">
                       <Icon className={cn("h-4 w-4", activePane === pane && "text-brand")} />
                       {showBadge && (
-                        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-label-xxs font-bold text-white">
+                        <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-label-xxs font-bold text-white">
                           {updateCount > 9 ? "9+" : updateCount}
                         </span>
                       )}
@@ -219,7 +222,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                       <span className="flex items-center gap-1.5">
                         {label}
                         {showBadge && !collapsed && (
-                          <span className="rounded-full bg-teal-500/10 px-1.5 py-0 text-label-xxs font-medium text-teal-600 dark:text-teal-400">
+                          <span aria-hidden="true" className="rounded-full bg-teal-500/10 px-1.5 py-0 text-label-xxs font-medium text-teal-600 dark:text-teal-400">
                             {updateCount}
                           </span>
                         )}
@@ -232,7 +235,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             )
             if (pane === "chat") {
               return (
-                <div key={pane} className="flex items-center gap-1">
+                <div key={pane} className={cn("flex items-center gap-1", collapsed && "flex-col")}>
                   {navButton}
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -251,11 +254,13 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 </div>
               )
             }
-            if (pane === "settings" && showBadge) {
+            if (pane === "settings") {
+              // Always the same wrapper: adding it only once updates arrive
+              // remounts the button under the pointer.
               return (
-                <div key={pane} className="flex items-center gap-1">
+                <div key={pane} className={cn("flex items-center gap-1", collapsed && "flex-col")}>
                   {navButton}
-                  <Popover>
+                  {showBadge && <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         variant="ghost"
@@ -286,7 +291,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                         Apply now
                       </Button>
                     </PopoverContent>
-                  </Popover>
+                  </Popover>}
                 </div>
               )
             }
@@ -297,7 +302,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Conversation history — only when sidebar expanded */}
         {!collapsed ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className={cn("flex flex-1 flex-col overflow-hidden", historyExpanded ? "min-h-56" : "min-h-0")}>
             <Separator />
             <div className="flex items-center gap-1 px-3 py-1.5">
               <Button

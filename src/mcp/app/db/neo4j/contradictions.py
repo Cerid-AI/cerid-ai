@@ -167,6 +167,40 @@ def list_contradictions(
     return rows
 
 
+def count_contradictions(
+    driver: Any,
+    *,
+    entity_slug: str | None = None,
+    since: str | None = None,
+) -> int:
+    """Count the findings :func:`list_contradictions` would return with no limit."""
+    parts = ["MATCH (f:ContradictionFinding)"]
+    conditions: list[str] = []
+    params: dict[str, Any] = {}
+
+    if entity_slug:
+        conditions.append("f.entity_slug = $entity_slug")
+        params["entity_slug"] = entity_slug
+
+    if since:
+        conditions.append("f.detected_at >= $since")
+        params["since"] = since
+
+    if conditions:
+        parts.append("WHERE " + " AND ".join(conditions))
+
+    parts.append("RETURN count(f) AS total")
+    cypher = "\n".join(parts)
+
+    try:
+        with driver.session() as session:
+            record = session.run(cypher, **params).single()
+            return int(record["total"]) if record else 0
+    except Exception as exc:
+        log_swallowed_error("contradiction_log", exc, context={"entity_slug": entity_slug})
+        raise
+
+
 def get_contradiction(driver: Any, finding_id: str) -> dict[str, Any] | None:
     """Fetch a single ContradictionFinding by ``finding_id``.
 

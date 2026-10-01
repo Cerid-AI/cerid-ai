@@ -76,7 +76,7 @@ SCAN_ROOT = REPO_ROOT / "src" / "mcp"
 SETTINGS_ROUTER = REPO_ROOT / "src" / "mcp" / "app" / "routers" / "settings.py"
 
 MODEL_CLASS = "SettingsUpdateRequest"
-HANDLER_FUNC = "update_settings_endpoint"
+HANDLER_FUNC = "apply_settings_update"
 
 #: Calls whose first string argument names the thing being written.
 #: ``set_toggle("enable_x", v)`` rebinds ``config.features.ENABLE_X``,

@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
+import { useSyncExternalStore } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Terminal, Zap } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { isLocalProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { getPortAccess, subscribePortAccess } from "@/lib/web-port"
 import {
   InferenceLaneRows,
   degradedLaneSummary,
@@ -45,7 +47,8 @@ export function StatusBar({
   // Audit P1.9: gold top border was always-on, competing with the teal
   // accent for users on the default tier. Gate to Pro+ tiers only.
   const tierGold = featureTier === "pro" || featureTier === "enterprise"
-  const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
+  const portAccess = useSyncExternalStore(subscribePortAccess, getPortAccess)
+  const { data, isError, isLoading, dataUpdatedAt } = useQuery({
     // Keyed by endpoint, not by topic: react-query caches on the key alone,
     // so sharing ["health"] with a component that fetches /health handed one
     // of them the other's payload.
@@ -54,6 +57,9 @@ export function StatusBar({
     refetchInterval: 15_000,
     retry: 1,
   })
+  // A failed refetch leaves the last payload in `data`. Shown as-is it keeps
+  // reporting every store as connected while the API is unreachable.
+  const health = isError ? undefined : data
 
   const { data: credits } = useQuery({
     queryKey: ["provider-credits"],
@@ -93,7 +99,9 @@ export function StatusBar({
         className={cn(
           // Task 3.7 — hidden <md so it doesn't collide with the fixed
           // bottom tab bar, which occupies the same screen position.
-          "hidden h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground md:flex",
+          // Items wrap whole onto a second row when the window is too narrow
+          // for them; a fixed height cut the wrapped text off.
+          "hidden min-h-8 flex-wrap items-center gap-x-4 gap-y-1 whitespace-nowrap border-t bg-muted/40 px-4 py-0.5 text-xs text-muted-foreground md:flex",
           tierGold ? "border-[rgba(212,175,55,0.22)]" : "border-border",
         )}
       >
@@ -145,6 +153,26 @@ export function StatusBar({
             <p className="text-muted-foreground">Last checked: {lastChecked}</p>
           </TooltipContent>
         </Tooltip>
+
+        {portAccess === "open" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-default rounded bg-yellow-500/20 px-1.5 py-0.5 text-label-xs font-semibold text-yellow-700 dark:text-yellow-400">
+                Port open: no sign-in
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs space-y-1">
+              <p className="font-medium">This port has no sign-in</p>
+              <p className="text-muted-foreground">
+                No sign-in password is set, so any process on this machine can use the API
+                through this port.
+              </p>
+              <p className="text-muted-foreground">
+                Set CERID_PORTAL_PASSWORD in .env and restart to require a sign-in.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Unlicensed-Pro marker: always present while paid features run
             without a license, so the state is visible from any screen. */}
@@ -217,7 +245,7 @@ export function StatusBar({
             </TooltipTrigger>
             <TooltipContent side="top" className="space-y-1">
               <p className="font-medium text-red-400">OpenRouter Authentication Failed</p>
-              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fail until it is restored — there is no fallback gateway. Local Ollama-served stages are unaffected.</p>
+              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fail until it is restored — there is no fallback gateway. Stages served by a local model server are unaffected.</p>
               <p className="text-muted-foreground">Check your OPENROUTER_API_KEY in .env</p>
             </TooltipContent>
           </Tooltip>
@@ -233,7 +261,7 @@ export function StatusBar({
             </TooltipTrigger>
             <TooltipContent side="top" className="space-y-1">
               <p className="font-medium text-orange-400">OpenRouter Circuit Breaker Open</p>
-              <p className="text-muted-foreground">Too many consecutive failures. OpenRouter calls are paused until the circuit resets; stages routed to local Ollama continue unaffected.</p>
+              <p className="text-muted-foreground">Too many consecutive failures. OpenRouter calls are paused until the circuit resets; stages routed to a local model server continue unaffected.</p>
             </TooltipContent>
           </Tooltip>
         )}
@@ -254,10 +282,11 @@ export function StatusBar({
           const configuredLocal =
             (isLocalProvider(health.internal_llm_provider) ? health.internal_llm_provider : undefined)
             ?? stageProviders.find(isLocalProvider)
+          const serverName = health.local_model_server?.name
           const localLabel = llmLane
-            ? providerLabel(llmLane.provider)
+            ? providerLabel(llmLane.provider, serverName)
             : configuredLocal
-              ? providerLabel(configuredLocal)
+              ? providerLabel(configuredLocal, serverName)
               : "Local inference"
           const modelLabel = llmLane
             ? laneModelUnset(llmLane)
@@ -294,7 +323,7 @@ export function StatusBar({
                   <p className="text-muted-foreground">
                     {localCount} of {totalStages} pipeline stages served on this machine ($0)
                   </p>
-                  <InferenceLaneRows lanes={lanes} />
+                  <InferenceLaneRows lanes={lanes} localServerName={serverName} />
                 </TooltipContent>
               </Tooltip>
             )
@@ -302,14 +331,14 @@ export function StatusBar({
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span data-testid="local-pipeline-chip" className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">
+                <span data-testid="local-pipeline-chip" className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No pipeline stage runs on a local model server.">
                   <Zap className="size-3" aria-hidden="true" />
                   0 local
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="space-y-1">
-                <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>
-                <InferenceLaneRows lanes={lanes} />
+                <p>All pipeline stages use cloud APIs. A local model server can run them on this machine.</p>
+                <InferenceLaneRows lanes={lanes} localServerName={serverName} />
               </TooltipContent>
             </Tooltip>
           )
@@ -318,10 +347,10 @@ export function StatusBar({
         {/* Backend status pill — shows the active inference backend
             (ollama / quenchforge / cloud) at a glance. Reads /system-check;
             no wire-up to the canonical INTERNAL_LLM_PROVIDER value yet. */}
-        <BackendStatusPill />
+        {!isError && <BackendStatusPill />}
 
         {/* TrustScore chip — pure presentation, no effect on retrieval/generation */}
-        <TrustScoreChip />
+        {!isError && <TrustScoreChip />}
 
         {/* Agent Console toggle */}
         {onToggleConsole && (

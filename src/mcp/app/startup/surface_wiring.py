@@ -24,12 +24,18 @@ logger = logging.getLogger("ai-companion.startup.surface_wiring")
 
 
 def wire_query_surfaces() -> bool:
-    """Register the compiled-wiki-page fetcher (GA P0.5 C2 surface).
+    """Register the compiled-wiki-page fetcher (GA P0.5 C2 surface) and the
+    reader of watched folders marked not searchable.
 
     Idempotent — re-registering replaces the slot. Returns True when the
     fetcher was installed, False when wiring failed (the caller keeps running
     with the surface disabled, matching the app's fail-open behaviour).
     """
+    from core.agents.query_agent import set_unsearchable_folder_provider
+    from utils.folder_privacy import unsearchable_folder_ids
+
+    set_unsearchable_folder_provider(unsearchable_folder_ids)
+
     try:
         import asyncio
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Puzzle, Server, Globe, Zap, Plus, RefreshCw, Trash2,
@@ -19,11 +19,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
 import { InfoTip } from "@/components/ui/info-tip"
 import {
-  SettingRow, AdvancedDisclosure, ConfirmActionButton, ReadOnlyEnvHint,
+  SettingRow, ConfirmActionButton, ReadOnlyEnvHint,
 } from "@/components/settings/settings-primitives"
 import { getDef } from "@/lib/settings-registry"
 import {
-  fetchPlugins, enablePlugin, disablePlugin, scanPlugins, getPluginConfig, updatePluginConfig,
+  fetchPlugins, enablePlugin, disablePlugin, scanPlugins,
   fetchExternalAPIs, toggleExternalAPI,
   fetchDataSources, enableDataSource, disableDataSource,
   listProAutomations, updateProAutomation, runProAutomationNow,
@@ -34,7 +34,7 @@ import {
   type McpServerAddRequest,
 } from "@/lib/api/governance"
 import { MCP_BASE } from "@/lib/api/common"
-import type { Plugin, PluginConfig } from "@/lib/types"
+import type { Plugin } from "@/lib/types"
 import { useEntitlements } from "@/hooks/use-entitlements"
 import { useNavigation, type NavigationOptions } from "@/contexts/navigation-context"
 import type { Pane } from "@/components/layout/sidebar"
@@ -124,11 +124,7 @@ function SectionCard({
 function PluginRow({ plugin }: { plugin: Plugin }) {
   const qc = useQueryClient()
   const ent = useEntitlements()
-  const [configValues, setConfigValues] = useState<Record<string, unknown>>({})
-  const [configLoaded, setConfigLoaded] = useState(false)
-  const [configError, setConfigError] = useState("")
   const [toggleError, setToggleError] = useState("")
-  const [savingConfig, setSavingConfig] = useState(false)
 
   // Older servers predate display_name/plugin_type — fall back to the raw id.
   const displayName = plugin.display_name ?? plugin.name
@@ -176,29 +172,6 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
     } catch (err) {
       setToggleError(err instanceof Error ? err.message : "Toggle failed")
       logSwallowedError(err, "extensions.togglePlugin")
-    }
-  }
-
-  useEffect(() => {
-    if (!plugin.config_schema || Object.keys(plugin.config_schema).length === 0) return
-    if (configLoaded) return
-    getPluginConfig(plugin.name)
-      .then((cfg) => { setConfigValues(cfg.values); setConfigLoaded(true) })
-      .catch((err) => { setConfigError(err instanceof Error ? err.message : "Failed to load config"); logSwallowedError(err, "extensions.getPluginConfig") })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount
-  }, [])
-
-  const handleSaveConfig = async () => {
-    setSavingConfig(true)
-    setConfigError("")
-    try {
-      await updatePluginConfig(plugin.name, { values: configValues } as PluginConfig)
-      await qc.invalidateQueries({ queryKey: ["plugins"] })
-    } catch (err) {
-      setConfigError(err instanceof Error ? err.message : "Save failed")
-      logSwallowedError(err, "extensions.updatePluginConfig")
-    } finally {
-      setSavingConfig(false)
     }
   }
 
@@ -251,36 +224,14 @@ function PluginRow({ plugin }: { plugin: Plugin }) {
           <AlertDescription className="text-label-xs">{toggleError}</AlertDescription>
         </Alert>
       )}
-      {isLocked && <PlanGateNote tier={requiredTierLabel} unverified={ent.isError} />}
-      {plugin.config_schema && Object.keys(plugin.config_schema).length > 0 && (
-        <AdvancedDisclosure category="extensions" group="plugins">
-          <div className="density-stack">
-            {configError && (
-              <Alert variant="destructive">
-                <AlertDescription className="text-label-xs">{configError}</AlertDescription>
-              </Alert>
-            )}
-            {configLoaded && Object.entries(configValues).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2">
-                <Label htmlFor={`plugin-cfg-${plugin.name}-${key}`} className="w-32 shrink-0 text-xs">
-                  {key}
-                </Label>
-                <Input
-                  id={`plugin-cfg-${plugin.name}-${key}`}
-                  value={String(val ?? "")}
-                  onChange={(e) => setConfigValues((prev) => ({ ...prev, [key]: e.target.value }))}
-                  className="h-7 text-xs"
-                />
-              </div>
-            ))}
-            {configLoaded && (
-              <Button size="sm" onClick={handleSaveConfig} disabled={savingConfig} className="h-7 text-xs">
-                {savingConfig ? "Saving…" : "Save config"}
-              </Button>
-            )}
-          </div>
-        </AdvancedDisclosure>
+      {plugin.restart_required && (
+        <p className="text-label-xs text-muted-foreground">
+          {plugin.enabled
+            ? "Saved. It starts when the server restarts."
+            : "Saved. It is still running until the server restarts."}
+        </p>
       )}
+      {isLocked && <PlanGateNote tier={requiredTierLabel} unverified={ent.isError} />}
     </div>
   )
 }

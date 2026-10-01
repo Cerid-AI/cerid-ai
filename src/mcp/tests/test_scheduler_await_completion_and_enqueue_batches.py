@@ -181,12 +181,14 @@ class TestEnqueueAndAwaitCompletion:
     async def test_bounded_deadline_logs_timeout_when_never_observed(self, monkeypatch):
         """A job_id that never appears in list_recent's terminal records
         must not hang the scheduler forever — the loop is bounded by
-        _STAGE_COMPLETION_TIMEOUT_S and logs 'timeout'."""
+        the queue's pending-stale age and logs 'timeout'."""
         _fast_poll(monkeypatch)
+        monkeypatch.setattr(sched.config, "PROCESSOR_PENDING_STALE_TTL_S", 0.03)
         log_calls = _capture_log(monkeypatch)
 
         queue = MagicMock()
         queue.enqueue_if_absent = AsyncMock(return_value="job-1")
+        queue.get = AsyncMock(return_value=None)
         # Always returns records for a different job — job-1 never resolves.
         other = SimpleNamespace(id="other-job", state=None, error_message=None)
         queue.list_recent = AsyncMock(return_value=[other])

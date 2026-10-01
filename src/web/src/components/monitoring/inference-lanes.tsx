@@ -76,9 +76,17 @@ export function isOnBoxServing(provider: string | null | undefined): boolean {
   return ON_BOX_SERVING.has((provider ?? "").trim().toLowerCase())
 }
 
-export function providerLabel(provider: string | null | undefined): string {
+/**
+ * "ollama" and "quenchforge" name the API a lane speaks. `localServerName` is
+ * what the server behind that API reports about itself, and wins for both.
+ */
+export function providerLabel(
+  provider: string | null | undefined,
+  localServerName?: string | null,
+): string {
   const p = (provider ?? "").trim().toLowerCase()
   if (!p) return "Unknown"
+  if (localServerName && (p === "ollama" || p === "quenchforge")) return localServerName
   return PROVIDER_LABEL[p] ?? provider!
 }
 
@@ -143,6 +151,7 @@ export function degradedLaneSummary(lanes: InferenceLane[]): string {
 interface RowsProps {
   lanes: InferenceLane[]
   className?: string
+  localServerName?: string | null
 }
 
 /**
@@ -150,7 +159,7 @@ interface RowsProps {
  * fallback count and the reason. Replaces the "Routing snapshot available"
  * placeholder that consumed this payload without showing any of it.
  */
-export function InferenceLaneRows({ lanes, className }: RowsProps) {
+export function InferenceLaneRows({ lanes, className, localServerName }: RowsProps) {
   if (lanes.length === 0) {
     return (
       <p className="text-muted-foreground">
@@ -171,13 +180,13 @@ export function InferenceLaneRows({ lanes, className }: RowsProps) {
                 lane.degraded && "text-amber-700 dark:text-amber-400",
               )}
             >
-              {LANE_LABEL[lane.lane]}: {providerLabel(lane.provider)}
+              {LANE_LABEL[lane.lane]}: {providerLabel(lane.provider, localServerName)}
               {model && !unset ? ` · ${model}` : ""}
             </p>
             <p className="text-muted-foreground">
               {lane.degraded
-                ? `Serving ${providerLabel(lane.serving)} — degraded`
-                : `Serving ${providerLabel(lane.serving)}`}
+                ? `Serving ${providerLabel(lane.serving, localServerName)} — degraded`
+                : `Serving ${providerLabel(lane.serving, localServerName)}`}
               {lane.fallbackCount > 0
                 ? ` · ${lane.fallbackCount} fallback${lane.fallbackCount === 1 ? "" : "s"}`
                 : ""}

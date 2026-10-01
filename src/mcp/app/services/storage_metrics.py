@@ -40,6 +40,7 @@ from config.settings import (
     STORAGE_LIMIT_MB,
     STORAGE_WARN_PCT,
 )
+from core.utils.swallowed import log_swallowed_error
 from errors import CeridError
 
 logger = logging.getLogger("ai-companion")
@@ -74,32 +75,83 @@ def _chromadb_metrics(get_chroma_fn: Callable[[], Any]) -> dict:
                 total_chunks += coll.count()
             except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 pass  # Collection count: skip unavailable collections
-        # Disk size: ChromaDB persist directory inside the container
-        chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "/chroma/chroma")
-        disk_mb = _dir_size_mb(chroma_dir)
-        return {
-            "disk_mb": disk_mb,
+        result: dict[str, Any] = {
+            "disk_mb": None,
             "collections": len(collections),
             "chunks": total_chunks,
         }
+        # The Chroma client has no size call, so the only measurement is a
+        # walk of the persist directory, and that directory belongs to the
+        # chromadb container. It is readable here only when an operator has
+        # mounted it and pointed CHROMA_PERSIST_DIR at the mount.
+        chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "/chroma/chroma")
+        if os.path.isdir(chroma_dir):
+            result["disk_mb"] = _dir_size_mb(chroma_dir)
+        else:
+            result["disk_mb_reason"] = f"persist directory {chroma_dir} is not mounted in this container"
+        return result
     except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("ChromaDB metrics unavailable: %s", e)
-        return {"disk_mb": 0, "collections": 0, "chunks": 0, "error": str(e)}
+        return {
+            "disk_mb": None, "disk_mb_reason": "store unreachable",
+            "collections": 0, "chunks": 0, "error": str(e),
+        }
+
+
+def _neo4j_store_mb(session: Any) -> tuple[float | None, str | None]:
+    """Neo4j's store size in MB, or None with the reason it was not measured."""
+    # apoc.monitor.store ships in APOC Extended, which the default stack does
+    # not install: the image fetches that jar at boot and refuses to start
+    # when the download fails. The stack mounts the store files instead.
+    data_dir = os.getenv("NEO4J_DATA_DIR", "/neo4j-data")
+    store_dir = os.path.join(data_dir, "databases")
+    if os.path.isdir(store_dir):
+        size_mb = _dir_size_mb(store_dir)
+        # A store that answers queries is never 0 bytes on disk.
+        if size_mb > 0:
+            return size_mb, None
+        mount = f"data directory {data_dir} is mounted with no readable store files"
+    else:
+        mount = f"data directory {data_dir} is not mounted in this container"
+    try:
+        record = session.run(
+            "CALL apoc.monitor.store() YIELD totalStoreSize RETURN totalStoreSize"
+        ).single()
+    except Exception as exc:  # noqa: BLE001 — the procedure is optional; the counts still stand
+        log_swallowed_error("app.services.storage_metrics.neo4j_store_size", exc)
+        code = getattr(exc, "code", None) or type(exc).__name__
+        if str(code).endswith("ProcedureNotFound"):
+            return None, f"apoc.monitor.store is not installed (it ships in APOC Extended) and {mount}"
+        return None, f"apoc.monitor.store failed ({code}) and {mount}"
+    size_bytes = record["totalStoreSize"] if record is not None else None
+    if isinstance(size_bytes, bool) or not isinstance(size_bytes, (int, float)) or size_bytes <= 0:
+        return None, f"apoc.monitor.store returned no store size and {mount}"
+    return round(size_bytes / (1024 * 1024), 2), None
 
 
 def _neo4j_metrics(get_neo4j_fn: Callable[[], Any]) -> dict:
-    """Neo4j: node count, relationship count."""
+    """Neo4j: node count, relationship count, store size."""
     driver = get_neo4j_fn()
     if driver is None:
-        return {"disk_mb": 0, "nodes": 0, "relationships": 0, "status": "disabled"}
+        return {
+            "disk_mb": None, "disk_mb_reason": "neo4j is disabled",
+            "nodes": 0, "relationships": 0, "status": "disabled",
+        }
     try:
         with driver.session() as session:
             nodes = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
             rels = session.run("MATCH ()-[r]-() RETURN count(r) AS c").single()["c"]
-        return {"disk_mb": 0, "nodes": nodes, "relationships": rels}
+            disk_mb, reason = _neo4j_store_mb(session)
+        result: dict[str, Any] = {"disk_mb": disk_mb, "nodes": nodes, "relationships": rels}
+        if disk_mb is None:
+            result["disk_mb_reason"] = reason
+        return result
     except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Neo4j metrics unavailable: %s", e)
-        return {"disk_mb": 0, "nodes": 0, "relationships": 0, "error": str(e)}
+        return {
+            "disk_mb": None, "disk_mb_reason": "store unreachable",
+            "nodes": 0, "relationships": 0, "error": str(e),
+        }
 
 
 def _redis_metrics(get_redis_fn: Callable[[], Any]) -> dict:
@@ -181,9 +233,17 @@ def get_storage_report(
     redis_m = _redis_metrics(get_redis_fn)
     bm25 = _bm25_metrics()
 
+    # A store with no measured size adds nothing, so total_mb, usage_pct and
+    # status are a lower bound whenever ``unmeasured`` is non-empty. Ingest
+    # backpressure reads ``status``: a lower bound can still reach critical,
+    # and an unmeasured store can never trip it.
+    unmeasured = [
+        name for name, store in (("chromadb", chromadb), ("neo4j", neo4j))
+        if store.get("disk_mb") is None
+    ]
     total_mb = round(
-        chromadb.get("disk_mb", 0)
-        + neo4j.get("disk_mb", 0)
+        (chromadb.get("disk_mb") or 0)
+        + (neo4j.get("disk_mb") or 0)
         + redis_m.get("memory_mb", 0)
         + bm25.get("disk_mb", 0),
         2,
@@ -196,6 +256,7 @@ def get_storage_report(
         "redis": redis_m,
         "bm25": bm25,
         "total_mb": total_mb,
+        "unmeasured": unmeasured,
         "limit_mb": STORAGE_LIMIT_MB,
         "usage_pct": pct,
         "warn_pct": STORAGE_WARN_PCT,

@@ -776,11 +776,15 @@ async def resolve_memory_conflict(
                         "merged_text": None,
                     }
             except Exception as exc:
-                # NLI unavailable (model not loaded, CUDA OOM, malformed input);
-                # falling through merges without the entailment guard. Whether
-                # that fallthrough is acceptable is a semantic question tracked
-                # separately; the observability hook is the scope here.
+                # NLI unavailable (model not loaded, CUDA OOM, malformed input).
+                # An unchecked merge can drop a fact from either memory, so
+                # keep both, as every other failure in this function does.
                 log_swallowed_error("core.agents.memory.resolve_conflict_nli_guard", exc)
+                return {
+                    "action": "coexist",
+                    "reason": "NLI guard unavailable",
+                    "merged_text": None,
+                }
 
         return {
             "action": action,
@@ -1045,6 +1049,28 @@ async def recall_memories(
                 m for m in scored_memories if m["memory_id"] not in superseded_ids
             ]
 
+    # Drop archived candidates. The flag is set on the Neo4j node (retention
+    # sweep, soft delete, quarantine) and is not in the Chroma metadata, so it
+    # has to be read from the graph. Best-effort, like the supersession check.
+    if neo4j_driver and scored_memories:
+        try:
+            with neo4j_driver.session() as session:
+                rows = session.run(
+                    "UNWIND $ids AS aid "
+                    "MATCH (a:Artifact {id: aid}) "
+                    "WHERE coalesce(a.archived, false) "
+                    "RETURN a.id AS id",
+                    ids=[m["memory_id"] for m in scored_memories],
+                )
+                archived_ids = {r["id"] for r in rows}
+        except Exception as exc:  # noqa: BLE001 — recall proceeds unfiltered
+            log_swallowed_error("core.agents.memory.recall_memories_archived", exc)
+            archived_ids = set()
+        if archived_ids:
+            scored_memories = [
+                m for m in scored_memories if m["memory_id"] not in archived_ids
+            ]
+
     # Step 3.6: Interval admission (bi-temporal :Fact layer, plan D3) — drop
     # candidates whose validity interval is CLOSED (non-empty valid_to). DARK by
     # default (ENABLE_FACT_INVALIDATION_FILTER, default off): with the flag off,
@@ -1104,11 +1130,16 @@ async def recall_memories(
 # Retention / archival
 # ---------------------------------------------------------------------------
 
+# Decisions and preferences do not go stale with age, so the age sweep leaves
+# them alone. The graph node carries the type only as its filename prefix.
+_AGELESS_MEMORY_TYPES = ("decision", "preference")
+
+
 async def archive_old_memories(
     neo4j_driver,
     retention_days: int | None = None,
 ) -> dict[str, Any]:
-    """Mark old conversation memories as archived (deprioritized in search)."""
+    """Mark old conversation memories as archived, except decisions and preferences."""
     if retention_days is None:
         retention_days = config.MEMORY_RETENTION_DAYS
 
@@ -1119,9 +1150,12 @@ async def archive_old_memories(
             result = session.run(
                 "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
                 "WHERE a.ingested_at < $cutoff AND NOT coalesce(a.archived, false) "
+                "AND NONE(prefix IN $spared_prefixes "
+                "WHERE coalesce(a.filename, '') STARTS WITH prefix) "
                 "SET a.archived = true, a.archived_at = $now "
                 "RETURN count(a) AS archived_count",
                 cutoff=cutoff,
+                spared_prefixes=[f"memory_{t}_" for t in _AGELESS_MEMORY_TYPES],
                 now=utcnow_iso(),
             )
             record = result.single()

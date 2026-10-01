@@ -27,17 +27,11 @@ vi.mock("@/lib/api/kb", () => ({
   fetchIngestionProgress: vi.fn(),
   fetchIngestLog: vi.fn(),
 }))
-vi.mock("@/lib/api/settings", () => ({
-  fetchIngestHistory: vi.fn(),
-}))
-
 import { fetchIngestionProgress, fetchIngestLog } from "@/lib/api/kb"
-import { fetchIngestHistory } from "@/lib/api/settings"
 import { SourcesActivityStream } from "@/components/sources/activity-stream"
 
 const mockProgress = fetchIngestionProgress as ReturnType<typeof vi.fn>
 const mockLog = fetchIngestLog as ReturnType<typeof vi.fn>
-const mockHistory = fetchIngestHistory as ReturnType<typeof vi.fn>
 
 function renderStream() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -104,7 +98,6 @@ describe("SourcesActivityStream — ingestion ledger (F359)", () => {
     renderStream()
 
     await waitFor(() => expect(mockLog).toHaveBeenCalled())
-    expect(mockHistory).not.toHaveBeenCalled()
   })
 
   it("accepts the bare list /ingest_log returns on the wire", async () => {

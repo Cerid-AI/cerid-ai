@@ -25,10 +25,11 @@ import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 import { BackendRecommendationStep } from "@/components/setup/backend-recommendation-step"
 import { QuenchforgeInstallStep } from "@/components/setup/quenchforge-install-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
-import { fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
+import { fetchProviderCredits, fetchSetupStatus, fetchSystemCheck } from "@/lib/api"
 import { applySetupConfiguration, completeOnboarding } from "@/lib/api/setup"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
+import { NEUTRAL_LOCAL_SERVER, backendOptionsForHardware } from "@/lib/hardware-profile"
 import { cn } from "@/lib/utils"
 import type { ProviderCredits, RecommendedLocalBackend, SystemCheckResponse } from "@/lib/types"
 
@@ -122,6 +123,9 @@ interface WizardState {
   selectedMode: "simple" | "advanced"
   /** User's chosen local-inference backend. null = follow recommendation. */
   selectedBackend: RecommendedLocalBackend | null
+  /** True once saved choices were restored: a later system check then
+   *  checks them instead of replacing them with its defaults. */
+  restored: boolean
 }
 
 type WizardAction =
@@ -141,6 +145,7 @@ type WizardAction =
   | { type: "SET_BUILD_KNOWLEDGE"; installedPackIds: string[]; firstDoc: WizardState["firstDoc"] }
   | { type: "SET_MODE"; mode: "simple" | "advanced" }
   | { type: "SET_BACKEND"; backend: RecommendedLocalBackend }
+  | { type: "RESTORE"; saved: PersistedProgress; systemCheck: SystemCheckResponse | null }
 
 function createInitialState(): WizardState {
   return {
@@ -180,7 +185,29 @@ function createInitialState(): WizardState {
     installedPackIds: [],
     selectedMode: "simple",
     selectedBackend: null,
+    restored: false,
   }
+}
+
+/** The local model the wizard starts with: the one the instance already
+ *  names, else the one chosen in this session, else none. Apply writes this
+ *  as the model inference uses, so it is never the first one served. */
+export function chooseLocalModel(result: SystemCheckResponse, chosen: string | null): string | null {
+  if (result.ollama_configured_model) return result.ollama_configured_model
+  if (chosen && result.ollama_models.includes(chosen)) return chosen
+  return null
+}
+
+/** Chat-model label for the Mode summary: the model chosen for a local
+ *  backend. Never a reranker, which a v2-persisted state can carry from the
+ *  wizard that mislabelled the rerank slot as the local LLM. */
+export function summaryChatModel(
+  backend: RecommendedLocalBackend | null,
+  model: string | null,
+): string | null {
+  if (backend === "cloud") return null
+  if (model && !model.toLowerCase().includes("reranker")) return model
+  return null
 }
 
 function wizardReducer(state: WizardState, action: WizardAction): WizardState {
@@ -211,6 +238,9 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, credits: action.credits }
     case "SET_SYSTEM_CHECK": {
       const result = action.result
+      if (state.restored) {
+        return { ...state, systemCheck: result, ollama: checkedLocal(state.ollama, result) }
+      }
       return {
         ...state,
         systemCheck: result,
@@ -223,7 +253,7 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
           ...state.ollama,
           detected: result.ollama_detected,
           enabled: result.ollama_detected,  // auto-enable when Ollama is available
-          model: result.ollama_models.length > 0 ? result.ollama_models[0] : null,
+          model: chooseLocalModel(result, state.ollama.model),
         },
       }
     }
@@ -239,6 +269,8 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, selectedMode: action.mode }
     case "SET_BACKEND":
       return { ...state, selectedBackend: action.backend }
+    case "RESTORE":
+      return restoreProgress(state, action.saved, action.systemCheck)
     default:
       return state
   }
@@ -298,6 +330,67 @@ function loadProgress(): PersistedProgress | null {
     return data as PersistedProgress
   } catch {
     return null
+  }
+}
+
+/** The saved local-inference choice, held to what the server reports now. */
+function checkedLocal(
+  ollama: WizardState["ollama"],
+  systemCheck: SystemCheckResponse,
+): WizardState["ollama"] {
+  return {
+    detected: systemCheck.ollama_detected,
+    enabled: ollama.enabled && systemCheck.ollama_detected,
+    model: chooseLocalModel(systemCheck, ollama.model),
+    pulling: false,
+  }
+}
+
+/** Saved progress is JSON from a browser store: each value is taken only
+ *  when it has the type and range this build writes. */
+function restoreProgress(
+  state: WizardState,
+  saved: PersistedProgress,
+  systemCheck: SystemCheckResponse | null,
+): WizardState {
+  const raw: { [K in keyof PersistedProgress]?: unknown } = saved
+  const kb = (raw.kbConfig && typeof raw.kbConfig === "object" ? raw.kbConfig : {}) as Record<string, unknown>
+  const local = (raw.ollama && typeof raw.ollama === "object" ? raw.ollama : {}) as Record<string, unknown>
+  const domains = Array.isArray(kb.domains)
+    ? kb.domains.filter((d): d is string => typeof d === "string" && d.length > 0)
+    : []
+  const ollama: WizardState["ollama"] = {
+    detected: local.detected === true,
+    enabled: local.enabled === true,
+    model: typeof local.model === "string" && local.model ? local.model : null,
+    pulling: false,
+  }
+  const step = raw.step
+  return {
+    ...state,
+    restored: true,
+    step: typeof step === "number" && Number.isInteger(step) && step > 0 && step < TOTAL_STEPS ? step : 0,
+    skippedSteps: new Set(
+      Array.isArray(raw.skippedSteps)
+        ? raw.skippedSteps.filter((n): n is number => typeof n === "number" && SKIPPABLE_STEPS.has(n))
+        : [],
+    ),
+    kbConfig: {
+      archivePath:
+        typeof kb.archivePath === "string" && kb.archivePath ? kb.archivePath : state.kbConfig.archivePath,
+      domains: domains.length > 0 ? domains : state.kbConfig.domains,
+      lightweightMode:
+        typeof kb.lightweightMode === "boolean" ? kb.lightweightMode : state.kbConfig.lightweightMode,
+      watchFolder: typeof kb.watchFolder === "boolean" ? kb.watchFolder : state.kbConfig.watchFolder,
+    },
+    ollama: systemCheck ? checkedLocal(ollama, systemCheck) : ollama,
+    systemCheck: systemCheck ?? state.systemCheck,
+    selectedMode: raw.selectedMode === "advanced" ? "advanced" : "simple",
+    selectedBackend:
+      raw.selectedBackend === "ollama" || raw.selectedBackend === "quenchforge" || raw.selectedBackend === "cloud"
+        ? raw.selectedBackend
+        : null,
+    applied: raw.applied === true,
   }
 }
 
@@ -462,6 +555,11 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
         watch_folder: state.kbConfig.watchFolder,
         ollama_enabled: state.ollama.enabled,
         ollama_model: state.ollama.model ?? undefined,
+        // The first step shows the recommended backend as selected until the
+        // user clicks another, so that is the choice when none was clicked.
+        inference_backend:
+          state.selectedBackend ??
+          (state.systemCheck ? backendOptionsForHardware(state.systemCheck).defaultId : undefined),
       }, { force: opts?.force ?? false })
       if (result.success) {
         // M-A.7: drop the 800ms `setTimeout` gate — the new step's wrapper
@@ -475,14 +573,17 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
           error: result.error ?? "This instance is already configured — pass force to reconfigure.",
         })
       } else {
-        dispatch({ type: "SET_APPLY_ERROR", error: "Configuration failed — check backend logs" })
+        dispatch({
+          type: "SET_APPLY_ERROR",
+          error: result.error ?? "Configuration failed — check backend logs",
+        })
       }
     } catch {
       dispatch({ type: "SET_APPLY_ERROR", error: "Connection failed — is the backend running?" })
     } finally {
       dispatch({ type: "SET_APPLYING", applying: false })
     }
-  }, [state.keys, state.kbConfig, state.ollama, backendConfigured])
+  }, [state.keys, state.kbConfig, state.ollama, state.selectedBackend, state.systemCheck, backendConfigured])
 
   const handleAllHealthy = useCallback(() => {
     dispatch({ type: "SET_ALL_HEALTHY" })
@@ -521,10 +622,16 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
 
   const handleResume = useCallback((resume: boolean) => {
     setShowResumePrompt(false)
-    if (resume) {
-      dispatch({ type: "SET_STEP", step: resumeStep })
-    }
-  }, [resumeStep])
+    const saved = resume ? loadProgress() : null
+    if (!saved) return
+    dispatch({ type: "RESTORE", saved, systemCheck: state.systemCheck })
+    if (state.systemCheck) return
+    // The step that runs the system check is not shown on a resume, and the
+    // saved model and local server are only valid against a current one.
+    fetchSystemCheck()
+      .then((result) => dispatch({ type: "SET_SYSTEM_CHECK", result }))
+      .catch((err) => logSwallowedError(err, "setup.resume.system-check"))
+  }, [state.systemCheck])
 
   // Compute config summary for mode selection step
   const validProviders = Object.entries(state.keys).filter(([, k]) => k.valid)
@@ -536,22 +643,15 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const hasAnsweringModel =
     providerCount > 0 || state.ollama.enabled || state.selectedBackend === "quenchforge"
 
-  // Chat-model label for the Mode summary. The previous wizard mislabelled
-  // the rerank slot model (`bge-reranker-v2-m3`) as "Local LLM", which is a
-  // category error — rerankers aren't chat LLMs. Pick a sensible chat-slot
-  // alias per backend; for Ollama, surface the user's downloaded chat model.
-  const modeSummaryChatModel: string | null = (() => {
-    if (state.selectedBackend === "quenchforge") return "llama3.1-8b"
-    if (state.selectedBackend === "cloud") return null
-    // Ollama (or null/legacy): use the explicit model the user pulled, but
-    // never the reranker — Quenchforge users on a v2-persisted state can
-    // have `state.ollama.model` set to `bge-reranker-v2-m3` from the prior
-    // wizard's mislabelled flow.
-    if (state.ollama.model && !state.ollama.model.toLowerCase().includes("reranker")) {
-      return state.ollama.model
-    }
-    return null
-  })()
+  // The backend ids name an API. A detected server is shown under the name
+  // it reports; the id's own label is for a backend still to be installed.
+  const localBackendName = state.ollama.detected
+    ? state.systemCheck?.local_server_name || NEUTRAL_LOCAL_SERVER
+    : state.selectedBackend === "quenchforge"
+      ? "Quenchforge"
+      : "Ollama"
+
+  const modeSummaryChatModel = summaryChatModel(state.selectedBackend, state.ollama.model)
 
   // Document count for the Mode summary. Single upload sets count=1; sample
   // pack install sets count=pack.artifact_count. Both flow through
@@ -852,6 +952,8 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
               inferenceBackend={state.selectedBackend}
               ollamaDetected={state.ollama.detected}
               ollamaModels={state.systemCheck?.ollama_models ?? []}
+              localServerName={state.systemCheck?.local_server_name || NEUTRAL_LOCAL_SERVER}
+              cloudChat={state.keys.openrouter?.valid ?? false}
               state={state.ollama}
               onChange={(s) => dispatch({ type: "SET_OLLAMA", state: s })}
               hardwareGpu={state.systemCheck?.gpu ?? null}
@@ -922,8 +1024,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                   <div className="rounded-lg border bg-card px-3 py-2">
                     <p className="text-xs font-medium text-muted-foreground">Inference Backend</p>
                     <p className="mt-0.5 text-xs">
-                      {state.selectedBackend === "quenchforge" && "Quenchforge (local, GPU-accelerated)"}
-                      {state.selectedBackend === "ollama" && "Ollama (local)"}
+                      {state.selectedBackend !== "cloud" && `${localBackendName} (local)`}
                       {state.selectedBackend === "cloud" && "Cloud providers only"}
                     </p>
                   </div>
@@ -934,7 +1035,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 {!state.skippedSteps.has(3) && state.ollama.detected && (
                   <div className="rounded-lg border bg-card px-3 py-2">
                     <p className="text-xs font-medium text-muted-foreground">
-                      {state.selectedBackend === "quenchforge" ? "Quenchforge" : "Ollama"}
+                      {localBackendName}
                     </p>
                     <p className="mt-0.5 text-xs">
                       {state.ollama.enabled ? "Enabled" : "Disabled"}
@@ -949,6 +1050,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 <CapabilitySummary
                   assessment={assessment}
                   inferenceBackend={state.selectedBackend}
+                  localBackendName={localBackendName}
                 />
 
                 {!state.applied && !confirmOverwrite && (
@@ -1069,6 +1171,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 domainCount,
                 ollamaEnabled: state.ollama.enabled,
                 ollamaModel: modeSummaryChatModel,
+                localServerName: localBackendName,
                 documentCount: modeSummaryDocCount,
                 inferenceBackend: state.selectedBackend,
               }}
@@ -1228,16 +1331,17 @@ function ProviderWarnings({ warnings }: { warnings: ProviderWarning[] }) {
 function CapabilitySummary({
   assessment,
   inferenceBackend,
+  localBackendName,
 }: {
   assessment: CapabilityAssessment
   inferenceBackend: RecommendedLocalBackend | null
+  localBackendName: string
 }) {
-  // Override the static "Pipeline: Free (Ollama)" string when the user
-  // selected Quenchforge on Step 1 — using "Ollama" misrepresents which
-  // local backend is actually running pipeline tasks (F-04-05).
+  // The static label says "Ollama"; name the backend that runs the pipeline
+  // tasks on this machine (F-04-05).
   const costLabel = (() => {
-    if (assessment.costProfile === "free-pipeline" && inferenceBackend === "quenchforge") {
-      return "Pipeline: Free (Quenchforge)"
+    if (assessment.costProfile === "free-pipeline" && inferenceBackend !== "cloud") {
+      return `Pipeline: Free (${localBackendName})`
     }
     if (assessment.costProfile === "free-pipeline" && inferenceBackend === "cloud") {
       // costProfile said `free-pipeline` because the live provider snapshot

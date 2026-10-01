@@ -17,10 +17,12 @@ interactions without requiring additional LLM calls for verification.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 import config
+from utils.domain_privacy import owner_domains
 
 logger = logging.getLogger("ai-companion.self_rag")
 
@@ -34,6 +36,7 @@ async def maybe_self_rag(
     neo4j_driver: Any,
     redis_client: Any,
     model: str | None = None,
+    budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Apply Self-RAG enhancement when enabled AND a ``response_text`` is supplied
     to validate; return the result unchanged otherwise.
@@ -41,17 +44,38 @@ async def maybe_self_rag(
     The gate (``enable_self_rag`` override → ``config.ENABLE_SELF_RAG`` default,
     plus the ``response_text`` precondition) lives here so ``agent_query_full``
     and the smart-mode router branch share one implementation (Phase 1).
+
+    Self-RAG gets the same wall-clock ceiling as the retrieval it follows
+    (``budget_seconds``, else ``AGENT_QUERY_BUDGET_SECONDS``). Past it, the
+    retrieval result is returned as it was, with ``self_rag.status`` set to
+    ``"timed_out"``.
     """
     use = enable_self_rag if enable_self_rag is not None else config.ENABLE_SELF_RAG
     if use and response_text:
-        return await self_rag_enhance(
-            query_result=query_result,
-            response_text=response_text,
-            chroma_client=chroma_client,
-            neo4j_driver=neo4j_driver,
-            redis_client=redis_client,
-            model=model,
+        budget = (
+            budget_seconds
+            if budget_seconds is not None
+            else getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 20.0)
         )
+        try:
+            return await asyncio.wait_for(
+                self_rag_enhance(
+                    query_result=query_result,
+                    response_text=response_text,
+                    chroma_client=chroma_client,
+                    neo4j_driver=neo4j_driver,
+                    redis_client=redis_client,
+                    model=model,
+                ),
+                timeout=budget,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Self-RAG exceeded %.1fs wall-clock budget; returning the "
+                "retrieval result without refinement",
+                budget,
+            )
+            return _with_metadata(query_result, "timed_out", 0, 0, 0)
     return query_result
 
 
@@ -202,7 +226,7 @@ async def _assess_claims(
     """Check how well each claim is covered by the KB (lightweight, no reranking)."""
     from core.agents.query_agent import multi_domain_query  # retrieval-import-allowed: component of full; would recurse
 
-    verification_domains = [d for d in config.DOMAINS if d != "conversations"]
+    verification_domains = [d for d in owner_domains() if d != "conversations"]
     assessments: list[dict[str, Any]] = []
 
     for claim in claims:

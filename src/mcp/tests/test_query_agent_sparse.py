@@ -1,17 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Smoke test for the tri_rrf fusion branch in query_agent (C3.2).
+"""Three-way fusion properties of ``rrf_fuse`` (C3.2).
 
-These tests verify the *wiring* — that when ``HYBRID_FUSION_MODE=tri_rrf``
-and the sparse index is available, ``search_sparse`` is invoked, its
-hits are fused with the vector + BM25 rankings via ``rrf_fuse``, and a
-sparse-only chunk surfaces in the final ranked list.
-
-We don't stand up a real ChromaDB / BM25 index — the goal here is
-contract verification, not end-to-end retrieval quality. The
-end-to-end gate lives in :file:`docs/EVAL_BASELINES.md` and runs
-post-corpus-growth.
+These tests call ``rrf_fuse`` directly with three hand-built rankings.
+They do not run ``query_agent``: the ``tri_rrf`` branch there fuses with
+``rrf_fuse_by_artifact``, and ``rrf_fuse`` has no production caller.
 """
 
 from __future__ import annotations

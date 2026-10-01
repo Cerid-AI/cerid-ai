@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 import config
-from app.deps import get_redis
+from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file as _parse_file
 from app.services.ingestion import ingest_content, ingest_file
 from config.taxonomy import SUPPORTED_EXTENSIONS
@@ -31,6 +31,7 @@ from core.ingest.vault_config import (
     build_profile,
 )
 from core.utils.time import utcnow_iso
+from utils.folder_privacy import WATCHED_FOLDER_KEY, owning_folder_id
 
 # Extensions treated as binary attachments inside an attachments folder.
 # Files in attachments_folders with these suffixes still flow through
@@ -194,6 +195,139 @@ def _record_file_scanned(
     redis.set(_KEY_LAST_SCAN_AT, utcnow_iso())
 
 
+def _is_error_record(raw: Any) -> bool:
+    """True when a scanned-file record is for an ingest that failed.
+
+    A failed file was never ingested, so its record must not count as a
+    dedup hit. An unreadable record still counts as one.
+    """
+    try:
+        return json.loads(raw).get("status") == "error"
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _watched_folder_records(redis: Any) -> list[dict[str, Any]]:
+    from app.routers.watched_folders import _list_folder_ids, _load_folder
+
+    return [
+        rec for fid in _list_folder_ids(redis)
+        if (rec := _load_folder(redis, fid))
+    ]
+
+
+def _stamp_artifact(artifact_id: str, domain: str, folder_id: str) -> int:
+    """Record ``folder_id`` on the artifact's chunks that name no folder yet.
+
+    Email attachments are separate artifacts that point at their parent, and
+    are stamped with it. A chunk that already names a folder keeps it: the
+    same content in two folders belongs to the one that ingested it first.
+    """
+    collection = get_chroma().get_collection(name=config.collection_name(domain))
+    got = collection.get(
+        where={"$or": [
+            {"artifact_id": artifact_id},
+            {"parent_artifact_id": artifact_id},
+        ]},
+        include=["metadatas"],
+    )
+    ids = [
+        cid for cid, meta in zip(got["ids"], got["metadatas"] or [])
+        if not (meta or {}).get(WATCHED_FOLDER_KEY)
+    ]
+    if ids:
+        collection.update(
+            ids=ids, metadatas=[{WATCHED_FOLDER_KEY: folder_id} for _ in ids],
+        )
+    return len(ids)
+
+
+def _ingested_text(file_path: str) -> str:
+    """The text ``ingest_file`` hashes for this file."""
+    if config.ENABLE_LAYOUT_AWARE_PARSING:
+        from core.ingest.dispatch import layout_aware_parse
+
+        layout_result = layout_aware_parse(file_path)
+        if layout_result is not None:
+            return layout_result[0]
+    return _parse_file(file_path).get("text", "")
+
+
+def _link_file(file_path: str, folder_id: str) -> bool:
+    """Stamp the artifact ingested from ``file_path``. False when none matches."""
+    content_hash = hashlib.sha256(_ingested_text(file_path).encode("utf-8")).hexdigest()
+    with get_neo4j().session() as session:
+        record = session.run(
+            "MATCH (a:Artifact {content_hash: $hash})-[:BELONGS_TO]->(d:Domain) "
+            "RETURN a.id AS id, d.name AS domain",
+            hash=content_hash,
+        ).single(strict=False)
+    if not record:
+        return False
+    _stamp_artifact(record["id"], record["domain"], folder_id)
+    return True
+
+
+async def link_folder_artifacts(
+    root_path: str,
+    *,
+    exclude_patterns: set[str] | None = None,
+) -> dict[str, int]:
+    """Link content already ingested from ``root_path`` back to its folder.
+
+    Chunks written before the scanner stamped a folder id carry no link to
+    their folder, and nothing else stored records one. The file is parsed
+    again and matched to its artifact by content hash; nothing is re-embedded.
+    A file that was edited or deleted since it was ingested cannot be matched.
+
+    Returns counts: ``files`` seen, ``linked``, ``unmatched`` and ``errored``.
+    """
+    exclude_dirs = DEFAULT_EXCLUDE_DIRS | (exclude_patterns or set())
+    watched = _watched_folder_records(get_redis())
+
+    files: list[tuple[str, str]] = []
+    stack: list[str] = [root_path]
+    while stack:
+        for entry in os.scandir(stack.pop()):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                if entry.name.lower() not in exclude_dirs:
+                    stack.append(entry.path)
+            elif entry.is_file(follow_symlinks=False):
+                folder_id = owning_folder_id(entry.path, watched)
+                if folder_id:
+                    files.append((entry.path, folder_id))
+
+    counts = {"files": len(files), "linked": 0, "unmatched": 0, "errored": 0}
+    if not files:
+        return counts
+
+    # A file whose name no artifact carries was never ingested; skip the parse.
+    def _known_names() -> set[str]:
+        with get_neo4j().session() as session:
+            rows = session.run(
+                "MATCH (a:Artifact) WHERE a.filename IN $names "
+                "RETURN DISTINCT a.filename AS filename",
+                names=sorted({Path(p).name for p, _ in files}),
+            )
+            return {row["filename"] for row in rows}
+
+    known = await asyncio.to_thread(_known_names)
+    for file_path, folder_id in files:
+        if Path(file_path).name not in known:
+            continue
+        try:
+            linked = await asyncio.to_thread(_link_file, file_path, folder_id)
+        except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("app.services.folder_scanner.link_folder_artifacts", e)
+            counts["errored"] += 1
+            continue
+        counts["linked" if linked else "unmatched"] += 1
+    return counts
+
+
 async def scan_folder(
     root_path: str,
     *,
@@ -230,6 +364,7 @@ async def scan_folder(
     exclude_dirs = DEFAULT_EXCLUDE_DIRS | (exclude_patterns or set())
     max_size = max_file_size_mb * 1024 * 1024
     redis = get_redis()
+    watched = _watched_folder_records(redis)
     sem = asyncio.Semaphore(3)
 
     # Stack-based recursive walk using os.scandir
@@ -311,7 +446,7 @@ async def scan_folder(
                 continue
 
             existing = redis.get(f"{_KEY_FILES}:{content_hash}")
-            if existing:
+            if existing and not _is_error_record(existing):
                 yield ScanResult(path=file_path, status="duplicate", file_size_bytes=file_size)
                 continue
 
@@ -337,6 +472,9 @@ async def scan_folder(
                 if not domain:
                     domain = vault_profile.default_domain
 
+            folder_id = owning_folder_id(file_path, watched)
+            folder_meta = {WATCHED_FOLDER_KEY: folder_id} if folder_id else {}
+
             async with sem:
                 try:
                     # Try ingest_file first; fall back to parse+ingest_content
@@ -347,6 +485,7 @@ async def scan_folder(
                             domain=domain,
                             sub_category=sub_cat,
                             client_source="folder_scanner",
+                            extra_metadata=folder_meta or None,
                         )
                     except (OSError, ValueError) as _ingest_exc:
                         # AF-022: ingest_file failed (e.g. Path.resolve on a
@@ -387,6 +526,7 @@ async def scan_folder(
                             "filename": filename,
                             "sub_category": sub_cat,
                             "client_source": "folder_scanner",
+                            **folder_meta,
                         }
                         result = await asyncio.to_thread(
                             ingest_content,
@@ -422,6 +562,13 @@ async def scan_folder(
                     # was threaded into the return dicts, every fresh success
                     # was misclassified low_quality too).
                     if result.get("status") == "duplicate":
+                        if folder_id and artifact_id:
+                            await asyncio.to_thread(
+                                _stamp_artifact,
+                                artifact_id,
+                                result.get("domain") or domain or "general",
+                                folder_id,
+                            )
                         _record_file_scanned(redis, content_hash, file_path, "duplicate")
                         yield ScanResult(
                             path=file_path,

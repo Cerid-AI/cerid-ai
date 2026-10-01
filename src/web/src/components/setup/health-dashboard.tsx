@@ -20,15 +20,15 @@ interface HealthDashboardProps {
 
 type ServiceCategory = "infrastructure" | "ai_pipeline" | "optional"
 
-const SERVICE_META: Record<string, { label: string; port: number; description: string; category: ServiceCategory; optional?: boolean; tooltip?: string; fixAction?: string }> = {
-  mcp: { label: "MCP Server (API)", port: 8888, description: "Core API — powers everything", category: "infrastructure", tooltip: "The brain of Cerid — processes queries, manages your KB, and coordinates all services", fixAction: "Check Docker Desktop is running" },
-  chromadb: { label: "ChromaDB (Vectors)", port: 8001, description: "Semantic search over your knowledge", category: "infrastructure", tooltip: "Stores document embeddings for fast semantic search — finds relevant content even when wording differs", fixAction: "docker compose up chromadb -d" },
-  redis: { label: "Redis (Cache)", port: 6379, description: "Query cache and audit log", category: "infrastructure", tooltip: "Speeds up repeated queries and stores your conversation audit trail", fixAction: "docker compose up redis -d" },
-  // Show Browser HTTP port (:7474) — that's what a user opens in a browser.
-  // Bolt protocol port (:7687) was previously shown, which led operators to
-  // try connecting to it as if it were the web UI (F-04-06).
-  neo4j: { label: "Neo4j (Graph DB)", port: 7474, description: "Graph relationships between documents", category: "infrastructure", tooltip: "Tracks relationships between your documents — which topics connect to which sources. Browser at :7474, Bolt protocol at :7687.", fixAction: "docker compose up neo4j -d" },
-  verification_pipeline: { label: "Verification Pipeline", port: 0, description: "Claim verification and fact-checking", category: "ai_pipeline", optional: true, tooltip: "Fact-checks AI responses against your KB and external sources" },
+const SERVICE_META: Record<string, { label: string; description: string; category: ServiceCategory; optional?: boolean; tooltip?: string; fixAction?: string }> = {
+  mcp: { label: "MCP Server (API)", description: "Core API — powers everything", category: "infrastructure", tooltip: "The brain of Cerid — processes queries, manages your KB, and coordinates all services", fixAction: "Check Docker Desktop is running" },
+  chromadb: { label: "ChromaDB (Vectors)", description: "Semantic search over your knowledge", category: "infrastructure", tooltip: "Stores document embeddings for fast semantic search — finds relevant content even when wording differs", fixAction: "docker compose up chromadb -d" },
+  redis: { label: "Redis (Cache)", description: "Query cache and audit log", category: "infrastructure", tooltip: "Speeds up repeated queries and stores your conversation audit trail", fixAction: "docker compose up redis -d" },
+  // The port shown is the Browser HTTP port, the one a user opens. The Bolt
+  // port was previously shown, which led operators to try connecting to it
+  // as if it were the web UI (F-04-06).
+  neo4j: { label: "Neo4j (Graph DB)", description: "Graph relationships between documents", category: "infrastructure", tooltip: "Tracks relationships between your documents — which topics connect to which sources. The port shown is the Neo4j Browser, not Bolt.", fixAction: "docker compose up neo4j -d" },
+  verification_pipeline: { label: "Verification Pipeline", description: "Claim verification and fact-checking", category: "ai_pipeline", optional: true, tooltip: "Fact-checks AI responses against your KB and external sources" },
 }
 
 const CATEGORY_META: Record<ServiceCategory, { label: string; icon: typeof Server }> = {
@@ -45,6 +45,8 @@ function statusBadge(status: string, serviceName?: string) {
       return <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400" aria-label={label}>Healthy</Badge>
     case "degraded":
       return <Badge variant="outline" className="border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" aria-label={label}>Degraded</Badge>
+    case "setup_mode":
+      return <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400" aria-label={label}>Waiting for setup</Badge>
     case "starting":
       return <Badge variant="outline" className="border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400" aria-label={label}><Loader2 className="h-2.5 w-2.5 animate-spin" />Starting…</Badge>
     default:
@@ -65,18 +67,18 @@ function ServiceRow({
   retesting: boolean
   onRetest: () => void
 }) {
-  const meta = SERVICE_META[svc.name] ?? { label: svc.name, port: 0, description: "", category: "optional" as ServiceCategory }
+  const meta = SERVICE_META[svc.name] ?? { label: svc.name, description: "", category: "optional" as ServiceCategory }
   const isLightweightNeo4j = lightweightMode && svc.name === "neo4j"
   const isOptional = meta.optional ?? false
-  const isOffline = svc.status !== "healthy" && svc.status !== "connected" && svc.status !== "degraded" && svc.status !== "starting"
+  const isOffline = svc.status !== "healthy" && svc.status !== "connected" && svc.status !== "degraded" && svc.status !== "starting" && svc.status !== "setup_mode"
 
   return (
     <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{meta.label}</span>
-          {meta.port > 0 && (
-            <span className="text-xs text-muted-foreground">:{meta.port}</span>
+          {(svc.port ?? 0) > 0 && (
+            <span className="text-xs text-muted-foreground">:{svc.port}</span>
           )}
           {meta.tooltip && (
             <Tooltip>

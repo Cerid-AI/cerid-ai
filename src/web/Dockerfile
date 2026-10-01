@@ -9,7 +9,6 @@ RUN npm ci
 COPY . .
 # In Docker, use nginx proxy paths (env-config.js can override at runtime)
 ENV VITE_MCP_URL=/api/mcp
-ENV VITE_BIFROST_URL=/api/bifrost
 ARG VITE_CERID_API_KEY=""
 ENV VITE_CERID_API_KEY=${VITE_CERID_API_KEY}
 RUN npm run build

@@ -3,6 +3,7 @@
 
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useLocalServerName } from "@/hooks/use-local-server-name"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PaneError } from "@/components/ui/pane-error"
@@ -18,10 +19,11 @@ import { KBOperations } from "./kb-operations"
 import { ObservabilityDashboard } from "./observability-dashboard"
 import { TrustScoreChip } from "@/components/trust-score"
 import { ProcessorPane } from "@/components/processor"
-import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
+import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchSchedulerLog, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
   const queryClient = useQueryClient()
+  const localServerName = useLocalServerName()
   const { data: maintenance, isLoading: loadingMaintenance, isError: errorMaintenance, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["maintenance"],
     queryFn: () => fetchMaintenance(["health", "collections"]),
@@ -37,6 +39,12 @@ export function MonitoringPane() {
   const { data: scheduler, isError: errorScheduler, refetch: refetchScheduler } = useQuery({
     queryKey: ["scheduler"],
     queryFn: fetchSchedulerStatus,
+    refetchInterval: 30_000,
+  })
+
+  const { data: schedulerRuns, isError: errorSchedulerRuns } = useQuery({
+    queryKey: ["scheduler-log"],
+    queryFn: () => fetchSchedulerLog(20),
     refetchInterval: 30_000,
   })
 
@@ -101,7 +109,7 @@ export function MonitoringPane() {
               <ObservabilityDashboard />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Health Cards" queryClient={queryClient}>
-              <HealthCards health={maintenance?.health} />
+              <HealthCards health={maintenance?.health} localServerName={localServerName} />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Operational Invariants" queryClient={queryClient}>
               <InvariantsCard />
@@ -131,7 +139,7 @@ export function MonitoringPane() {
                   onRetry={() => void refetchScheduler()}
                 />
               ) : (
-                <SchedulerStatus scheduler={scheduler} />
+                <SchedulerStatus scheduler={scheduler} runs={schedulerRuns} runsError={errorSchedulerRuns} />
               )}
             </PaneErrorBoundary>
           </div>

@@ -297,6 +297,56 @@ META_SELF_REFERENTIAL_PATTERNS = [
         re.I,
     ),
     re.compile(r"\byour personal (?:data|information|files|messages)\b.{0,40}\b(?:access|private)\b", re.I),
+    # Refusals about the user's own sources. A second model asked whether
+    # "I don't have access to your documents" is true can only agree, and its
+    # agreement was shown as "1/1 verified, cross-model (100% match)".
+    # "I don't have access to any documents", "... to the files you mentioned"
+    re.compile(
+        r"\bI (?:don'?t|do not|cannot|can'?t|could not|couldn'?t)\s+"
+        r"(?:have\s+)?(?:direct\s+)?access\s+(?:to\s+)?(?:any\s+)?(?:of\s+)?"
+        r"(?:the\s+|those\s+|these\s+|a\s+)?"
+        r"(?:documents?|files?|knowledge base|uploads?|attachments?)\b",
+        re.I,
+    ),
+    # "I can't find that in your knowledge base", "I was unable to locate X
+    # in the provided context", "I don't have information about X in your
+    # documents" — anchored on the first person AND on the user's sources, so
+    # "I couldn't find a 2019 study in the Cochrane database" stays a claim.
+    re.compile(
+        r"\bI(?:'m| am| was)? (?:don'?t|do not|cannot|can'?t|could not|couldn'?t|"
+        r"did not|didn'?t|unable to|not able to)\s+(?:find|locate|see|have)\b"
+        r".{0,80}?\b(?:in|from)\s+"
+        r"(?:your|the user'?s|the (?:provided|available|given|retrieved|supplied))\s+"
+        r"(?:knowledge base|KB|documents?|files?|context|sources?|notes)\b",
+        re.I,
+    ),
+    # The same statement with the sources as the subject. The object must be
+    # information itself: "Your files do not include executable permissions"
+    # is a claim.
+    re.compile(
+        r"\b(?:the (?:provided|available|given|retrieved|supplied) "
+        r"(?:context|documents?|sources?)|your (?:knowledge base|documents?|files?))\s+"
+        r"(?:does not|doesn'?t|do not|don'?t)\s+"
+        r"(?:contain|include|have|provide)\s+"
+        r"(?:(?:any|enough|sufficient|specific|relevant)\s+)?"
+        r"(?:information|details|data|anything|mention|references?)\b",
+        re.I,
+    ),
+    # Ignorance with no topic named: "I don't have information about that",
+    # "I don't have any information on that topic". With a topic ("... about
+    # the 2031 census") it does not match and keeps the ignorance verdict path.
+    re.compile(
+        r"\bI (?:don'?t|do not) have (?:(?:specific|any|detailed|enough) )?"
+        r"(?:information|data|knowledge|details) (?:about|on|regarding) "
+        r"(?:that|this|it|those|these)(?: (?:topic|subject|question|matter))?\s*[.!]?\s*$",
+        re.I,
+    ),
+    # "I don't have enough information to answer that question"
+    re.compile(
+        r"\bI (?:don'?t|do not) have (?:enough|sufficient) "
+        r"(?:information|context|data|details) to (?:answer|respond|say|help)\b",
+        re.I,
+    ),
 ]
 
 
@@ -304,6 +354,8 @@ def is_meta_self_referential(text: str) -> bool:
     """True when *text* is the assistant talking about itself (identity or
     access to the user's data) — a statement with no verifiable external
     referent, which must never become a verification claim."""
+    # Models write the typographic apostrophe; the patterns name the ASCII one.
+    text = text.replace("\u2019", "'")
     return any(p.search(text) for p in META_SELF_REFERENTIAL_PATTERNS)
 
 

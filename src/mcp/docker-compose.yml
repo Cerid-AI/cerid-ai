@@ -20,6 +20,12 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@ai-companion-redis:6379
       - ARCHIVE_PATH=/archive
       - CERID_SYNC_DIR=/sync
+      # The published host ports, so /setup/health can report the ports this
+      # stack is reachable on rather than the defaults.
+      - CERID_PORT_MCP=${CERID_PORT_MCP:-8888}
+      - CERID_PORT_NEO4J=${CERID_PORT_NEO4J:-7474}
+      - CERID_PORT_CHROMA=${CERID_PORT_CHROMA:-8001}
+      - CERID_PORT_REDIS=${CERID_PORT_REDIS:-6379}
       # Performance tuning
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}

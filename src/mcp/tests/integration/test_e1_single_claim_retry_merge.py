@@ -100,6 +100,7 @@ _FRESH_VERDICT = {
     "verification_method": "expert",
     "verification_model": "grok-4",
     "source_filename": "fresh-source.md",
+    "source_urls": ["https://example.org/fresh-source"],
     "reason": "expert re-verification",
 }
 

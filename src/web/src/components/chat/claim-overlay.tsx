@@ -11,6 +11,7 @@ import { findModel } from "@/lib/types"
 import type { HallucinationClaim } from "@/lib/types"
 import {
   getClaimDisplayStatus,
+  displayStatusLabel,
   DISPLAY_STATUS_COLORS,
   verificationMethodLabel,
   verificationMethodColor,
@@ -144,7 +145,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
     if (!span) return null
     const claim = resolveClaimData(hovered.index)
     const domainSuffix = claim?.verification_method === "kb" && claim?.source_domain ? ` · ${claim.source_domain}` : ""
-    const label = span.displayStatus + domainSuffix
+    const label = displayStatusLabel(span.displayStatus) + domainSuffix
 
     return (
       <div
@@ -172,6 +173,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
       activeClaim.verification_method,
       activeClaim.claim_type,
       activeClaim.reason,
+      activeClaim,
     )
     const methodLabel = verificationMethodLabel(activeClaim.verification_method)
     const methodColor = verificationMethodColor(activeClaim.verification_method)

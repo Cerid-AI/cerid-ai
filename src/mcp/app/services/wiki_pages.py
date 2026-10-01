@@ -340,6 +340,25 @@ async def list_entities(
     return result
 
 
+async def count_entities(
+    neo4j_driver: Any,
+    *,
+    search: str | None = None,
+    include_internal: bool = False,
+) -> int:
+    """Count the entities matching the filters :func:`list_entities` takes."""
+    try:
+        return await asyncio.to_thread(
+            _neo4j_adapter.count_entities,
+            neo4j_driver,
+            search=search,
+            include_internal=include_internal,
+        )
+    except Exception as exc:
+        log_swallowed_error("wiki.count_entities", exc)
+        raise
+
+
 def _resolve_entity_slug(neo4j_driver: Any, hint: str) -> str | None:
     """Resolve a free-text entity hint to a real ``canonical_id``.
 

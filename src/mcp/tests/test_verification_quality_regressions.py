@@ -323,7 +323,8 @@ class TestSweepReemission:
             if calls["n"] == 1:
                 raise TimeoutError("per-claim timeout")
             return {"status": "verified", "similarity": 0.88,
-                    "verification_method": "cross_model",
+                    "verification_method": "web_search",
+                    "source_urls": ["https://example.org/paris"],
                     "reason": "resolved on retry"}
 
         with (

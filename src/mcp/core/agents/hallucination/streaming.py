@@ -30,6 +30,7 @@ from core.agents.hallucination.extraction import (
     _merge_special_claims,
     _reclassify_recency,
     _resolve_pronouns_heuristic,
+    _strip_meta_sentences,
     extract_claims,
 )
 from core.agents.hallucination.patterns import (
@@ -38,11 +39,16 @@ from core.agents.hallucination.patterns import (
     _is_current_event_claim,
     _is_ignorance_admission,
     _is_recency_claim,
+    is_meta_self_referential,
 )
 from core.agents.hallucination.persistence import (
     REDIS_HALLUCINATION_PREFIX,
     REDIS_HALLUCINATION_TTL,
     get_hallucination_report,
+)
+from core.agents.hallucination.source_backing import (
+    counts_as_verified,
+    is_agreement_only,
 )
 from core.agents.hallucination.verification import (
     _check_history_consistency,
@@ -50,6 +56,7 @@ from core.agents.hallucination.verification import (
 )
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
+from utils.domain_privacy import owner_domains
 
 logger = logging.getLogger("ai-companion.hallucination")
 
@@ -279,7 +286,7 @@ async def check_hallucinations(
             "skipped": True,
             "reason": f"Response too short ({len(response_text)} chars < {min_length})",
             "claims": [],
-            "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
+            "summary": {"total": 0, "verified": 0, "agreed": 0, "unverified": 0, "uncertain": 0},
         }
 
     claims, method = await extract_claims(response_text, user_query=user_query)
@@ -291,7 +298,7 @@ async def check_hallucinations(
             "reason": "No factual claims extracted",
             "extraction_method": method,
             "claims": [],
-            "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
+            "summary": {"total": 0, "verified": 0, "agreed": 0, "unverified": 0, "uncertain": 0},
         }
 
     sem = _get_claim_verify_semaphore()
@@ -391,12 +398,16 @@ async def check_hallucinations(
 
     results = await asyncio.gather(*[_limited_verify(i, c) for i, c in enumerate(claims)])
 
-    status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}
+    status_counts = {"verified": 0, "agreed": 0, "unverified": 0, "uncertain": 0, "error": 0}
     assessed_confidence = 0.0
     assessed_count = 0
     for r in results:
         status = r.get("status", "error")
-        if status in status_counts:
+        # A second model's agreement with no source is its own count: it is not
+        # verified, and it is not unverified or uncertain either.
+        if is_agreement_only(r):
+            status_counts["agreed"] += 1
+        elif status in status_counts:
             status_counts[status] += 1
         # Mirror the streaming-path aggregate at streaming.py:984-989 — only
         # verified/unverified contribute to overall confidence; uncertain and
@@ -488,6 +499,7 @@ async def check_hallucinations(
             conversation_id=conversation_id,
             model=model,
             verified=status_counts["verified"],
+            agreed=status_counts["agreed"],
             unverified=status_counts["unverified"],
             uncertain=status_counts["uncertain"],
             total=len(results),
@@ -513,14 +525,16 @@ def _summarize_claims(
     """Recompute (status counts, overall_score) from a claims list.
 
     Single source of truth for a report's summary: every present claim lands in
-    exactly one bucket, so verified+unverified+uncertain+skipped == total (the
-    CR-037/CR-107 invariant — the summary agrees with its own claims array). A
+    exactly one bucket, so verified+agreed+unverified+uncertain+skipped == total
+    (the CR-037/CR-107 invariant — the summary agrees with its own claims array).
+    ``agreed`` is the claims a second model agreed with and no source backs. A
     ``status='error'`` claim the sweep could not resolve folds into uncertain
     (matching the main loop's pre-sweep semantics) rather than vanishing from
     every counter. ``overall`` = mean similarity over assessed verified/unverified
     claims, which includes deadline-fallback verified claims (CR-115).
     """
-    verified = sum(1 for r in claims if r and r.get("status") == "verified")
+    verified = sum(1 for r in claims if r and counts_as_verified(r))
+    agreed = sum(1 for r in claims if r and is_agreement_only(r))
     unverified = sum(1 for r in claims if r and r.get("status") == "unverified")
     skipped = sum(1 for r in claims if r and r.get("status") == "skipped")
     # Everything present that is not verified/unverified/skipped (uncertain,
@@ -536,6 +550,7 @@ def _summarize_claims(
     overall = round(sum(assessed) / len(assessed), 3) if assessed else 0.0
     counts = {
         "verified": verified,
+        "agreed": agreed,
         "unverified": unverified,
         "uncertain": uncertain,
         "skipped": skipped,
@@ -639,6 +654,7 @@ async def verify_response_streaming(
             "type": "summary",
             "overall_confidence": 0,
             "verified": 0,
+            "agreed": 0,
             "unverified": 0,
             "uncertain": 0,
             "total": 0,
@@ -652,14 +668,19 @@ async def verify_response_streaming(
     ignorance_claims = _extract_ignorance_claims(response_text)
     evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
     citation_claims = _extract_citation_claims(response_text)
+    # The extractors never see the assistant's refusals and statements about
+    # itself (see extraction._strip_meta_sentences). Claim context below is
+    # still cut from response_text, the text the user saw.
+    extractable = _strip_meta_sentences(response_text)
     if _evasion_supersedes_primary(response_text, evasion_claims):
         # Whole-response evasion: heuristic output would only restate the
         # hedge — see extraction._evasion_supersedes_primary. The nonempty
         # special set below also short-circuits Stage 2's LLM extraction.
         heuristic_claims: list[str] = []
     else:
-        heuristic_raw = _extract_claims_heuristic(response_text)
-        heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
+        heuristic_raw = _extract_claims_heuristic(extractable)
+        heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, extractable, user_query)
+        heuristic_claims = [c for c in heuristic_claims if not is_meta_self_referential(c)]
     initial_claims = _merge_special_claims(
         heuristic_claims, ignorance_claims, evasion_claims, citation_claims, max_claims,
     )
@@ -669,15 +690,18 @@ async def verify_response_streaming(
     # If heuristic found nothing → fall back to LLM extraction (complex/conversational response).
     if initial_claims:
         method = "heuristic"
+    elif not extractable:
+        method = "none"
     else:
         # No heuristic claims — must wait for LLM
         try:
             llm_result = await asyncio.wait_for(
-                _extract_claims_llm(response_text, max_claims, user_query=user_query),
+                _extract_claims_llm(extractable, max_claims, user_query=user_query),
                 timeout=30,
             )
+            llm_result = [c for c in llm_result or [] if not is_meta_self_referential(c)]
             initial_claims = _merge_special_claims(
-                llm_result or [], ignorance_claims, evasion_claims, citation_claims, max_claims,
+                llm_result, ignorance_claims, evasion_claims, citation_claims, max_claims,
             )
             method = "llm" if llm_result else "none"
         except TimeoutError:
@@ -694,6 +718,7 @@ async def verify_response_streaming(
             "type": "summary",
             "overall_confidence": 0,
             "verified": 0,
+            "agreed": 0,
             "unverified": 0,
             "uncertain": 0,
             "total": 0,
@@ -759,7 +784,7 @@ async def verify_response_streaming(
         # Anti-circularity: mirror the per-claim path — never retrieve from
         # the conversations domain, or a response verifies against its own
         # (or a prior turn's) transcript once it gets ingested.
-        batch_domains = [d for d in config.DOMAINS if d != "conversations"]
+        batch_domains = [d for d in owner_domains() if d != "conversations"]
         batch_kb_context = await lightweight_kb_query(
             batch_query, domains=batch_domains, chroma_client=chroma_client,
             top_k=15,
@@ -941,6 +966,8 @@ async def verify_response_streaming(
 
     # --- Parallel verification via asyncio.as_completed ---
     verified_count = 0
+    # Settled with a second model's agreement and no source: progress, not verified.
+    agreed_count = 0
     unverified_count = 0
     uncertain_count = 0
     skipped_count = 0
@@ -1143,14 +1170,16 @@ async def verify_response_streaming(
         UI, instead of counting claims the report never stored) and emits each
         through the shared ``_claim_verified_event`` builder.
         """
-        nonlocal verified_count, uncertain_count
+        nonlocal verified_count, agreed_count, uncertain_count
         for j in range(len(claims)):
             if collected_results[j] is not None:
                 continue  # already has a verdict
             result = _fallback_result(j)
             collected_results[j] = result
-            if result["status"] == "verified":
+            if counts_as_verified(result):
                 verified_count += 1
+            elif is_agreement_only(result):
+                agreed_count += 1
             else:
                 uncertain_count += 1
             yield _claim_verified_event(j, result)
@@ -1202,7 +1231,7 @@ async def verify_response_streaming(
                     "Streaming verification total timeout reached (%ds) "
                     "after %d/%d claims",
                     config.STREAMING_TOTAL_TIMEOUT,
-                    verified_count + unverified_count + uncertain_count,
+                    verified_count + agreed_count + unverified_count + uncertain_count,
                     len(claims),
                 )
                 stream_interrupted = True
@@ -1253,7 +1282,10 @@ async def verify_response_streaming(
             confidence = result.get("similarity", 0.0)
 
             if status == "verified":
-                verified_count += 1
+                if is_agreement_only(result):
+                    agreed_count += 1
+                else:
+                    verified_count += 1
                 assessed_confidence += confidence
                 assessed_count += 1
             elif status == "unverified":
@@ -1284,7 +1316,7 @@ async def verify_response_streaming(
     except Exception as loop_exc:
         logger.error(
             "Verification loop interrupted after %d/%d claims: %s",
-            verified_count + unverified_count + uncertain_count,
+            verified_count + agreed_count + unverified_count + uncertain_count,
             len(claims),
             loop_exc,
         )
@@ -1313,7 +1345,7 @@ async def verify_response_streaming(
             "error_type": "stream_interrupted",
             "phase": "verification",
             "message": str(loop_exc)[:500],
-            "claims_seen": verified_count + unverified_count + uncertain_count,
+            "claims_seen": verified_count + agreed_count + unverified_count + uncertain_count,
             "claims_total": len(claims),
             "recoverable": True,
         }
@@ -1371,6 +1403,7 @@ async def verify_response_streaming(
         "overall_confidence": round(overall, 3),
         **({"metamorphic_score": _metamorphic} if _metamorphic else {}),
         "verified": verified_count,
+        "agreed": agreed_count,
         "unverified": unverified_count,
         "uncertain": uncertain_count,
         "skipped": skipped_count,
@@ -1441,7 +1474,8 @@ async def verify_response_streaming(
         # Recount after sweep. E1 CR-107: fold status='error' into uncertain (a
         # claim the sweep could not resolve must not vanish from every counter),
         # matching _summarize_claims and the pre-sweep main-loop semantics.
-        verified_count = sum(1 for r in collected_results if r and r.get("status") == "verified")
+        verified_count = sum(1 for r in collected_results if r and counts_as_verified(r))
+        agreed_count = sum(1 for r in collected_results if r and is_agreement_only(r))
         unverified_count = sum(1 for r in collected_results if r and r.get("status") == "unverified")
         uncertain_count = sum(
             1 for r in collected_results
@@ -1457,10 +1491,14 @@ async def verify_response_streaming(
             if resolved_result is not None:
                 yield _claim_verified_event(idx, resolved_result)
         if sweep_resolved:
-            assessed = verified_count + unverified_count
+            assessed = sum(
+                1 for r in collected_results
+                if r and r.get("status") in ("verified", "unverified")
+            )
             yield {
                 "type": "summary_update",
                 "verified": verified_count,
+                "agreed": agreed_count,
                 "unverified": unverified_count,
                 "uncertain": uncertain_count,
                 "total": len(claims),
@@ -1536,6 +1574,7 @@ async def verify_response_streaming(
         "summary": {
             "total": durable_counts["total"],
             "verified": durable_counts["verified"],
+            "agreed": durable_counts["agreed"],
             "unverified": durable_counts["unverified"],
             "uncertain": durable_counts["uncertain"],
             "skipped": durable_counts["skipped"],
@@ -1613,6 +1652,7 @@ async def verify_response_streaming(
             conversation_id=conversation_id,
             model=model,
             verified=verified_count,
+            agreed=agreed_count,
             unverified=unverified_count,
             uncertain=uncertain_count,
             total=len(claims),
@@ -1704,6 +1744,7 @@ async def verify_response_streaming(
                 claims=durable_claims,
                 overall_score=durable_overall,
                 verified=durable_counts["verified"],
+                agreed=durable_counts["agreed"],
                 unverified=durable_counts["unverified"],
                 uncertain=durable_counts["uncertain"],
                 total=durable_counts["total"],

@@ -281,6 +281,19 @@ describe("ChatPanel — four-state matrix (D.2)", () => {
 // D.3: axe-clean
 // ---------------------------------------------------------------------------
 
+// jsdom does no layout, so this pins the rule rather than the pixels: the
+// column's one-line previews give it a min-content width wider than a phone,
+// and a flex item will not shrink below that unless told it may. Measured in
+// a browser at 375 px: the column spanned -28 to 403 before, 0 to 375 after.
+describe("ChatPanel — welcome screen on a narrow window (audit 52)", () => {
+  it("lets the welcome column shrink to the window", () => {
+    render(<ChatPanel />, { wrapper: makeWrapper() })
+    const column = screen.getByRole("heading", { level: 1 }).parentElement!.parentElement!
+    expect(column).toHaveClass("max-w-md")
+    expect(column).toHaveClass("min-w-0")
+  })
+})
+
 describe("ChatPanel — axe-clean (D.3)", () => {
   it("is axe-clean (D.3) in idle/welcome state", async () => {
     const { container } = render(<ChatPanel />, { wrapper: makeWrapper() })

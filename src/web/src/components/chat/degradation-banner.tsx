@@ -106,7 +106,7 @@ export function DegradationBanner() {
   // Compute adaptive poll interval
   const pollIntervalRef = useRef(POLL_HEALTHY_MS)
 
-  const { data: health, isError: isHealthFetchError } = useQuery({
+  const { data: health, isError: isHealthFetchError, errorUpdateCount } = useQuery({
     queryKey: ["health-status"],
     queryFn: fetchHealthStatus,
     refetchInterval: () => pollIntervalRef.current,
@@ -117,7 +117,12 @@ export function DegradationBanner() {
   // A failed fetch (retries exhausted) must not be read as the healthiest
   // "full" tier — that both hides a real outage and resets the adaptive
   // poll back to the healthy cadence. See WB-18.
-  const tier: BannerTier = isHealthFetchError ? "unknown" : ((health?.degradation_tier ?? "full") as DegradationTier)
+  // A refetch after a failure with no earlier answer puts the query back to
+  // "pending" with no error, which is not a recovery.
+  const neverAnswered = health === undefined && errorUpdateCount > 0
+  const tier: BannerTier = isHealthFetchError || neverAnswered
+    ? "unknown"
+    : ((health?.degradation_tier ?? "full") as DegradationTier)
   const info = tier !== "full" ? TIER_INFO[tier] : undefined
   const isDegraded = tier !== "full"
 

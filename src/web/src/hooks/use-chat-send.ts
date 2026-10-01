@@ -24,17 +24,14 @@ const PRUNE_TARGET_RATIO = 0.5
  *  does not pass options.autoInjectMax. */
 const DEFAULT_AUTO_INJECT_MAX = 3
 
-/** Budget for the auto-inject KB round trip. Past this the send goes out
- *  without fresh context rather than making the user wait. This is a
- *  responsiveness budget: breaching it says the answer will be ungrounded,
- *  not that the knowledge base is unhealthy. */
-const KB_INJECT_TIMEOUT_MS = 500
-
-/** Budget past which the knowledge base is not slow, it is not answering.
- *  Only a breach of THIS one is reported as degradation, and only a question
- *  that cannot be answered without grounding waits for it — for those the
- *  alternative is a fabricated denial, which is worth a couple of seconds. */
-const KB_DEGRADED_TIMEOUT_MS = 3_000
+/** How long a send waits for the knowledge base. Every question waits for it:
+ *  at 500 ms no answer was grounded on a host whose retrieval takes 1.7 to
+ *  3.9 s (twelve live queries, 2026-09-27), and an early answer without the
+ *  user's documents is worth less than a later one with them. A host that
+ *  answers quickly never reaches this. Past it the knowledge base is not
+ *  slow, it is not answering, and that is reported as degradation for the
+ *  questions that cannot be answered without it. */
+const KB_WAIT_TIMEOUT_MS = 5_000
 
 /** Outcome of the auto-inject KB round trip. A plain `null` cannot say
  *  whether the KB had nothing, took too long, or failed — and the caller has
@@ -115,6 +112,14 @@ interface UseChatSendOptions {
   // KB context
   injectedContext: KBQueryResult[]
   kbResults: KBQueryResult[]
+  /** The text `kbResults` was retrieved for. The panel queries with the last
+   *  message already in the conversation, so at send time its results belong
+   *  to the previous question; they stand in for a query only when this
+   *  equals the text being sent (a regenerate). */
+  kbResultsQuery?: string
+  /** Retrieval for the text being sent, shared with the panel's own request.
+   *  Absent, the send queries the knowledge base itself. */
+  retrieve?: (content: string) => Promise<Awaited<ReturnType<typeof queryKB>>>
   clearInjected: () => void
 
   /** Private Mode level (0=off, 1=no logging, 2=also bypass KB injection,
@@ -240,8 +245,8 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
       const priorInjected = injectedHistoryRef.current
 
-      // Auto-inject: query KB with the CURRENT message, with a 500ms timeout
-      // to avoid blocking the stream start. Falls back to stale results on timeout.
+      // Auto-inject: query KB with the CURRENT message and wait for it up to
+      // KB_WAIT_TIMEOUT_MS. On timeout the send goes out with no KB context.
       // IMPORTANT: AbortController ensures timed-out fetches release browser
       // connection slots immediately, preventing the chat/stream request from
       // being queued behind stale KB queries.
@@ -250,50 +255,35 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // degradedReason (from the orchestrated context query), superseded by
       // the send-time KB query's own envelope when one fires below.
       let effectiveDegradedReason = options.degradedReason ?? ""
-      // Skip auto-inject on the first message of a conversation — the KB
-      // queries compete for browser connection slots and backend event loop
-      // time, delaying the chat/stream response.  Follow-up messages benefit
-      // more from context injection once the conversation topic is established.
-      const isFirstMessage = !(options.activeMessages?.length)
-      if (options.autoInject && !isFirstMessage && !bypassKB) {
-        let freshResults = options.kbResults
-        // Only hit the network when the cache is cold. Wave-0 Task 3:
-        // useOrchestratedQuery / useKBContext already populate TanStack
-        // cache with staleTime 15s — re-firing queryKB here duplicates work
-        // and saturates the backend _QUERY_SEMAPHORE.
-        const cacheCold = !freshResults || freshResults.length === 0
+      if (options.autoInject && !bypassKB) {
+        const cacheWarm =
+          options.kbResults.length > 0 && options.kbResultsQuery === content
+        let freshResults: KBQueryResult[] = cacheWarm ? options.kbResults : []
+        // Only hit the network when the panel has not already retrieved for
+        // this text. Wave-0 Task 3: useOrchestratedQuery / useKBContext
+        // populate the TanStack cache — re-firing queryKB for the same text
+        // duplicates work and saturates the backend _QUERY_SEMAPHORE.
+        const cacheCold = !cacheWarm
         if (cacheCold && content.length > 2) {
           const injectAbort = new AbortController()
-          // Questions about the user's own data are the ones the deferral gate
-          // below can refuse outright, so they get the long budget: waiting two
-          // more seconds for real grounding beats answering "I don't have
-          // access to your mail" because a healthy backend took 700ms.
           const groundingCritical = isPersonalDataQuery(content)
-          // A grace period past the wait deadline: the abort has to land AFTER
-          // the timeout verdict, or the cancelled fetch rejects first and a
-          // knowledge base that never answered is reported as one that failed.
-          const abortAfter =
-            (groundingCritical ? KB_DEGRADED_TIMEOUT_MS : KB_INJECT_TIMEOUT_MS) + 50
           const timers: ReturnType<typeof setTimeout>[] = []
-          const abortTimer = setTimeout(() => injectAbort.abort(), abortAfter)
-          timers.push(abortTimer)
-          const timeoutAfter = (ms: number) =>
-            new Promise<KBInjectOutcome>((resolve) => {
-              timers.push(setTimeout(() => resolve({ kind: "timeout" }), ms))
-            })
-          // The soft budget stops the WAIT; it no longer aborts the request,
-          // because a request cancelled at 500ms can never distinguish a slow
-          // backend from a dead one.
-          const softTimeout = timeoutAfter(KB_INJECT_TIMEOUT_MS)
+          const waitTimeout = new Promise<KBInjectOutcome>((resolve) => {
+            timers.push(setTimeout(() => resolve({ kind: "timeout" }), KB_WAIT_TIMEOUT_MS))
+          })
           // E1 R16: honor contextSources.memory — do not recall when Memory is off.
           const memoryOn = options.memoryEnabled !== false
           // The KB leg is tagged so a 5xx, an abort and a genuinely empty
           // knowledge base stay three different answers all the way to the
           // degraded-reason check below — collapsing them into `null` is what
           // let a KB outage render as "you have nothing about that".
-          const kbLeg: Promise<KBInjectOutcome> = queryKB(
-            content, undefined, 5, undefined,
-            { signal: injectAbort.signal, excludePacks: !options.includePacks },
+          const kbLeg: Promise<KBInjectOutcome> = (
+            options.retrieve
+              ? options.retrieve(content)
+              : queryKB(content, undefined, 5, undefined, {
+                  signal: injectAbort.signal,
+                  excludePacks: !options.includePacks,
+                })
           )
             .then((value) => ({ kind: "ok" as const, value }))
             .catch(() => ({ kind: "error" as const }))
@@ -301,19 +291,20 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           let freshMemories: unknown
           try {
             ;[kbOutcome, freshMemories] = await Promise.all([
-              Promise.race<KBInjectOutcome>([kbLeg, softTimeout]),
+              Promise.race<KBInjectOutcome>([kbLeg, waitTimeout]),
               memoryOn
-                ? Promise.race([recallMemories(content, 3).catch(() => []), softTimeout]).catch(() => [])
+                ? Promise.race([recallMemories(content, 3).catch(() => []), waitTimeout]).catch(() => [])
                 : Promise.resolve([]),
             ])
-            if (kbOutcome.kind === "timeout" && groundingCritical) {
-              kbOutcome = await Promise.race<KBInjectOutcome>([
-                kbLeg,
-                timeoutAfter(KB_DEGRADED_TIMEOUT_MS - KB_INJECT_TIMEOUT_MS),
-              ])
-            }
           } finally {
             for (const t of timers) clearTimeout(t)
+            // Release the send's own request once the wait is decided. The
+            // abort used to sit on a timer that the line above cleared, so a
+            // request that outran the wait ran on and held a backend slot.
+            // It follows the verdict, so a knowledge base that never answered
+            // is not reported as one that failed. A shared request is the
+            // panel's and is not the send's to cancel.
+            injectAbort.abort()
           }
           if (!Array.isArray(freshMemories)) freshMemories = []
           const freshKB = kbOutcome.kind === "ok" ? kbOutcome.value : null
@@ -321,12 +312,8 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             freshResults = freshKB.results
           }
           if (kbOutcome.kind === "timeout") {
-            // Outrunning the inject budget is not evidence of a sick backend,
-            // and reporting it as one turned every slow-but-fine answer into a
-            // degradation notice — and, for a personal-data question, into a
-            // refusal. Only the degradation budget produces a verdict.
             if (groundingCritical) {
-              effectiveDegradedReason = `Knowledge base did not answer within ${KB_DEGRADED_TIMEOUT_MS}ms`
+              effectiveDegradedReason = `Knowledge base did not answer within ${KB_WAIT_TIMEOUT_MS}ms`
             }
           } else if (kbOutcome.kind === "error") {
             effectiveDegradedReason = "KB search failed"
@@ -334,11 +321,8 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             effectiveDegradedReason = freshKB.degraded_reason
           }
           // Merge memories into the candidate pool as pseudo-KB results.
-          // Clone first — when the KB query returned nothing, freshResults
-          // still aliases the caller's kbResults state array (mirrors the
-          // warm-cache branch below); mutating it duplicates memory entries.
           if (memoryOn && Array.isArray(freshMemories) && freshMemories.length > 0) {
-            freshResults = [...(freshResults ?? [])]
+            freshResults = [...freshResults]
             for (const mem of freshMemories) {
               freshResults.push(memoryToKBResult(mem))
             }
@@ -478,6 +462,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           content: buildDeferralMessage(effectiveDegradedReason),
           timestamp: Date.now(),
           degradedReason: effectiveDegradedReason,
+          deferral: true,
         })
         return
       }

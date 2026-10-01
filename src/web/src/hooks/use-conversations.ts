@@ -24,6 +24,13 @@ function isPrivateModeActive(): boolean {
   try { return localStorage.getItem("cerid-private-mode") === "true" } catch { return false }
 }
 
+/** Mark a conversation private once it takes message content while private
+ *  mode is on. The mark is never cleared: turning private mode off later must
+ *  not let what was said under it reach storage or the server. */
+function markPrivate(c: Conversation): Conversation {
+  return !c.private && isPrivateModeActive() ? { ...c, private: true } : c
+}
+
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
 
 /** Migrate old model IDs (missing openrouter/ prefix), validate against current MODELS list,
@@ -66,7 +73,9 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
 function loadConversations(): Conversation[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    const convos: Conversation[] = raw ? JSON.parse(raw) : []
+    const stored: Conversation[] = raw ? JSON.parse(raw) : []
+    const convos = stored.filter((c) => !c.private)
+    if (convos.length !== stored.length) saveConversations(convos)
     return migrateConversations(convos)
   } catch {
     return []
@@ -75,7 +84,8 @@ function loadConversations(): Conversation[] {
 
 function saveConversations(convos: Conversation[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(convos.slice(0, MAX_CONVERSATIONS)))
+    const storable = convos.filter((c) => !c.private)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(storable.slice(0, MAX_CONVERSATIONS)))
   } catch {
     // localStorage may be full or unavailable
   }
@@ -207,6 +217,7 @@ export function useConversations() {
     serverPendingRef.current.delete(id)
     if (!op) return
     if (isPrivateModeActive()) return  // local-only; symmetric for upsert + delete
+    if (op.kind === "upsert" && op.convo.private) return
     if (op.kind === "delete") {
       deleteConversationSync(id)
         .then(() => { clearTombstone(id); setSyncFailing(false) })  // server acked → forget the tombstone
@@ -254,7 +265,7 @@ export function useConversations() {
         for (const [id, op] of serverPending) {
           if (op.kind === "delete") {
             deleteConversationSync(id).then(() => clearTombstone(id)).catch(() => {})
-          } else {
+          } else if (!op.convo.private) {
             syncConversation(op.convo).catch(() => {})
           }
         }
@@ -293,7 +304,7 @@ export function useConversations() {
         const title = c.messages.length === 0 && message.role === "user"
           ? message.content.slice(0, 60) + (message.content.length > 60 ? "..." : "")
           : c.title
-        return { ...c, messages, title, updatedAt: Date.now() }
+        return markPrivate({ ...c, messages, title, updatedAt: Date.now() })
       })
       const updated = next.find((c) => c.id === convoId)
       persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
@@ -309,7 +320,7 @@ export function useConversations() {
         if (messages.length > 0) {
           messages[messages.length - 1] = { ...messages[messages.length - 1], content }
         }
-        return { ...c, messages, updatedAt: Date.now() }
+        return markPrivate({ ...c, messages, updatedAt: Date.now() })
       })
       const updated = next.find((c) => c.id === convoId)
       persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined, streaming: true })
@@ -367,7 +378,7 @@ export function useConversations() {
   const replaceMessages = useCallback((convoId: string, newMessages: ChatMessage[]) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
-        c.id === convoId ? { ...c, messages: newMessages, updatedAt: Date.now() } : c,
+        c.id === convoId ? markPrivate({ ...c, messages: newMessages, updatedAt: Date.now() }) : c,
       )
       const updated = next.find((c) => c.id === convoId)
       persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
@@ -581,7 +592,7 @@ export function useConversations() {
             if (serverTs > localTs) {
               byId.set(sc.id, sc)
               changed = true
-            } else if (localTs > serverTs && !isPrivateModeActive()) {
+            } else if (localTs > serverTs && !existing.private && !isPrivateModeActive()) {
               // Local has newer changes the server never received (e.g.
               // previous syncConversation() failed). Push now.
               syncConversation(existing).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
@@ -592,7 +603,7 @@ export function useConversations() {
           // tombstoned id — that would re-create what we just deleted).
           if (!isPrivateModeActive()) {
             for (const c of local) {
-              if (!serverIds.has(c.id) && !tombstones.has(c.id)) {
+              if (!c.private && !serverIds.has(c.id) && !tombstones.has(c.id)) {
                 syncConversation(c).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
               }
             }

@@ -143,3 +143,71 @@ def test_streaming_stamps_claim_type_into_the_promotion_input():
         "run_claims is built without stamping claim_type; promote_verified_facts "
         "will receive untyped claims and its meta-claim filter goes dead again."
     )
+
+
+# ---------------------------------------------------------------------------
+# A verdict with no source is not promoted
+# ---------------------------------------------------------------------------
+
+
+def _promote_one(claim: dict) -> tuple[dict, list[dict]]:
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from core.agents.verified_memory import promote_verified_facts
+
+    created: list[dict] = []
+
+    def _create(_driver, payload):
+        created.append(payload)
+        return "mem-1"
+
+    with patch("core.agents.memory.detect_memory_conflict", new=AsyncMock(return_value=[])):
+        counts = asyncio.run(promote_verified_facts(
+            {"conversation_id": "", "claims": [claim]},
+            chroma_client=None,
+            neo4j_driver=None,
+            create_memory_fn=_create,
+        ))
+    return counts, created
+
+
+_AGREED = {"status": "verified", "similarity": 1.0, "claim_type": "factual",
+           "verification_method": "cross_model"}
+
+
+def test_cross_model_agreement_alone_does_not_make_a_memory():
+    """The live case of 2026-09-27: a refusal no pattern names, agreed by a
+    second model, became a memory and fed later answers."""
+    counts, created = _promote_one({
+        **_AGREED,
+        "claim": "Cerid-anneal is not a widely recognized term, and without "
+                 "specific context or documentation, I cannot provide a definition",
+        "source_urls": [],
+    })
+    assert created == []
+    assert counts["promoted"] == 0
+    assert counts["skipped_no_source"] == 1
+
+
+def test_a_claim_verified_against_a_url_is_promoted():
+    counts, created = _promote_one({
+        **_AGREED,
+        "claim": "Tokyo has a population of about 14 million people",
+        "verification_method": "web_search",
+        "source_urls": ["https://example.org/tokyo"],
+    })
+    assert counts["skipped_no_source"] == 0
+    assert len(created) == 1
+
+
+def test_a_claim_verified_against_an_artifact_is_promoted():
+    counts, created = _promote_one({
+        **_AGREED,
+        "claim": "The relay service listens on port 7443",
+        "verification_method": "kb_nli",
+        "nli_entailment": 0.92,
+        "source_artifact_id": "art-relay",
+    })
+    assert counts["skipped_no_source"] == 0
+    assert created[0]["artifact_id"] == "art-relay"

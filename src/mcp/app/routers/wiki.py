@@ -478,7 +478,7 @@ async def list_knowledge_log(
     since: str | None = None,
     limit: int = 50,
 ) -> KnowledgeLogResponse:
-    from app.db.neo4j.knowledge_log import list_log_entries
+    from app.db.neo4j.knowledge_log import count_log_entries, list_log_entries
     from app.deps import get_neo4j
 
     driver = get_neo4j()
@@ -488,6 +488,7 @@ async def list_knowledge_log(
         rows = list_log_entries(
             driver, entity_slug=entity_slug, since=since, limit=limit,
         )
+        total = count_log_entries(driver, entity_slug=entity_slug, since=since)
     except Exception as exc:
         log_swallowed_error("wiki.knowledge_log.list", exc)
         raise HTTPException(status_code=500, detail="Failed to list log") from exc
@@ -503,7 +504,7 @@ async def list_knowledge_log(
         )
         for r in rows
     ]
-    return KnowledgeLogResponse(entries=entries, total=len(entries))
+    return KnowledgeLogResponse(entries=entries, total=total)
 
 
 @router.get(
@@ -543,11 +544,14 @@ async def list_knowledge_index(
     # Reuse list_entities then project to the K4.3 shape.
     # q is passed pre-limit into list_entities so filtering spans the whole
     # entity set rather than a post-limit slice.
-    from app.services.wiki_pages import list_entities  # noqa: PLC0415
+    from app.services.wiki_pages import count_entities, list_entities  # noqa: PLC0415
 
     try:
         summaries = await list_entities(
             driver, limit=limit, search=q or None, include_internal=include_internal
+        )
+        total = await count_entities(
+            driver, search=q or None, include_internal=include_internal
         )
     except Exception as exc:
         log_swallowed_error("wiki.knowledge_index.list", exc)
@@ -569,7 +573,7 @@ async def list_knowledge_index(
         )
         for s in summaries
     ]
-    return KnowledgeIndexResponse(entries=entries, total=len(entries))
+    return KnowledgeIndexResponse(entries=entries, total=total)
 
 
 # ---------------------------------------------------------------------------

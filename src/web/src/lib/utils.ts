@@ -22,6 +22,34 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * A relevance score as a bar length and its accessible name. Retrieval
+ * relevance is a relative score, not a probability, so it is measured against
+ * the best result in the same list (`among`); a source that stands alone is
+ * measured against 1.0. The backend's boosts can lift a score past 1.0, so
+ * the ratio is capped.
+ */
+export function relativeRelevance(
+  relevance: number,
+  among?: readonly number[],
+): { pct: number; label: string } {
+  if (!among || among.length === 0) {
+    const ratio = Math.min(1, Math.max(0, relevance))
+    return {
+      pct: Math.round(ratio * 100),
+      label: `Relevance: ${ratio.toFixed(2)} out of 1.00, single source`,
+    }
+  }
+  const best = Math.max(...among)
+  const ratio = best > 0 ? Math.min(1, Math.max(0, relevance / best)) : 0
+  const rank = 1 + among.filter((s) => s > relevance).length
+  const total = among.length
+  return {
+    pct: Math.round(ratio * 100),
+    label: `Relevance: ${rank} of ${total} result${total === 1 ? "" : "s"}, ${ratio.toFixed(2)} relative to the best match`,
+  }
+}
+
 /** Generate a UUID v4, with fallback for insecure contexts (plain HTTP on LAN). */
 export function uuid(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID()

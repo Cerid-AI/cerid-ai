@@ -5,8 +5,9 @@
  * ClaimBadge — per-claim verification badge with hover provenance.
  *
  * Renders a keyboard-focusable `<button>` wrapping a shadcn Badge with
- * variant matching the four linguistic bands:
+ * variant matching the five linguistic bands:
  *   - "verified"   → green / CheckCircle icon
+ *   - "agreed"     → neutral / MessagesSquare icon (a second model agreed, no source)
  *   - "partial"    → amber / Minus icon
  *   - "refuted"    → red / XCircle icon   (a check actively disagreed)
  *   - "unverified" → red / HelpCircle icon (nothing found either way)
@@ -22,7 +23,7 @@
  * WCAG 2.1 AA: color paired with icon; aria-label includes band + count.
  */
 
-import { CheckCircle, HelpCircle, Minus, XCircle, type LucideIcon } from "lucide-react"
+import { CheckCircle, HelpCircle, MessagesSquare, Minus, XCircle, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   HoverCard,
@@ -52,6 +53,12 @@ const BAND_STYLES: Record<
     label: (n) => UX_COPY.verification.verified(n),
     ariaLabel: (n) => UX_COPY.verification.ariaVerified(n),
   },
+  agreed: {
+    badge: "border-border bg-muted/50 text-muted-foreground hover:bg-muted",
+    icon: "text-muted-foreground",
+    label: () => UX_COPY.verification.agreed,
+    ariaLabel: () => UX_COPY.verification.ariaAgreed,
+  },
   partial: {
     badge:
       "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20",
@@ -77,6 +84,7 @@ const BAND_STYLES: Record<
 
 const BAND_ICONS: Record<VerificationBand, LucideIcon> = {
   verified: CheckCircle,
+  agreed: MessagesSquare,
   partial: Minus,
   refuted: XCircle,
   unverified: HelpCircle,

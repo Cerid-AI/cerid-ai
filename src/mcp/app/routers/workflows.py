@@ -196,7 +196,7 @@ NODE_TYPE_CATALOG: dict[str, dict[str, str | None]] = {
     },
     "condition": {
         "label": "Condition",
-        "description": "Evaluates a comparison expression against the data flowing in. When the expression is false, downstream nodes are skipped.",
+        "description": "Evaluates a comparison expression against the data flowing in. Edges leaving it run their target when the expression is true; an edge whose condition is \"false\" runs its target when the expression is false instead. Nodes reachable only through the branch not taken are skipped.",
         "inputs": "Upstream node outputs merged with the workflow input.",
         "outputs": "A passed flag plus the unchanged upstream data.",
         "config_schema_summary": "expression — a comparison of one field against a value, e.g. confidence > 0.5 (operators: == != > < >= <=).",
@@ -518,8 +518,12 @@ async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> Wo
 
     # Build adjacency + edge map for condition evaluation
     adj: dict[str, list[WorkflowEdge]] = defaultdict(list)
+    # Incoming edges still able to deliver data; a node that had parents and
+    # has none left live is skipped, which is what carries a skip downstream.
+    live_in: dict[str, int] = {}
     for edge in workflow.edges:
         adj[edge.source_id].append(edge)
+        live_in[edge.target_id] = live_in.get(edge.target_id, 0) + 1
 
     node_outputs: dict[str, Any] = {}
     results: dict[str, Any] = {}
@@ -527,6 +531,12 @@ async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> Wo
     try:
         for nid in order:
             node = node_map[nid]
+
+            if live_in.get(nid) == 0:
+                results[nid] = {"node": node.name, "type": "skipped"}
+                for edge in adj.get(nid, []):
+                    live_in[edge.target_id] -= 1
+                continue
 
             # Gather inputs from upstream nodes
             upstream_data = dict(input_data)
@@ -544,13 +554,12 @@ async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> Wo
                 passed = await _evaluate_condition(expr, upstream_data)
                 node_outputs[nid] = {"passed": passed, **upstream_data}
                 results[nid] = {"node": node.name, "type": "condition", "passed": passed}
-                # If condition fails, skip downstream nodes by removing edges
-                if not passed:
-                    for edge in adj.get(nid, []):
-                        if edge.condition and edge.condition.lower() == "true":
-                            continue
-                        # Mark downstream as skipped
-                        results[edge.target_id] = {"node": node_map.get(edge.target_id, WorkflowNode(type=NodeType.TOOL, name="unknown")).name, "type": "skipped"}
+                # An edge labelled "false" is the else branch; every other edge,
+                # labelled "true" or not, carries data only when the condition passed.
+                for edge in adj.get(nid, []):
+                    wants = (edge.condition or "").strip().lower() != "false"
+                    if wants != passed:
+                        live_in[edge.target_id] -= 1
 
             elif node.type in (NodeType.TOOL, NodeType.PARSER):
                 # Generic passthrough for tool/parser nodes

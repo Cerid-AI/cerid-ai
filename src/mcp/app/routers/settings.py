@@ -305,7 +305,7 @@ class SettingsUpdateRequest(BaseModel):
         None,
         description=(
             "Toggle parent-child (small-to-big) chunk retrieval. Backed "
-            "by env PARENT_CHILD_ENABLED. Surfaced via the recommender's "
+            "by env ENABLE_PARENT_CHILD_RETRIEVAL. Surfaced via the recommender's "
             "Enable payload."
         ),
     )
@@ -395,6 +395,73 @@ class SettingsUpdateRequest(BaseModel):
         None, ge=0,
         description="Token count above which hybrid mode may route a job to the API tier.",
     )
+
+
+# Where each field of SettingsUpdateRequest is saved. Every field belongs to
+# exactly one group; tests/test_settings_restart_roundtrip.py fails otherwise.
+#
+# HOST_SETTING_KEYS: the right value depends on what is installed on the
+# machine, so these go to config.HOST_SETTINGS_PATH and are never read from
+# the sync directory, which is shared between machines.
+HOST_SETTING_KEYS = frozenset({
+    # Inference providers: each names a service that must be running here.
+    "embeddings_provider",
+    "rerank_provider",
+    "internal_llm_provider",
+    # Model names: must exist in this machine's local model server.
+    "internal_llm_model",
+    "quenchforge_embed_model",
+    "quenchforge_rerank_model",
+    # Needs the SPLADE model or a sidecar that serves it.
+    "enable_sparse_retrieval",
+    # Background processor: local or hybrid depends on the local model
+    # server, and the cap, fallback and token threshold only tune that choice.
+    "processor_mode",
+    "processor_monthly_cap_usd",
+    "processor_api_cap_fallback",
+    "processor_api_threshold_tokens",
+})
+
+SYNCED_SETTING_KEYS = frozenset({
+    "categorize_mode",
+    "enable_feedback_loop",
+    "enable_hallucination_check",
+    "enable_memory_extraction",
+    "hallucination_threshold",
+    "cost_sensitivity",
+    "enable_auto_inject",
+    "auto_inject_threshold",
+    "auto_inject_max",
+    "enable_model_router",
+    "storage_mode",
+    "enable_self_rag",
+    "hybrid_vector_weight",
+    "hybrid_keyword_weight",
+    "rerank_llm_weight",
+    "rerank_original_weight",
+    "pack_relevance_weight",
+    "sensitive_domain_retrieval",
+    "enable_contextual_chunks",
+    "enable_adaptive_retrieval",
+    "adaptive_retrieval_light_top_k",
+    "enable_query_decomposition",
+    "query_decomposition_max_subqueries",
+    "enable_mmr_diversity",
+    "mmr_lambda",
+    "enable_intelligent_assembly",
+    "enable_late_interaction",
+    "late_interaction_top_n",
+    "late_interaction_blend_weight",
+    "enable_semantic_cache",
+    "semantic_cache_threshold",
+    "enable_memory_consolidation",
+    "enable_context_compression",
+    "rag_mode",
+    "enable_hype",
+    "enable_parent_child_retrieval",
+    "hybrid_fusion_mode",
+    "hybrid_rrf_sparse_weight",
+})
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -498,11 +565,12 @@ async def get_settings_endpoint():
     }
 
 
-@router.patch("/settings", response_model=UpdateSettingsEndpointResponse)
-async def update_settings_endpoint(req: SettingsUpdateRequest):
-    """Update a subset of settings at runtime.
+def apply_settings_update(req: SettingsUpdateRequest) -> dict[str, str | bool | float]:
+    """Write every field set on ``req`` to the running process.
 
-    Only settings that make sense to change without a restart are accepted.
+    Returns the fields that were applied. PATCH /settings and the startup
+    hydration both go through here, so a setting that can be saved is
+    restored by the same code that applied it.
     """
     updated: dict[str, str | bool | float] = {}
 
@@ -708,9 +776,13 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["enable_hype"] = req.enable_hype
 
     if req.enable_parent_child_retrieval is not None:
-        os.environ["PARENT_CHILD_ENABLED"] = (
+        os.environ["ENABLE_PARENT_CHILD_RETRIEVAL"] = (
             "true" if req.enable_parent_child_retrieval else "false"
         )
+        # The ingest path reads utils.chunker's copy, captured at import.
+        from utils import chunker as _chunker_mod
+        _chunker_mod.PARENT_CHILD_ENABLED = req.enable_parent_child_retrieval
+        set_toggle("enable_parent_child_retrieval", req.enable_parent_child_retrieval)
         updated["enable_parent_child_retrieval"] = req.enable_parent_child_retrieval
 
     if req.hybrid_fusion_mode is not None:
@@ -855,6 +927,17 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.settings.PROCESSOR_API_THRESHOLD_TOKENS = req.processor_api_threshold_tokens
         updated["processor_api_threshold_tokens"] = req.processor_api_threshold_tokens
 
+    return updated
+
+
+@router.patch("/settings", response_model=UpdateSettingsEndpointResponse)
+async def update_settings_endpoint(req: SettingsUpdateRequest):
+    """Update a subset of settings at runtime.
+
+    Only settings that make sense to change without a restart are accepted.
+    """
+    updated = apply_settings_update(req)
+
     if not updated:
         raise HTTPException(
             status_code=400,
@@ -869,9 +952,23 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     # False (write never landed) still reported status:success — mirrors the
     # fix already applied to the same helper contract in
     # app/routers/user_state.py's save_preferences.
-    if getattr(config, "SYNC_DIR", ""):
+    synced = {k: v for k, v in updated.items() if k in SYNCED_SETTING_KEYS}
+    host = {k: v for k, v in updated.items() if k in HOST_SETTING_KEYS}
+
+    if host:
+        from app.sync.user_state import write_host_settings
+        try:
+            write_host_settings(config.HOST_SETTINGS_PATH, host)
+        except OSError as exc:
+            logger.error("Host settings were not saved: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Settings were not saved to this machine's settings file.",
+            ) from exc
+
+    if synced and config.SYNC_DIR:
         from app.sync.user_state import write_settings_with_retry
-        ok = await write_settings_with_retry(config.SYNC_DIR, updated)
+        ok = await write_settings_with_retry(config.SYNC_DIR, synced)
         if not ok:
             raise HTTPException(
                 status_code=503,

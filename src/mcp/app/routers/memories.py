@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.deps import get_chroma, get_neo4j, get_redis
+from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils import cache
 
 
@@ -342,17 +343,21 @@ async def delete_memory(memory_id: str):
             logger.info(f"Deleted verified memory node {memory_id[:8]}")
             return {"status": "deleted", "memory_id": memory_id}
 
-        # Delete chunks from ChromaDB
+        # Delete chunks from ChromaDB, with the parent chunks and HyPE
+        # questions the node does not list.
+        chunk_ids: list[str] = []
         chunk_ids_raw = record["chunk_ids"]
         if chunk_ids_raw:
             try:
                 chunk_ids = json.loads(chunk_ids_raw)
-                if chunk_ids:
-                    collection = chroma.get_or_create_collection(name=CONVERSATIONS_COLLECTION)
-                    collection.delete(ids=chunk_ids)
-                    logger.info(f"Deleted {len(chunk_ids)} chunks from ChromaDB for memory {memory_id[:8]}")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"Failed to parse chunk_ids for memory {memory_id[:8]}: {e}")
+        collection = chroma.get_or_create_collection(name=CONVERSATIONS_COLLECTION)
+        rows = list(dict.fromkeys(chunk_ids + artifact_row_ids(collection, memory_id)))
+        if rows:
+            collection.delete(ids=rows)
+            logger.info(f"Deleted {len(rows)} chunks from ChromaDB for memory {memory_id[:8]}")
+        remove_artifact_hype_rows(chroma, CONVERSATIONS_COLLECTION, memory_id)
 
         with driver.session() as session:
             session.run(
@@ -420,8 +425,8 @@ async def dedup_memories(req: MemoryDedupRequest | None = None):
             for group in groups:
                 keeper = group[0]
                 for dup in group[1:]:
-                    mark_superseded(driver, str(dup["id"]), str(keeper["id"]))
-                    superseded += 1
+                    if mark_superseded(driver, str(dup["id"]), str(keeper["id"])):
+                        superseded += 1
 
         return {
             "dry_run": not apply,

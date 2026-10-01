@@ -11,6 +11,9 @@ export interface ChatMessage {
   /** Non-empty when retrieval breached its time budget and the answer is ungrounded.
    * Populated from the backend `AgentQueryResponse.degraded_reason` field. */
   degradedReason?: string
+  /** True for the app's own message that it will not answer without
+   *  grounding. No model wrote it, so there is nothing in it to verify. */
+  deferral?: boolean
 }
 
 export type RagMode = "smart" | "always" | "off"
@@ -46,6 +49,8 @@ export interface Conversation {
   createdAt: number
   updatedAt: number
   archived?: boolean
+  /** Held while private mode was on: kept in memory only, never stored or synced. */
+  private?: boolean
   /** Per-message verification reports — keyed by assistant message ID. */
   verificationReports?: Record<string, HallucinationReport>
 }
@@ -257,8 +262,9 @@ export interface InferenceStatus {
   onnx_providers: string[]
   ollama_available: boolean
   sidecar_available: boolean
-  embed_latency_ms: number
-  rerank_latency_ms: number
+  /** null until a call has been timed. */
+  embed_latency_ms: number | null
+  rerank_latency_ms: number | null
   message: string
   expectations?: LocalExpectations
 }
@@ -312,6 +318,8 @@ export interface HealthStatusResponse extends HealthResponse {
   inference_routing?: Record<string, unknown>
   internal_llm_provider?: string
   internal_llm_model?: string
+  /** The server behind the Ollama-compatible port, named from what it reports. */
+  local_model_server?: { name: string; version: string | null; url: string }
   inference?: InferenceStatus
 }
 
@@ -634,6 +642,15 @@ export interface SchedulerStatus {
   jobs: { id: string; name: string; next_run: string | null; trigger: string }[]
 }
 
+export interface SchedulerRun {
+  event: string
+  job: string
+  status: string
+  duration_s: number
+  detail: string
+  timestamp: string
+}
+
 // Run-now is honest about duplicates (SF-2): a queue-backed job with a live
 // pending/running equivalent answers "collapsed_into_pending", not "started".
 export type SchedulerJobRunResult =
@@ -803,6 +820,8 @@ export interface HallucinationReport {
   summary: {
     total: number
     verified: number
+    /** Claims a second model agreed with and no source backs. Absent on a report stored before the server sent it. */
+    agreed?: number
     unverified: number
     uncertain: number
     error?: number
@@ -1244,6 +1263,7 @@ export interface SetupConfig {
   watch_folder?: boolean
   ollama_enabled?: boolean
   ollama_model?: string
+  inference_backend?: RecommendedLocalBackend
 }
 
 export interface SetupConfigRequest {
@@ -1280,6 +1300,11 @@ export interface SystemCheckResponse {
   ollama_detected: boolean
   ollama_url: string | null
   ollama_models: string[]
+  /** The model the instance already names, when the server serves it. */
+  ollama_configured_model?: string | null
+  /** What the detected server calls itself; a neutral name when it does not say. */
+  local_server_name?: string
+  local_server_version?: string | null
   lightweight_recommended: boolean
   archive_path_exists: boolean
   default_archive_path: string
@@ -1311,7 +1336,9 @@ export interface SystemCheckResponse {
 
 export interface SetupServiceHealth {
   name: string
-  status: "healthy" | "degraded" | "error" | "connected" | "starting"
+  status: "healthy" | "degraded" | "error" | "connected" | "starting" | "setup_mode"
+  /** Published host port; 0 or absent for a service with none. */
+  port?: number
 }
 
 export interface SetupHealth {
@@ -1429,15 +1456,13 @@ export interface Plugin {
   enabled: boolean
   status: PluginStatus
   file_types: string[]
-  config_schema: Record<string, unknown> | null
   capabilities: string[]
+  /** True when `enabled` is a choice the running server has not applied:
+      plugins load once, at server start. Optional for older servers. */
+  restart_required?: boolean
   // FEATURE_FLAGS keys the plugin's manifest declares (empty when none).
   // Optional so cached pre-upgrade payloads still type-check.
   feature_flags?: string[]
-}
-
-export interface PluginConfig {
-  values: Record<string, unknown>
 }
 
 export interface PluginListResponse {
@@ -1535,7 +1560,9 @@ export interface ArtifactFilterParams {
 // ---------------------------------------------------------------------------
 
 export interface ServiceStorageMetrics {
-  disk_mb: number
+  /** null when the store's size could not be measured; see disk_mb_reason. */
+  disk_mb: number | null
+  disk_mb_reason?: string
   error?: string
 }
 
@@ -1568,6 +1595,8 @@ export interface StorageMetrics {
   redis: RedisStorage
   bm25: BM25Storage
   total_mb: number
+  /** Stores left out of total_mb because their size was not measured. */
+  unmeasured?: string[]
   limit_mb: number
   usage_pct: number
   warn_pct: number
@@ -1585,12 +1614,6 @@ export interface IngestHistoryEntry {
   timestamp: string
   chunks: number
   error: string
-}
-
-export interface IngestHistoryResponse {
-  items: IngestHistoryEntry[]
-  total: number
-  next_cursor: string | null
 }
 
 // === Agent Communication Console ===

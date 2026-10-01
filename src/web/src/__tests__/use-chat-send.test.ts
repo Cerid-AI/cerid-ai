@@ -638,12 +638,16 @@ describe("useChatSend — KB injection payload assembly", () => {
 // queryKB unconditionally — redundant and, with _QUERY_SEMAPHORE(2) + 10s
 // budgets, enough to monopolize the backend for ~30s per user message.
 //
-// Fix: skip the fresh queryKB call when options.kbResults is already populated
-// (cache warm). Still fetch fresh memories — they aren't covered by the KB
-// cache and the prior duplication was KB-specific.
+// Fix: skip the fresh queryKB call when options.kbResults was retrieved for the
+// text being sent (cache warm). Still fetch fresh memories — they aren't
+// covered by the KB cache and the prior duplication was KB-specific.
+//
+// The panel retrieves with the last message already in the conversation, so
+// results it holds for any other text belong to the previous question and
+// must not ground this one.
 
 describe("useChatSend — KB query deduplication (Task 3)", () => {
-  it("does NOT call queryKB when options.kbResults is non-empty (cache warm)", async () => {
+  it("does NOT call queryKB when options.kbResults was retrieved for this text (cache warm)", async () => {
     const prePopulated = [
       makeKBResult({ artifact_id: "pre-1", filename: "pre.md", relevance: 0.9, content: "hello" }),
     ]
@@ -652,6 +656,7 @@ describe("useChatSend — KB query deduplication (Task 3)", () => {
       autoInject: true,
       autoInjectThreshold: 0.5,
       kbResults: prePopulated,
+      kbResultsQuery: "hi there",
     })
     const { result } = renderHook(() => useChatSend(opts))
 
@@ -660,6 +665,53 @@ describe("useChatSend — KB query deduplication (Task 3)", () => {
     })
 
     expect(mockQueryKB).not.toHaveBeenCalled()
+  })
+
+  it("queries for the text being sent and leaves the previous question's results out", async () => {
+    mockQueryKB.mockResolvedValue({
+      results: [makeKBResult({ artifact_id: "new-1", filename: "new.md", relevance: 0.9, content: "about the new topic" })],
+    })
+    const sendSpy = vi.fn()
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      send: sendSpy,
+      kbResults: [
+        makeKBResult({ artifact_id: "old-1", filename: "old.md", relevance: 0.9, content: "about the previous topic" }),
+      ],
+      kbResultsQuery: "the previous question",
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("a question on a new topic")
+    })
+
+    expect(mockQueryKB).toHaveBeenCalledTimes(1)
+    expect(mockQueryKB.mock.calls[0][0]).toBe("a question on a new topic")
+    const sources = sendSpy.mock.calls[0][3] as { artifact_id: string }[]
+    expect(sources.map((x) => x.artifact_id)).toEqual(["new-1"])
+  })
+
+  it("sends no stale results when the knowledge base has nothing for the new text", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const sendSpy = vi.fn()
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      send: sendSpy,
+      kbResults: [
+        makeKBResult({ artifact_id: "old-1", filename: "old.md", relevance: 0.9, content: "about the previous topic" }),
+      ],
+      kbResultsQuery: "the previous question",
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("a question on a new topic")
+    })
+
+    expect(sendSpy.mock.calls[0][3]).toBeUndefined()
   })
 
   it("DOES call queryKB when options.kbResults is empty (cache cold)", async () => {
@@ -688,6 +740,7 @@ describe("useChatSend — KB query deduplication (Task 3)", () => {
       autoInject: true,
       autoInjectThreshold: 0.5,
       kbResults: prePopulated,
+      kbResultsQuery: "hi there",
     })
     const { result } = renderHook(() => useChatSend(opts))
 

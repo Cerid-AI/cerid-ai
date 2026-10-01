@@ -411,6 +411,222 @@ class TestWorkflowExecution:
         assert run.status == RunStatus.COMPLETED
         assert len(run.results) == 2
 
+    @staticmethod
+    def _run_failing_condition(mock_agent, mock_redis_fn, nodes, edges):
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": 0.1}
+        wf = _workflow(nodes, edges)
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(wf, {"query": "test"}))
+        loop.close()
+
+        executed = [call.args[0] for call in mock_agent.call_args_list]
+        return run, executed
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_failed_condition_skips_downstream_node(self, mock_agent, mock_redis_fn):
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node("self_rag", "sr"),
+        ]
+        edges = [_edge("q", "c"), _edge("c", "sr")]
+
+        run, executed = self._run_failing_condition(mock_agent, mock_redis_fn, nodes, edges)
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.results["c"]["passed"] is False
+        assert executed == ["query"]
+        assert run.results["sr"] == {"node": "self_rag", "type": "skipped"}
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_failed_condition_skips_transitive_downstream(self, mock_agent, mock_redis_fn):
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node("self_rag", "sr"),
+            _node("parse", "p", NodeType.PARSER),
+            _node("memory", "m"),
+        ]
+        edges = [_edge("q", "c"), _edge("c", "sr"), _edge("sr", "p"), _edge("p", "m")]
+
+        run, executed = self._run_failing_condition(mock_agent, mock_redis_fn, nodes, edges)
+
+        assert run.status == RunStatus.COMPLETED
+        assert executed == ["query"]
+        for nid in ("sr", "p", "m"):
+            assert run.results[nid]["type"] == "skipped"
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_node_with_a_live_parent_still_runs(self, mock_agent, mock_redis_fn):
+        """A join fed by both the failed branch and a live one is not skipped."""
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node("self_rag", "sr"),
+            _node("audit", "a"),
+            _node("memory", "m"),
+        ]
+        edges = [
+            _edge("q", "c"), _edge("c", "sr"), _edge("sr", "m"),
+            _edge("q", "a"), _edge("a", "m"),
+        ]
+
+        run, executed = self._run_failing_condition(mock_agent, mock_redis_fn, nodes, edges)
+
+        assert run.status == RunStatus.COMPLETED
+        assert "self_rag" not in executed
+        assert run.results["sr"]["type"] == "skipped"
+        assert sorted(executed) == ["audit", "memory", "query"]
+        assert run.results["m"]["status"] == "completed"
+
+    @staticmethod
+    def _run_branch(mock_agent, mock_redis_fn, confidence, label, target="self_rag"):
+        """query -> condition -[label]-> target, with the condition passing or failing."""
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": confidence}
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node(target, "t"),
+        ]
+        edges = [_edge("q", "c"), _edge("c", "t", condition=label)]
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(_workflow(nodes, edges), {"query": "test"}))
+        loop.close()
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.results["c"]["passed"] is (confidence > 0.5)
+        return run, [call.args[0] for call in mock_agent.call_args_list]
+
+    @pytest.mark.parametrize("label", ["true", "TRUE", "True", None, "", "maybe"])
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_passed_condition_runs_true_and_unlabelled_edges(self, mock_agent, mock_redis_fn, label):
+        run, executed = self._run_branch(mock_agent, mock_redis_fn, 0.9, label)
+
+        assert executed == ["query", "self_rag"]
+        assert run.results["t"]["status"] == "completed"
+
+    @pytest.mark.parametrize("label", ["true", "TRUE", "True", None, "", "maybe"])
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_failed_condition_skips_true_and_unlabelled_edges(self, mock_agent, mock_redis_fn, label):
+        run, executed = self._run_branch(mock_agent, mock_redis_fn, 0.1, label)
+
+        assert executed == ["query"]
+        assert run.results["t"] == {"node": "self_rag", "type": "skipped"}
+
+    @pytest.mark.parametrize("label", ["false", "FALSE", "False"])
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_passed_condition_skips_false_edge(self, mock_agent, mock_redis_fn, label):
+        run, executed = self._run_branch(mock_agent, mock_redis_fn, 0.9, label)
+
+        assert executed == ["query"]
+        assert run.results["t"] == {"node": "self_rag", "type": "skipped"}
+
+    @pytest.mark.parametrize("label", ["false", "FALSE", "False"])
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_failed_condition_runs_false_edge(self, mock_agent, mock_redis_fn, label):
+        run, executed = self._run_branch(mock_agent, mock_redis_fn, 0.1, label)
+
+        assert executed == ["query", "self_rag"]
+        assert run.results["t"]["status"] == "completed"
+
+    @staticmethod
+    def _branching_workflow():
+        """A true branch and a false branch that join at memory; each branch is two nodes deep."""
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node("self_rag", "sr"),
+            _node("parse", "p", NodeType.PARSER),
+            _node("audit", "a"),
+            _node("tool", "tl", NodeType.TOOL),
+            _node("memory", "m"),
+        ]
+        edges = [
+            _edge("q", "c"),
+            _edge("c", "sr", condition="true"), _edge("sr", "p"), _edge("p", "m"),
+            _edge("c", "a", condition="false"), _edge("a", "tl"), _edge("tl", "m"),
+        ]
+        return _workflow(nodes, edges)
+
+    @pytest.mark.parametrize(
+        ("confidence", "ran", "skipped"),
+        [
+            (0.9, ("sr", "p"), ("a", "tl")),
+            (0.1, ("a", "tl"), ("sr", "p")),
+        ],
+    )
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_exactly_one_branch_runs_and_the_join_always_runs(
+        self, mock_agent, mock_redis_fn, confidence, ran, skipped,
+    ):
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": confidence}
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(self._branching_workflow(), {"query": "test"}))
+        loop.close()
+
+        assert run.status == RunStatus.COMPLETED
+        for nid in ran:
+            assert run.results[nid]["status"] == "completed"
+        for nid in skipped:
+            assert run.results[nid]["type"] == "skipped"
+        assert run.results["m"]["status"] == "completed"
+        executed = [call.args[0] for call in mock_agent.call_args_list]
+        branch_agent = "self_rag" if confidence > 0.5 else "audit"
+        assert executed == ["query", branch_agent, "memory"]
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_passed_condition_skips_everything_below_a_false_edge(self, mock_agent, mock_redis_fn):
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": 0.9}
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="confidence > 0.5"),
+            _node("audit", "a"),
+            _node("parse", "p", NodeType.PARSER),
+            _node("memory", "m"),
+        ]
+        edges = [_edge("q", "c"), _edge("c", "a", condition="false"), _edge("a", "p"), _edge("p", "m")]
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(_workflow(nodes, edges), {"query": "test"}))
+        loop.close()
+
+        assert run.status == RunStatus.COMPLETED
+        assert [call.args[0] for call in mock_agent.call_args_list] == ["query"]
+        for nid in ("a", "p", "m"):
+            assert run.results[nid]["type"] == "skipped"
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_label_on_an_edge_leaving_a_non_condition_node_is_ignored(self, mock_agent, mock_redis_fn):
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": 0.9}
+        nodes = [_node("query", "q"), _node("audit", "a"), _node("memory", "m")]
+        edges = [_edge("q", "a", condition="false"), _edge("q", "m", condition="true")]
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(_workflow(nodes, edges), {"query": "test"}))
+        loop.close()
+
+        assert sorted(call.args[0] for call in mock_agent.call_args_list) == ["audit", "memory", "query"]
+        assert run.results["a"]["status"] == "completed"
+        assert run.results["m"]["status"] == "completed"
+
 
 # ---------------------------------------------------------------------------
 # Tests: Available Agents

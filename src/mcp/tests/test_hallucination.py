@@ -696,7 +696,7 @@ class TestCheckHallucinations:
         """Full pipeline should extract and verify claims."""
         mock_extract.return_value = (["claim 1", "claim 2"], "llm")
         mock_verify.side_effect = [
-            {"claim": "claim 1", "status": "verified", "similarity": 0.9},
+            {"claim": "claim 1", "status": "verified", "similarity": 0.9, "verification_method": "kb"},
             {"claim": "claim 2", "status": "unverified", "similarity": 0.1},
         ]
 
@@ -781,7 +781,7 @@ class TestStreamingPersistence:
     async def test_persists_to_redis(self, mock_verify, mock_chroma, mock_neo4j, mock_redis):
         """After streaming completes, report should be stored in Redis."""
         mock_verify.side_effect = [
-            {"claim": "claim 1", "status": "verified", "similarity": 0.85},
+            {"claim": "claim 1", "status": "verified", "similarity": 0.85, "verification_method": "kb"},
             {"claim": "claim 2", "status": "unverified", "similarity": 0.2},
         ]
 

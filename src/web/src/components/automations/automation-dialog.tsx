@@ -186,9 +186,9 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
 
           {/* Schedule */}
           <div className="space-y-1.5">
-            <Label>Schedule</Label>
+            <Label htmlFor="auto-schedule">Schedule</Label>
             <Select value={scheduleKey} onValueChange={setScheduleKey}>
-              <SelectTrigger>
+              <SelectTrigger id="auto-schedule">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -201,6 +201,7 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
             </Select>
             {scheduleKey === "custom" && (
               <Input
+                aria-label="Custom cron expression"
                 placeholder="e.g. 30 8 * * 1-5"
                 value={customCron}
                 onChange={(e) => setCustomCron(e.target.value)}
@@ -211,12 +212,13 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
 
           {/* Action type */}
           <div className="space-y-1.5">
-            <Label>Action Type</Label>
-            <div className="flex gap-2">
+            <Label id="auto-action-label">Action Type</Label>
+            <div role="group" aria-labelledby="auto-action-label" className="flex gap-2">
               {ACTION_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
+                  aria-pressed={action === opt.value}
                   onClick={() => setAction(opt.value)}
                   className={cn(
                     "flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
@@ -236,8 +238,8 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
 
           {/* Domains */}
           <div className="space-y-1.5">
-            <Label>Domains</Label>
-            <div className="flex flex-wrap gap-2">
+            <Label id="auto-domains-label">Domains</Label>
+            <div role="group" aria-labelledby="auto-domains-label" className="flex flex-wrap gap-2">
               {domainOptions.map((domain) => (
                 <label
                   key={domain}

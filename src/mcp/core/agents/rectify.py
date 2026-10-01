@@ -12,6 +12,12 @@ from typing import Any
 
 import config
 from core.context.identity import with_tenant_scope
+from core.retrieval.artifact_rows import (
+    VERIFIED_MEMORY_PREFIX,
+    artifact_row_ids,
+    remove_artifact_hype_rows,
+)
+from core.retrieval.hype_index import hype_collection_name
 from core.utils.cache import log_event
 from core.utils.time import utcnow, utcnow_iso
 
@@ -131,50 +137,72 @@ def find_orphaned_chunks(
     neo4j_driver,
     chroma_client: Any,
 ) -> dict[str, Any]:
-    """Find ChromaDB chunks without corresponding Neo4j artifact records."""
+    """Find ChromaDB rows whose artifact has no Neo4j ``:Artifact`` node.
+
+    Scans each domain's collection (parent chunks carry ``artifact_id`` like
+    their children) and its ``_hype`` companion, whose questions name their
+    artifact in ``source_artifact_id``; a companion's entries carry a
+    ``collection`` key. Verified-memory documents are skipped: they belong to
+    ``:Memory`` nodes, never to an artifact.
+    """
     with neo4j_driver.session() as session:
         result = session.run("MATCH (a:Artifact) RETURN a.id AS id")
         neo4j_ids = {record["id"] for record in result}
 
+    existing = {getattr(c, "name", c) for c in chroma_client.list_collections()}
     orphaned = {}
     for domain in config.DOMAINS:
+        base = config.collection_name(domain)
         try:
-            collection = chroma_client.get_collection(name=config.collection_name(domain))
+            collection = chroma_client.get_collection(name=base)
         except Exception as e:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('core.agents.rectify', e)
             logger.debug(f"Collection not found for domain {domain}: {e}")
             continue
 
-        # WB-35: page through the collection instead of loading every chunk's
-        # metadata for the whole domain at once — same pattern as
-        # app/routers/kb_admin.py::_domain_version_distribution.
-        domain_orphans = []
-        offset = 0
-        page = 1000
-        while True:
-            batch = collection.get(limit=page, offset=offset, include=["metadatas"])
-            batch_ids = batch.get("ids") or []
-            if not batch_ids:
-                break
-            metadatas = batch.get("metadatas") or []
-            for i, chunk_id in enumerate(batch_ids):
-                meta = metadatas[i] if metadatas else {}
-                artifact_id = meta.get("artifact_id", "")
-                if artifact_id and artifact_id not in neo4j_ids:
-                    domain_orphans.append({
-                        "chunk_id": chunk_id,
-                        "artifact_id": artifact_id,
-                        "filename": meta.get("filename", ""),
-                    })
-            if len(batch_ids) < page:
-                break
-            offset += page
+        domain_orphans = _orphan_rows(collection, "artifact_id", neo4j_ids)
+        hype_name = hype_collection_name(base)
+        if hype_name in existing:
+            hype_orphans = _orphan_rows(
+                chroma_client.get_collection(name=hype_name), "source_artifact_id", neo4j_ids,
+            )
+            domain_orphans += [{**o, "collection": hype_name} for o in hype_orphans]
 
         if domain_orphans:
             orphaned[domain] = domain_orphans
 
     return orphaned
+
+
+def _orphan_rows(collection: Any, key: str, neo4j_ids: set[str]) -> list[dict[str, Any]]:
+    # WB-35: page through the collection instead of loading every chunk's
+    # metadata for the whole domain at once — same pattern as
+    # app/routers/kb_admin.py::_domain_version_distribution.
+    orphans = []
+    offset = 0
+    page = 1000
+    while True:
+        batch = collection.get(limit=page, offset=offset, include=["metadatas"])
+        batch_ids = batch.get("ids") or []
+        if not batch_ids:
+            break
+        metadatas = batch.get("metadatas") or []
+        for i, chunk_id in enumerate(batch_ids):
+            if chunk_id.startswith(VERIFIED_MEMORY_PREFIX):
+                continue
+            meta = metadatas[i] if metadatas else {}
+            artifact_id = meta.get(key, "")
+            if artifact_id and artifact_id not in neo4j_ids:
+                orphans.append({
+                    "chunk_id": chunk_id,
+                    "artifact_id": artifact_id,
+                    "filename": meta.get("filename", ""),
+                })
+        if len(batch_ids) < page:
+            break
+        offset += page
+    return orphans
 
 
 # ---------------------------------------------------------------------------
@@ -216,14 +244,18 @@ def resolve_duplicates(
         else:
             chunk_ids = json.loads(raw_chunks or "[]")
         domain = artifact["domain"]
+        try:
+            coll_name = config.collection_name(domain)
+            collection = chroma_client.get_collection(name=coll_name)
+            rows = list(dict.fromkeys(chunk_ids + artifact_row_ids(collection, artifact["id"])))
+            if rows:
+                collection.delete(ids=rows)
+            remove_artifact_hype_rows(chroma_client, coll_name, artifact["id"])
+        except Exception as e:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error('core.agents.rectify', e)
+            logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
         if chunk_ids:
-            try:
-                collection = chroma_client.get_collection(name=config.collection_name(domain))
-                collection.delete(ids=chunk_ids)
-            except Exception as e:
-                from core.utils.swallowed import log_swallowed_error
-                log_swallowed_error('core.agents.rectify', e)
-                logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
             try:
                 from core.retrieval.bm25 import remove_chunks as bm25_remove
                 bm25_remove(domain, chunk_ids)
@@ -295,22 +327,27 @@ def cleanup_orphaned_chunks(
     chroma_client: Any,
     orphaned: dict[str, list[dict[str, str]]],
 ) -> dict[str, int]:
-    """Remove orphaned chunks from ChromaDB."""
+    """Remove orphaned chunks from ChromaDB, each from the collection it was
+    found in (the domain's own unless the entry names one)."""
     cleaned = {}
     for domain, chunks in orphaned.items():
-        chunk_ids = [c["chunk_id"] for c in chunks]
-        if not chunk_ids:
+        by_collection: dict[str, list[str]] = {}
+        for c in chunks:
+            name = c.get("collection") or config.collection_name(domain)
+            by_collection.setdefault(name, []).append(c["chunk_id"])
+        if not by_collection:
             continue
 
-        try:
-            collection = chroma_client.get_collection(name=config.collection_name(domain))
-            collection.delete(ids=chunk_ids)
-            cleaned[domain] = len(chunk_ids)
-        except Exception as e:
-            from core.utils.swallowed import log_swallowed_error
-            log_swallowed_error('core.agents.rectify', e)
-            logger.error(f"Failed to clean orphans in {domain}: {e}")
-            cleaned[domain] = 0
+        cleaned[domain] = 0
+        for name, chunk_ids in by_collection.items():
+            try:
+                collection = chroma_client.get_collection(name=name)
+                collection.delete(ids=chunk_ids)
+                cleaned[domain] += len(chunk_ids)
+            except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.rectify', e)
+                logger.error(f"Failed to clean orphans in {name}: {e}")
 
     return cleaned
 
@@ -417,6 +454,8 @@ async def rectify(
         report["findings"]["orphans"] = {
             "count": total_orphans,
             "by_domain": {d: len(chunks) for d, chunks in orphans.items()},
+            # Listed so a dry run (auto_fix false) shows what an apply deletes.
+            "chunks": [{**c, "domain": d} for d, chunks in orphans.items() for c in chunks],
         }
 
         if auto_fix and total_orphans > 0:

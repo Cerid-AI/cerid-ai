@@ -75,7 +75,7 @@ def get_routing_snapshot() -> dict[str, dict[str, Any]]:
         llm_block = {
             "provider": "ollama",
             "url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
-            "model": os.getenv("OLLAMA_DEFAULT_MODEL", "unset"),
+            "model": os.getenv("INTERNAL_LLM_MODEL") or os.getenv("OLLAMA_DEFAULT_MODEL") or "unset",
         }
     else:
         llm_block = {

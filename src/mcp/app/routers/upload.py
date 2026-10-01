@@ -73,12 +73,20 @@ async def upload_file_endpoint(
             f"Supported: {sorted(config.SUPPORTED_EXTENSIONS)}",
         )
 
-    # Read file content with size limit
-    content = await file.read()
+    # Enforce the size limit before the content is held in memory. The
+    # multipart parser spools the part to disk and records its size, so an
+    # oversize part is refused without reading it; the bounded read covers a
+    # part whose size was not recorded.
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {file.size} bytes. Maximum: {MAX_UPLOAD_BYTES} bytes (50 MB)",
+        )
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large: {len(content)} bytes. Maximum: {MAX_UPLOAD_BYTES} bytes (50 MB)",
+            detail=f"File too large. Maximum: {MAX_UPLOAD_BYTES} bytes (50 MB)",
         )
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")

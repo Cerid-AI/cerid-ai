@@ -85,7 +85,7 @@ The check:
 - Otherwise sends `GET https://127.0.0.1:443/api/bifrost/x` with `-k` (the
   gateway's public site uses Caddy's self-signed `local_certs`) and an
   `X-API-Key` header (clears the gateway's SSO `forward_auth`, same as any
-  programmatic client — see `stacks/gateway/sso/sso.py`), asserting **404**.
+  programmatic client — see `stacks/sso/sso.py`), asserting **404**.
 - Reads `CERID_API_KEY` from the shell, falling back to the repo `.env`,
   same convention as `REDIS_PASSWORD` above it in `smoke.sh`.
 

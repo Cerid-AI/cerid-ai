@@ -89,6 +89,46 @@ function lastTriggerKey(): number {
   return calls[calls.length - 1][3] as number
 }
 
+describe("useVerificationOrchestrator — the app's own deferral", () => {
+  beforeEach(() => {
+    mockStreamHook.mockClear()
+    mockStreamReturn = defaultStreamReturn()
+  })
+
+  const DEFERRAL =
+    "Your knowledge base did not answer in time, so I won't guess about your personal data."
+
+  function render(deferral: boolean) {
+    const withAnswer: ChatMessage[] = [
+      ...makeMessages(null),
+      { id: "a1", role: "assistant", content: DEFERRAL, timestamp: 2, ...(deferral ? { deferral: true } : { model: currentModel.id }) },
+    ]
+    const { rerender } = renderHook(
+      ({ messages, isStreaming }: { messages: ChatMessage[]; isStreaming: boolean }) =>
+        useVerificationOrchestrator({
+          activeMessages: messages,
+          activeId: "conv-deferral",
+          isStreaming,
+          hallucinationEnabled: true,
+          currentModel,
+        }),
+      { initialProps: { messages: makeMessages(null), isStreaming: false } },
+    )
+    rerender({ messages: withAnswer, isStreaming: false })
+  }
+
+  it("is not sent for verification", async () => {
+    render(true)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(lastTriggerKey()).toBe(0)
+  })
+
+  it("the same words from a model are", async () => {
+    render(false)
+    await waitFor(() => expect(lastTriggerKey()).toBeGreaterThan(0))
+  })
+})
+
 describe("useVerificationOrchestrator — length gate (Bug #11)", () => {
   beforeEach(() => {
     mockStreamHook.mockClear()

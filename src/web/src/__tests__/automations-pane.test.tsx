@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render as rtlRender, screen, waitFor } from "@testing-library/react"
+import { render as rtlRender, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
 import { axe } from "jest-axe"
@@ -21,7 +21,7 @@ vi.mock("@/lib/api/domains", () => ({
   fetchDomainCounts: vi.fn(() => Promise.reject(new Error("down"))),
 }))
 
-import { fetchAutomations } from "@/lib/api"
+import { fetchAutomations, deleteAutomation } from "@/lib/api"
 import AutomationsPane from "@/components/automations/automations-pane"
 
 // AutomationDialog uses useQuery for the domain list — every render needs
@@ -129,5 +129,41 @@ describe("AutomationsPane — axe-clean (D.3)", () => {
     const { container } = render(<AutomationsPane />)
     await screen.findByText("Daily Digest")
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Deleting asks first (audit 53)
+// ---------------------------------------------------------------------------
+
+describe("AutomationsPane — delete confirmation (audit 53)", () => {
+  it("asks before deleting and deletes nothing when cancelled", async () => {
+    vi.mocked(fetchAutomations).mockResolvedValue(mockAutomations)
+    render(<AutomationsPane />)
+    fireEvent.click(await screen.findByRole("button", { name: /delete/i }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("Delete this automation?")).toBeInTheDocument()
+    expect(within(dialog).getByText(/This action cannot be undone\./)).toBeInTheDocument()
+    expect(deleteAutomation).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(deleteAutomation).not.toHaveBeenCalled()
+    expect(screen.getByText("Daily Digest")).toBeInTheDocument()
+  })
+
+  it("deletes the automation once confirmed", async () => {
+    vi.mocked(fetchAutomations).mockResolvedValue(mockAutomations)
+    vi.mocked(deleteAutomation).mockResolvedValue(undefined as never)
+    render(<AutomationsPane />)
+    fireEvent.click(await screen.findByRole("button", { name: /delete/i }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    await waitFor(() => expect(deleteAutomation).toHaveBeenCalledWith("auto-1"))
+    await waitFor(() => expect(screen.queryByText("Daily Digest")).not.toBeInTheDocument())
   })
 })

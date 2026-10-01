@@ -61,6 +61,7 @@ from core.utils.claim_cache import (
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
+from utils.domain_privacy import owner_domains
 
 
 class CreditExhaustedError(NonTransientError):
@@ -2093,7 +2094,7 @@ async def _gather_kb_evidence(
 
     # Exclude 'conversations' domain from general KB query to avoid
     # self-verification against feedback-ingested LLM responses.
-    verification_domains = [d for d in config.DOMAINS if d != "conversations"]
+    verification_domains = [d for d in owner_domains() if d != "conversations"]
     # Build an enriched query: the bare claim text is often too terse
     # for vector search (e.g. "it uses 768 dimensions" without context).
     # Prepending the response_context topic gives the embedding model

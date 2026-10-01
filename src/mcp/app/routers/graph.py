@@ -249,7 +249,7 @@ async def _query_neighborhood(
     # Filter narrows by entity_type if specified.
     type_filter = ""
     if filter:
-        type_filter = "AND (e.entity_type = $filter OR n.entity_type = $filter)"
+        type_filter = "AND e.entity_type = $filter"
 
     # Partition reachable entities by CO_MENTIONED degree in a single pass:
     # keep those under the cap as `related`, and surface `truncated` when any
@@ -2653,8 +2653,12 @@ async def get_domains(include_internal: bool = Query(default=False)) -> DomainsR
     # WK2: hide client/internal domains from the default wiki view (the
     # category + browse-by-domain chips read this endpoint). Reuse the same
     # hidden set the wiki entity list uses; reveal via ?include_internal=true.
+    # Consumers' operational domains are hidden with them: the owner's
+    # retrieval never reaches those, so a filter chip for one invites a search
+    # the owner did not mean to run.
     from app.db.neo4j.wiki import _hidden_domains  # noqa: PLC0415
-    hidden = set() if include_internal else _hidden_domains()
+    from utils.domain_privacy import operational_domains  # noqa: PLC0415
+    hidden = set() if include_internal else _hidden_domains() | operational_domains()
 
     domains_out: list[DomainSummary] = []
     for d in raw.get("domains") or []:

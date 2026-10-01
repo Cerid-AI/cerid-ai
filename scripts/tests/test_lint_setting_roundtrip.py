@@ -33,8 +33,7 @@ def _settings(model_body: str, handler_body: str) -> str:
         "class SettingsUpdateRequest(BaseModel):\n"
         f"{model_body}"
         "\n\n"
-        "@router.patch('/settings')\n"
-        "async def update_settings_endpoint(req: SettingsUpdateRequest):\n"
+        "def apply_settings_update(req: SettingsUpdateRequest):\n"
         "    updated = {}\n"
         f"{handler_body}"
         "    return {'updated': updated}\n"
@@ -157,8 +156,13 @@ class TestRepoBaseline:
 
     def test_allowlist_is_non_increasing(self) -> None:
         """Seeded at 10 on 2026-09-03. Lower this constant when one drains;
-        never raise it — a new placebo knob has to fail here first."""
-        assert len(lint._load_allowlist()) <= 10
+        never raise it — a new placebo knob has to fail here first.
+
+        12 since 2026-09-27: enable_auto_inject and enable_model_router were
+        never read by the backend, but the gate counted the key list in the
+        startup hydration as their reader. That list was replaced, which
+        exposed them; no knob was added."""
+        assert len(lint._load_allowlist()) <= 12
 
     def test_every_allowlist_entry_has_a_reason(self) -> None:
         for key, reason in lint._load_allowlist().items():

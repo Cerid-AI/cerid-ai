@@ -183,14 +183,14 @@ RECOMMENDATIONS: tuple[RecommendationSpec, ...] = (
     RecommendationSpec(
         id="parent_child_retrieval",
         label="Parent-child chunk retrieval",
-        flag_env_var="PARENT_CHILD_ENABLED",
+        flag_env_var="ENABLE_PARENT_CHILD_RETRIEVAL",
         enable_payload={"enable_parent_child_retrieval": True},
         reason_template=(
             "With {count} documents indexed, parent-child retrieval lets "
             "the model match against small, precise chunks while still "
             "seeing the surrounding paragraph at generation time."
         ),
-        condition_fn=_at(_THRESHOLD_PARENT_CHILD, "PARENT_CHILD_ENABLED"),
+        condition_fn=_at(_THRESHOLD_PARENT_CHILD, "ENABLE_PARENT_CHILD_RETRIEVAL"),
     ),
     RecommendationSpec(
         id="rrf_fusion",

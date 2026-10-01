@@ -216,6 +216,7 @@ class TestSDKHealth:
         # Resolved from the live routing state, not from an import-time config
         # copy — /sdk/v1/health used to name a model the backend never served.
         monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("INTERNAL_LLM_MODEL", "")
         monkeypatch.setenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 
         with patch("config.features.FEATURE_TOGGLES", {}):

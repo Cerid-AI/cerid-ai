@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: FSL-1.1-ALv2
 """The diarization checkpoint must be revision-pinned.
 
-This is the code half of the pip-audit ignore for PYSEC-2026-3624 (lightning
-RCE via a crafted checkpoint). That ignore is only honest while the checkpoint
-we hand to pyannote is immutable — an unpinned model name resolves to whatever
-the upstream default branch points at today.
+This was the code half of the pip-audit ignore for PYSEC-2026-3624 (lightning
+RCE via a crafted checkpoint), removed when lightning 2.6.6 fixed it. The pin
+keeps the checkpoint we hand to pyannote immutable — an unpinned model name
+resolves to whatever the upstream default branch points at today.
 
 `_load_pipeline` is not covered by the meeting-capture tests: they mock the
 whole `diarize` module, so nothing ever reached `Pipeline.from_pretrained`.

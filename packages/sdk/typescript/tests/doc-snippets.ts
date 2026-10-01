@@ -33,6 +33,9 @@ export async function guideQuickstart(client: CeridClient): Promise<void> {
     conversation_id: "demo",
   });
   console.log(check.summary.overall_confidence, check.nli_skipped);
+  // summary.agreed counts claims a second model agreed with and no source backs;
+  // they are not in summary.verified.
+  console.log(check.summary.verified, check.summary.agreed);
 
   // Extract memories; a queued server answers 202 with a job to poll
   const extracted = await client.memory.extract({

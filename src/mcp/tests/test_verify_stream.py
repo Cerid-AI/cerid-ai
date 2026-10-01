@@ -487,7 +487,8 @@ class TestAutoPersist:
         from core.agents.hallucination import verify_response_streaming
 
         async def _mock_verify_claim(*args, **kwargs):
-            return {"status": "verified", "similarity": 0.9, "confidence": 0.88}
+            return {"status": "verified", "similarity": 0.9, "confidence": 0.88,
+                    "verification_method": "kb"}
 
         captured: dict = {}
 

@@ -29,6 +29,7 @@ from tokenizers import Tokenizer
 
 import config
 from core.observability.span_helpers import span
+from core.utils.cpu import onnx_intra_op_threads
 from core.utils.hf_cache import resolve_hf_file
 from core.utils.swallowed import log_swallowed_error
 
@@ -76,7 +77,7 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
 
         sess_opts = ort.SessionOptions()
         sess_opts.inter_op_num_threads = 1
-        sess_opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
+        sess_opts.intra_op_num_threads = onnx_intra_op_threads()
 
         _session = ort.InferenceSession(
             model_path,
@@ -275,6 +276,12 @@ class _NliBatcher:
         try:
             if _COALESCE_MS > 0:
                 await asyncio.sleep(_COALESCE_MS / 1000.0)
+            # From here this task is a flush, not a timer. Drop the
+            # reference so a force-flush cannot cancel it after it has
+            # drained a batch, and so pairs arriving during the flush get
+            # a timer of their own.
+            if self._flush_task is asyncio.current_task():
+                self._flush_task = None
             await self._flush()
         except asyncio.CancelledError:
             # Force-flush path cancelled us; the caller is doing the

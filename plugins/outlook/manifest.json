@@ -6,8 +6,5 @@
   "tier": "pro",
   "license": "BUSL-1.1",
   "entry_point": "plugin.py",
-  "capabilities": ["email_sync"],
-  "config_schema": {
-    "poll_interval_minutes": {"type": "integer", "default": 15}
-  }
+  "capabilities": ["email_sync"]
 }

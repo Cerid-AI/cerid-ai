@@ -18,7 +18,7 @@ import uuid
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
-import config
+from app.middleware.origin_guard import cors_origin_allowed as _origin_allowed
 from app.tool_registry import ToolError
 from app.tools import execute_tool, get_all_tools
 from core.utils.version import get_version
@@ -53,17 +53,6 @@ _SIMPLE_REQUEST_TYPES = frozenset({
     "application/x-www-form-urlencoded",
     "multipart/form-data",
 })
-
-
-def _origin_allowed(request: Request) -> bool:
-    """True unless the request carries an Origin the app's CORS policy rejects."""
-    origin = request.headers.get("origin")
-    if not origin:
-        return True  # non-browser client — the normal case for MCP transport
-    allowed = {
-        o.strip() for o in getattr(config, "CORS_ORIGINS", "").split(",") if o.strip()
-    }
-    return "*" in allowed or origin in allowed
 
 
 def _guard(request: Request, *, require_json: bool = False) -> Response | None:

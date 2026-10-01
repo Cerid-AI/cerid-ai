@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from app.services.contradiction_log import (
     ContradictionFinding,
+    count_recent,
     get_by_id,
     list_recent,
 )
@@ -119,12 +120,13 @@ async def list_contradictions(
             since=since,
             limit=limit,
         )
+        total = await count_recent(entity_slug=entity_slug, since=since)
     except Exception as exc:
         log_swallowed_error("contradiction_log", exc)
         raise HTTPException(status_code=500, detail="Failed to retrieve contradiction findings") from exc
 
     return ContradictionListResponse(
-        total=len(findings),
+        total=total,
         limit=limit,
         findings=[ContradictionFindingResponse.from_finding(f) for f in findings],
     )

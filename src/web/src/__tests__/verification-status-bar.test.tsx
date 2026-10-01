@@ -120,6 +120,23 @@ describe("VerificationStatusBar", () => {
     expect(screen.getByText("1 unverified")).toBeInTheDocument()
   })
 
+  it("shows no accuracy figure when no claim was verified or refuted", () => {
+    // The live case: a refusal, one claim, verdict uncertain. It read 100% and High.
+    render(
+      <VerificationStatusBar
+        report={makeReport({
+          claims: [makeClaim({ claim: "I cannot provide a definition", status: "uncertain", similarity: 0 })],
+          summary: { total: 1, verified: 0, unverified: 0, uncertain: 1 },
+        })}
+        loading={false}
+        featureEnabled={true}
+      />,
+    )
+    expect(screen.queryByText("100%")).not.toBeInTheDocument()
+    expect(screen.getByText("—")).toBeInTheDocument()
+    expect(screen.getByText("Not assessed")).toBeInTheDocument()
+  })
+
   it("shows accuracy percentage and coherence label", () => {
     render(
       <VerificationStatusBar report={makeReport()} loading={false} featureEnabled={true} />,

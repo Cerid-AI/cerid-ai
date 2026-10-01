@@ -15,6 +15,7 @@
 | State | Display string |
 |---|---|
 | Verified (n sources) | "Verified by {n} source(s)" |
+| A second model agreed, no source | "second model agrees" |
 | Partial source | "Partial source" |
 | No source | "No source found for this claim" |
 
@@ -23,8 +24,15 @@
 | State | Badge text |
 |---|---|
 | verified | "Verified by {n} source(s)" |
+| agreed | "Agreed" |
 | partial | "Partial source" |
 | unverified | "No source" |
+
+"Verified" is for a claim supported by a source the user can open: a KB
+artifact or a web result with a URL. A claim a second model agreed with and no
+source backs reads "agreed", in the neutral colour, and is left out of the
+verified count and the accuracy figure. The summary count reads
+"{n} agreed by a second model".
 
 ## Streaming / loading
 
@@ -50,6 +58,7 @@
 | State | aria-label |
 |---|---|
 | Verified badge | "Claim verified by {n} source(s)" |
+| Agreed badge | "A second model agrees with this claim; no source" |
 | Partial badge | "Claim has partial source" |
 | Unverified badge | "Claim has no source" |
 

@@ -21,7 +21,7 @@ describe("isTimeoutMethod", () => {
 
 describe("getClaimDisplayStatus", () => {
   it("returns verified for verified status", () => {
-    expect(getClaimDisplayStatus("verified")).toBe("verified")
+    expect(getClaimDisplayStatus("verified", "kb")).toBe("verified")
   })
 
   it("returns refuted for unverified + cross_model", () => {
@@ -77,7 +77,7 @@ describe("matchClaimsToText", () => {
 
   it("matches exact substring", () => {
     const text = "The capital of France is Paris. It is a beautiful city."
-    const claims = [{ claim: "The capital of France is Paris", status: "verified" }]
+    const claims = [{ claim: "The capital of France is Paris", status: "verified", verification_method: "kb" }]
     const spans = matchClaimsToText(text, claims)
     expect(spans).toHaveLength(1)
     expect(spans[0].start).toBe(0)

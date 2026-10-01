@@ -99,6 +99,10 @@ class DigestResult:
     inbox_urgent_count: int = 0
     skipped: bool = False
     skip_reason: str = ""
+    # The counts are real but the written sections are missing, because the
+    # model call failed or its answer could not be read.
+    partial: bool = False
+    partial_reason: str = ""
     persisted_artifact_id: str | None = None
     # Set by the app layer when this server runs Pro features without a
     # license. Empty on a licensed or trialing install. core/ cannot read
@@ -120,6 +124,8 @@ class DigestResult:
             "inbox_urgent_count": self.inbox_urgent_count,
             "skipped": self.skipped,
             "skip_reason": self.skip_reason,
+            "partial": self.partial,
+            "partial_reason": self.partial_reason,
             "persisted_artifact_id": self.persisted_artifact_id,
             "license_notice": self.license_notice,
         }
@@ -341,6 +347,12 @@ async def _persist(result: DigestResult, mcp_base_url: str) -> str | None:
     import httpx
 
     parts: list[str] = [f"# Daily Digest — {result.generated_at[:10]}", ""]
+    if result.partial:
+        parts.append(
+            f"_The written summary is missing ({result.partial_reason}). "
+            "The counts are real._"
+        )
+        parts.append("")
     if result.top_categories:
         parts.append("## Top categories")
         for c in result.top_categories:
@@ -367,19 +379,31 @@ async def _persist(result: DigestResult, mcp_base_url: str) -> str | None:
             parts.append(f"- **{s.title}** — {s.body}")
 
     content = "\n".join(parts)
+    # /ingest/structured takes string metadata values only.
+    metadata = {
+        "source": "daily_digest",
+        "kind": "daily",
+        "generated_at": result.generated_at,
+        "window_hours": str(result.window_hours),
+        "artifact_count": str(result.artifact_count),
+        "flagged_count": str(result.flagged_count),
+        "inbox_urgent_count": str(result.inbox_urgent_count),
+        "partial": "true" if result.partial else "false",
+        "top_categories": json.dumps(result.top_categories),
+    }
+    if result.digest_id:
+        metadata["digest_id"] = result.digest_id
+    if result.partial:
+        metadata["partial_reason"] = result.partial_reason
+    else:
+        # Action items come from the model; without its answer there is no
+        # count to record, and zero would claim there were none.
+        metadata["action_item_count"] = str(len(result.action_items))
     payload = {
         "content": content,
         "domain": "digests",
         "source_id": f"daily_digest:{result.generated_at[:10]}",
-        "metadata": {
-            "source": "daily_digest",
-            "kind": "daily",
-            "generated_at": result.generated_at,
-            "window_hours": str(result.window_hours),
-            "artifact_count": str(result.artifact_count),
-            "flagged_count": str(result.flagged_count),
-            "inbox_urgent_count": str(result.inbox_urgent_count),
-        },
+        "metadata": metadata,
     }
     # Self-call over HTTP crosses the API-key gate like any other client;
     # without the key the persist 401s on every auth-enforcing deployment
@@ -497,6 +521,12 @@ async def generate_daily_digest(
 
     raw_response = await _call_llm(prompt)
     parsed: dict[str, Any] = _parse_llm_response(raw_response) if raw_response else {}
+    if not raw_response:
+        result.partial = True
+        result.partial_reason = "model_call_failed"
+    elif not parsed:
+        result.partial = True
+        result.partial_reason = "model_response_unreadable"
 
     # Merge LLM output into the result. Always preserve our deterministic
     # `top_categories` (count-based, not LLM-derived) but let the LLM

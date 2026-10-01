@@ -146,8 +146,10 @@ export interface HallucinationResponse {
   reason: string | null;
   claims: Array<Record<string, unknown>>;
   /**
-   * Integer per-status counts (`total`, `verified`, `unverified`,
-   * `uncertain`, `assessed`) plus the float `overall_confidence`. Mirrors the
+   * Integer per-status counts (`total`, `verified`, `agreed`, `unverified`,
+   * `uncertain`, `assessed`) plus the float `overall_confidence`. `agreed` is
+   * the claims a second model agreed with and no source backs; they are not
+   * in `verified`. Mirrors the
    * server's `dict[str, float | int]` — a fixed counts-only shape here made
    * every real response a type error at the call site.
    */

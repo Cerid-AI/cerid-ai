@@ -284,32 +284,35 @@ def _key_expired(status: dict) -> bool:
         return True
 
 
-def reconcile_license_state(redis) -> str:
-    """Re-derive the runtime tier from persisted state. Safe to call repeatedly.
+def entitled_tier(redis) -> str:
+    """The tier the persisted state grants right now. Reads only.
 
     Precedence: a valid unexpired key beats an active trial, which beats the
-    ``CERID_TIER`` baseline. Called at startup (persisted entitlement must
-    survive a restart) and after every mutation.
+    ``CERID_TIER`` baseline.
     """
     baseline = _baseline_tier()
-
     status = _stored_status(redis)
-    if status.get("active") and status.get("tier") in _PAID_TIERS:
-        if _key_expired(status):
-            logger.info("License expired — reverting to baseline tier %r", baseline)
-            _clear_license(redis)
-        else:
-            target = higher_tier(str(status["tier"]), baseline)
-            _set_tier(target)
-            return target
-
+    if status.get("active") and status.get("tier") in _PAID_TIERS and not _key_expired(status):
+        return higher_tier(str(status["tier"]), baseline)
     if trial_state(redis).active:
-        target = higher_tier(TRIAL_TIER, baseline)
-        _set_tier(target)
-        return target
-
-    _set_tier(baseline)
+        return higher_tier(TRIAL_TIER, baseline)
     return baseline
+
+
+def reconcile_license_state(redis) -> str:
+    """Set the runtime tier from persisted state and drop an expired key.
+
+    Safe to call repeatedly. Called at startup (persisted entitlement must
+    survive a restart), after every mutation, and hourly by the scheduler.
+    Never from a GET: a read must not write.
+    """
+    status = _stored_status(redis)
+    if status.get("active") and status.get("tier") in _PAID_TIERS and _key_expired(status):
+        logger.info("License expired — reverting to baseline tier %r", _baseline_tier())
+        _clear_license(redis)
+    target = entitled_tier(redis)
+    _set_tier(target)
+    return target
 
 
 def _clear_license(redis) -> None:
@@ -322,7 +325,7 @@ def _clear_license(redis) -> None:
 async def license_status() -> LicenseStatusResponse:
     """Current entitlement, its provenance, and trial availability."""
     redis = get_redis()
-    tier = reconcile_license_state(redis)
+    tier = entitled_tier(redis)
     status = _stored_status(redis)
     trial = trial_state(redis)
 
@@ -356,12 +359,9 @@ async def license_capabilities() -> dict:
     Without this the community build had no capabilities source at all: every
     Pro surface rendered locked even after a customer activated a real key.
     """
-    redis = get_redis()
-    reconcile_license_state(redis)
-
     import config.features as features_mod
 
-    return {**features_mod.get_feature_status(), "license_state": entitlement_state(redis)}
+    return {**features_mod.get_feature_status(), "license_state": entitlement_state(get_redis())}
 
 
 @router.post("/activate", response_model=LicenseStatusResponse)

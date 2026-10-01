@@ -242,3 +242,24 @@ describe("SourceDetailPane — axe-clean", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 })
+
+describe("SourceDetailPane — figures the API did not measure", () => {
+  it("shows a dash, not 0, for a folder's null chunk and 24h counts", () => {
+    const source = makeSource({
+      kind: "folder",
+      id: "folder:1",
+      total_artifacts: 12,
+      total_chunks: null,
+      total_edges: null,
+      total_artifacts_24h: null,
+      quality_floor: null,
+    })
+    render(
+      <SourceDetailPane open source={source} onClose={() => {}} />,
+      { wrapper: wrap() },
+    )
+    expect(screen.getByText("chunks").previousElementSibling).toHaveTextContent("—")
+    expect(screen.getByText("24h").previousElementSibling).toHaveTextContent("—")
+    expect(screen.getByText("artifacts").previousElementSibling).toHaveTextContent("12")
+  })
+})

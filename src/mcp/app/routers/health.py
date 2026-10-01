@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -13,17 +14,21 @@ from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from config.constants import HEALTH_STATUS_CACHE_TTL_S
 from core.routing.provider_state import active_provider as _active_provider
+from core.routing.provider_state import is_local_provider as _is_local_provider
+from core.routing.provider_state import local_backend_url as _local_backend_url
 from core.utils.internal_llm import effective_local_model
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 from utils.encryption import CHROMA_ENCRYPTED_FIELDS, get_encryptor
+from utils.local_model_server import NEUTRAL_NAME, identify_local_server
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -181,6 +186,31 @@ def _probe_ollama_tags(ollama_url: str) -> dict:
         return result
 
 
+_local_server_cache: tuple[float, str, dict] | None = None
+
+
+def _probe_local_server(base_url: str) -> dict:
+    """Name and version of the local model server, cached like the tags probe."""
+    global _local_server_cache
+    now = time.monotonic()
+    with _ollama_probe_lock:
+        cached = _local_server_cache
+        if (
+            cached is not None
+            and cached[1] == base_url
+            and (now - cached[0]) < _OLLAMA_PROBE_CACHE_TTL_S
+        ):
+            return cached[2]
+        try:
+            name, version = identify_local_server(base_url)
+        except Exception as exc:
+            log_swallowed_error("app.routers.health.local_server_probe", exc)
+            name, version = NEUTRAL_NAME, None
+        result = {"name": name, "version": version, "url": base_url}
+        _local_server_cache = (now, base_url, result)
+        return result
+
+
 def health_check() -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     status = {"chromadb": "unknown", "redis": "unknown", "neo4j": "unknown"}
@@ -292,6 +322,8 @@ def health_check() -> dict:
     }
     if ollama_status is not None:
         result["ollama"] = {**ollama_status, "effective_local_model": effective_local_model()}
+    if ollama_enabled or _is_local_provider():
+        result["local_model_server"] = _probe_local_server(_local_backend_url())
     return result
 
 
@@ -1194,6 +1226,26 @@ def scheduler_status_endpoint():
     from app.scheduler import get_job_status
 
     return get_job_status()
+
+
+@router.get("/scheduler/log")  # response-model-allowed: dynamic response (shape varies)
+def scheduler_log_endpoint(
+    response: Response,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Return scheduled-job runs, newest first."""
+    try:
+        redis_client = get_redis()
+        total = redis_client.llen(config.REDIS_SCHEDULER_LOG)
+        raw = redis_client.lrange(config.REDIS_SCHEDULER_LOG, offset, offset + limit - 1)
+        runs = [json.loads(r) for r in raw]
+    except Exception as e:
+        logger.error(f"Scheduler log error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Has-More"] = "true" if offset + len(runs) < total else "false"
+    return runs
 
 
 @router.post("/scheduler/jobs/{job_id}/run")

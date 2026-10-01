@@ -25,7 +25,7 @@ import("@/lib/syntax-highlighter")
   .catch(() => { /* environment torn down before lazy import resolved */ })
 import type { ChatMessage, HallucinationClaim } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
-import { matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { displayStatusLabel, matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { SourceAttribution } from "./source-attribution"
 import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
@@ -38,6 +38,7 @@ import { SaveToVaultButton } from "./save-to-vault-button"
  *  to draw attention to potential issues. */
 const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
   verified: { backgroundColor: "transparent", borderBottom: "2px solid var(--claim-verified-border, rgba(22,163,74,0.6))", textDecoration: "none", color: "inherit" },
+  agreed: { backgroundColor: "rgba(107,114,128,0.10)", color: "inherit" },
   refuted: { backgroundColor: "var(--claim-refuted-bg, rgba(220,38,38,0.12))", borderBottom: "2px solid var(--claim-refuted-border, rgba(220,38,38,0.6))", color: "inherit" },
   unverified: { backgroundColor: "var(--claim-unverified-bg, rgba(202,138,4,0.10))", borderBottom: "2px solid var(--claim-unverified-border, rgba(202,138,4,0.5))", color: "inherit" },
   evasion: { backgroundColor: "var(--claim-evasion-bg, rgba(234,88,12,0.10))", borderBottom: "2px solid rgba(234,88,12,0.5)", color: "inherit" },
@@ -316,7 +317,7 @@ function CopyButton({ text }: { text: string }) {
 
 export type MessageVerificationStatus =
   | { state: "loading" }
-  | { state: "done"; verified: number; unverified: number; uncertain: number; skipped?: number; total: number; creditExhausted?: boolean; hasExpertClaims?: boolean }
+  | { state: "done"; verified: number; agreed?: number; unverified: number; uncertain: number; skipped?: number; total: number; creditExhausted?: boolean; hasExpertClaims?: boolean }
   | null
 
 function VerificationBadge({ status, onClick }: { status: MessageVerificationStatus; onClick?: () => void }) {
@@ -332,6 +333,7 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
   }
 
   const { verified, total, unverified, skipped, creditExhausted, hasExpertClaims } = status
+  const agreed = status.agreed ?? 0
   // Accuracy denominator: claims we actually got a binary answer on
   // (verified or unverified). Excluding uncertain/skipped matches the
   // `verification-status-bar.tsx:280` formula and resolves the prior
@@ -354,6 +356,8 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
             ? "bg-yellow-500/10 text-amber-600 dark:text-yellow-400 hover:bg-yellow-500/20"
             : hasIssues
               ? "bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20"
+              : denominator === 0 && agreed > 0
+                ? "bg-muted text-muted-foreground hover:bg-muted/80"
               : accuracy >= 80
                 ? "bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
                 : "bg-yellow-500/10 text-amber-600 dark:text-yellow-400 hover:bg-yellow-500/20",
@@ -365,7 +369,7 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
           ? <ShieldAlert className="h-2.5 w-2.5" />
           : <ShieldCheck className="h-2.5 w-2.5" />
       }
-      {verified}/{total} verified{hasSkipped ? ` (${skipped} skipped)` : ""}
+      {verified}/{total} verified{agreed > 0 ? ` · ${agreed} agreed` : ""}{hasSkipped ? ` (${skipped} skipped)` : ""}
     </button>
   )
 }
@@ -545,7 +549,7 @@ export function MessageBubble({ message, conversationId, verificationStatus, ver
           mark.dataset.claimIndex = String(i)
           // V-P2.7: announce the verification status to screen readers so the
           // <mark> isn't read as a bare "mark" with no context.
-          mark.setAttribute("aria-label", `Claim: ${span.displayStatus}`)
+          mark.setAttribute("aria-label", `Claim: ${displayStatusLabel(span.displayStatus)}`)
           range.surroundContents(mark)
           createdEls.push(mark)
           lastMark = mark

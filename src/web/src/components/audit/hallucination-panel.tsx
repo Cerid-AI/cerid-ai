@@ -10,7 +10,8 @@ import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, External
 import { submitClaimFeedback, verifySingleClaim } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase, ActivityLogEntry } from "@/hooks/use-verification-stream"
-import { getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
+import { countPositiveVerdicts, reportPositiveCounts, getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
+import { UX_COPY } from "@/lib/ux-copy"
 import { cn } from "@/lib/utils"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { ClaimBadge as VerificationClaimBadge } from "@/components/verification/claim-badge"
@@ -20,7 +21,7 @@ function VerificationMethodBadge({ method, model }: { method?: string; model?: s
   const label = verificationMethodLabel(method)
   if (!label) return null
   return (
-    <Badge variant="outline" className={`text-label-xs px-1 py-0 ${verificationMethodColor(method)}`} title={model ? `Verified by ${model}` : undefined}>
+    <Badge variant="outline" className={`text-label-xs px-1 py-0 ${verificationMethodColor(method)}`} title={model ? `Checked by ${model}` : undefined}>
       {label}
     </Badge>
   )
@@ -111,7 +112,7 @@ function ClaimBadge({
   // Auto-expand when focused — compute directly instead of syncing via effect
   const effectiveExpanded = expanded || focused
 
-  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, undefined, claim)
 
   const handleFeedback = async (correct: boolean) => {
     if (!conversationId || feedback) return
@@ -501,7 +502,7 @@ export function HallucinationPanel({
         )}
         <div className="flex gap-3 px-4 py-2 text-xs">
           <span className="text-muted-foreground">
-            {resolved.length}/{streamingClaims.length} verified
+            {resolved.length}/{streamingClaims.length} checked
           </span>
           {pending.length > 0 && (
             <span className="flex items-center gap-1 text-muted-foreground">
@@ -556,7 +557,13 @@ export function HallucinationPanel({
   }
 
   // Claims found — full detailed view
-  const { verified, unverified, uncertain } = report.summary
+  const { unverified, uncertain } = report.summary
+  // A claim re-verified here has a verdict the server's summary has not seen.
+  const { verified, agreed: agreedCount } = claimUpdates.size > 0
+    ? countPositiveVerdicts(
+        report.claims.map((c, i) => (claimUpdates.has(i) ? { ...c, ...claimUpdates.get(i)! } : c)),
+      )
+    : reportPositiveCounts(report.summary, report.claims)
 
   // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
   const refutedCount = report.claims.filter(
@@ -579,17 +586,18 @@ export function HallucinationPanel({
 
   // Classify each claim's filter category for filtering
   const getFilterCategory = (claim: HallucinationClaim): string => {
-    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, undefined, claim)
     if (ds === "refuted") return "refuted"
     if (ds === "evasion") return "evasion"
     if (ds === "verified") return "verified"
+    if (ds === "agreed") return "agreed"
     if (ds === "unverified") return "unverified"
     return "other"
   }
 
   // Refuted sub-categorization based on reason text
   const getRefutedSubType = (claim: HallucinationClaim): string | null => {
-    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, undefined, claim)
     if (ds !== "refuted") return null
     const reason = (claim.reason ?? "").toLowerCase()
     if (reason.includes("outdated") || reason.includes("superseded") || reason.includes("current") || reason.includes("newer")) return "outdated"
@@ -619,6 +627,20 @@ export function HallucinationPanel({
             )}
           >
             {verified} verified
+          </button>
+        )}
+        {agreedCount > 0 && (
+          <button
+            onClick={() => toggleCategory("agreed")}
+            title={UX_COPY.verification.agreedExplained}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors border",
+              hiddenCategories.has("agreed")
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
+                : "bg-muted/50 text-muted-foreground border-border",
+            )}
+          >
+            {UX_COPY.verification.agreedCount(agreedCount)}
           </button>
         )}
         {refutedCount > 0 && (

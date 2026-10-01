@@ -2,12 +2,15 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.2.0**. Client packages are `cerid-sdk`
+**1.3.0**. Client packages are `cerid-sdk`
 ([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
-([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.0** in this
-tree; the registries still serve 0.1.1 until 0.2.0 is published, which is a
+([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.1** in this
+tree; the registries still serve 0.1.1 until it is published, which is a
 separate step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
-product. Additive in 1.2.0: `POST /sdk/v1/memory/recall`,
+product. New in 1.3.0: the hallucination `summary` carries an integer
+`agreed`, and `verified` counts only claims a source backs (see "Verify
+claims" in the Python quickstart below). Additive in 1.2.0:
+`POST /sdk/v1/memory/recall`,
 `POST /sdk/v1/ingest/upload` (multipart), `DELETE /sdk/v1/artifacts/{id}`
 (consumer-scoped). Restricted domains raise HTTP 403 with
 `retrieval_reason: consumer_domain_restricted` (SDK: `DomainRestrictedError`).
@@ -112,6 +115,16 @@ check = client.verify.check("Redis defaults to port 6380.", conversation_id="dem
 for claim in check.claims:
     print(claim["status"], claim["confidence"])
 print(check.summary["overall_confidence"], "nli_skipped:", check.nli_skipped)
+# summary["verified"] counts only claims a source backs: a KB verdict, a
+# source_artifact_id, or a source_urls entry. A claim with status "verified",
+# verification_method "cross_model" and no source_urls is a second model's
+# agreement: it keeps its status and is counted in summary["agreed"].
+# verified + agreed + unverified + uncertain + error == total, less any claim
+# with status "skipped" (provider credits ran out), which this endpoint does not
+# count. A report stored before the server sent "agreed" has no such key: read
+# it with .get() and count the claims yourself when it is missing; do not
+# assume zero.
+print(check.summary["verified"], check.summary.get("agreed"))
 
 # Extract memories. Servers running the extraction queue answer 202 with a
 # job to poll instead of an inline result — branch on the returned type.
@@ -150,6 +163,9 @@ const check = await client.verify.check({
   conversation_id: "demo",
 });
 console.log(check.summary.overall_confidence, check.nli_skipped);
+// summary.agreed counts claims a second model agreed with and no source backs;
+// they are not in summary.verified.
+console.log(check.summary.verified, check.summary.agreed);
 
 // Extract memories; a queued server answers 202 with a job to poll
 const extracted = await client.memory.extract({
@@ -330,7 +346,7 @@ request.
 **GET /sdk/v1/settings**
 
 ```json
-{"version": "1.2.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
+{"version": "1.3.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
 ```
 
 ## Rate Limiting

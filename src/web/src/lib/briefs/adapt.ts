@@ -10,7 +10,9 @@
  * components/verification/types.ts). A `verified` band with no
  * `source_ids` therefore honestly degrades to an amber "partial" badge
  * (no viewable provenance) rather than fabricating a source — do not
- * work around that here.
+ * work around that here. It is not shown as "agreed": a brief claim carries
+ * no URLs, so a claim a web result supports also arrives with no `source_ids`
+ * and saying a second model agreed would be a guess.
  */
 
 import type { ClaimVerificationFE, ClaimStatus } from "@/components/verification/types"
@@ -31,7 +33,7 @@ const CONFIDENCE_BY_BAND: Record<BriefClaim["band"], number> = {
 export function briefClaimToFE(claim: BriefClaim): ClaimVerificationFE {
   return {
     claim: claim.text,
-    status: STATUS_BY_BAND[claim.band],
+    status: claim.band === "verified" && claim.source_ids.length === 0 ? "uncertain" : STATUS_BY_BAND[claim.band],
     confidence: CONFIDENCE_BY_BAND[claim.band],
     source_artifact_id: claim.source_ids[0],
   }

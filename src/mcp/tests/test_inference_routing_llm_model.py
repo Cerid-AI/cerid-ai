@@ -22,6 +22,7 @@ def _clear(monkeypatch) -> None:
         "INTERNAL_LLM_PROVIDER", "INTERNAL_LLM_MODEL", "EMBEDDINGS_PROVIDER",
         "RERANK_PROVIDER", "QUENCHFORGE_URL", "OLLAMA_URL",
         "QUENCHFORGE_DEFAULT_MODEL", "RETRIEVAL_SPARSE_ENABLED",
+        "OLLAMA_DEFAULT_MODEL",
     ):
         monkeypatch.delenv(var, raising=False)
     ih.reset()
@@ -56,3 +57,20 @@ def test_llm_lane_surfaces_the_model_that_actually_served(monkeypatch):
     snap = get_routing_snapshot()
     assert snap["llm"]["model"] == "llama3.1-8b"
     assert snap["llm"]["serving_model"] == "qwen2.5-7b-instruct-q4_k_m.gguf"
+
+
+def test_ollama_llm_lane_reports_the_pin_inference_asks_for(monkeypatch):
+    """Both keys can name a model. Calls read INTERNAL_LLM_MODEL first, so the
+    lane must not show the other one until the first call corrects it."""
+    _clear(monkeypatch)
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("INTERNAL_LLM_MODEL", "gemma-4-26b-a4b")
+    monkeypatch.setenv("OLLAMA_DEFAULT_MODEL", "qwen3.5-4b-instruct")
+    assert get_routing_snapshot()["llm"]["model"] == "gemma-4-26b-a4b"
+
+
+def test_ollama_llm_lane_falls_back_to_the_ollama_default(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("INTERNAL_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_DEFAULT_MODEL", "qwen3.5-4b-instruct")
+    assert get_routing_snapshot()["llm"]["model"] == "qwen3.5-4b-instruct"

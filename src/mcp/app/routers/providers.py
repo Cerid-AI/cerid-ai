@@ -563,14 +563,20 @@ async def get_provider_credits():
 @router.get("/routing", response_model=GetRoutingInfoResponse)
 async def get_routing_info():
     """Return smart routing configuration and current state."""
-    from core.routing.smart_router import _check_ollama, _ollama_models, get_model_registry
+    from core.routing import smart_router
 
-    ollama_available = await _check_ollama()
+    ollama_available = await smart_router._check_ollama()
+    # Read after the check, through the module. The check REBINDS the list, so
+    # a name imported beside it kept the list from before the first check and
+    # this endpoint answered "available, no models" for ever.
+    local_chat_models = [
+        m for m in smart_router._ollama_models if smart_router._is_chat_capable(m)
+    ]
 
     return {
         "ollama_available": ollama_available,
-        "ollama_models": _ollama_models if ollama_available else [],
-        "model_registry": get_model_registry(),
+        "ollama_models": local_chat_models if ollama_available else [],
+        "model_registry": smart_router.get_model_registry(),
         "default_internal_model": config.INTERNAL_LLM_MODEL or config.INTERNAL_LLM_MODEL_DEFAULT,
         "smart_routing_enabled": getattr(config, "SMART_ROUTING_ENABLED", True),
     }

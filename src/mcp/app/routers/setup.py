@@ -26,6 +26,7 @@ from app.routers import health
 from app.services.private_mode import get_private_mode_level
 from config.environment_profiles import classify_hardware, resolve_profile, suggest_profile
 from core.utils.swallowed import log_swallowed_error
+from utils.local_model_server import NEUTRAL_NAME, identify_local_server_async
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -124,6 +125,9 @@ class ConfigureRequest(BaseModel):
     watch_folder: bool | None = None
     ollama_enabled: bool | None = None
     ollama_model: str | None = None
+    # The backend chosen on the wizard's first step: "ollama", "quenchforge"
+    # or "cloud". Absent from older clients, which changes nothing.
+    inference_backend: str | None = None
     # Explicit consent to overwrite an already-configured instance. Without
     # it, /setup/configure on a configured install responds 409 (beta triage
     # 2026-07-12 P0-B4: a re-run wizard silently rewrote ARCHIVE_PATH /
@@ -142,12 +146,54 @@ class ConfigureResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+_LOCAL_PROVIDERS = ("ollama", "quenchforge")
+
+
+def _local_provider_configured() -> bool:
+    """True when the instance is set to answer from a local model server.
+
+    That takes three things the operator wrote down: the provider, where it
+    listens and which model to ask for. It is not a probe. Whether the server
+    answers is what ``/setup/status.services`` and ``/health`` report, and a
+    model server that is restarting must not send every browser back to the
+    wizard.
+    """
+    provider = os.environ.get("INTERNAL_LLM_PROVIDER", "").strip().lower()
+    if provider not in _LOCAL_PROVIDERS:
+        return False
+    url = (os.environ.get("QUENCHFORGE_URL") or os.environ.get("OLLAMA_URL") or "").strip()
+    model = (
+        os.environ.get("INTERNAL_LLM_MODEL") or os.environ.get("OLLAMA_DEFAULT_MODEL") or ""
+    ).strip()
+    return bool(url and model)
+
+
+def _configured_local_model() -> str:
+    """The local model the instance already names, or empty.
+
+    ``INTERNAL_LLM_MODEL`` names a remote model while the provider is a cloud
+    one, so it counts only under a local provider.
+    """
+    provider = os.environ.get("INTERNAL_LLM_PROVIDER", "").strip().lower()
+    pinned = os.environ.get("INTERNAL_LLM_MODEL", "").strip()
+    if provider in _LOCAL_PROVIDERS and pinned:
+        return pinned
+    return os.environ.get("OLLAMA_DEFAULT_MODEL", "").strip()
+
+
 def _is_configured() -> bool:
-    """Return True when all required API keys are present and non-empty."""
-    return all(os.environ.get(k, "").strip() for k in _REQUIRED_KEYS)
+    """True when the instance has one provider to answer with: the required
+    API keys, or a local model server. An install that runs on local inference
+    alone was never configured, and the wizard reopened in every browser."""
+    if all(os.environ.get(k, "").strip() for k in _REQUIRED_KEYS):
+        return True
+    return _local_provider_configured()
 
 
 def _missing_keys() -> list[str]:
+    """The keys setup still needs. None, once a local provider stands in."""
+    if _local_provider_configured():
+        return []
     return [k for k in _REQUIRED_KEYS if not os.environ.get(k, "").strip()]
 
 
@@ -370,6 +416,14 @@ def _verification_pipeline_status() -> dict:
     }
 
 
+def _published_port(var: str, default: int) -> int:
+    """The host port compose published, from the ``CERID_PORT_*`` it was given."""
+    try:
+        return int(os.environ.get(var) or default)
+    except ValueError:
+        return default
+
+
 @router.get("/health", response_model=SetupHealthResponse)
 async def setup_health() -> dict:
     """Detailed health dashboard for all services."""
@@ -382,24 +436,24 @@ async def setup_health() -> dict:
         {
             "name": "neo4j",
             "status": statuses["neo4j"],
-            "port": 7474,
+            "port": _published_port("CERID_PORT_NEO4J", 7474),
             "url": neo4j_url,
         },
         {
             "name": "chromadb",
             "status": statuses["chromadb"],
-            "port": 8001,
+            "port": _published_port("CERID_PORT_CHROMA", 8001),
             "url": chroma_url,
         },
         {
             "name": "redis",
             "status": statuses["redis"],
-            "port": 6379,
+            "port": _published_port("CERID_PORT_REDIS", 6379),
         },
         {
             "name": "mcp",
             "status": statuses["mcp"],
-            "port": 8888,
+            "port": _published_port("CERID_PORT_MCP", 8888),
         },
     ]
 
@@ -409,9 +463,10 @@ async def setup_health() -> dict:
     # wired to POST /setup/retest-verification — for the whole of onboarding.
     services.append(_verification_pipeline_status())
 
-    # Required services must all be healthy
+    # Required services must all be up. "setup_mode" is the API answering
+    # before a provider is configured, which is when the wizard asks.
     required_healthy = all(
-        s["status"] in ("healthy", "connected")
+        s["status"] in ("healthy", "connected", "setup_mode")
         for s in services
         if s["name"] not in _OPTIONAL_SERVICES
     )
@@ -419,10 +474,7 @@ async def setup_health() -> dict:
     return {
         "services": services,
         "all_healthy": required_healthy,
-        "docker": {
-            "compose_version": "v2.x.x",
-            "network": "llm-network",
-        },
+        "docker": {},
     }
 
 
@@ -534,6 +586,25 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             ),
         )
 
+    # A cloud choice writes nothing here: it does not erase a local
+    # configuration the user did not ask to remove.
+    local_backend: str | None = None
+    local_model = ""
+    if req.inference_backend is not None:
+        backend = req.inference_backend.strip().lower()
+        if backend not in (*_LOCAL_PROVIDERS, "cloud"):
+            return ConfigureResponse(
+                success=False, error=f"Unknown inference backend: {req.inference_backend}",
+            )
+        if backend in _LOCAL_PROVIDERS and req.ollama_enabled:
+            local_model = (req.ollama_model or "").strip() or _configured_local_model()
+            if not local_model:
+                return ConfigureResponse(
+                    success=False,
+                    error="Choose a local model before enabling the local backend.",
+                )
+            local_backend = backend
+
     try:
         updates: dict[str, str] = {}
 
@@ -563,6 +634,10 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             updates["OLLAMA_ENABLED"] = "true" if req.ollama_enabled else "false"
         if req.ollama_model is not None:
             updates["OLLAMA_DEFAULT_MODEL"] = req.ollama_model
+        if local_backend:
+            updates["INTERNAL_LLM_PROVIDER"] = local_backend
+            updates["INTERNAL_LLM_MODEL"] = local_model
+            updates["OLLAMA_DEFAULT_MODEL"] = local_model
 
         if not updates:
             return ConfigureResponse(success=False, error="No configuration provided")
@@ -573,6 +648,22 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
         # health checks pick up the change without a restart.
         for key, value in updates.items():
             os.environ[key] = value
+
+        if local_backend:
+            from core.routing.provider_state import set_active_provider
+            from core.utils.internal_llm import reset_effective_local_model_cache
+
+            set_active_provider(local_backend, local_model)
+            # Startup restores this machine's settings file over .env.
+            from app.sync.user_state import write_host_settings
+
+            write_host_settings(config.HOST_SETTINGS_PATH, {
+                "internal_llm_provider": local_backend,
+                "internal_llm_model": local_model,
+            })
+            # The resolved model is cached per served-list refresh; without
+            # this the previous model keeps answering until the next one.
+            reset_effective_local_model_cache()
 
         _logger.info(
             "First-run configuration applied: %s",
@@ -785,6 +876,26 @@ def _clean_ollama_models(raw_names: list[str]) -> list[str]:
     return cleaned
 
 
+def _local_chat_choice(served: list[str]) -> tuple[list[str], str | None]:
+    """The models the wizard may offer for chat, and the one already in use.
+
+    The wizard took the first name the server listed and wrote it as the chat
+    model. The first name may be an embedder, and the instance may already
+    name a model: finishing the wizard replaced it. The list is now the
+    chat-capable models, and the second value is the configured model when the
+    server serves it.
+    """
+    from core.routing.smart_router import _is_chat_capable
+
+    chat = [name for name in served if _is_chat_capable(name)]
+    # Same order a call resolves its model in (core.utils.internal_llm).
+    for key in ("INTERNAL_LLM_MODEL", "OLLAMA_DEFAULT_MODEL"):
+        configured = _strip_quant_suffix(os.getenv(key, "").strip())
+        if configured and configured in chat:
+            return chat, configured
+    return chat, None
+
+
 def _recommend_backend_from_hw(hw: "object") -> str:
     """Pick a sensible local-inference backend when start-cerid.sh did not
     propagate ``HOST_RECOMMENDED_LOCAL_BACKEND`` (e.g. dev-mode container
@@ -849,6 +960,8 @@ async def system_check(response: Response) -> dict:
     ollama_detected = False
     ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
     ollama_models: list[str] = []
+    ollama_configured_model: str | None = None
+    local_server_name, local_server_version = NEUTRAL_NAME, None
     for _attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -856,8 +969,12 @@ async def system_check(response: Response) -> dict:
                 if resp.status_code == HTTPStatus.OK:
                     data = resp.json()
                     raw_names = [m.get("name", "") for m in data.get("models", [])]
-                    ollama_models = _clean_ollama_models(raw_names)
-                    ollama_detected = len(ollama_models) > 0
+                    served = _clean_ollama_models(raw_names)
+                    ollama_detected = len(served) > 0
+                    ollama_models, ollama_configured_model = _local_chat_choice(served)
+                    local_server_name, local_server_version = (
+                        await identify_local_server_async(client, ollama_url)
+                    )
                 break
         except Exception as exc:
             log_swallowed_error('app.routers.setup', exc)
@@ -929,6 +1046,9 @@ async def system_check(response: Response) -> dict:
         "ollama_detected": ollama_detected,
         "ollama_url": ollama_url if ollama_detected else None,
         "ollama_models": ollama_models,
+        "ollama_configured_model": ollama_configured_model,
+        "local_server_name": local_server_name,
+        "local_server_version": local_server_version,
         "lightweight_recommended": lightweight_recommended,
         "archive_path_exists": Path(archive_path).exists(),
         "default_archive_path": default_archive,

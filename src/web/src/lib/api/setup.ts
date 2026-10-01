@@ -64,6 +64,7 @@ export async function applySetupConfiguration(
   if (config.watch_folder !== undefined) payload.watch_folder = config.watch_folder
   if (config.ollama_enabled !== undefined) payload.ollama_enabled = config.ollama_enabled
   if (config.ollama_model !== undefined) payload.ollama_model = config.ollama_model
+  if (config.inference_backend !== undefined) payload.inference_backend = config.inference_backend
   if (opts.force) payload.force = true
 
   const res = await fetch(`${MCP_BASE}/setup/configure`, {

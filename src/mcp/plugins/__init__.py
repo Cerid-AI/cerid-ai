@@ -53,6 +53,13 @@ _plugin_tool_handlers: dict[str, Any] = {}
 # Tool definitions registered by ToolPlugin instances (for MCP_TOOLS merge)
 _plugin_tool_definitions: list[dict[str, Any]] = []
 
+# Tool name -> the plugin that registered it, so a plugin switched off in
+# Settings stops serving its tools without waiting for a restart.
+_plugin_tool_owners: dict[str, str] = {}
+
+# Written by POST /plugins/{name}/enable|disable: "1" or "0".
+ENABLED_KEY = "cerid:plugins:{name}:enabled"
+
 # Sync backend classes registered by SyncBackendPlugin instances
 # (backend name -> class), so a config value can select one.
 _plugin_sync_backends: dict[str, type] = {}
@@ -137,14 +144,54 @@ def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
         )
 
 
-def _is_plugin_enabled(name: str) -> bool:
-    """Check if a plugin is enabled via config."""
-    # If ENABLED_PLUGINS is set, only those plugins are loaded
-    enabled = config.ENABLED_PLUGINS
-    if enabled:
-        return name in enabled
-    # Otherwise auto-discover all plugins in the directory
-    return True
+def _get_redis() -> Any:
+    from app.deps import get_redis
+
+    return get_redis()
+
+
+def read_stored_enabled(names: list[str]) -> dict[str, bool]:
+    """The enable/disable choices stored by the plugin endpoints.
+
+    A name with no stored choice is absent. One round trip for all names, and
+    an unreachable Redis yields no choices rather than an error, so a boot
+    without Redis loads what it loaded before the choices existed.
+    """
+    if not names:
+        return {}
+    try:
+        values = _get_redis().mget([ENABLED_KEY.format(name=n) for n in names])
+    except Exception as exc:  # noqa: BLE001 — any Redis fault falls back to the defaults
+        from core.utils.swallowed import log_swallowed_error
+
+        log_swallowed_error("plugins", exc)
+        logger.warning("Stored plugin choices unreadable, using defaults: %s", exc)
+        return {}
+    return {
+        name: (val.decode() if isinstance(val, bytes) else str(val)) == "1"
+        for name, val in zip(names, values)
+        if val is not None
+    }
+
+
+def plugin_disabled_reason(name: str, stored: bool | None) -> str | None:
+    """Why a plugin is switched off, or None when it is on.
+
+    ``CERID_ENABLED_PLUGINS`` is the outer allowlist when set: a stored choice
+    decides only among the plugins it admits. ``stored`` is the choice made
+    through the plugin endpoints, None when there is none.
+    """
+    allowlist = config.ENABLED_PLUGINS
+    if allowlist and name not in allowlist:
+        return "not in CERID_ENABLED_PLUGINS"
+    if stored is False:
+        return "disabled in settings"
+    return None
+
+
+def _is_plugin_enabled(name: str, stored: bool | None = None) -> bool:
+    """Check if a plugin is enabled via config and the stored choice."""
+    return plugin_disabled_reason(name, stored) is None
 
 
 def _find_plugin_class(module: Any) -> type | None:
@@ -172,9 +219,14 @@ def _find_plugin_class(module: Any) -> type | None:
     return candidates[0] if candidates else None
 
 
-def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
+def _load_single_plugin(
+    plugin_dir: Path, stored_enabled: dict[str, bool] | None = None
+) -> dict[str, Any] | None:
     """
     Load a single plugin from its directory.
+
+    ``stored_enabled`` holds the choices made through the plugin endpoints,
+    keyed by plugin name.
 
     Returns plugin info dict on success, None on skip.
     Raises PluginLoadError on failure.
@@ -209,8 +261,9 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     name = manifest["name"]
 
     # Check if enabled
-    if not _is_plugin_enabled(name):
-        logger.info(f"Plugin '{name}' skipped (not in ENABLED_PLUGINS)")
+    disabled_reason = plugin_disabled_reason(name, (stored_enabled or {}).get(name))
+    if disabled_reason:
+        logger.info(f"Plugin '{name}' skipped ({disabled_reason})")
         # Recorded, not silent. Disabling a plugin is a legitimate operator
         # choice, but it does NOT switch off the feature flags that plugin
         # supplies — so the customer keeps being told the feature is enabled
@@ -219,7 +272,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         # CERID_ENABLED_PLUGINS stop being a way to turn the gate green.
         _record_plugin_failure(
             plugin_dir,
-            PluginDisabledError("not in CERID_ENABLED_PLUGINS"),
+            PluginDisabledError(disabled_reason),
         )
         return None
 
@@ -382,7 +435,9 @@ def plugin_search_dirs(plugin_dir: str | None = None) -> list[Path]:
     return dirs
 
 
-def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
+def _scan_directory(
+    base_dir: Path, loaded: list[str], stored_enabled: dict[str, bool] | None = None
+) -> None:
     """Scan a single directory for plugins and load them."""
     if not base_dir.exists() or not base_dir.is_dir():
         return
@@ -392,7 +447,7 @@ def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
             continue
 
         try:
-            info = _load_single_plugin(entry)
+            info = _load_single_plugin(entry, stored_enabled)
             if info:
                 _loaded_plugins[info["name"]] = info
                 _failed_plugins.pop(entry.name, None)  # recovered on reload
@@ -456,8 +511,11 @@ def load_plugins(plugin_dir: str | None = None, app: Any = None) -> list[str]:
     """
     loaded: list[str] = []
 
+    stored_enabled = read_stored_enabled(
+        [str(m["name"]) for m in discover_plugins(plugin_dir) if m.get("name")]
+    )
     for base in plugin_search_dirs(plugin_dir):
-        _scan_directory(base, loaded)
+        _scan_directory(base, loaded, stored_enabled)
 
     if loaded:
         logger.info(f"Loaded {len(loaded)} plugin(s): {', '.join(loaded)}")
@@ -479,6 +537,7 @@ def load_plugins(plugin_dir: str | None = None, app: Any = None) -> list[str]:
                     handler = tool_def.pop("handler", None)
                     if handler and callable(handler):
                         _plugin_tool_handlers[tool_name] = handler
+                        _plugin_tool_owners[tool_name] = name
                         _plugin_tool_definitions.append(tool_def)
                         logger.info("Plugin '%s' registered tool: %s", name, tool_name)
             except (AttributeError, KeyError, TypeError) as e:
@@ -558,6 +617,17 @@ def get_failed_plugins() -> dict[str, dict[str, Any]]:
     return {name: dict(info) for name, info in _failed_plugins.items()}
 
 
+def _withheld_tool_names() -> set[str]:
+    """Tools whose plugin has been switched off since it was loaded."""
+    owners = sorted(set(_plugin_tool_owners.values()))
+    stored = read_stored_enabled(owners)
+    return {
+        tool
+        for tool, owner in _plugin_tool_owners.items()
+        if not _is_plugin_enabled(owner, stored.get(owner))
+    }
+
+
 def get_plugin_tool_definitions() -> list[dict[str, Any]]:
     """Return tool definitions registered by ToolPlugin instances.
 
@@ -565,7 +635,8 @@ def get_plugin_tool_definitions() -> list[dict[str, Any]]:
     ``ToolPlugin`` actually appears in ``tools/list`` (RA-63) instead of
     being collected here and never read.
     """
-    return list(_plugin_tool_definitions)
+    withheld = _withheld_tool_names()
+    return [t for t in _plugin_tool_definitions if t["name"] not in withheld]
 
 
 def get_plugin_tool_handlers() -> dict[str, Any]:
@@ -574,7 +645,8 @@ def get_plugin_tool_handlers() -> dict[str, Any]:
     Consumed by ``app.tools`` to route ``tools/call`` for plugin tools
     (RA-63) — the counterpart to :func:`get_plugin_tool_definitions`.
     """
-    return dict(_plugin_tool_handlers)
+    withheld = _withheld_tool_names()
+    return {n: h for n, h in _plugin_tool_handlers.items() if n not in withheld}
 
 
 def get_registered_sync_backends() -> dict[str, type]:

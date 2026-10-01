@@ -13,6 +13,7 @@ import type {
   RectifyResponse,
   CurateResponse,
   TaxonomyResponse,
+  SchedulerRun,
   SchedulerStatus,
   SchedulerJobRunResult,
   IngestLogResponse,
@@ -426,6 +427,12 @@ export async function fetchSynopsisEstimate(
 export async function fetchSchedulerStatus(): Promise<SchedulerStatus> {
   const res = await fetch(`${MCP_BASE}/scheduler`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Scheduler status failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchSchedulerLog(limit = 20): Promise<SchedulerRun[]> {
+  const res = await fetch(`${MCP_BASE}/scheduler/log?limit=${limit}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Scheduler log failed: ${res.status}`))
   return res.json()
 }
 

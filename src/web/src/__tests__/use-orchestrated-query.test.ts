@@ -121,3 +121,55 @@ describe("useOrchestratedQuery — error propagation", () => {
     await waitFor(() => expect(mockOrchestrated).toHaveBeenCalled())
   })
 })
+
+describe("useOrchestratedQuery — the send's retrieval is the panel's request", () => {
+  const response = {
+    results: [],
+    confidence: 0.5,
+    total_results: 0,
+    execution_time_ms: 12,
+    source_breakdown: null,
+  }
+
+  it.each([
+    ["the request is still in flight", 50],
+    ["the request has already answered", 0],
+  ])("makes one request for a message, not two (%s)", async (_name, delayMs) => {
+    mockOrchestrated.mockImplementation(
+      () => new Promise((res) => setTimeout(() => res(response), delayMs)),
+    )
+    const first = [{ role: "user" as const, content: "what changed in the cutover?" }]
+    const { result, rerender } = renderHook(
+      ({ text, recent }: { text: string; recent?: typeof first }) =>
+        useOrchestratedQuery(text, "smart", recent),
+      { wrapper: createWrapper(), initialProps: { text: "", recent: undefined as typeof first | undefined } },
+    )
+    expect(mockOrchestrated).not.toHaveBeenCalled()
+
+    // The send asks first, for the message it is about to add.
+    let sent: Promise<unknown> | undefined
+    act(() => {
+      sent = result.current.retrieveFor("what changed in the cutover?", first)
+    })
+    if (delayMs === 0) await act(async () => { await sent })
+
+    // The message joins the conversation and the panel asks for the same text.
+    rerender({ text: "what changed in the cutover?", recent: first })
+    await act(async () => { await sent })
+    await waitFor(() => expect(result.current.hasQueried).toBe(true))
+
+    expect(mockOrchestrated).toHaveBeenCalledTimes(1)
+    expect(mockOrchestrated.mock.calls[0][0]).toBe("what changed in the cutover?")
+    expect(mockOrchestrated.mock.calls[0][4]).toEqual(first)
+  })
+
+  it("asks again for a different text", async () => {
+    mockOrchestrated.mockResolvedValue(response)
+    const { result } = renderHook(() => useOrchestratedQuery("", "smart"), { wrapper: createWrapper() })
+    await act(async () => {
+      await result.current.retrieveFor("first question here", [{ role: "user", content: "first question here" }])
+      await result.current.retrieveFor("second question here", [{ role: "user", content: "second question here" }])
+    })
+    expect(mockOrchestrated).toHaveBeenCalledTimes(2)
+  })
+})

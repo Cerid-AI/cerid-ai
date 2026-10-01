@@ -267,6 +267,46 @@ def list_top_entities(
         raise
 
 
+def count_entities(
+    driver: Any,
+    *,
+    search: str | None = None,
+    include_internal: bool = False,
+) -> int:
+    """Count the entities :func:`list_top_entities` would return with no limit.
+
+    Applies the same search and hidden-domain predicates, so a caller can
+    report "N of M" for a page it fetched with the same arguments.
+    """
+    search_lc = (search or "").strip().lower()
+    hidden: set[str] | None = None if include_internal else _hidden_domains()
+
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if search_lc:
+        where_clauses.append(
+            "(toLower(e.name) CONTAINS $search "
+            "OR toLower(e.canonical_id) CONTAINS $search "
+            "OR toLower(coalesce(e.summary, '')) CONTAINS $search)"
+        )
+        params["search"] = search_lc
+    if hidden is not None:
+        where_clauses.append("NOT e.primary_domain IN $hidden")
+        params["hidden"] = sorted(hidden)
+    where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    try:
+        with driver.session() as session:
+            record = session.run(
+                f"MATCH (e:Entity) {where} RETURN count(e) AS total",
+                **params,
+            ).single()
+            return int(record["total"]) if record else 0
+    except Exception as exc:
+        log_swallowed_error("wiki.count_entities", exc)
+        raise
+
+
 # ---------------------------------------------------------------------------
 # get_entity
 # ---------------------------------------------------------------------------

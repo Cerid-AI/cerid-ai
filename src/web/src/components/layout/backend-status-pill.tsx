@@ -80,7 +80,12 @@ export function BackendStatusPill() {
     configured ?? data.recommended_local_backend ?? deriveRecommendation(data)
   const summary = backendSummary(unobserved)
 
-  const label = observed ? providerLabel(llmLane.serving) : summary.label
+  const serverName = health?.local_model_server?.name
+  const label = observed
+    ? providerLabel(llmLane.serving, serverName)
+    : summary.tone === "local" && configured && serverName
+      ? serverName
+      : summary.label
   const tone: "local" | "cloud" = observed
     ? isOnBoxServing(llmLane.serving)
       ? "local"
@@ -125,7 +130,7 @@ export function BackendStatusPill() {
         {observed ? (
           <p className="text-muted-foreground">
             {degraded
-              ? `Configured for ${providerLabel(llmLane.provider)}; ${label} answered the last ${llmLane.fallbackCount} call${llmLane.fallbackCount === 1 ? "" : "s"}.`
+              ? `Configured for ${providerLabel(llmLane.provider, serverName)}; ${label} answered the last ${llmLane.fallbackCount} call${llmLane.fallbackCount === 1 ? "" : "s"}.`
               : tone === "local"
                 ? "Pipeline LLM calls are being answered on this machine."
                 : "Pipeline LLM calls are being answered by the configured cloud provider."}

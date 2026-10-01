@@ -125,7 +125,6 @@ describe("ExtensionsCategory — plugin rows", () => {
             enabled: true,
             version: "1.0.0",
             tier_required: "community",
-            config_schema: null,
           }],
           total: 1,
         })
@@ -134,6 +133,51 @@ describe("ExtensionsCategory — plugin rows", () => {
     }))
     render(<ExtensionsCategory />, { wrapper })
     expect(await screen.findByText("GitHub")).toBeInTheDocument()
+  })
+
+  it("says a change applies after a restart when the server has not applied it", async () => {
+    const row = (name: string, restart_required: boolean) => ({
+      name, description: "", enabled: false, version: "1.0.0",
+      tier_required: "community", restart_required,
+    })
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/plugins")) {
+        return ok({ plugins: [row("pending", true), row("settled", false)], total: 2 })
+      }
+      return mockApis()(url)
+    }))
+    render(<ExtensionsCategory />, { wrapper })
+    await screen.findByText("settled")
+    expect(screen.getAllByText(/still running until the server restarts/i)).toHaveLength(1)
+  })
+
+  it("offers no configuration for a plugin, and asks the server for none", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/config")) return ok({ values: { poll_interval_minutes: 15 } })
+      if (url.includes("/plugins")) {
+        return ok({
+          plugins: [{
+            name: "gmail-connector", description: "", enabled: true, version: "1.0.0",
+            tier_required: "community",
+            // What a server older than this client still sends.
+            config_schema: { poll_interval_minutes: { type: "integer", default: 15 } },
+          }],
+          total: 1,
+        })
+      }
+      return mockApis()(url)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    localStorage.setItem("cerid-settings-disclosure:extensions.plugins", "open")
+    render(<ExtensionsCategory />, { wrapper })
+    expect(await screen.findByRole("switch", { name: /disable gmail-connector/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading/i)).toBeNull()
+    })
+    expect(document.querySelector("[data-advanced-disclosure='extensions.plugins']")).toBeNull()
+    expect(screen.queryByRole("button", { name: /save config/i })).toBeNull()
+    expect(screen.queryByText("poll_interval_minutes")).toBeNull()
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/config"))).toBe(false)
   })
 
   // GUI spec MUST-6/MUST-7: rows render the manifest's human display_name
@@ -152,7 +196,6 @@ describe("ExtensionsCategory — plugin rows", () => {
               enabled: false,
               version: "0.1.0",
               tier_required: "community",
-              config_schema: null,
             },
             {
               name: "ocr",
@@ -162,7 +205,6 @@ describe("ExtensionsCategory — plugin rows", () => {
               enabled: true,
               version: "1.0.0",
               tier_required: "community",
-              config_schema: null,
             },
           ],
           total: 2,
@@ -216,7 +258,6 @@ describe("ExtensionsCategory — plugin rows", () => {
             enabled: false,
             version: "0.1.0",
             tier_required: "community",
-            config_schema: null,
           }],
           total: 1,
         })
@@ -562,7 +603,6 @@ describe("ExtensionsCategory — plugin rows resolve entitlement per flag", () =
         enabled: false,
         version: "1.0.0",
         tier_required: "pro",
-        config_schema: null,
         file_types: [],
         capabilities: [],
         feature_flags: ["meeting_diarization"],

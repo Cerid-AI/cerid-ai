@@ -97,9 +97,18 @@ endpoint in `WEBHOOK_ENDPOINTS` that subscribes to it. Payload:
   "flagged_count": 2,
   "inbox_urgent_count": 1,
   "persisted_artifact_id": "art:abc123",
+  "partial": false,
+  "partial_reason": "",
   "summary": "Your daily digest is ready."
 }
 ```
+
+When the model call fails, or its answer cannot be read, the digest is
+saved with its counts and without its written sections. `partial` is
+then `true`, `partial_reason` is `model_call_failed` or
+`model_response_unreadable`, and `summary` says the written summary is
+missing. `GET /digests/*` serves the same two fields, and the scheduled
+run is logged as `partial` rather than `success`.
 
 The receiver fetches the full content via `GET /digests/latest` or
 `GET /digests/{date}`.

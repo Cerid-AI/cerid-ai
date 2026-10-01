@@ -4,13 +4,14 @@
 import { useState } from "react"
 import {
   ShieldCheck, ShieldAlert, Loader2, ChevronDown, ChevronUp,
-  CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink, RefreshCw,
+  CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink, RefreshCw, MessagesSquare,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import type { HallucinationReport, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase } from "@/hooks/use-verification-stream"
-import { getClaimDisplayStatus, isTimeoutMethod, stripMarkdown, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { reportPositiveCounts, getClaimDisplayStatus, isTimeoutMethod, stripMarkdown, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { UX_COPY } from "@/lib/ux-copy"
 import { cn, getAccuracyTier } from "@/lib/utils"
 
 interface VerificationStatusBarProps {
@@ -57,6 +58,8 @@ function ClaimStatusIcon({
   switch (displayStatus) {
     case "verified":
       return <CheckCircle2 data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-green-700 dark:text-green-400", pulseCls)} />
+    case "agreed":
+      return <MessagesSquare data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-muted-foreground", pulseCls)} />
     case "refuted":
       return <XOctagon data-current={isCurrent} className={cn("h-3 w-3 shrink-0 text-red-700 dark:text-red-400", pulseCls)} />
     case "evasion":
@@ -79,6 +82,7 @@ function ClaimStatusIcon({
 function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
   switch (displayStatus) {
     case "verified": return "text-green-700 dark:text-green-400"
+    case "agreed": return "text-muted-foreground"
     case "refuted": return "text-red-700 dark:text-red-400"
     case "evasion": return "text-orange-600 dark:text-orange-400"
     case "citation": return "text-purple-600 dark:text-purple-400"
@@ -142,7 +146,7 @@ export function VerificationStatusBar({
           <div className="border-t border-border/50 px-4 py-1.5">
             <ul className="space-y-0.5">
               {streamingClaims.map((c) => {
-                const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method, c.claim_type)
+                const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method, c.claim_type, undefined, c)
                 return (
                   <li key={c.index} className="flex flex-col gap-0.5 text-xs">
                     <div className="flex items-start gap-1.5">
@@ -293,7 +297,11 @@ export function VerificationStatusBar({
     )
   }
 
-  const { verified, unverified, uncertain, total } = report.summary
+  const { unverified, uncertain, total } = report.summary
+  // "verified" means a source the user can open. The server counts by the same
+  // rule; counting the claims here keeps a report stored before that rule from
+  // showing a second model's agreement as verified.
+  const { verified, agreed: agreedCount } = reportPositiveCounts(report.summary, report.claims)
   const skippedCount = report.summary?.skipped ?? 0
 
   // Split uncertain into timed-out (evidence gathering cut short) and
@@ -313,10 +321,16 @@ export function VerificationStatusBar({
   const evasionCount = report.claims.filter((c) => c.claim_type === "evasion").length
   const softUnverifiedCount = unverified - refutedCount - evasionCount
 
-  // Accuracy: only refuted claims count as failures (not soft unverified)
+  // Accuracy: only refuted claims count as failures (not soft unverified).
+  // Claims a second model merely agreed with are in neither term.
   const denominator = verified + refutedCount
-  const accuracyPct = denominator > 0 ? Math.round((verified / denominator) * 100) : 100
-  const accuracyTier = getAccuracyTier(accuracyPct / 100)
+  // No claim with a verdict is no measurement. It read "100%" and "High",
+  // which is what a refusal with one uncertain claim was shown as.
+  const accuracyPct = denominator > 0 ? Math.round((verified / denominator) * 100) : null
+  const accuracyTier =
+    accuracyPct === null
+      ? { label: "Not assessed", textColor: "text-muted-foreground", barColor: "bg-muted-foreground/30" }
+      : getAccuracyTier(accuracyPct / 100)
 
   // Shield color — refuted claims trigger the warning
   const hasRefuted = refutedCount > 0
@@ -377,13 +391,18 @@ export function VerificationStatusBar({
 
           {/* Claim count — show assessed vs total when some are uncertain */}
           <span className="shrink-0 text-muted-foreground">
-            {uncertain > 0 ? `${verified + unverified} of ${total}` : `${total}`} claims assessed
+            {uncertain > 0 ? `${verified + agreedCount + unverified} of ${total}` : `${total}`} claims assessed
           </span>
 
-          {verified > 0 && (
+          {(verified > 0 || agreedCount > 0) && (
             <Tooltip><TooltipTrigger asChild>
-              <span className="shrink-0 text-green-700 dark:text-green-400">{verified} verified</span>
-            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims confirmed by cross-model check or KB evidence</p></TooltipContent></Tooltip>
+              <span className={cn("shrink-0", verified > 0 ? "text-green-700 dark:text-green-400" : "text-muted-foreground")}>{verified} verified</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims supported by a source you can open: a KB document or a web result</p></TooltipContent></Tooltip>
+          )}
+          {agreedCount > 0 && (
+            <Tooltip><TooltipTrigger asChild>
+              <span className="shrink-0 text-muted-foreground">{UX_COPY.verification.agreedCount(agreedCount)}</span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">{UX_COPY.verification.agreedExplained}</p></TooltipContent></Tooltip>
           )}
           {refutedCount > 0 && (
             <Tooltip><TooltipTrigger asChild>
@@ -417,16 +436,16 @@ export function VerificationStatusBar({
           <div className="flex shrink-0 items-center gap-1.5">
             <span className="text-muted-foreground">Accuracy:</span>
             <ProgressBar
-              pct={accuracyPct}
+              pct={accuracyPct ?? 0}
               label="Accuracy"
               fillClassName={accuracyTier.barColor}
               className="w-12"
             />
             <span className={cn("tabular-nums", accuracyTier.textColor)}>
-              {accuracyPct}%
+              {accuracyPct === null ? "—" : `${accuracyPct}%`}
             </span>
           </div>
-          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verified claims / (verified + refuted). Unverified claims are excluded.</p></TooltipContent></Tooltip>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verified claims / (verified + refuted). Verified means supported by a source you can open; claims a second model only agreed with and unverified claims are excluded. A dash means no claim was verified or refuted.</p></TooltipContent></Tooltip>
 
           <div className="h-3 w-px shrink-0 bg-border" />
 
@@ -489,7 +508,7 @@ export function VerificationStatusBar({
         <div className="border-t border-border/50 px-4 py-1.5">
           <ul className="space-y-1">
             {report.claims.map((c, i) => {
-              const ds = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type)
+              const ds = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type, undefined, c)
               return (
                 <li key={i} className="flex flex-col gap-0.5 text-xs">
                   <div className="flex items-start gap-1.5">

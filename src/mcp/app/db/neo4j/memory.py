@@ -68,6 +68,7 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
         base_score (float): Original extraction score (default: 1.0)
         conversation_id (str): Optional — creates EXTRACTED_FROM relationship
         artifact_id (str): Optional — creates RELATES_TO relationship
+        source_urls (list[str]): Optional — stored on the node as source_urls
     """
     memory_id = memory_data.get("id") or str(uuid.uuid4())
     text = memory_data.get("text", "")
@@ -121,6 +122,17 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
                 "MERGE (m)-[:RELATES_TO]->(a)",
                 mid=memory_id,
                 aid=artifact_id,
+            )
+
+        # Optional: URLs the memory was verified against
+        source_urls = [
+            u for u in memory_data.get("source_urls") or [] if isinstance(u, str) and u
+        ]
+        if source_urls:
+            session.run(
+                "MATCH (m:Memory {id: $mid}) SET m.source_urls = $source_urls",
+                mid=memory_id,
+                source_urls=source_urls,
             )
 
     logger.debug("Created Memory node %s (source=%s)", memory_id, source)

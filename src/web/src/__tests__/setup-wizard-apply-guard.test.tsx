@@ -180,7 +180,8 @@ describe("SetupWizard — already-configured Apply guard", () => {
   it("applies directly (force=false) when the backend is not configured", async () => {
     // setup_required=true (not configured) — configured_providers still
     // reports the openrouter key so the Apply button clears its key gate
-    // (resume does not restore the persisted ollama/keys state).
+    // (keys are never saved, and the mocked system check detects no local
+    // server, so the saved local backend is dropped on resume).
     vi.mocked(fetchSetupStatus).mockResolvedValue({
       configured: false,
       setup_required: true,
@@ -200,10 +201,9 @@ describe("SetupWizard — already-configured Apply guard", () => {
 })
 
 describe("SetupWizard — Apply button provider gating (Task B3)", () => {
-  // Resume only jumps `state.step`; it does not restore keys/ollama from the
-  // persisted record (those come back from the mocked fetchSetupStatus below
-  // via the mount-time provider_status effect), so no-key-valid coverage can
-  // reuse the plain resume-to-step-4 helper.
+  // Keys are never saved with the progress record; they come back from the
+  // mocked fetchSetupStatus below, so no-key-valid coverage can reuse the
+  // plain resume-to-step-4 helper.
   function seedResumeAtApplyStep() {
     localStorage.setItem(
       "cerid-setup-progress",

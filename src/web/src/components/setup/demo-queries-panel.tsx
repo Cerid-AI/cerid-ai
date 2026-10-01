@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2, ChevronRight, MessagesSquare, Check, AlertCircle, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 import { queryKB } from "@/lib/api/kb"
 import type { KnowledgePackSummary } from "@/lib/api/knowledge-packs"
 import type { KBQueryResult } from "@/lib/types"
@@ -232,7 +233,7 @@ export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
             {result.answer}
           </p>
 
-          {/* Source attribution — filename + relevance %.
+          {/* Source attribution — filename + relevance bar.
               Mirrors the main chat's ``SourceAttribution`` (card variant) at
               a compact one-line scale so the wizard step stays under fold. */}
           {result.topSource && (
@@ -245,9 +246,7 @@ export function DemoQueriesPanel({ pack, onComplete }: DemoQueriesPanelProps) {
                 {result.topSource.filename}
               </span>
               {result.topSource.relevance > 0 && (
-                <span className="ml-auto shrink-0 tabular-nums">
-                  {Math.round(result.topSource.relevance * 100)}%
-                </span>
+                <RelevanceBar relevance={result.topSource.relevance} className="ml-auto" />
               )}
             </div>
           )}

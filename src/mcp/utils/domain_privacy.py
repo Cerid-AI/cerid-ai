@@ -78,6 +78,34 @@ def is_domain_visible(domain: str, *, include_sensitive: bool) -> bool:
     return _domain_visible(domain, include_sensitive)
 
 
+def operational_domains() -> frozenset[str]:
+    """Domains a registered consumer owns that the code's taxonomy does not define.
+
+    An orchestrator's or a product's corpus (``anneal_*``, ``boardroom_*``,
+    ``trading``) is kept out of the taxonomy so the owner's retrieval never
+    reaches it. Each one still gets a ``:Domain`` node on first ingest, and boot
+    rehydration merges every such node into ``config.DOMAINS`` — which the admin,
+    sync and export paths need. Retrieval must therefore not read "all domains"
+    from ``config.DOMAINS``; it reads ``owner_domains()``.
+    """
+    import config.settings
+    import config.taxonomy
+
+    owned: set[str] = set()
+    for consumer in config.settings.CONSUMER_REGISTRY.values():
+        owned.update(consumer.get("allowed_domains") or ())
+    return frozenset(owned - config.taxonomy.BUILTIN_DOMAINS)
+
+
+def owner_domains() -> list[str]:
+    """What "all domains" means for retrieval: ``config.DOMAINS`` without the
+    operational ones. A caller that names an operational domain still reaches it."""
+    import config
+
+    hidden = operational_domains()
+    return [d for d in config.DOMAINS if d not in hidden]
+
+
 def sensitive_domains_opted_in() -> bool:
     """Read the dedicated sensitive-domain-retrieval opt-in from config.
 

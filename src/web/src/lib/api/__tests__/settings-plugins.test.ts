@@ -20,7 +20,7 @@ describe("fetchPlugins normalization", () => {
         plugins: [{
           name: "apple_mail", display_name: "Apple Mail", plugin_type: "connector",
           version: "0.1.0", description: "", tier_required: "pro", enabled: false,
-          status: "disabled", file_types: [], config_schema: null, capabilities: [],
+          status: "disabled", file_types: [], capabilities: [],
         }],
         total: 1,
       }),

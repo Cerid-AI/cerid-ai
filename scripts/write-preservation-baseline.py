@@ -33,10 +33,9 @@ Usage::
         --junit-xml preservation-results.xml \
         --source ci
 
-    # Local dev — same XML location after `make preservation-check`
-    python3 scripts/write-preservation-baseline.py \
-        --junit-xml src/mcp/preservation-results.xml \
-        --source local
+    # Local dev — record the last `make preservation-check` run. The check
+    # itself never writes the committed baseline; this is the only local path.
+    make preservation-baseline
 """
 from __future__ import annotations
 

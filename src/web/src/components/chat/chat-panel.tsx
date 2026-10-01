@@ -6,10 +6,10 @@ import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panel
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck, Menu } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
-import { DegradationBanner } from "./degradation-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
@@ -380,6 +380,24 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     return kbContext.results
   }, [ragMode, orchestratedContext.results, orchestratedContext.sourceBreakdown, kbContext.results])
 
+  // The send's retrieval. With the orchestrator on it is the panel's own
+  // request for the same text, asked for one render early; the panel's query
+  // for the message then finds it in flight or cached.
+  const { retrieveFor } = orchestratedContext
+  const retrieveForSend = useMemo(() => {
+    if (ragMode === "off") return undefined
+    return async (content: string) => {
+      const recentAfterSend = [
+        ...(recentMessages ?? []),
+        { role: "user" as const, content },
+      ].slice(-5)
+      const data = await retrieveFor(content, recentAfterSend)
+      if (data.results?.length) return data
+      const ext = data.source_breakdown?.external ?? []
+      return ext.length > 0 ? { ...data, results: ext.map(externalToKBResult) } : data
+    }
+  }, [ragMode, recentMessages, retrieveFor])
+
   // --- Model routing ---
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
     routingMode,
@@ -445,6 +463,8 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     includePacks,
     injectedContext,
     kbResults: effectiveKBResults,
+    kbResultsQuery: latestUserMessage,
+    retrieve: retrieveForSend,
     clearInjected,
     privateModeLevel,
     memoryEnabled: contextSources.memory !== false,
@@ -520,7 +540,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
             <Menu className="h-4 w-4" />
           </Button>
         )}
-        <div className="relative flex max-w-md flex-col items-center gap-6 px-6 text-center">
+        <div className="relative flex min-w-0 max-w-md flex-col items-center gap-6 px-6 text-center">
           {/* Subtle pulsing brand glow */}
           <div className="pointer-events-none absolute -top-12 h-32 w-32 animate-pulse rounded-full bg-brand/10 blur-2xl" />
           <div className="relative space-y-2">
@@ -615,9 +635,6 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
 
       {/* Credit exhaustion banner */}
       <CreditBanner />
-
-      {/* Service degradation banner */}
-      <DegradationBanner />
 
       {/* Dashboard metrics bar */}
       {showDashboard && (
@@ -851,9 +868,11 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
                 )}
               />
               {s.filename}
-              <span className="text-label-xs text-muted-foreground tabular-nums">
-                {Math.round(s.relevance * 100)}%
-              </span>
+              <RelevanceBar
+                relevance={s.relevance}
+                among={smartSuggestions.suggestions.map((x) => x.relevance)}
+                className="w-8"
+              />
             </Badge>
           ))}
         </div>

@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input"
 import { DomainFilter } from "./domain-filter"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 import { fetchDataSources, updateSettings } from "@/lib/api"
 import { useNavigation } from "@/contexts/navigation-context"
 import { IngestionProgress } from "./ingestion-progress"
@@ -39,7 +40,7 @@ import { DegradedBanner } from "@/components/chat/degraded-banner"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
 
-interface KnowledgeConsoleProps extends UseOrchestratedQueryReturn {
+interface KnowledgeConsoleProps extends Omit<UseOrchestratedQueryReturn, "retrieveFor"> {
   ragMode: RagMode
   onRagModeChange?: (mode: RagMode) => void
   onClose: () => void
@@ -109,16 +110,14 @@ function SourceSection({
   )
 }
 
-function KBSourceCard({ result }: { result: KBQueryResult }) {
+function KBSourceCard({ result, among }: { result: KBQueryResult; among: number[] }) {
   return (
     <div className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
       <FileText className="h-3 w-3 shrink-0 mt-0.5 text-blue-400" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-label-sm font-medium">{result.filename}</p>
-          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
-            {Math.round(result.relevance * 100)}%
-          </span>
+          <RelevanceBar relevance={result.relevance} among={among} />
         </div>
         <p className="text-label-xs text-muted-foreground">{result.domain}</p>
       </div>
@@ -126,7 +125,7 @@ function KBSourceCard({ result }: { result: KBQueryResult }) {
   )
 }
 
-function MemorySourceCard({ result }: { result: MemoryRecallResult }) {
+function MemorySourceCard({ result, among }: { result: MemoryRecallResult; among: number[] }) {
   const typeColors: Record<string, string> = {
     empirical: "text-blue-400",
     decision: "text-amber-400",
@@ -142,9 +141,7 @@ function MemorySourceCard({ result }: { result: MemoryRecallResult }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-label-sm font-medium">{result.summary || result.content.slice(0, 60)}</p>
-          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
-            {Math.round(result.relevance * 100)}%
-          </span>
+          <RelevanceBar relevance={result.relevance} among={among} />
         </div>
         <div className="flex items-center gap-2 text-label-xs text-muted-foreground">
           <Badge variant="outline" className="text-label-xxs px-1 py-0">{result.memory_type}</Badge>
@@ -155,16 +152,14 @@ function MemorySourceCard({ result }: { result: MemoryRecallResult }) {
   )
 }
 
-function ExternalSourceCard({ result }: { result: ExternalSourceResult }) {
+function ExternalSourceCard({ result, among }: { result: ExternalSourceResult; among: number[] }) {
   return (
     <div className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
       <Globe className="h-3 w-3 shrink-0 mt-0.5 text-green-400" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-label-sm font-medium">{result.source_name ?? "External"}</p>
-          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">
-            {Math.round(result.relevance * 100)}%
-          </span>
+          <RelevanceBar relevance={result.relevance} among={among} />
         </div>
         <p className="mt-0.5 text-label-xs text-muted-foreground line-clamp-2">{result.content}</p>
         {safeHttpUrl(result.source_url) && (
@@ -391,6 +386,9 @@ export function KnowledgeConsole({
   onClose,
 }: KnowledgeConsoleProps) {
   const confidencePct = Math.round(confidence * 100)
+  const kbScores = kbSources.map((r) => r.relevance)
+  const memoryScores = memorySources.map((r) => r.relevance)
+  const externalScores = externalSources.map((r) => r.relevance)
   const totalSources = kbSources.length + memorySources.length + externalSources.length
 
   return (
@@ -487,7 +485,7 @@ export function KnowledgeConsole({
                 {kbSources.length === 0 ? (
                   <p className="text-label-sm text-muted-foreground py-1">No KB matches</p>
                 ) : (
-                  kbSources.map((r, i) => <KBSourceCard key={`kb-${r.artifact_id}-${r.chunk_index}-${i}`} result={r} />)
+                  kbSources.map((r, i) => <KBSourceCard key={`kb-${r.artifact_id}-${r.chunk_index}-${i}`} result={r} among={kbScores} />)
                 )}
               </SourceSection>
 
@@ -502,7 +500,7 @@ export function KnowledgeConsole({
                 {memorySources.length === 0 ? (
                   <p className="text-label-sm text-muted-foreground py-1">No memory matches</p>
                 ) : (
-                  memorySources.map((r, i) => <MemorySourceCard key={`mem-${r.memory_id}-${i}`} result={r} />)
+                  memorySources.map((r, i) => <MemorySourceCard key={`mem-${r.memory_id}-${i}`} result={r} among={memoryScores} />)
                 )}
               </SourceSection>
 
@@ -518,7 +516,7 @@ export function KnowledgeConsole({
                 {externalSources.length === 0 ? (
                   <p className="text-label-sm text-muted-foreground py-1">No external results</p>
                 ) : (
-                  externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} />)
+                  externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} among={externalScores} />)
                 )}
                 <DataSourceIndicator />
                 {/*

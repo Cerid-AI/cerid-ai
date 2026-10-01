@@ -715,7 +715,8 @@ def delete_artifact(
     when the parent is deleted orphans their :Artifact nodes in Neo4j.
     Their chunk_ids are folded into the returned ``chunk_ids`` list so the
     content-lifecycle coordinator's Chroma/BM25/SPLADE fan-out cleans up
-    the children's chunks too, not just the parent's.
+    the children's chunks too, not just the parent's. Their ids come back as
+    ``attachment_ids`` for the rows no node lists (parent chunks, HyPE).
     """
     with driver.session() as session:
         # Fetch chunk_ids before deletion (needed for tombstone + ChromaDB cleanup)
@@ -724,7 +725,8 @@ def delete_artifact(
             "OPTIONAL MATCH (a)-[:HAS_ATTACHMENT*1..]->(c:Artifact) "
             "WITH a, collect(DISTINCT c) AS children "
             "RETURN a.chunk_ids AS chunk_ids, a.domain AS domain, a.filename AS filename, "
-            "       [x IN children | x.chunk_ids] AS child_chunk_ids",
+            "       [x IN children | x.chunk_ids] AS child_chunk_ids, "
+            "       [x IN children | x.id] AS attachment_ids",
             id=artifact_id,
         )
         record = result.single()
@@ -734,6 +736,7 @@ def delete_artifact(
         chunk_ids = _parse_chunk_ids(record["chunk_ids"])
         for raw_child_chunk_ids in record.get("child_chunk_ids") or []:
             chunk_ids.extend(_parse_chunk_ids(raw_child_chunk_ids))
+        attachment_ids = list(record.get("attachment_ids") or [])
 
         domain = record["domain"] or ""
         filename = record["filename"] or ""
@@ -780,6 +783,7 @@ def delete_artifact(
         "domain": domain,
         "filename": filename,
         "chunk_ids": chunk_ids,
+        "attachment_ids": attachment_ids,
     }
 
 
@@ -935,8 +939,13 @@ def save_verification_report(
     unverified: int = 0,
     uncertain: int = 0,
     total: int = 0,
+    agreed: int | None = None,
 ) -> str:
     """Persist a verification report with complete provenance.
+
+    ``agreed`` is the number of claims a second model agreed with and no source
+    backs. A caller that does not send it stores no such property, which reads
+    back as ``None``: unknown, not zero.
 
     Writes:
       * ``(:VerificationReport {conversation_id})`` with claims blob, scores,
@@ -995,6 +1004,7 @@ def save_verification_report(
                 r.claims = $claims,
                 r.overall_score = $score,
                 r.verified = $verified,
+                r.agreed = $agreed,
                 r.unverified = $unverified,
                 r.uncertain = $uncertain,
                 r.total = $total,
@@ -1007,6 +1017,7 @@ def save_verification_report(
             claims=claims_json,
             score=overall_score,
             verified=verified,
+            agreed=agreed,
             unverified=unverified,
             uncertain=uncertain,
             total=total,
@@ -1083,7 +1094,8 @@ def get_verification_report(driver, conversation_id: str) -> dict | None:
             "MATCH (r:VerificationReport {conversation_id: $cid}) "
             "RETURN r.id AS id, r.conversation_id AS conversation_id, "
             "       r.claims AS claims, r.overall_score AS overall_score, "
-            "       r.verified AS verified, r.unverified AS unverified, "
+            "       r.verified AS verified, r.agreed AS agreed, "
+            "       r.unverified AS unverified, "
             "       r.uncertain AS uncertain, r.total AS total, "
             "       r.created_at AS created_at",
             cid=conversation_id,
@@ -1104,6 +1116,7 @@ def get_verification_report(driver, conversation_id: str) -> dict | None:
             "claims": claims,
             "overall_score": record["overall_score"],
             "verified": record["verified"],
+            "agreed": record["agreed"],
             "unverified": record["unverified"],
             "uncertain": record["uncertain"],
             "total": record["total"],

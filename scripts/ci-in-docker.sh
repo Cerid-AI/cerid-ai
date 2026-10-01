@@ -53,7 +53,12 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 cache="${CI_CONTAINER_CACHE:-$HOME/.cache/cerid-ci}"
-mkdir -p "$cache/pip" "$cache/npm"
+# One pip cache per runner, as docker-gate.sh does for Trivy. The mac-pro
+# runners share a $HOME, and parallel installs racing on one HTTP cache left pip
+# holding PyPI's bare 304 for an index page: "Skipping page ... Content-Type:
+# Unknown", then "from versions: none". Unset RUNNER_NAME keeps the shared path.
+pipcache="$cache/pip${RUNNER_NAME:+-${RUNNER_NAME//[^A-Za-z0-9_.-]/_}}"
+mkdir -p "$pipcache" "$cache/npm"
 
 # CI_SHADOW_DIRS: container-absolute paths to back with an anonymous volume so
 # they live in the container's own filesystem instead of the macOS bind mount.
@@ -85,7 +90,7 @@ echo "── ci-in-docker: $image :: $* ──"
 # quoting in the caller survives intact.
 exec docker run --rm \
   -v "$PWD":/work -w /work \
-  -v "$cache/pip":/root/.cache/pip \
+  -v "$pipcache":/root/.cache/pip \
   -v "$cache/npm":/root/.npm \
   ${shadow_args[@]+"${shadow_args[@]}"} \
   -e CI=true \

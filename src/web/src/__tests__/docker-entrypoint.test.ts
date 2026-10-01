@@ -34,6 +34,8 @@ function setup() {
     CERID_ENV_JS_PATH: path.join(dir, 'env-config.js'),
     CERID_VERSION_JS_PATH: path.join(dir, 'version.json'),
     CERID_KEY_INC_PATH: path.join(dir, 'cerid-api-key.inc'),
+    CERID_HOSTS_INC_PATH: path.join(dir, 'cerid-hosts.inc'),
+    CERID_ENV_GUARD_INC_PATH: path.join(dir, 'cerid-env-config.inc'),
   }
   return { dir, env }
 }
@@ -49,7 +51,6 @@ describe('docker-entrypoint.sh', () => {
     const { dir, env } = setup()
     const hostile = {
       VITE_MCP_URL: '/api/mcp"; window.pwned = 1; //',
-      VITE_BIFROST_URL: '/api/bifrost\\"; window.pwned = 2; //',
       VITE_SENTRY_DSN_WEB: '`touch injected-backtick`',
       VITE_APP_VERSION: '";alert(1);// $(touch injected-subst)',
     }
@@ -67,13 +68,24 @@ describe('docker-entrypoint.sh', () => {
     expect(context.window.pwned).toBeUndefined()
     expect(context.window.__ENV__).toBeDefined()
     expect(context.window.__ENV__?.VITE_MCP_URL).toBe(hostile.VITE_MCP_URL)
-    expect(context.window.__ENV__?.VITE_BIFROST_URL).toBe(hostile.VITE_BIFROST_URL)
     expect(context.window.__ENV__?.VITE_SENTRY_DSN_WEB).toBe(hostile.VITE_SENTRY_DSN_WEB)
     expect(context.window.__ENV__?.VITE_APP_VERSION).toBe(hostile.VITE_APP_VERSION)
 
     // Shell payloads stayed data — nothing executed at container start
     expect(existsSync(path.join(dir, 'injected-backtick'))).toBe(false)
     expect(existsSync(path.join(dir, 'injected-subst'))).toBe(false)
+  })
+
+  it('does not publish a URL for the retired Bifrost gateway', async () => {
+    const { dir, env } = setup()
+
+    await execFileAsync('sh', [SCRIPT], {
+      cwd: dir,
+      env: { ...env, VITE_BIFROST_URL: '/api/bifrost' },
+    })
+
+    const emitted = readFileSync(path.join(dir, 'env-config.js'), 'utf8')
+    expect(emitted).not.toMatch(/bifrost/i)
   })
 
   it('refuses to start when the API key would inject nginx directives', async () => {
@@ -101,5 +113,82 @@ describe('docker-entrypoint.sh', () => {
 
     const include = readFileSync(path.join(dir, 'cerid-api-key.inc'), 'utf8')
     expect(include).toBe('proxy_set_header X-API-Key "sk-cerid-0123456789";\n')
+  })
+
+  const BASE_HOSTS = 'localhost 1;\n127.0.0.1 1;\n[::1] 1;\ncerid-web 1;\n'
+
+  it('names only the loopback and container hosts when CERID_HOST is unset', async () => {
+    const { dir, env } = setup()
+
+    await execFileAsync('sh', [SCRIPT], { cwd: dir, env })
+
+    expect(readFileSync(path.join(dir, 'cerid-hosts.inc'), 'utf8')).toBe(BASE_HOSTS)
+  })
+
+  it.each(['192.168.1.50', 'macpro.local', 'fd00::1', 'MacPro.Local'])(
+    'adds CERID_HOST %s to the names the proxy forwards for',
+    async (host) => {
+      const { dir, env } = setup()
+
+      await execFileAsync('sh', [SCRIPT], { cwd: dir, env: { ...env, CERID_HOST: host } })
+
+      const lower = host.toLowerCase()
+      const expected = lower.includes(':') ? `[${lower}]` : lower
+      expect(readFileSync(path.join(dir, 'cerid-hosts.inc'), 'utf8')).toBe(
+        `${BASE_HOSTS}${expected} 1;\n`,
+      )
+    },
+  )
+
+  it('does not repeat a CERID_HOST that is already a loopback name', async () => {
+    const { dir, env } = setup()
+
+    await execFileAsync('sh', [SCRIPT], { cwd: dir, env: { ...env, CERID_HOST: 'localhost' } })
+
+    expect(readFileSync(path.join(dir, 'cerid-hosts.inc'), 'utf8')).toBe(BASE_HOSTS)
+  })
+
+  it.each(['evil.example; return 200', 'a b', '*.example', '~^.*$', 'host"', '_', 'default'])(
+    'refuses to start when CERID_HOST %j would widen or break the host list',
+    async (host) => {
+      const { dir, env } = setup()
+
+      await expect(
+        execFileAsync('sh', [SCRIPT], { cwd: dir, env: { ...env, CERID_HOST: host } }),
+      ).rejects.toMatchObject({ code: 1 })
+
+      expect(existsSync(path.join(dir, 'cerid-hosts.inc'))).toBe(false)
+    },
+  )
+
+  // With an absolute VITE_MCP_URL the key is in env-config.js. A page whose
+  // name was re-pointed at this port would read it as its own.
+  it('serves env-config.js to known hosts only when it holds the key', async () => {
+    const { dir, env } = setup()
+
+    await execFileAsync('sh', [SCRIPT], {
+      cwd: dir,
+      env: {
+        ...env,
+        VITE_MCP_URL: 'http://192.168.1.50:8888',
+        VITE_CERID_API_KEY: 'placeholder', // pragma: allowlist secret
+      },
+    })
+
+    expect(readFileSync(path.join(dir, 'cerid-env-config.inc'), 'utf8')).toBe(
+      'if ($cerid_known_host = 0) { return 421; }\n',
+    )
+  })
+
+  it.each([
+    { VITE_CERID_API_KEY: 'placeholder' }, // pragma: allowlist secret
+    { VITE_MCP_URL: 'http://192.168.1.50:8888' },
+    {},
+  ])('serves env-config.js to any host when it holds no key (%j)', async (extra) => {
+    const { dir, env } = setup()
+
+    await execFileAsync('sh', [SCRIPT], { cwd: dir, env: { ...env, ...extra } })
+
+    expect(readFileSync(path.join(dir, 'cerid-env-config.inc'), 'utf8')).toBe('')
   })
 })

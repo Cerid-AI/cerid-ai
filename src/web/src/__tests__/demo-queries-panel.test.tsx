@@ -139,15 +139,16 @@ describe("DemoQueriesPanel", () => {
     expect(opts.metadataFilter).toEqual({ pack_id: "irs-publications-curated" })
   })
 
-  it("renders source attribution (filename + relevance %) under the answer (F-06-02)", async () => {
+  it("renders source attribution (filename + relevance bar) under the answer (F-06-02)", async () => {
     renderWithQuery(<DemoQueriesPanel pack={PYTHON_PACK} onComplete={onComplete} />)
     fireEvent.click(screen.getByText("How do I read a file with Python's pathlib?"))
     await waitFor(() => {
       expect(screen.getByText(MOCK_KB_ANSWER)).toBeInTheDocument()
     })
-    // Filename + relevance % must appear so the user can verify provenance.
+    // Filename + relevance must appear so the user can verify provenance.
     expect(screen.getByText("pathlib_intro.md")).toBeInTheDocument()
-    expect(screen.getByText("87%")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 0.87 out of 1.00, single source" })).toBeInTheDocument()
+    expect(screen.queryByText("87%")).toBeNull()
   })
 
   it("shows the answer text after a query succeeds", async () => {

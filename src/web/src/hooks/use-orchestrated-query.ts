@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useState, useCallback, useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { queryKBOrchestrated } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type {
@@ -38,6 +38,12 @@ export interface UseOrchestratedQueryReturn {
    *  for the most recent query and returned an ungrounded answer. */
   degradedReason: string
 
+  /** Retrieve for a message about to be sent, sharing the panel's request. */
+  retrieveFor: (
+    query: string,
+    recentAfterSend: Pick<ChatMessage, "role" | "content">[],
+  ) => Promise<AgentQueryResponse>
+
   // Source toggles (for Knowledge Console)
   kbEnabled: boolean
   memoryEnabled: boolean
@@ -63,6 +69,41 @@ export interface UseOrchestratedQueryReturn {
   clearInjected: () => void
 }
 
+interface OrchestratedQueryInput {
+  query: string
+  ragMode: RagMode
+  domains: Set<string>
+  recentMessages?: Pick<ChatMessage, "role" | "content">[]
+  contextSources?: ContextSources
+}
+
+/** The key and the request for one orchestrated query. The panel's useQuery and
+ *  the send's retrieval both build theirs here, so the two are one cache entry
+ *  and one request: issued separately they ran side by side, and three
+ *  concurrent retrievals took 16 s where one takes 4. */
+function orchestratedQueryOptions(input: OrchestratedQueryInput) {
+  const { query, ragMode, domains, contextSources } = input
+  const recent =
+    input.recentMessages && input.recentMessages.length > 0 ? input.recentMessages : undefined
+  const domainKey = [...domains].sort().join(",")
+  const sourcesKey = `${contextSources?.kb ?? true},${contextSources?.memory ?? true},${contextSources?.external ?? true}`
+  return {
+    queryKey: ["orchestrated-query", query, ragMode, domainKey, recent?.length ?? 0, sourcesKey],
+    queryFn: ({ signal }: { signal?: AbortSignal }) =>
+      queryKBOrchestrated(
+        query,
+        ragMode,
+        domains.size > 0 ? [...domains] : undefined,
+        10,
+        recent,
+        undefined,
+        contextSources,
+        { signal },
+      ),
+    staleTime: 15_000,
+  }
+}
+
 export function useOrchestratedQuery(
   latestUserMessage: string,
   ragMode: RagMode,
@@ -82,48 +123,46 @@ export function useOrchestratedQuery(
   const externalEnabled = contextSources?.external ?? true
 
   const effectiveQuery = activeManualQuery || latestUserMessage
-
-  const domainKey = useMemo(
-    () => [...activeDomains].sort().join(","),
-    [activeDomains],
-  )
-
-  const contextMsgCount = recentMessages?.length ?? 0
-
-  // Guard: treat empty conversation messages as undefined to avoid backend errors
-  const conversationMessages =
-    recentMessages && recentMessages.length > 0 ? recentMessages : undefined
-
-  // Stable key for context sources (avoids object identity churn)
-  const sourcesKey = `${kbEnabled},${memoryEnabled},${externalEnabled}`
+  const queryClient = useQueryClient()
 
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
-    queryKey: ["orchestrated-query", effectiveQuery, ragMode, domainKey, contextMsgCount, sourcesKey],
     // Let failures propagate to react-query so `isError` drives the
     // console's error + Retry state. Swallowing here (returning an empty
     // response) made that UI permanently dead — a backend outage read as
     // "no results". TanStack treats signal-abort as a cancellation, not an
     // error, so query-key churn won't flash the error state.
-    queryFn: ({ signal }) =>
-      queryKBOrchestrated(
-        effectiveQuery,
-        ragMode,
-        activeDomains.size > 0 ? [...activeDomains] : undefined,
-        10,
-        conversationMessages,
-        undefined,
-        contextSources,
-        { signal },
-      ),
+    ...orchestratedQueryOptions({
+      query: effectiveQuery,
+      ragMode,
+      domains: activeDomains,
+      recentMessages,
+      contextSources,
+    }),
     // `enabled` gates only the auto latestUserMessage query. Manual search
     // (activeManualQuery) still fires when auto is suppressed.
     enabled:
       (autoEnabled && !!effectiveQuery && effectiveQuery.length > 2) ||
       (!!activeManualQuery && activeManualQuery.length > 2),
-    staleTime: 15_000,
     retry: 1,
     retryDelay: 2000,
   })
+
+  // The send's retrieval for a message that is about to join the conversation.
+  // `recentAfterSend` is what `recentMessages` will be once it has, so the key
+  // is the one this hook asks for a render later and the request is shared.
+  const retrieveFor = useCallback(
+    (query: string, recentAfterSend: Pick<ChatMessage, "role" | "content">[]) =>
+      queryClient.fetchQuery<AgentQueryResponse>(
+        orchestratedQueryOptions({
+          query,
+          ragMode,
+          domains: activeDomains,
+          recentMessages: recentAfterSend,
+          contextSources,
+        }),
+      ),
+    [queryClient, ragMode, activeDomains, contextSources],
+  )
 
   const toggleDomain = useCallback((domain: string) => {
     setActiveDomains((prev) => {
@@ -192,6 +231,7 @@ export function useOrchestratedQuery(
     externalSources,
 
     degradedReason,
+    retrieveFor,
 
     kbEnabled,
     memoryEnabled,

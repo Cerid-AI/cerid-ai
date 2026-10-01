@@ -16,6 +16,9 @@ import type {
   SystemCheckResponse,
 } from "./types"
 
+/** Shown for a local server that does not say what it is. */
+export const NEUTRAL_LOCAL_SERVER = "Local model server"
+
 export interface BackendOption {
   /** Stable identifier sent to the backend as ``INTERNAL_LLM_PROVIDER``. */
   id: RecommendedLocalBackend
@@ -58,6 +61,17 @@ export function backendOptionsForHardware(
         "Routes inference through OpenRouter (or another configured cloud provider). No local model download required.",
     },
   ]
+
+  // The "ollama" id means "the server on the Ollama-compatible port". When a
+  // server is answering there under another name, offer it under that name.
+  const detected = sys?.ollama_detected ? sys.local_server_name : undefined
+  if (detected && detected !== "Ollama" && detected !== "Quenchforge") {
+    const local = options.find((o) => o.id === "ollama")!
+    local.label = `${detected} (Local)`
+    local.blurb = `Runs models on this machine through the ${
+      detected === NEUTRAL_LOCAL_SERVER ? "local model server" : detected
+    } already answering here.`
+  }
 
   for (const opt of options) {
     if (opt.id === defaultId) {

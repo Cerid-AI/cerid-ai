@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink, Monitor, Cpu, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchSystemCheck } from "@/lib/api"
+import { NEUTRAL_LOCAL_SERVER } from "@/lib/hardware-profile"
 import { SystemCheckHttpError } from "@/lib/api/settings"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import type { SystemCheckResponse } from "@/lib/types"
@@ -94,7 +95,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
     { label: "System Memory", icon: MemoryStick, status: "checking", detail: "Detecting..." },
     { label: "Docker", icon: Container, status: "checking", detail: "Detecting..." },
     { label: "Configuration", icon: FileText, status: "checking", detail: "Detecting..." },
-    { label: "Ollama", icon: Bot, status: "checking", detail: "Detecting..." },
+    { label: NEUTRAL_LOCAL_SERVER, icon: Bot, status: "checking", detail: "Detecting..." },
   ])
   const [hardware, setHardware] = useState<{ os: string; cpu: string; cpuCores: number | null; gpu: string; gpuAcceleration: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -175,7 +176,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
             : "Fresh install",
         },
         {
-          label: "Ollama",
+          label: result.local_server_name || NEUTRAL_LOCAL_SERVER,
           icon: Bot,
           status: result.ollama_detected ? "pass" : "neutral",
           detail: result.ollama_detected

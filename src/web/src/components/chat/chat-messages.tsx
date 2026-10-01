@@ -30,6 +30,7 @@ import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import { useChatVirtualization } from "@/hooks/use-chat-virtualization"
 import type { ChatMessage, HallucinationReport } from "@/lib/types"
+import { reportPositiveCounts } from "@/lib/verification-utils"
 
 /** Distance (px) from the bottom within which we still treat the viewport
  *  as "anchored to the latest message". Beyond this, we assume the user
@@ -67,9 +68,11 @@ function buildStatusFromReport(report: HallucinationReport): MessageVerification
   const summary = report.summary
   if (!summary) return null
   if (report.skipped || summary.total === 0) return null
+  const { verified, agreed } = reportPositiveCounts(summary, report.claims ?? [])
   return {
     state: "done",
-    verified: summary.verified ?? 0,
+    verified,
+    agreed,
     unverified: summary.unverified ?? 0,
     uncertain: summary.uncertain ?? 0,
     total: summary.total ?? 0,

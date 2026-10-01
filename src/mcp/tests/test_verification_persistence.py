@@ -192,6 +192,7 @@ class TestGetVerificationReport:
             "claims": json.dumps([{"claim": "test", "status": "verified"}]),
             "overall_score": 0.85,
             "verified": 1,
+            "agreed": None,
             "unverified": 0,
             "uncertain": 0,
             "total": 1,
@@ -214,6 +215,7 @@ class TestGetVerificationReport:
             "claims": "not valid json{",
             "overall_score": 0.0,
             "verified": 0,
+            "agreed": None,
             "unverified": 0,
             "uncertain": 0,
             "total": 0,
@@ -232,6 +234,7 @@ class TestGetVerificationReport:
             "claims": "[]",
             "overall_score": 0.75,
             "verified": 5,
+            "agreed": None,
             "unverified": 2,
             "uncertain": 1,
             "total": 8,
@@ -241,7 +244,7 @@ class TestGetVerificationReport:
         result = get_verification_report(driver, "c1")
         expected_keys = {
             "report_id", "conversation_id", "claims",
-            "overall_score", "verified", "unverified",
+            "overall_score", "verified", "agreed", "unverified",
             "uncertain", "total", "created_at",
         }
         assert expected_keys == set(result.keys())
@@ -278,6 +281,7 @@ class TestVerificationRoundTrip:
             "claims": json.dumps(claims),
             "overall_score": 0.55,
             "verified": 1,
+            "agreed": None,
             "unverified": 0,
             "uncertain": 0,
             "total": 2,

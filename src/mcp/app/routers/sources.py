@@ -233,14 +233,16 @@ class SourceRecord(BaseModel):
     config: dict[str, Any]
     sync_cursor: dict[str, Any]
     total_artifacts: int = 0
-    total_chunks: int = 0
-    total_edges: int = 0
-    total_artifacts_24h: int = 0
+    # None on these four means the figure is not measured for this source
+    # (folder sources), which is different from a measured zero.
+    total_chunks: int | None = 0
+    total_edges: int | None = 0
+    total_artifacts_24h: int | None = 0
     connection_time_ms: int | None = None
     last_sync_at: str | None = None
     created_at: str | None = None
     last_error: str | None = None
-    quality_floor: float = 0.0
+    quality_floor: float | None = 0.0
 
 
 class HealthProbeResult(BaseModel):

@@ -252,7 +252,6 @@ async def _verify(claim: str, kb_results: list[dict], nli: dict,
 
 # Ingestion patch stack — shared across all ingestion-dependent tests
 _INGEST_PATCHES = [
-    patch("app.routers.system_monitor.get_redis", return_value=MagicMock()),
     patch("app.services.ingestion.cache"),
     patch("app.services.ingestion.get_redis", return_value=MagicMock()),
 ]
@@ -704,12 +703,11 @@ class TestSyntheticKBInjection:
 class TestDataIntegrity:
     """Verify data correctness throughout the ingestion pipeline."""
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_content_hash_dedup_exact_match(self, mock_chroma_fn, mock_neo4j_fn,
-                                             mock_redis_fn, _mock_monitor):
+                                             mock_redis_fn):
         """Ingest same content twice; second returns duplicate with matching hash."""
         client, collection = _chroma_mocks()
         mock_chroma_fn.return_value = client
@@ -735,13 +733,12 @@ class TestDataIntegrity:
         assert r2["status"] == "duplicate"
         assert r2["artifact_id"] == r1["artifact_id"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_metadata_fields_complete(self, mock_chroma_fn, mock_neo4j_fn,
-                                       mock_redis_fn, mock_cache, _mock_monitor):
+                                       mock_redis_fn, mock_cache):
         """Ingest a doc and verify all metadata fields are present."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
@@ -763,13 +760,12 @@ class TestDataIntegrity:
         assert result["domain"] == "coding"
         assert result["chunks"] > 0
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_chunk_count_matches_content_length(self, mock_chroma_fn, mock_neo4j_fn,
-                                                  mock_redis_fn, mock_cache, _mock_monitor):
+                                                  mock_redis_fn, mock_cache):
         """Short content -> 1 chunk; long content -> multiple chunks."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
@@ -788,13 +784,12 @@ class TestDataIntegrity:
         assert long_r["chunks"] > 1
         assert long_r["chunks"] > short["chunks"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_neo4j_artifact_node_created(self, mock_chroma_fn, mock_neo4j_fn,
-                                          mock_redis_fn, mock_cache, _mock_monitor):
+                                          mock_redis_fn, mock_cache):
         """Verify graph.create_artifact is called with correct properties."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
@@ -813,13 +808,12 @@ class TestDataIntegrity:
         assert call_kwargs.kwargs.get("domain") == "coding"
         assert call_kwargs.kwargs.get("artifact_id") == result["artifact_id"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_relationship_discovery_called(self, mock_chroma_fn, mock_neo4j_fn,
-                                            mock_redis_fn, mock_cache, _mock_monitor):
+                                            mock_redis_fn, mock_cache):
         """Verify graph.discover_relationships is called after successful ingestion."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
@@ -904,13 +898,12 @@ class TestEdgeCases:
             f"relevance {relevance} exceeds the documented [0,1] bound"
         )
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_oversized_content_chunked_correctly(self, mock_chroma_fn, mock_neo4j_fn,
-                                                   mock_redis_fn, mock_cache, _mock_monitor):
+                                                   mock_redis_fn, mock_cache):
         """50KB content produces multiple chunks (not rejected)."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
@@ -927,13 +920,12 @@ class TestEdgeCases:
         assert result["status"] == "success"
         assert result["chunks"] > 1
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
     def test_unicode_content_handled(self, mock_chroma_fn, mock_neo4j_fn,
-                                      mock_redis_fn, mock_cache, _mock_monitor):
+                                      mock_redis_fn, mock_cache):
         """Content with emojis, CJK characters, and special symbols ingests cleanly."""
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client

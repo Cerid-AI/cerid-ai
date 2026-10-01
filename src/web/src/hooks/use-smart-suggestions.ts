@@ -123,6 +123,10 @@ export function useSmartSuggestions({
   }, [])
 
   const clear = useCallback(() => {
+    // The search a keystroke scheduled has to go too: left pending it fired a
+    // second after the message was sent and ran beside the send's retrieval.
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
     abortRef.current?.abort()
     setSuggestions([])
     lastQueryRef.current = ""

@@ -474,6 +474,36 @@ class TestAttachmentRecursionService:
         assert edge["filename"] == "report.pdf"
         assert edge["content_type"] == "application/pdf"
 
+    def test_attachment_inherits_the_watched_folder_of_its_email(
+        self, recording_infra, monkeypatch,
+    ):
+        """An attachment is its own artifact. Without the folder of the email
+        it came in, it would stay searchable when that folder is not."""
+        import app.parsers as _parsers_pkg
+        monkeypatch.setattr(
+            _parsers_pkg, "parse_file",
+            lambda _p: {"text": "stub pdf text", "file_type": "pdf", "page_count": 1},
+        )
+        blob = AttachmentBlob(
+            filename="report.pdf",
+            content_bytes=_REAL_PDF_BYTES,
+            content_type="application/pdf",
+            size=len(_REAL_PDF_BYTES),
+        )
+
+        _run_attachment_recursion(blobs=[blob], parent_meta={"watched_folder_id": "f1"})
+        _run_attachment_recursion(
+            blobs=[AttachmentBlob(
+                filename="other.pdf", content_bytes=_REAL_PDF_BYTES,
+                content_type="application/pdf", size=len(_REAL_PDF_BYTES),
+            )],
+            parent_meta={},
+        )
+
+        stamped, unstamped = (c["metadata"] for c in recording_infra.content_calls)
+        assert stamped["watched_folder_id"] == "f1"
+        assert "watched_folder_id" not in unstamped
+
     def test_magic_byte_mismatch_skips_attachment(
         self, recording_infra, monkeypatch, caplog,
     ):

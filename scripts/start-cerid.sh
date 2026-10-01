@@ -445,8 +445,14 @@ fi
 OLLAMA_PROFILE=""
 OLLAMA_DEFAULT_MODEL="llama3.2:3b"
 
-# Source GPU detection
-source "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
+# Source GPU detection, guarded as above. macOS's bash 3.2 exits under
+# `set -e` when `source` fails, `|| true` notwithstanding.
+if [ -f "$CERID_ROOT/scripts/detect-gpu.sh" ]; then
+    set +e
+    # shellcheck source=scripts/detect-gpu.sh
+    source "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
+    set -e
+fi
 
 # [0/4] Inference Sidecar — detect, auto-start, or offer install
 SIDECAR_PORT="${CERID_SIDECAR_PORT:-8889}"
@@ -627,7 +633,7 @@ echo "[net] CERID_HOST=$CERID_HOST (source: $_host_source)"
 # LAN access is an explicit opt-in. Materialize the relevant settings from .env
 # (the script reads specific keys; it does not source the whole file) so that
 # `CERID_LAN_MODE=true` in .env actually takes effect.
-for _k in CERID_LAN_MODE CERID_API_KEY CERID_GATEWAY CERID_TAILSCALE CERID_PORT_TAILNET; do
+for _k in CERID_LAN_MODE CERID_BIND_ADDR CERID_API_KEY CERID_PORTAL_PASSWORD CERID_GATEWAY CERID_TAILSCALE CERID_PORT_TAILNET; do
   if [ -z "${!_k:-}" ] && [ -f "$ENV_FILE" ]; then
     printf -v "$_k" '%s' "$(grep -s "^${_k}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- || echo "")"
   fi
@@ -665,6 +671,28 @@ if [[ -n "$CERID_HOST" && "$CERID_HOST" != "localhost" && "$CERID_HOST" != "127.
   fi
 fi
 
+# The web port adds the API key to whatever it forwards, so the sign-in
+# password is what stands between that port and its callers.
+case "${CERID_BIND_ADDR:-127.0.0.1}" in
+  127.0.0.1|localhost|::1)
+    if [[ -z "${CERID_PORTAL_PASSWORD:-}" ]]; then
+      echo "[net] WARNING: CERID_PORTAL_PASSWORD is not set. The web port (${CERID_PORT_GUI}) has no sign-in:"
+      echo "      any process on this machine can use the API through it."
+      echo "      To require a sign-in, add to .env: CERID_PORTAL_PASSWORD=<password>   (openssl rand -hex 24)"
+    fi
+    ;;
+  *)
+    if [[ -z "${CERID_PORTAL_PASSWORD:-}" ]]; then
+      echo "[FATAL] Binding to ${CERID_BIND_ADDR} requires CERID_PORTAL_PASSWORD to be set."
+      echo "        Refusing to put the web port (${CERID_PORT_GUI}) on the network without a sign-in:"
+      echo "        it adds the API key to every request it forwards."
+      echo "        Generate a password:  openssl rand -hex 24"
+      echo "        Then add to .env: CERID_PORTAL_PASSWORD=<password>"
+      exit 1
+    fi
+    ;;
+esac
+
 # ── Tailscale trusted interface (opt-in) ────────────────────────────────
 # Fronts the suite portal over the tailnet with real TLS at a DEDICATED HTTPS
 # port (default 8443) so any existing `tailscale serve` config on :443 is left
@@ -689,16 +717,14 @@ if [[ "${CERID_TAILSCALE:-}" == "true" ]]; then
   fi
 fi
 
-# Runtime MCP URL for the web container. In LAN mode use the relative proxy
-# path ("/api/mcp", served by nginx and the Caddy gateway) so the UI calls the
-# API SAME-ORIGIN — no CORS, works over HTTPS, and the desktop remote client
-# (which loads this same served UI) inherits it. Single-host runs keep the
-# absolute host:port for direct access.
-if [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
-    export VITE_MCP_URL="/api/mcp"
-else
-    export VITE_MCP_URL="http://${CERID_HOST}:${CERID_PORT_MCP}"
-fi
+# Runtime MCP URL for the web container: always the relative proxy path
+# ("/api/mcp", served by nginx and the Caddy gateway) so the UI calls the API
+# SAME-ORIGIN — no CORS, works over HTTPS, nginx injects X-API-Key, and the
+# tailnet and desktop remote clients (which load this same served UI) inherit
+# it. An absolute http://${CERID_HOST}:${CERID_PORT_MCP} broke every loopback
+# stack on a host with a LAN IP: the browser dialled the LAN address while the
+# API listened on 127.0.0.1 only.
+export VITE_MCP_URL="/api/mcp"
 # Absolute MCP URL for the LAN reachability probe below. /health/ping, not
 # /health: the informative health payload (pack registry path, KB domains,
 # internal inference URL) requires X-API-Key once the server binds off
@@ -715,7 +741,7 @@ export VITE_CERID_API_KEY="${CERID_API_KEY:-}"
 # Force-recreate web container if VITE_MCP_URL changed (prevents stale IP bug)
 WEB_RECREATE=""
 CURRENT_MCP_URL=$(docker exec cerid-web cat /usr/share/nginx/html/env-config.js 2>/dev/null \
-    | grep 'VITE_MCP_URL' | sed 's/.*"\(http[^"]*\)".*/\1/' || echo "")
+    | grep 'VITE_MCP_URL' | sed 's/.*VITE_MCP_URL: *"\([^"]*\)".*/\1/' || echo "")
 if [ -n "$CURRENT_MCP_URL" ] && [ "$CURRENT_MCP_URL" != "$VITE_MCP_URL" ]; then
     echo "[net] MCP URL changed ($CURRENT_MCP_URL -> $VITE_MCP_URL), will recreate web container"
     WEB_RECREATE="--force-recreate"
@@ -786,7 +812,7 @@ fi
 REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
 # Fallback to the canonical set if config derivation is unavailable.
-[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web"
+[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web cerid-sso"
 if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
     if [ -n "$FORCE_FLAG" ]; then
         echo "[conflict] --force set — proceeding anyway (compose up may still fail)."
@@ -857,6 +883,8 @@ else
 
     echo "[3/3] Starting React GUI..."
     docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
+    # The web port refuses API calls until its sign-in service answers.
+    docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" up -d --no-deps cerid-sso
 fi
 
 # Optional: Caddy reverse proxy for local HTTPS
@@ -935,8 +963,9 @@ elif [ "$OLLAMA_CONFIGURED" = "true" ] && [ "${CERID_OLLAMA_IMAGE:-}" = "native"
     fi
 fi
 
-# Validate LAN reachability (the bug that prompted Phase 27)
-if [ "$CERID_HOST" != "localhost" ]; then
+# Validate LAN reachability (the bug that prompted Phase 27). Only LAN mode
+# binds off loopback, so only LAN mode can be reachable at ${CERID_HOST}.
+if [ "$CERID_HOST" != "localhost" ] && [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
     echo -n "  MCP (LAN)..."
     if wait_for_service "MCP-LAN" "${_MCP_LAN_HEALTH_URL}" 10 2; then
         echo " ready"
@@ -980,7 +1009,7 @@ echo ""
 echo "=== Access URLs ==="
 echo "React GUI: http://localhost:${CERID_PORT_GUI}"
 echo "MCP Docs:  http://localhost:${CERID_PORT_MCP}/docs"
-if [ "$CERID_HOST" != "localhost" ]; then
+if [ "$CERID_HOST" != "localhost" ] && [[ "${CERID_LAN_MODE:-}" == "true" ]]; then
     echo ""
     echo "=== LAN Access (iPad / other devices) ==="
     echo "React GUI: http://${CERID_HOST}:${CERID_PORT_GUI}"
@@ -993,6 +1022,17 @@ fi
 # Clean up generated lightweight override
 if [ -f "$LIGHTWEIGHT_OVERRIDE" ]; then
     rm -f "$LIGHTWEIGHT_OVERRIDE"
+fi
+
+# A rebuild re-tags the images and leaves the previous ones dangling (about
+# 10 GB for mcp-server each time); nothing else removes them, and on 2026-10-01
+# they filled the Docker VM and took a sibling stack's Postgres down. Dangling
+# only, as in scripts/ci/docker-gate.sh: never `-a`, never `system prune`. Only
+# after a healthy start, so a failed rebuild keeps the previous image to re-tag.
+if [ -n "$BUILD_FLAG" ] && [ "$CRITICAL_FAIL" -eq 0 ]; then
+    echo ""
+    echo "[build] Removing dangling images left by the rebuild..."
+    docker image prune -f || echo "[build] WARNING: docker image prune failed; dangling images remain (see docker system df)"
 fi
 
 if [ "$CRITICAL_FAIL" -ne 0 ]; then

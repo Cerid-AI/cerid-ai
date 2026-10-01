@@ -215,6 +215,34 @@ def _reset_llm_client():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_host_settings_file(monkeypatch, tmp_path):
+    """Keep PATCH /settings tests from writing the real per-machine file.
+
+    A provider saved there by one test would be restored by any later test
+    that runs the startup hydration.
+    """
+    import config
+
+    monkeypatch.setattr(config, "HOST_SETTINGS_PATH", str(tmp_path / "host_settings.json"))
+
+
+@pytest.fixture(autouse=True)
+def _no_stored_plugin_choices(monkeypatch):
+    """Keep the plugin loader from reading a real Redis.
+
+    The loader reads the enable/disable choices stored by the plugin
+    endpoints. Left alone it would reach whatever Redis the machine running
+    the suite can see, or pay the connection retries when it can see none.
+    Tests of the stored choices install their own store.
+    """
+    import plugins
+
+    store = MagicMock()
+    store.mget.side_effect = lambda keys: [None] * len(keys)
+    monkeypatch.setattr(plugins, "_get_redis", lambda: store)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_local_model_resolution():
     """Reset the local-chat-model resolver cache around every test.
 

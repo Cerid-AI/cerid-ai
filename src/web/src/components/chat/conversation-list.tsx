@@ -291,7 +291,7 @@ export function ConversationList({
               : "No conversations yet"}
         </div>
       ) : (
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div ref={listRef} className="space-y-1 p-2">
             {filtered.map((convo, idx) => (
               <div

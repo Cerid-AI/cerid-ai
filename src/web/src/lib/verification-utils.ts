@@ -12,7 +12,64 @@
  * This mapping is frontend-only — zero backend changes needed.
  */
 
-export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending" | "evasion" | "citation" | "skipped"
+import { UX_COPY } from "@/lib/ux-copy"
+
+export type ClaimDisplayStatus = "verified" | "agreed" | "refuted" | "unverified" | "uncertain" | "pending" | "evasion" | "citation" | "skipped"
+
+interface SourceFields {
+  verification_method?: string
+  source_artifact_id?: string
+  source_urls?: string[]
+}
+
+const KB_METHODS = new Set(["kb", "kb_nli", "kb_batch", "kb_only_timeout"])
+
+/**
+ * The one rule for the word "verified": the claim is supported by a source the
+ * user can open, a KB artifact or a web result with a URL. A second model
+ * agreeing from its own training is a weaker thing and is named "agreed".
+ * A verdict reached on a KB path was graded against the user's own documents,
+ * so the method alone marks it as backed. Mirrors core/agents/hallucination/source_backing.py.
+ */
+export function isSourceBacked(claim: SourceFields): boolean {
+  return (
+    KB_METHODS.has(claim.verification_method ?? "") ||
+    !!claim.source_artifact_id ||
+    (claim.source_urls ?? []).some((u) => !!u)
+  )
+}
+
+/** Counts of positive verdicts in a claims list, split by the rule above. */
+export function countPositiveVerdicts(
+  claims: Array<SourceFields & { status?: string }>,
+): { verified: number; agreed: number } {
+  let verified = 0
+  let agreed = 0
+  for (const c of claims) {
+    if (c.status !== "verified") continue
+    if (isSourceBacked(c)) verified++
+    else agreed++
+  }
+  return { verified, agreed }
+}
+
+/**
+ * Positive-verdict counts for a report. The agreed count is the server's when
+ * the summary carries one; a report stored before the server sent it has none,
+ * and the claims are counted instead.
+ */
+export function reportPositiveCounts(
+  summary: { agreed?: number } | null | undefined,
+  claims: Array<SourceFields & { status?: string }>,
+): { verified: number; agreed: number } {
+  const counted = countPositiveVerdicts(claims)
+  return typeof summary?.agreed === "number" ? { ...counted, agreed: summary.agreed } : counted
+}
+
+/** Label for a display status. Only "agreed" differs from its key. */
+export function displayStatusLabel(status: ClaimDisplayStatus | "error"): string {
+  return status === "agreed" ? UX_COPY.verification.agreedLong : status
+}
 
 export interface ClaimSpan {
   start: number
@@ -21,11 +78,10 @@ export interface ClaimSpan {
   displayStatus: ClaimDisplayStatus
 }
 
-interface ClaimLike {
+interface ClaimLike extends SourceFields {
   claim: string
   status: string
   claim_type?: string
-  verification_method?: string
   reason?: string
 }
 
@@ -68,7 +124,7 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
     const claimText = stripMarkdown(c.claim).trim()
     if (!claimText) continue
 
-    const displayStatus = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type, c.reason)
+    const displayStatus = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type, c.reason, c)
     const claimLower = claimText.toLowerCase()
 
     // Tier 1: exact substring match (case-insensitive)
@@ -186,7 +242,8 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
  *
  * - evasion claim_type → evasion (orange, model deflected)
  * - citation claim_type → citation (purple, source verification)
- * - verified → verified (green)
+ * - verified + a source the user can open → verified (green)
+ * - verified with no source → agreed (neutral, a second model agreed)
  * - unverified + cross_model/web_search → refuted (red, actively wrong)
  * - unverified + kb/none → unverified (yellow, no evidence)
  * - uncertain → uncertain (gray, checked but inconclusive)
@@ -197,6 +254,7 @@ export function getClaimDisplayStatus(
   verificationMethod?: string,
   claimType?: string,
   reason?: string,
+  sources?: Pick<SourceFields, "source_artifact_id" | "source_urls">,
 ): ClaimDisplayStatus {
   // Evasion claims get special orange treatment regardless of verification outcome
   if (claimType === "evasion") return "evasion"
@@ -211,7 +269,7 @@ export function getClaimDisplayStatus(
         return "uncertain"
       }
     }
-    return "verified"
+    return isSourceBacked({ ...sources, verification_method: verificationMethod }) ? "verified" : "agreed"
   }
   if (
     status === "unverified" &&
@@ -232,6 +290,7 @@ export function getClaimDisplayStatus(
  */
 export const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string> = {
   verified: "bg-green-50 text-green-700 border-green-200 dark:bg-green-500/20 dark:text-green-400 dark:border-green-500/30",
+  agreed: "bg-muted/50 text-muted-foreground border-border",
   refuted: "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30",
   unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-yellow-500/20 dark:text-yellow-400 dark:border-yellow-500/30",
   evasion: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:border-orange-500/30",
