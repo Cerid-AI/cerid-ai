@@ -13,7 +13,7 @@ the point their verdicts can be used:
 - **CR-106** — when the total streaming deadline fires, both fallback paths
   ``break`` out of the ``as_completed`` loop WITHOUT cancelling the remaining
   per-claim verify tasks. Those tasks keep running ``verify_claim`` under the
-  *process-global* claim-verify semaphore (``patterns._claim_verify_semaphore``,
+  *process-global* claim-verify semaphore (``patterns._get_claim_verify_semaphore()``,
   shared across every conversation), so already-settled claims keep consuming
   external LLM budget and semaphore slots that gate the NEXT message's
   verification — degraded runs cascade under load — and their eventual results
