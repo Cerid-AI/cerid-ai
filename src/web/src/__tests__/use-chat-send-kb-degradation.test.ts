@@ -6,11 +6,9 @@
  * base failed, the knowledge base did not answer at all, and the knowledge
  * base answered with nothing.
  *
- * The 500 ms inject budget is a responsiveness budget, not a health signal.
- * Treating a breach of it as degradation arms the honest-deferral gate on a
- * healthy backend that merely answered slowly, which replaces a good answer
- * with a refusal. The degradation verdict has its own, longer budget, and the
- * grounding-critical questions wait for it rather than guessing.
+ * A send waits for the knowledge base up to one budget. An answer that
+ * arrives inside it is used, however slow; only silence past it is a
+ * degradation, and only a grounding-critical question is deferred for it.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"

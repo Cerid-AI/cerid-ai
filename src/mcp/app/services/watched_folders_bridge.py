@@ -96,13 +96,21 @@ def delete_folder_source(redis: Any, source_id: str) -> None:
     Raises HTTP 404 if the folder does not exist."""
     from fastapi import HTTPException
 
-    from app.routers.watched_folders import _folder_key, _load_folder, _remove_from_index
+    from app.routers.watched_folders import (
+        _folder_key,
+        _load_folder,
+        _remove_from_index,
+        _searchability_changed,
+    )
 
     fid = strip_folder_prefix(source_id)
-    if _load_folder(redis, fid) is None:
+    rec = _load_folder(redis, fid)
+    if rec is None:
         raise HTTPException(status_code=404, detail="Source not found")
     redis.delete(_folder_key(fid))
     _remove_from_index(redis, fid)
+    if not rec.get("search_enabled", True):
+        _searchability_changed()
 
 
 async def folder_health(redis: Any, source_id: str) -> dict[str, Any]:
@@ -186,14 +194,18 @@ def folder_record_to_source(rec: dict[str, Any]) -> dict[str, Any]:
         },
         "sync_cursor": {},
         "total_artifacts": int(stats.get("ingested", 0)),
-        "total_chunks": 0,
-        "total_edges": 0,
-        "total_artifacts_24h": 0,
+        # Artifacts scanned before chunks named their folder carry no link
+        # back to it, so these cannot be counted from the stores. None means
+        # not measured.
+        "total_chunks": None,
+        "total_edges": None,
+        "total_artifacts_24h": None,
         "connection_time_ms": None,
         "last_sync_at": rec.get("last_scanned_at"),
         "created_at": rec.get("created_at"),
         "last_error": _scan_error_summary(stats),
-        "quality_floor": 0.0,
+        # Folders have no quality floor; the policy endpoint ignores them.
+        "quality_floor": None,
     }
 
 

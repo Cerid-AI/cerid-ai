@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 import type { SourceRef } from "@/lib/types"
 
 interface SourceAttributionProps {
@@ -55,6 +56,7 @@ export function SourceAttribution({ sources, variant = "card" }: SourceAttributi
   // post-rerank `relevance` is an ordinal cross-encoder sigmoid, so an absolute
   // 0.45 cutoff here hid real citations from grounded answers (CR-010).
   const dedupedSources = deduplicateByArtifact(sources)
+  const scores = dedupedSources.map((s) => s.relevance)
 
   if (dedupedSources.length === 0) return null
 
@@ -72,7 +74,7 @@ export function SourceAttribution({ sources, variant = "card" }: SourceAttributi
       </Collapsible.Trigger>
       <Collapsible.Content className="mt-1.5 space-y-1">
         {dedupedSources.map((src) => (
-          <SourceCard key={src.artifact_id} source={src} />
+          <SourceCard key={src.artifact_id} source={src} among={scores} />
         ))}
       </Collapsible.Content>
     </Collapsible.Root>
@@ -89,6 +91,8 @@ function SourceBadge({ sources }: { sources: SourceRef[] }) {
   const memoryCount = sources.filter((s) => s.source_type === "memory").length
   const externalCount = sources.filter((s) => s.source_type === "external").length
   const hasMultipleTypes = (memoryCount > 0 || externalCount > 0)
+
+  const scores = sources.map((s) => s.relevance)
 
   const label = hasMultipleTypes
     ? `${kbCount} KB · ${memoryCount} memory · ${externalCount} external`
@@ -111,9 +115,8 @@ function SourceBadge({ sources }: { sources: SourceRef[] }) {
               return (
                 <li key={i} className="flex items-center gap-1 truncate">
                   <SourceIcon className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="truncate">
-                    {s.filename} ({Math.round(s.relevance * 100)}%)
-                  </span>
+                  <span className="truncate">{s.filename}</span>
+                  <RelevanceBar relevance={s.relevance} among={scores} className="ml-auto w-8" />
                 </li>
               )
             })}
@@ -124,9 +127,7 @@ function SourceBadge({ sources }: { sources: SourceRef[] }) {
   )
 }
 
-function SourceCard({ source }: { source: SourceRef }) {
-  const relevancePct = Math.round(source.relevance * 100)
-
+function SourceCard({ source, among }: { source: SourceRef; among: number[] }) {
   return (
     <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
       <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -160,11 +161,7 @@ function SourceCard({ source }: { source: SourceRef }) {
             Q{Math.round(source.quality_score * 100)}
           </span>
         )}
-        {relevancePct > 0 && (
-          <span className="tabular-nums text-muted-foreground">
-            {relevancePct}%
-          </span>
-        )}
+        {source.relevance > 0 && <RelevanceBar relevance={source.relevance} among={among} />}
       </div>
     </div>
   )

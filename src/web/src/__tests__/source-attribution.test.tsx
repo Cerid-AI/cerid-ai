@@ -57,13 +57,24 @@ describe("SourceAttribution", () => {
     expect(screen.getByText("budget-2025.xlsx")).toBeInTheDocument()
   })
 
-  it("shows relevance percentages", async () => {
+  it("shows relevance as a bar relative to the best source, not a percentage", async () => {
     const user = userEvent.setup()
     render(<SourceAttribution sources={mockSources} />)
     await user.click(screen.getByText("2 sources"))
 
-    expect(screen.getByText("92%")).toBeInTheDocument()
-    expect(screen.getByText("78%")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 1 of 2 results, 1.00 relative to the best match" })).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.85 relative to the best match" })).toBeInTheDocument()
+    expect(screen.queryByText(/\d+%/)).toBeNull()
+  })
+
+  it("badge variant lists each source with a relative bar, not a percentage", async () => {
+    const user = userEvent.setup()
+    render(<SourceAttribution sources={mockSources} variant="badge" />)
+    await user.hover(screen.getByText(/Context sent to LLM/))
+
+    const bars = await screen.findAllByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.85 relative to the best match" })
+    expect(bars.length).toBeGreaterThan(0)
+    expect(screen.queryByText(/\d+%/)).toBeNull()
   })
 
   it("shows sub-category badge when present and not 'general'", async () => {
@@ -125,7 +136,8 @@ describe("SourceAttribution", () => {
     // Only one "report.pdf" card
     expect(screen.getAllByText("report.pdf")).toHaveLength(1)
     // Highest relevance kept
-    expect(screen.getByText("85%")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 1 of 2 results, 1.00 relative to the best match" })).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.65 relative to the best match" })).toBeInTheDocument()
   })
 
   it("CR-010: shows low ordinal-relevance sources (no client-side absolute floor)", async () => {

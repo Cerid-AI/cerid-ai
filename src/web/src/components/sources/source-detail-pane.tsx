@@ -302,14 +302,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number | null }) {
   return (
     <div>
       <div
         key={value}
         className="metric-value-pulse text-lg font-medium tabular-nums text-foreground"
       >
-        {value.toLocaleString()}
+        {value === null ? "\u2014" : value.toLocaleString()}
       </div>
       <div className="text-label-xs text-muted-foreground">{label}</div>
     </div>

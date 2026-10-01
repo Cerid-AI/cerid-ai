@@ -2,6 +2,17 @@
 # an auth test answer 401 on 2026-09-07.
 unexport CERID_API_KEY
 
+# The targets that talk to a running stack are the exception: they get
+# CERID_API_KEY and NEO4J_PASSWORD from the environment, or else from .env.
+# Only these recipes see the values, and they are never printed.
+LIVE_STACK_TARGETS := preservation-check validate-pro pro-feature-health \
+	eval-live-retrieval eval-chat-faithfulness eval-verdict slo smoke
+_ENV_CERID_API_KEY := $(CERID_API_KEY)
+_ENV_NEO4J_PASSWORD := $(NEO4J_PASSWORD)
+_from_dotenv = $(shell sed -n 's/^$(1)=//p' '$(CURDIR)/.env' 2>/dev/null | head -n 1)
+$(LIVE_STACK_TARGETS): export CERID_API_KEY = $(or $(_ENV_CERID_API_KEY),$(call _from_dotenv,CERID_API_KEY))
+$(LIVE_STACK_TARGETS): export NEO4J_PASSWORD = $(or $(_ENV_NEO4J_PASSWORD),$(call _from_dotenv,NEO4J_PASSWORD))
+
 .PHONY: lock-python lock-python-dev lock-all install-hooks install-macos-integration \
        deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
@@ -117,6 +128,12 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	.venv/bin/python -m flake8 --select=DUO138 src/mcp/
 	@echo "[ci-local] gate probes (scripts/tests)"
 	.venv/bin/pytest scripts/tests/ -q -p no:cacheprovider
+	@echo "[ci-local] MLX server tests (stacks/mlx-inference; cases needing MLX or openai-harmony skip here, CI runs them)"
+	@if [ -d stacks/mlx-inference ]; then \
+	  .venv/bin/pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider; \
+	else \
+	  echo "  (stacks/mlx-inference absent — internal-only mirror, skipped)"; \
+	fi
 	@echo "[ci-local] frontend · eslint + tsc + vitest"
 	cd src/web && npx eslint . && npx tsc -b && npx vitest run
 	@echo "[ci-local] secret detection (matches CI security job)"
@@ -337,6 +354,8 @@ smoke:
 # Gates every sprint in the consolidation program. Runs against the
 # live stack at http://127.0.0.1:8888 (override with
 # CERID_PRESERVATION_MCP). NEO4J_PASSWORD must be in the env or in .env.
+PRESERVATION_JUNIT ?= /tmp/preservation-results.xml
+
 pro-feature-health: ## Gate: no Pro feature is entitled-but-not-loaded (needs a live stack)
 	@echo "[pro-feature-health] requires stack running (scripts/start-cerid.sh)"
 	.venv/bin/python scripts/lint-pro-feature-health.py
@@ -375,12 +394,16 @@ preservation-check: ## Run capability-preservation invariants (I1-I8) against a 
 	  --ignore-glob='tests/integration/test_w4_contradiction_preservation.py' \
 	  --ignore-glob='tests/integration/test_cl12_store_divergence_preservation.py' \
 	  --ignore-glob='tests/integration/test_e1_*.py' \
-	  --junit-xml=/tmp/preservation-results.xml ; \
-	rc=$$? ; \
-	cd ../.. ; \
-	python3 scripts/write-preservation-baseline.py \
-	  --junit-xml /tmp/preservation-results.xml --source local >/dev/null 2>&1 || true ; \
-	exit $$rc
+	  --junit-xml='$(PRESERVATION_JUNIT)'
+
+# The committed baseline (src/mcp/tests/eval/baselines/preservation.json, read
+# by trust_score) changes only when asked, never as a side effect of a run: a
+# run that answered 401 for want of a key once overwrote it. Record the last
+# preservation-check run deliberately. The writer exits 1 when the run it
+# recorded had failures; that is still a successful recording.
+preservation-baseline: ## Record the last preservation-check run as the committed baseline
+	@python3 scripts/write-preservation-baseline.py \
+	  --junit-xml '$(PRESERVATION_JUNIT)' --source local || [ $$? -eq 1 ]
 
 # -- Latency SLO benchmarks --
 slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)

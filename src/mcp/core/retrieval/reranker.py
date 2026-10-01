@@ -10,8 +10,8 @@ packages required.
 """
 
 import logging
-import os
 import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -19,6 +19,7 @@ import onnxruntime as ort
 from tokenizers import Tokenizer
 
 import config
+from core.utils.cpu import onnx_intra_op_threads
 from core.utils.hf_cache import resolve_hf_file
 from core.utils.onnx_providers import resolve_providers
 
@@ -52,7 +53,7 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
 
         sess_opts = ort.SessionOptions()
         sess_opts.inter_op_num_threads = 1
-        sess_opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
+        sess_opts.intra_op_num_threads = onnx_intra_op_threads()
 
         _session = ort.InferenceSession(
             model_path,
@@ -132,6 +133,20 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
     return scores.tolist()
 
 
+def _record_latency(latency_ms: float) -> None:
+    """Feed /health's rerank_latency_ms, as the remote rerank clients do."""
+    try:
+        from utils.inference_config import get_inference_config
+        cfg = get_inference_config()
+        if cfg.rerank_latency_ms > 0:
+            cfg.rerank_latency_ms = cfg.rerank_latency_ms * 0.7 + latency_ms * 0.3
+        else:
+            cfg.rerank_latency_ms = latency_ms
+    except Exception as exc:  # noqa: BLE001 — latency tracking is best-effort
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("core.retrieval.reranker.record_latency", exc)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -204,7 +219,9 @@ def rerank(
         candidates = high_signal
 
     documents = [r["content"] for r in candidates]
+    t0 = time.perf_counter()
     ce_scores = _score_pairs(query, documents)
+    _record_latency((time.perf_counter() - t0) * 1000)
 
     for result, ce_score in zip(candidates, ce_scores):
         original = result["relevance"]

@@ -315,11 +315,9 @@ Edit
 +  "version": "0.2.1",
 ```
 
-If the wire protocol shifted, also bump `SDK_PROTOCOL_VERSION` in the
-Python SDK's `__version__.py` (the TypeScript client doesn't carry a
-separate protocol constant; it's kept in sync with the Python SDK's
-by the `sdk-contract` CI gate testing both against the same
-`docs/openapi-sdk-v1.json`).
+If the wire protocol shifted, also bump `SDK_PROTOCOL_VERSION` in
+`src/version.ts`. The `sdk-contract` CI gate tests it, and the Python SDK's
+constant, against `info.version` in `docs/openapi-sdk-v1.json`.
 
 ### 2. Commit + tag
 

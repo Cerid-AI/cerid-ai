@@ -115,7 +115,18 @@ python-multipart>=0.0.32,<1
 # whisper.cpp Python bindings (CPU-portable; Metal auto-routes on Apple Silicon)
 pywhispercpp>=1.5.1,<2
 # Speaker diarization (HF gated: pyannote/speaker-diarization-3.1 + segmentation-3.0).
-# Brings torch + torchaudio as transitive deps (~700MB wheel — accepted for Pro tier).
+# Brings torch + torchaudio as transitive deps — accepted for Pro tier.
+#
+# CPU-only torch. PyPI's linux torch depends on the full CUDA stack (nvidia-*,
+# triton: ~3.8 GB in the image), and nothing here can use it: diarize.py never
+# moves the pipeline off CPU, and the hosts (Colima arm64, Docker Desktop and
+# ubuntu-latest amd64) expose no GPU to the container. PyTorch's CPU index
+# publishes `+cpu` builds for linux amd64 and arm64, and PEP 440 ranks
+# `2.13.0+cpu` above `2.13.0`, so torch, torchaudio and torchcodec resolve
+# there. Every lock entry stays hash-pinned, so the second index widens what
+# pip-compile may choose, not what an install may fetch.
+# scripts/tests/test_lock_cpu_only_torch.py fails if CUDA wheels come back.
+--extra-index-url https://download.pytorch.org/whl/cpu
 # MUST stay >=4: pyannote 3.x reads torchaudio.AudioMetaData, which torchaudio
 # removed by 2.11 — the combination the lock resolved. That AttributeError was
 # raised at plugin-load time, so the whole Meeting Capture bucket (diarization,

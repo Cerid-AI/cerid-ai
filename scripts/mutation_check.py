@@ -65,6 +65,7 @@ TESTS = [
     "src/mcp/tests/test_private_mode_redis_failure.py",
     "src/mcp/tests/test_graph_archived_filter.py",
     "src/mcp/tests/test_sync_chroma_roundtrip.py",
+    "src/mcp/tests/test_operational_domain_isolation.py",
 ]
 
 # (label, file, original, mutated)
@@ -178,6 +179,17 @@ MUTANTS: list[tuple[str, str, str, str]] = [
      "src/mcp/app/routers/graph.py",
      "        WHERE m.created_at >= $start AND m.created_at <= $end\n          AND coalesce(a.archived, false) = false\n        WITH a, m",
      "        WHERE m.created_at >= $start AND m.created_at <= $end\n        WITH a, m"),
+
+    # ── utils/domain_privacy.py — a consumer's corpus in the owner's search ──
+    ("domain_privacy: search every registered domain (operational ones too)",
+     "src/mcp/utils/domain_privacy.py",
+     "    return [d for d in config.DOMAINS if d not in hidden]",
+     "    return list(config.DOMAINS)"),
+
+    ("verified_memory: promote a verdict that names no source",
+     "src/mcp/core/agents/verified_memory.py",
+     'if not claim_data.get("source_artifact_id") and not claim_data.get("source_urls"):',
+     "if False:"),
 ]
 
 

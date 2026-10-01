@@ -386,6 +386,35 @@ def _empty_agent_query_envelope() -> dict[str, Any]:
     }
 
 
+def _scoped_context_sources(
+    context_sources: dict | None,
+    domains: list[str] | None,
+    *,
+    strict_domains: bool,
+    requested_strict: bool,
+) -> dict | None:
+    """The context sources a query held strictly to named domains may use.
+
+    The domain filter constrains the knowledge base scan and nothing else. A
+    query held to ``tasks`` still came back with rows from the memory surface
+    (domain ``conversations``) and from the web, and a strict consumer asking
+    for its own domain was handed the owner's memories the same way.
+
+    Memory is the owner's data, so any strict scope turns it off unless
+    ``conversations`` is one of the domains named. The web is nobody's data: it
+    goes off only when the REQUEST asked for the strict scope. A consumer that
+    is strict by registration still gets web augmentation on a thin corpus.
+    """
+    if not (strict_domains and domains):
+        return context_sources
+    scoped = dict(context_sources or {})
+    if "conversations" not in domains:
+        scoped["memory"] = False
+    if requested_strict:
+        scoped["external"] = False
+    return scoped
+
+
 async def _agent_query_inner(req: AgentQueryRequest, request: Request):
     try:
         if await request.is_disconnected():
@@ -416,9 +445,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         client_id = request.headers.get("x-client-id", "gui")
         consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
         allowed_domains = consumer.get("allowed_domains")
-        # Per-request strict_domains can only tighten (True), never loosen the consumer default
+        # Naming domains or asking for strict tightens the consumer default; nothing loosens it
         consumer_strict = consumer.get("strict_domains", False)
-        strict_domains = req.strict_domains if req.strict_domains else consumer_strict
+        # Naming domains holds the knowledge base rows to them; it does not by
+        # itself take the owner's memories away.
+        scope_strict = bool(req.strict_domains or consumer_strict)
+        strict_domains = bool(scope_strict or req.domains)
         consumer_scope = ",".join(sorted(allowed_domains)) if allowed_domains else "__all__"
 
         has_context = bool(req.conversation_messages)
@@ -427,6 +459,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         # context_sources, rag_mode, and scoped retrieval. Mirror C2: skip C1
         # entirely when metadata_filter / exclude_packs narrow the result set
         # (a general-key hit would cross that wall).
+        req.context_sources = _scoped_context_sources(
+            req.context_sources,
+            req.domains,
+            strict_domains=scope_strict,
+            requested_strict=bool(req.strict_domains),
+        )
         _cs = req.context_sources or {}
         _mem = "1" if _cs.get("memory", True) is not False else "0"
         _kb = "1" if _cs.get("kb", True) is not False else "0"
@@ -504,6 +542,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 neo4j_driver=get_neo4j(),
                 redis_client=get_redis(),
                 model=req.model,
+                budget_seconds=req.budget_seconds,
             )
         else:
             # Manual mode → the canonical full agentic-retrieval path. The KB
@@ -726,6 +765,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
                 "summary": {
                     "total": len(uncertain_claims),
                     "verified": 0,
+                    "agreed": 0,
                     "unverified": 0,
                     "uncertain": len(uncertain_claims),
                 },
@@ -780,6 +820,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
                             or 0.0
                         ),
                         verified=int(summary.get("verified", 0)),
+                        agreed=summary.get("agreed"),
                         unverified=int(summary.get("unverified", 0)),
                         uncertain=int(summary.get("uncertain", 0)),
                         total=int(summary.get("total", len(claims_payload))),
@@ -1195,6 +1236,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 unverified: int,
                 uncertain: int,
                 total: int,
+                agreed: int | None = None,
             ) -> None:
                 _save_report(
                     get_neo4j(),
@@ -1202,6 +1244,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     claims=claims,
                     overall_score=overall_score,
                     verified=verified,
+                    agreed=agreed,
                     unverified=unverified,
                     uncertain=uncertain,
                     total=total,
@@ -1329,6 +1372,7 @@ class SaveVerificationRequest(BaseModel):
     claims: list[dict]
     overall_score: float = Field(ge=0.0, le=1.0)
     verified: int = 0
+    agreed: int | None = Field(default=None, ge=0)
     unverified: int = 0
     uncertain: int = 0
     total: int = 0
@@ -1356,6 +1400,7 @@ async def save_verification_report(req: SaveVerificationRequest):
             claims=req.claims,
             overall_score=req.overall_score,
             verified=req.verified,
+            agreed=req.agreed,
             unverified=req.unverified,
             uncertain=req.uncertain,
             total=req.total,

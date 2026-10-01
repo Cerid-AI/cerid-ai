@@ -178,6 +178,10 @@ COMPOSE_VARS: list[tuple[str, str]] = [
     # while the drift gate reported the file in sync.
     ("CERID_PORT_GOOGLE_MCP", "8810"),
     ("CERID_PORT_MS365_MCP", "8811"),
+    # Read by the cerid-sso container and by start-cerid.sh, never by Python
+    # under src/mcp.
+    ("CERID_PORTAL_PASSWORD", ""),
+    ("CERID_PORTAL_TITLE", ""),
     ("CERID_BIND_ADDR", "127.0.0.1"),
     ("MS365_MCP_TENANT_ID", "common"),
     ("CERID_PORT_MCP", "8888"),
@@ -190,6 +194,9 @@ COMPOSE_VARS: list[tuple[str, str]] = [
     # Python, so the AST walk cannot see it — yet RUNBOOK_PRODUCTION.md tells
     # operators to set it in THIS file. Absent until 2026-09-01.
     ("VITE_SENTRY_DSN_WEB", ""),
+    # The API container's CPU cap. It runs three ONNX models at up to four
+    # threads each; a cap of 2 took a retrieval from about 1 s to about 2 s.
+    ("CERID_MCP_CPUS", "4.0"),
 ]
 
 
@@ -198,6 +205,15 @@ COMPOSE_VARS: list[tuple[str, str]] = [
 # an operator reading .env.example cannot otherwise know that
 # CERID_ENVIRONMENT_PROFILE takes exactly three words.
 VAR_COMMENTS: dict[str, tuple[str, ...]] = {
+    "CERID_PORTAL_PASSWORD": (
+        "Sign-in password for the web port (3000) and the gateway. Empty = no",
+        "sign-in: any process on this machine can use the API through port 3000.",
+        "start-cerid.sh refuses to bind off loopback without it.",
+        "Generate one with: openssl rand -hex 24",
+    ),
+    "CERID_PORTAL_TITLE": (
+        "Name shown on the sign-in page. Empty = Cerid.",
+    ),
     "CERID_ENVIRONMENT_PROFILE": (
         "Environment profile: a named bundle of the knobs below, applied as",
         "DEFAULTS only where you have not set a value yourself (your pins win).",
@@ -242,6 +258,7 @@ def render_env_example(entries: list[tuple[str, str | None]]) -> str:
         "# Change these when a default port collides with another service.",
     ]
     for name, default in sorted(COMPOSE_VARS):
+        lines.extend(f"# {c}" for c in VAR_COMMENTS.get(name, ()))
         lines.append(f"{name}={default}")
     return "\n".join(lines) + "\n"
 

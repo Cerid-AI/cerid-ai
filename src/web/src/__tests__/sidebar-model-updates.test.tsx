@@ -93,3 +93,31 @@ describe("Sidebar model-update badge", () => {
     await waitFor(() => expect(applyModelUpdates).toHaveBeenCalledTimes(1))
   })
 })
+
+describe("Sidebar Settings button with pending model updates (audit 63)", () => {
+  const threeUpdates = {
+    updates: ["a", "b", "c"].map((id) => ({
+      update_id: `coding:${id}`, model_id: id, update_type: "new", details: {}, detected_at: "now",
+    })),
+  }
+
+  it("keeps the same Settings button mounted when the update check resolves", async () => {
+    let resolveUpdates: (v: unknown) => void = () => {}
+    fetchModelUpdatesFull.mockReturnValue(new Promise((r) => { resolveUpdates = r }))
+    renderSidebar()
+
+    const before = screen.getByRole("button", { name: "Settings" })
+    resolveUpdates(threeUpdates)
+    await screen.findByLabelText(/3 model updates available/i)
+
+    expect(before.isConnected).toBe(true)
+  })
+
+  it("is still named Settings, without the update counts", async () => {
+    fetchModelUpdatesFull.mockResolvedValue(threeUpdates)
+    renderSidebar()
+    await screen.findByLabelText(/3 model updates available/i)
+
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument()
+  })
+})

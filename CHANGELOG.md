@@ -2,6 +2,66 @@
 
 All notable changes to cerid-ai are documented here.
 
+## [Unreleased]
+
+### Security
+
+- **The web port adds the API key only for a caller who has signed in.** The
+  web container's proxy added `X-API-Key` to every request under `/api/mcp/`,
+  so any process on the machine, and any page open in a browser on it, could
+  call every API route with no credential. nginx now asks the sign-in service
+  first. A caller passes with a session cookie or by sending the key itself;
+  anyone else gets `401` and the app opens the sign-in page. If the sign-in
+  service does not answer, the port answers `503` and adds no key.
+  `/api/mcp/health/ping` and `/api/mcp/health/live` stay open.
+- **`CERID_PORTAL_PASSWORD` is required off loopback.** `start-cerid.sh`
+  refuses to start with `CERID_BIND_ADDR` on a network address and no
+  password, as it does without `CERID_API_KEY`. On a loopback bind with no
+  password the port stays open: the script prints a warning and the status bar
+  shows **Port open: no sign-in**.
+- **Writes from another site are refused.** `POST`, `PUT`, `PATCH` and
+  `DELETE` answer `403` `CROSS_SITE_REQUEST_REFUSED` when the browser's
+  `Origin` is not in `CORS_ORIGINS`, not the other loopback spelling of an
+  entry, and not the server's own host and port, or when the browser marks the
+  request `Sec-Fetch-Site: cross-site`. Requests with no `Origin` are
+  unaffected.
+- **The web port forwards only under its own names**: `localhost`,
+  `127.0.0.1`, `[::1]`, `cerid-web` and `CERID_HOST`. An API call or sign-in
+  request under any other `Host` gets `421`. Static files are served under
+  any name.
+- The sign-in service is `stacks/sso/sso.py` and ships with the public
+  distribution. `CERID_PORTAL_TITLE` names the sign-in page.
+- Sign-in on port 3000 sets its own cookie, `cerid_portal_local`, without
+  `Secure`, because browsers do not keep a `Secure` cookie on plain HTTP. The
+  gateway does not accept it.
+
+### Changed
+
+- **The `mcp-server` image is 4 GB, down from 10.6 GB** (linux/amd64). torch,
+  torchaudio and torchcodec now come from PyTorch's CPU index, so the image no
+  longer carries the CUDA libraries and triton that no host ever gave it a GPU
+  for. Meeting Capture diarization runs on CPU as before.
+
+### Upgrading
+
+- `cerid-sso` moved from the gateway stack to the main `docker-compose.yml`.
+  The first start after upgrading finds the old container holding the name:
+  run `./scripts/start-cerid.sh --reclaim` once.
+- A LAN install needs `CERID_PORTAL_PASSWORD` in `.env` before it will start.
+- Scripts that call the API through port 3000 on an install with a password
+  must send `X-API-Key`.
+- API calls on port 3000 under a name other than `CERID_HOST` answer `421`.
+- The sign-in page says "Cerid" unless `CERID_PORTAL_TITLE` is set.
+
+### SDK — `cerid-sdk` / `@cerid-ai/sdk` 0.2.1, wire protocol 1.3.0
+
+- `/sdk/v1/health` and `/sdk/v1/settings` report `version` 1.3.0. The
+  hallucination `summary` carries an integer `agreed`, the claims a second
+  model agreed with and no source backs, and `verified` counts only claims a
+  source backs. A claim's `status` is unchanged.
+- Clients built against 1.2.0 accept a 1.3.0 server: the SDKs refuse only a
+  different major version.
+
 ## [1.0.7] — 2026-09-21
 
 A correctness release. Two changes decide what a caller gets back. When the

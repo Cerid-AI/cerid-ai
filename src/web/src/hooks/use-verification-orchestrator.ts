@@ -27,6 +27,7 @@ import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { MODELS } from "@/lib/types"
+import { countPositiveVerdicts, reportPositiveCounts } from "@/lib/verification-utils"
 import type { ChatMessage, HallucinationClaim, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
 
@@ -106,6 +107,12 @@ export function useVerificationOrchestrator({
     return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].content : null
   }, [activeMessages])
 
+  const latestIsDeferral = useMemo(() => {
+    if (!activeMessages) return false
+    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
+    return assistantMsgs.length > 0 && assistantMsgs[assistantMsgs.length - 1].deferral === true
+  }, [activeMessages])
+
   const lastAssistantMsgId = useMemo(() => {
     if (!activeMessages) return null
     const assistantMsgs = activeMessages.filter((m) => m.role === "assistant" && m.content)
@@ -141,7 +148,9 @@ export function useVerificationOrchestrator({
     if (assistantCount > lastKnownCount.current && !isStreaming) {
       const key = activeId && lastAssistantMsgId ? cacheKey(activeId, lastAssistantMsgId) : ""
       const textLen = latestAssistantText?.length ?? 0
-      if (textLen >= MIN_VERIFIABLE_LENGTH && (!key || !reportCache.has(key))) {
+      // The app's own deferral is not an answer. Verified, it was split
+      // into a claim, given two web sources and shown as "Accuracy: 100%".
+      if (!latestIsDeferral && textLen >= MIN_VERIFIABLE_LENGTH && (!key || !reportCache.has(key))) {
         triggerCounter.current += 1
         // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
         setTriggerBump((prev) => prev + 1)
@@ -150,7 +159,7 @@ export function useVerificationOrchestrator({
     } else if (assistantCount !== lastKnownCount.current && !isStreaming) {
       lastKnownCount.current = assistantCount
     }
-  }, [assistantCount, isStreaming, activeId, lastAssistantMsgId, latestAssistantText])
+  }, [assistantCount, isStreaming, activeId, lastAssistantMsgId, latestAssistantText, latestIsDeferral])
 
   // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
   const streamTriggerKey = isStreaming ? 0 : triggerCounter.current + triggerBump * 0
@@ -352,13 +361,14 @@ export function useVerificationOrchestrator({
         const merged = halReport.claims.map((c, i) =>
           claimUpdates.has(i) ? { ...c, ...claimUpdates.get(i) } : c,
         )
-        const verified = merged.filter((c) => c.status === "verified").length
+        const { verified, agreed } = countPositiveVerdicts(merged)
         const unverified = merged.filter((c) => c.status === "unverified").length
         const uncertain = merged.filter((c) => c.status === "uncertain").length
         const skipped = merged.filter((c) => c.status === "skipped").length
         return {
           state: "done",
           verified,
+          agreed,
           unverified,
           uncertain,
           skipped,
@@ -369,7 +379,7 @@ export function useVerificationOrchestrator({
       }
       return {
         state: "done",
-        verified: halReport.summary?.verified,
+        ...reportPositiveCounts(halReport.summary, halReport.claims ?? []),
         unverified: halReport.summary?.unverified,
         uncertain: halReport.summary?.uncertain,
         skipped: halReport.summary?.skipped,

@@ -307,29 +307,47 @@ def _sweep_orphan_verification_reports(stack_reachable: bool) -> Iterator[None]:
         _direct_orphan_sweep()
 
 
+_CLEANUP_ROUTES = {
+    "conversation": "/user-state/conversations/{id}",
+    "artifact": "/admin/artifacts/{id}",
+}
+
+
+def _warn_cleanup_leak(kind: str, _id: str, why: str) -> None:
+    warnings.warn(
+        f"preservation_cleanup_leak: {kind} {_id} was not removed: {why}",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
 @pytest.fixture
-def cleanup_ids() -> Iterator[list[tuple[str, str]]]:
+def cleanup_ids(http_headers: dict) -> Iterator[list[tuple[str, str]]]:
     """Accumulator for ``(kind, id)`` tuples that the test creates and
     needs to clean up in teardown. Example:
 
         def test_foo(http_client, cleanup_ids):
-            r = http_client.post("/conversations", json={...})
+            r = http_client.post("/user-state/conversations", json={...})
             cleanup_ids.append(("conversation", r.json()["id"]))
 
-    After the test, known kinds are torn down via their documented
-    delete endpoints. Unknown kinds are logged so the test author can
-    wire them. Never silently leaks."""
+    After the test, known kinds are deleted through ``_CLEANUP_ROUTES`` with
+    the same headers ``http_client`` sends. Cleanup never fails the test, but
+    an id it could not remove — refused, unreachable, or an unknown kind —
+    raises a ``preservation_cleanup_leak`` warning naming it."""
     accumulator: list[tuple[str, str]] = []
     yield accumulator
-    # Best-effort cleanup — the tests themselves own hard assertions;
-    # leaked ids are observability noise, not failures.
     import httpx
     for kind, _id in accumulator:
-        with contextlib.suppress(Exception):  # best-effort artifact teardown
-            if kind == "conversation":
-                httpx.delete(f"{MCP_BASE}/conversations/{_id}", timeout=5.0)
-            elif kind == "artifact":
-                httpx.delete(
-                    f"{MCP_BASE}/admin/kb/artifact/{_id}", timeout=5.0
-                )
-            # Add more kinds as preservation tests introduce them.
+        route = _CLEANUP_ROUTES.get(kind)
+        if route is None:
+            _warn_cleanup_leak(kind, _id, "no delete route for this kind in _CLEANUP_ROUTES")
+            continue
+        path = route.format(id=_id)
+        try:
+            r = httpx.delete(f"{MCP_BASE}{path}", headers=http_headers, timeout=5.0)
+        except httpx.HTTPError as exc:
+            _warn_cleanup_leak(kind, _id, f"DELETE {path} raised {type(exc).__name__}: {exc}")
+            continue
+        # 404: the test already deleted it, which is the cleanup we wanted.
+        if not r.is_success and r.status_code != 404:
+            _warn_cleanup_leak(kind, _id, f"DELETE {path} answered HTTP {r.status_code}")

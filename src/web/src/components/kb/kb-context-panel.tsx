@@ -22,6 +22,7 @@ import { uploadFile, fetchKBStats, recallMemories } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
 import type { MemoryRecallResult, KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 
 interface KBContextPanelProps extends UseKBContextReturn {
   onClose: () => void
@@ -96,6 +97,8 @@ export function KBContextPanel({
     }
     return { kbResults: kb, externalResults: ext }
   }, [results])
+  const kbScores = kbResults.map((r) => r.relevance)
+  const memoryScores = memoryResults.map((m) => m.relevance)
 
   // Drag-drop for file ingestion
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -314,6 +317,7 @@ export function KBContextPanel({
             <ArtifactCard
               key={`${result.artifact_id}-${result.chunk_index}`}
               result={result}
+              relevanceAmong={kbScores}
               isSelected={selectedArtifactId === result.artifact_id}
               onSelect={() =>
                 setSelectedArtifactId(
@@ -362,7 +366,7 @@ export function KBContextPanel({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
                           <p className="truncate text-label-sm font-medium">{m.summary || m.content.slice(0, 60)}</p>
-                          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">{Math.round(m.relevance * 100)}%</span>
+                          <RelevanceBar relevance={m.relevance} among={memoryScores} />
                         </div>
                         <div className="flex items-center gap-2 text-label-xs text-muted-foreground">
                           <Badge variant="outline" className="text-label-xxs px-1 py-0">{m.memory_type}</Badge>

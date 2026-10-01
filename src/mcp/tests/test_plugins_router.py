@@ -256,8 +256,10 @@ class TestEnableDisable:
             assert response.status_code == 404
 
 
-class TestPluginConfig:
-    def test_get_empty_config(self, tmp_path: Path):
+class TestPluginConfigIsGone:
+    """No plugin reads a stored configuration, so nothing offers to store one."""
+
+    def test_the_config_routes_do_not_exist_and_nothing_is_written(self, tmp_path: Path):
         plugin_dir = _make_plugin_dir(tmp_path)
         mock_redis = _mock_redis()
 
@@ -270,52 +272,55 @@ class TestPluginConfig:
             app.include_router(router)
             client = TestClient(app)
 
-            response = client.get("/plugins/cerid-plugin-analytics/config")
-            assert response.status_code == 200
-            assert response.json()["values"] == {}
-
-    def test_set_and_get_config(self, tmp_path: Path):
-        plugin_dir = _make_plugin_dir(tmp_path)
-        mock_redis = _mock_redis()
-
-        with patch("config.PLUGIN_DIR", str(plugin_dir)), \
-             patch("config.features.FEATURE_TIER", "community"), \
-             patch("app.routers.plugins.get_redis", return_value=mock_redis):
-            from app.routers.plugins import router
-
-            app = FastAPI()
-            app.include_router(router)
-            client = TestClient(app)
-
-            # Set config
+            get_resp = client.get("/plugins/cerid-plugin-analytics/config")
             put_resp = client.put(
                 "/plugins/cerid-plugin-analytics/config",
-                json={"values": {"threshold": 0.8, "mode": "detailed"}},
+                json={"values": {"threshold": 0.8}},
             )
-            assert put_resp.status_code == 200
 
-            # Read it back
-            get_resp = client.get("/plugins/cerid-plugin-analytics/config")
-            assert get_resp.status_code == 200
-            values = get_resp.json()["values"]
-            assert values["threshold"] == 0.8
-            assert values["mode"] == "detailed"
+            assert get_resp.status_code == 404
+            assert put_resp.status_code in (404, 405)
+            mock_redis.set.assert_not_called()
+            # The plugin itself is still there.
+            assert client.get("/plugins/cerid-plugin-analytics").status_code == 200
 
-    def test_config_nonexistent_plugin_returns_404(self, tmp_path: Path):
+    def test_a_plugin_payload_carries_no_config_schema(self, tmp_path: Path):
         plugin_dir = _make_plugin_dir(tmp_path)
-        mock_redis = _mock_redis()
+        manifest_path = plugin_dir / "analytics" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["config_schema"] = {"threshold": {"type": "number", "default": 0.5}}
+        manifest_path.write_text(json.dumps(manifest))
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.features.FEATURE_TIER", "community"), \
-             patch("app.routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=_mock_redis()):
             from app.routers.plugins import router
 
             app = FastAPI()
             app.include_router(router)
             client = TestClient(app)
 
-            response = client.get("/plugins/nonexistent/config")
-            assert response.status_code == 404
+            one = client.get("/plugins/cerid-plugin-analytics").json()
+            listed = client.get("/plugins").json()["plugins"]
+
+            assert one["name"] == "cerid-plugin-analytics"
+            assert "config_schema" not in one
+            assert listed
+            assert all("config_schema" not in p for p in listed)
+
+    def test_no_shipped_manifest_declares_a_config_schema(self):
+        from plugins import plugin_search_dirs
+
+        manifests = [
+            m for base in plugin_search_dirs() if base.is_dir()
+            for m in sorted(base.glob("*/manifest.json"))
+        ]
+        assert manifests
+        declaring = [
+            str(m) for m in manifests
+            if "config_schema" in json.loads(m.read_text(encoding="utf-8"))
+        ]
+        assert declaring == []
 
 
 class TestScanPlugins:
@@ -401,6 +406,7 @@ class TestPluginStatus:
             app.include_router(router)
             client = TestClient(app)
 
+            client.post("/plugins/cerid-plugin-analytics/disable")
             response = client.get("/plugins/cerid-plugin-analytics")
             assert response.status_code == 200
             assert response.json()["status"] == "disabled"

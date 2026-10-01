@@ -9,6 +9,7 @@
 #   1. Infrastructure: neo4j, chromadb, redis  (no dependencies, start in parallel)
 #   2. MCP Server:     core API                (waits for neo4j, chromadb, redis)
 #   3. Cerid Web:      React frontend          (waits for mcp-server)
+#      Cerid SSO:      sign-in for the web port (no dependencies)
 #
 # Bifrost was retired 2026-04-17 (audit C-4). Chat + smart-router route
 # direct to OpenRouter via llm_client.py.
@@ -229,6 +230,10 @@ services:
       # a "cached" badge that vanished on the next --force-recreate. Named
       # volume so the download survives container recreates.
       - whisper-models:/home/cerid/.cerid/models/whisper
+      # Read-only view of the Neo4j store files so /system/storage can
+      # measure them; neo4j:community has no procedure that reports store
+      # size without APOC Extended.
+      - ./stacks/infrastructure/data/neo4j:/neo4j-data:ro
     env_file:
       - .env
     environment:
@@ -282,6 +287,12 @@ services:
       # POST /mcp/messages then DNS-fails). Override to the published
       # host:port — the container itself routes via `127.0.0.1:8888->8888`.
       - MCP_EXTERNAL_HOST=${MCP_EXTERNAL_HOST:-localhost:8888}
+      # The published host ports, so /setup/health can report the ports this
+      # stack is reachable on rather than the defaults.
+      - CERID_PORT_MCP=${CERID_PORT_MCP:-8888}
+      - CERID_PORT_NEO4J=${CERID_PORT_NEO4J:-7474}
+      - CERID_PORT_CHROMA=${CERID_PORT_CHROMA:-8001}
+      - CERID_PORT_REDIS=${CERID_PORT_REDIS:-6379}
       - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
       - HOST_OS=${HOST_OS:-}
       - HOST_CPU=${HOST_CPU:-}
@@ -305,7 +316,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          # The server runs three ONNX models at up to four threads each. A cap
+          # below that throttles every retrieval; set it to what the host can give.
+          cpus: '${CERID_MCP_CPUS:-4.0}'
           memory: 6G
     healthcheck:
       # 10s timeout (was 5s — Workstream A Phase 1.3 defence-in-depth) so a
@@ -332,6 +345,8 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+      # The one extra name nginx answers to besides localhost and cerid-web.
+      - CERID_HOST=${CERID_HOST:-}
       # Injected into the served UI's window.__ENV__ by docker-entrypoint.sh so
       # the browser sends X-API-Key. Required when the MCP enforces auth (LAN
       # mode); empty by default for local single-host use. start-cerid.sh derives
@@ -364,6 +379,34 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # Sign-in for the web port and the gateway. cerid-web asks it before it adds
+  # the API key to a request; Caddy asks it before every route. Stdlib-only
+  # Python, mounted as a script (no image build). With CERID_PORTAL_PASSWORD
+  # unset it admits everyone, which start-cerid.sh allows on loopback only.
+  cerid-sso:
+    container_name: cerid-sso
+    logging: *default-logging
+    image: python:3.12-slim
+    command: ["python", "-u", "/app/sso.py"]
+    volumes:
+      - ./stacks/sso:/app:ro
+    environment:
+      - CERID_PORTAL_PASSWORD=${CERID_PORTAL_PASSWORD:-}
+      - CERID_PORTAL_SECRET=${CERID_PORTAL_SECRET:-}
+      - CERID_PORTAL_TTL=${CERID_PORTAL_TTL:-604800}
+      - CERID_PORTAL_TITLE=${CERID_PORTAL_TITLE:-}
+      # Lets programmatic clients (desktop companion, API consumers) pass
+      # with the suite API key instead of a browser cookie.
+      - CERID_API_KEY=${CERID_API_KEY:-}
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
 
   # ──────────────────────────────────────────────
   # Optional: Local LLM (Ollama Add-On)

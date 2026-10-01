@@ -176,7 +176,6 @@ Plugins extend cerid-ai functionality without modifying core code.
 | `/plugins` | GET | List all plugins with status |
 | `/plugins/{id}/enable` | POST | Enable a plugin |
 | `/plugins/{id}/disable` | POST | Disable a plugin |
-| `/plugins/{id}/config` | GET/PUT | Read/update plugin configuration |
 | `/plugins/scan` | POST | Scan for new plugins |
 
 ### Configuration
@@ -363,6 +362,20 @@ rate-limit bucket and one redacted identity in the auth log: the `/auth/`
 budget documented above as brute-force protection (5 requests / 60s) becomes
 a lockout any LAN user can trigger for everyone.
 
+`TRUSTED_PROXIES` governs `X-Forwarded-For` and nothing else. The API does not
+read `X-Forwarded-Host` or `X-Forwarded-Proto`: when it decides whether a write
+comes from its own origin it compares the browser's `Origin` with the `Host`
+header, which the proxy forwards with its port.
+
+The proxy adds the key only for a caller the sign-in service (`cerid-sso`)
+accepts: one with a session cookie from `/__auth/login`, or one that sends
+`X-API-Key` itself. Anyone else gets `401`; if the service does not answer,
+`503`. With `CERID_PORTAL_PASSWORD` unset the service accepts everyone, which
+`start-cerid.sh` allows on a loopback bind only. The proxy forwards for
+`localhost`, `127.0.0.1`, `[::1]`, `cerid-web` and `CERID_HOST`, and gives an
+API call under any other `Host` a `421`; static files are served under any
+name. The sign-in script is `stacks/sso/sso.py`.
+
 ### Known Limitations
 
 - **In-memory only:** Rate limit state is lost on container restart. No warm-up period — limits reset to zero.
@@ -427,23 +440,30 @@ export CERID_HOST=192.168.1.42
 ### How It Works
 
 1. `start-cerid.sh` detects the LAN IP via `ipconfig getifaddr en0` (macOS) or `ip addr` (Linux)
-2. Exports `VITE_MCP_URL=http://<CERID_HOST>:8888`
-3. The web container's `docker-entrypoint.sh` injects this URL into `/env-config.js` at runtime
-4. The React GUI picks up `window.__ENV__.VITE_MCP_URL` for API calls
+2. With `CERID_LAN_MODE=true`, binds the MCP API and GUI to `0.0.0.0` (otherwise `127.0.0.1`)
+3. Exports `VITE_MCP_URL=/api/mcp` in every mode; the web container's `docker-entrypoint.sh` writes it into `/env-config.js`
+4. The React GUI calls the API same-origin through the nginx `/api/mcp/` proxy, which injects `X-API-Key` server-side once the caller has signed in (`CERID_PORTAL_PASSWORD`, required in LAN mode)
 
 ### CORS Configuration
 
-MCP server defaults to `CORS_ORIGINS=*` (allows all origins). To restrict:
+MCP server defaults to
+`CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:8888`.
+The list decides two things: which origins a browser may read responses from,
+and which origins may send a write (`POST`, `PUT`, `PATCH`, `DELETE`). For
+writes the server's own host and port are always allowed, so the GUI on
+`http://192.168.1.42:3000` needs no entry. Add an origin only when a page
+served from somewhere else must call the API:
 
 ```bash
 # In .env
-CORS_ORIGINS=http://localhost:3000,http://192.168.1.42:3000
+CORS_ORIGINS=http://localhost:3000,https://tools.example.internal
 ```
 
 ### Troubleshooting
 
 - **iPad can't connect:** Ensure both devices are on the same WiFi network. Check macOS firewall allows ports 3000 and 8888.
-- **MCP API errors on iPad:** Verify `VITE_MCP_URL` is set to the LAN IP (not `localhost`). Run `docker logs cerid-web` to check `/env-config.js` contents.
+- **The app loads but API calls answer 421:** the address in the browser is not `CERID_HOST`. Set `CERID_HOST` to the name or IP you use.
+- **MCP API errors on iPad:** Verify `CERID_LAN_MODE=true` and that `/env-config.js` (served by cerid-web) shows `VITE_MCP_URL: "/api/mcp"`.
 - **After IP change:** Re-run `./scripts/start-cerid.sh` — it re-detects the IP and regenerates the config.
 
 ---
@@ -618,16 +638,15 @@ Some features only appear under specific conditions:
 
 ### Known CVE Ignores
 
-**pip-audit ignores (migration planned):**
-- CVE-2026-26013 — SSRF in ChatOpenAI
-- CVE-2025-64439 — RCE in JsonPlusSerializer
-- CVE-2026-27794 — RCE via pickle fallback
+Each list lives in one place, with a rationale and a re-eval date per entry
+(`scripts/lint-suppression-expiry.py` fails on an expired one):
 
-**Trivy ignores (`.trivyignore`):**
-- 3 LangChain/LangGraph CVEs (same as above)
-- 1 glibc heap corruption (no fix in Debian 13)
-- 1 wheel privilege escalation (build-time only)
-- 3 libxml2 in Alpine (nginx static files only)
+- **pip-audit:** the `IGNORES` array in `scripts/audit-python-deps.sh`, applied
+  to both the pinned `src/mcp/requirements.lock` and a fresh resolution of
+  `requirements.txt`.
+- **Trivy:** the `trivyignore` heredoc in `scripts/ci/docker-gate.sh`. Empty as
+  of 2026-10-01; unfixed OS findings are dropped by `--ignore-unfixed`, not
+  listed.
 
 ---
 

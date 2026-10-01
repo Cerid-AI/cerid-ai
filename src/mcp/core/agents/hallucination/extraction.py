@@ -30,6 +30,7 @@ from core.agents.hallucination.patterns import (
     IGNORANCE_ADMISSION_PATTERNS,
     INABILITY_ADMISSION_PATTERNS,
     KNOWN_SOURCES,
+    META_SELF_REFERENTIAL_PATTERNS,
     NON_FACTUAL_PATTERNS,
     SENTENCE_RE,
     SPECIFIC_QUESTION_PATTERNS,
@@ -291,6 +292,113 @@ def _extract_claims_heuristic(response_text: str) -> list[str]:
                     break
 
     return claims
+
+
+_CLAUSE_BOUNDARY_RE = re.compile(r"\s*[,;:]\s+|\s+[\u2013\u2014-]\s+|\u2014")
+# Words that open a new clause after a meta clause, or announce the fact that
+# follows one ("As an AI, I can tell you the tower is ...").
+_CLAUSE_LEAD_RE = re.compile(
+    r"(?:but|however|though|although|yet|still|that said|"
+    r"I can tell you(?: that)?)\b[\s,]*",
+    re.I,
+)
+# A meta clause that only introduces the sentence: "As an AI, ...", "While I
+# don't have access to your documents, ...".
+_INTRODUCTORY_CLAUSE_RE = re.compile(r"^\s*(?:as|while|although|though|since|because)\b", re.I)
+
+
+def _meta_free_clauses(line: str) -> list[str]:
+    """The parts of the meta *line* outside its meta clauses that still read
+    as a claim, each a contiguous substring of *line*.
+
+    The meta patterns match a prefix of the clause ("I don't have access to
+    your"), not the clause, so a clause is meta when a match overlaps it.
+    After a comma, what follows a meta clause is often the rest of its object
+    ("... access to your Apple Mail, Calendar, or Contacts from 2023"), so a
+    part after a meta clause is kept only when it is plainly a new clause:
+    after a semicolon, colon or dash, led by "but" and the like, or after an
+    introductory meta clause. A part is kept only when the heuristic extractor
+    takes a claim from it: "I cannot browse the internet" and "I'm sorry" are
+    not statements.
+    """
+    normalized = line.replace("\u2019", "'")
+    spans = [m.span() for p in META_SELF_REFERENTIAL_PATTERNS for m in p.finditer(normalized)]
+    # (start, end, the boundary text before the clause)
+    clauses: list[tuple[int, int, str]] = []
+    start, before = 0, ""
+    for boundary in _CLAUSE_BOUNDARY_RE.finditer(line):
+        clauses.append((start, boundary.start(), before))
+        start, before = boundary.end(), boundary.group()
+    clauses.append((start, len(line), before))
+
+    # Runs of adjacent non-meta clauses: [start, end, whether it may be kept
+    # without a lead word].
+    runs: list[list] = []
+    last_meta: str | None = None
+    previous_meta = True
+    for c_start, c_end, c_before in clauses:
+        text = line[c_start:c_end]
+        meta = is_meta_self_referential(text) or any(
+            s_start < c_end and c_start < s_end for s_start, s_end in spans
+        )
+        if meta:
+            last_meta = text
+        elif previous_meta:
+            new_clause = (
+                last_meta is None
+                or c_before.strip() not in ("", ",")
+                or bool(_INTRODUCTORY_CLAUSE_RE.match(last_meta))
+            )
+            runs.append([c_start, c_end, new_clause])
+        else:
+            runs[-1][1] = c_end
+        previous_meta = meta
+
+    parts: list[str] = []
+    for r_start, r_end, new_clause in runs:
+        part = line[r_start:r_end]
+        # One lead word at a time: a repeated group around [\s,]* is a
+        # backtracking hazard (dlint DUO138).
+        lead = False
+        while m := _CLAUSE_LEAD_RE.match(part):
+            part = part[m.end():]
+            lead = True
+        if (new_clause or lead) and _extract_claims_heuristic(part):
+            parts.append(part)
+    return parts
+
+
+def _strip_meta_sentences(response_text: str) -> str:
+    """*response_text* without the clauses in which the assistant talks about
+    itself ("I'm sorry, but I don't have access to your documents").
+
+    The LLM and heuristic extractors read the result. The predicate has to run
+    on the sentence as written: the extractor model restates a refusal in the
+    third person ("The AI model does not have access to the user's
+    documents"), which the first-person patterns cannot match once it is a
+    claim. A fact in the same sentence as a meta clause ("I don't have access
+    to your documents, but the tower is 330 meters tall") is kept, as written,
+    so it is still checked and still found in the response. Returns
+    *response_text* unchanged when no sentence is meta.
+    """
+    kept: list[str] = []
+    dropped = 0
+    for sentence in SENTENCE_RE.split(response_text):
+        kept_lines: list[str] = []
+        for line in sentence.split("\n"):
+            if is_meta_self_referential(line):
+                dropped += 1
+                kept_lines.extend(_meta_free_clauses(line))
+            else:
+                kept_lines.append(line)
+        if any(line.strip() for line in kept_lines):
+            kept.append("\n".join(kept_lines))
+    if not dropped:
+        return response_text
+    logger.info("Removed %d meta/self-referential sentence(s) before claim extraction", dropped)
+    # A kept part can start in lower case, which SENTENCE_RE does not split
+    # on, so each sentence goes on its own line.
+    return "\n".join(kept).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -801,18 +909,25 @@ async def extract_claims(
     if _evasion_supersedes_primary(response_text, evasion_claims):
         return _merge_special([]), "evasion"
 
+    # The extractors never see the assistant's refusals and statements about
+    # itself; the pre-extraction passes above still read the whole response.
+    extractable = _strip_meta_sentences(response_text)
+
     # Try LLM extraction first
-    llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)
+    llm_claims = (
+        await _extract_claims_llm(extractable, max_claims, user_query=user_query)
+        if extractable else []
+    )
     llm_claims = _drop_meta_claims(_enforce_subject_validity(llm_claims, "LLM"), "LLM")
     if llm_claims:
         return _merge_special(llm_claims), "llm"
 
     # Fallback to heuristic extraction
     logger.info("LLM claim extraction returned empty — falling back to heuristic")
-    heuristic_claims = _extract_claims_heuristic(response_text)
+    heuristic_claims = _extract_claims_heuristic(extractable)
     if heuristic_claims:
         heuristic_claims = _resolve_pronouns_heuristic(
-            heuristic_claims, response_text, user_query,
+            heuristic_claims, extractable, user_query,
         )
         heuristic_claims = _drop_meta_claims(
             _enforce_subject_validity(heuristic_claims, "heuristic"), "heuristic",

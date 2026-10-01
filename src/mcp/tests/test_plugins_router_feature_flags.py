@@ -96,7 +96,8 @@ def test_existing_fields_survive_the_addition(tmp_path: Path):
     assert body["name"] == "gmail"
     assert body["version"] == "0.1.0"
     assert body["tier_required"] == "pro"
-    assert body["enabled"] is False
+    # No stored choice: the listing reports what the loader does, which is load.
+    assert body["enabled"] is True
 
 
 def test_shipped_manifests_are_surfaced_verbatim():

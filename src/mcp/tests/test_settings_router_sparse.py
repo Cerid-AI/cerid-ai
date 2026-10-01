@@ -20,7 +20,7 @@ _LEAKABLE_ENV_VARS = (
     "QUENCHFORGE_EMBED_MODEL",
     "QUENCHFORGE_RERANK_MODEL",
     "RETRIEVAL_HYPE_ENABLED",
-    "PARENT_CHILD_ENABLED",
+    "ENABLE_PARENT_CHILD_RETRIEVAL",
 )
 
 
@@ -209,4 +209,4 @@ def test_patch_enable_parent_child_retrieval(client):
     assert r.status_code == 200
     body = r.json()
     assert body["updated"]["enable_parent_child_retrieval"] is True
-    assert os.environ.get("PARENT_CHILD_ENABLED", "").lower() in {"true", "1"}
+    assert os.environ.get("ENABLE_PARENT_CHILD_RETRIEVAL", "").lower() in {"true", "1"}

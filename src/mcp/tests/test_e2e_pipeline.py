@@ -83,12 +83,11 @@ class TestIngestionPipeline:
     patch services.ingestion.get_redis/get_neo4j/get_chroma + graph module.
     """
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_markdown_file(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache, _mock_monitor_redis):
+    def test_ingest_markdown_file(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
@@ -108,11 +107,10 @@ class TestIngestionPipeline:
         collection.upsert.assert_called_once()
         g.create_artifact.assert_called_once()
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_deduplication(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, _mock_monitor_redis):
+    def test_ingest_deduplication(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn):
         client, collection = _chroma_mocks()
         mock_chroma_fn.return_value = client
         driver, session = _neo4j_mocks()
@@ -128,12 +126,11 @@ class TestIngestionPipeline:
         assert result["duplicate_of"] == "adr-001.md"
         collection.upsert.assert_not_called()
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_metadata_extraction(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache, _mock_monitor_redis):
+    def test_ingest_metadata_extraction(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
@@ -149,12 +146,11 @@ class TestIngestionPipeline:
         assert result["status"] == "success"
         assert result["domain"] == "coding"
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_chunking_strategy(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache, _mock_monitor_redis):
+    def test_ingest_chunking_strategy(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
@@ -172,11 +168,10 @@ class TestIngestionPipeline:
         ids = add_call.kwargs.get("ids") or add_call.args[0]
         assert len(ids) == result["chunks"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_rollback_on_chroma_failure(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, _mock_monitor_redis):
+    def test_ingest_rollback_on_chroma_failure(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn):
         client, collection = _chroma_mocks()
         collection.upsert.side_effect = RuntimeError("ChromaDB connection timeout")
         mock_chroma_fn.return_value = client
@@ -188,12 +183,11 @@ class TestIngestionPipeline:
         with pytest.raises(RuntimeError, match="ChromaDB connection timeout"):
             ingest_content("some content to ingest", domain="coding")
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_history_recorded(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache, _mock_monitor_redis):
+    def test_ingest_history_recorded(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
@@ -465,6 +459,7 @@ class TestVerificationPipeline:
                 "similarity": confidence,
                 "confidence": confidence,
                 "verification_method": "kb_cross_model",
+                "source_artifact_id": "art-mvcc",
             }
             async for event in verify_response_streaming(
                     long_response, conversation_id="conv-verdict",
@@ -610,8 +605,7 @@ class TestFullUserJourney:
     async def test_new_user_setup_query_verify(self):
         """Full journey: ingest a doc, query it, get results, verify a claim."""
         # --- Phase 1: Ingest (mock at service.ingestion level) ---
-        with patch("app.routers.system_monitor.get_redis", return_value=MagicMock()), \
-             patch("app.services.ingestion.cache"), \
+        with patch("app.services.ingestion.cache"), \
              patch("app.services.ingestion.get_redis", return_value=MagicMock()), \
              patch("app.services.ingestion.get_neo4j") as mock_neo4j_fn, \
              patch("app.services.ingestion.get_chroma") as mock_chroma_fn:

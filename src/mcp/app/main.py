@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db import neo4j as graph
 from app.deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from app.middleware.auth import APIKeyMiddleware
+from app.middleware.origin_guard import OriginGuardMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
@@ -164,81 +165,73 @@ def _start_watchdog() -> None:
 
 
 def _hydrate_settings_from_sync() -> None:
-    """Apply user settings from the sync directory to runtime config.
+    """Apply saved user settings to runtime config.
 
-    Reads ``user/settings.json`` from :pydata:`config.SYNC_DIR` and applies
-    boolean toggles, categorical values, and numeric parameters so that a
-    second machine picks up the same configuration automatically.
+    Applies every setting PATCH /settings accepts, through the same code the
+    PATCH uses. Settings that depend on the machine come from
+    :pydata:`config.HOST_SETTINGS_PATH`; the rest come from
+    ``user/settings.json`` in :pydata:`config.SYNC_DIR`, so a second machine
+    picks up the same preferences without inheriting another machine's
+    providers.
     """
     import config
 
     try:
-        sync_dir = config.SYNC_DIR
-        if not sync_dir:
-            return
+        from fastapi import HTTPException
+        from pydantic import ValidationError
 
-        from app.sync.user_state import read_settings
-        settings = read_settings(sync_dir)
+        from app.routers.settings import (
+            HOST_SETTING_KEYS,
+            SYNCED_SETTING_KEYS,
+            SettingsUpdateRequest,
+            apply_settings_update,
+        )
+        from app.sync.user_state import read_host_settings, read_settings
+
+        # Each file is only trusted for its own keys. The synced file may
+        # have been written by a machine with different software installed.
+        settings: dict = {}
+        if config.SYNC_DIR:
+            synced = read_settings(config.SYNC_DIR)
+            settings.update({k: v for k, v in synced.items() if k in SYNCED_SETTING_KEYS})
+        host = read_host_settings(config.HOST_SETTINGS_PATH)
+        settings.update({k: v for k, v in host.items() if k in HOST_SETTING_KEYS})
         if not settings:
             return
 
-        from utils.features import set_toggle
+        # Strict, one key at a time: a hand-edited or outdated value is
+        # skipped on its own instead of being coerced or rejecting the file.
+        valid: dict = {}
+        for key, value in settings.items():
+            if key not in SettingsUpdateRequest.model_fields:
+                continue
+            try:
+                SettingsUpdateRequest.model_validate({key: value}, strict=True)
+            except ValidationError:
+                logger.warning("Ignoring invalid saved setting %s", key)
+                continue
+            valid[key] = value
+
+        # The provider and its model are applied by one step of the update,
+        # so they are restored together.
+        provider_keys = ("internal_llm_provider", "internal_llm_model")
+        payloads = [{k: valid.pop(k) for k in provider_keys if k in valid}]
+        payloads += [{k: v} for k, v in valid.items()]
 
         hydrated = 0
-
-        # ── Boolean toggles ─────────────────────────────────────────────
-        _toggle_keys = (
-            "enable_feedback_loop",
-            "enable_hallucination_check",
-            "enable_memory_extraction",
-            "enable_auto_inject",
-            "enable_model_router",
-            "enable_self_rag",
-            "enable_contextual_chunks",
-            "enable_adaptive_retrieval",
-            "enable_query_decomposition",
-            "enable_mmr_diversity",
-            "enable_intelligent_assembly",
-            "enable_late_interaction",
-            "enable_semantic_cache",
-        )
-        for key in _toggle_keys:
-            if key in settings and isinstance(settings[key], bool):
-                set_toggle(key, settings[key])
-                hydrated += 1
-
-        # ── Categorical values ───────────────────────────────────────────
-        _categorical = {
-            "categorize_mode": ("manual", "smart", "pro"),
-            "cost_sensitivity": ("low", "medium", "high"),
-            "storage_mode": ("extract_only", "archive"),
-        }
-        for key, allowed in _categorical.items():
-            if key in settings and settings[key] in allowed:
-                setattr(config, key.upper(), settings[key])
-                hydrated += 1
-
-        # ── Numeric values with range validation ─────────────────────────
-        _numeric = {
-            "hallucination_threshold": (0.0, 1.0),
-            "auto_inject_threshold": (0.0, 1.0),
-            "hybrid_vector_weight": (0.0, 1.0),
-            "hybrid_keyword_weight": (0.0, 1.0),
-            "rerank_llm_weight": (0.0, 1.0),
-            "rerank_original_weight": (0.0, 1.0),
-        }
-        for key, (lo, hi) in _numeric.items():
-            if key in settings:
-                val = settings[key]
-                if isinstance(val, (int, float)) and lo <= val <= hi:
-                    setattr(config, key.upper(), float(val))
-                    hydrated += 1
+        for payload in payloads:
+            if not payload:
+                continue
+            try:
+                hydrated += len(apply_settings_update(SettingsUpdateRequest(**payload)))
+            except HTTPException as exc:
+                logger.warning("Ignoring invalid saved setting %s: %s", list(payload), exc.detail)
 
         if hydrated:
-            logger.info("Hydrated %d settings from sync directory", hydrated)
+            logger.info("Hydrated %d saved settings", hydrated)
     except Exception as e:
         log_swallowed_error('app.main', e)
-        logger.warning("Failed to hydrate settings from sync directory: %s", e)
+        logger.warning("Failed to hydrate saved settings: %s", e)
 
 
 def _signal_handler(signum: int, frame) -> None:
@@ -334,7 +327,12 @@ async def _prewarm_external_sources() -> None:
     the probe is cheap even in production where sources are reachable.
     """
     try:
-        from app.data_sources import registry
+        from app.data_sources import hydrate_enabled_state, registry
+
+        # A restarted process has every source at its code default (enabled).
+        # Load the operator's persisted flags before anything queries the
+        # registry. Redis is a blocking client, so keep it off the event loop.
+        await asyncio.to_thread(hydrate_enabled_state)
         sources = registry.get_enabled_sources()
         if not sources:
             return
@@ -1356,7 +1354,12 @@ app.add_middleware(TenantContextMiddleware)
 if CERID_MULTI_USER:
     from app.middleware.jwt_auth import JWTAuthMiddleware
     app.add_middleware(JWTAuthMiddleware)
-# 7. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
+# 7. Origin guard. Runs before every credential check because the web
+#    container's proxy adds the API key to whatever it forwards: a write from
+#    another site would otherwise arrive authenticated. Also ahead of the rate
+#    limiter, so a hostile page cannot spend the GUI's budget.
+app.add_middleware(OriginGuardMiddleware)
+# 8. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
 app.add_middleware(RequestIDMiddleware)
 
 # Register routers at root. The legacy `/api/v1/*` dual mount was retired

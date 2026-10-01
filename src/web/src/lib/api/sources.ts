@@ -39,14 +39,15 @@ export interface SourceRecord {
   config: Record<string, unknown>
   sync_cursor: Record<string, unknown>
   total_artifacts: number
-  total_chunks: number
-  total_edges: number
-  total_artifacts_24h: number
+  // null on these three means not measured for this source (folders).
+  total_chunks: number | null
+  total_edges: number | null
+  total_artifacts_24h: number | null
   connection_time_ms: number | null
   last_sync_at: string | null
   created_at: string | null
   last_error: string | null
-  quality_floor?: number
+  quality_floor?: number | null
 }
 
 export interface CreateSourceRequest {

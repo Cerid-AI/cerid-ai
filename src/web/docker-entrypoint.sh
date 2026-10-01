@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
 # Generate runtime environment config for the SPA.
-# This allows VITE_MCP_URL and VITE_BIFROST_URL to be overridden at
+# This allows VITE_MCP_URL to be overridden at
 # container startup without rebuilding the Docker image.
 # NOTE: Pure shell — no python3 dependency (nginx:alpine doesn't have it).
 
@@ -15,7 +15,6 @@ VERSION_JS="${CERID_VERSION_JS_PATH:-/usr/share/nginx/html/version.json}"
 
 # Write env config — values are JSON-escaped below before interpolation
 MCP_URL="${VITE_MCP_URL:-/api/mcp}"
-BIFROST_URL="${VITE_BIFROST_URL:-/api/bifrost}"
 API_KEY="${VITE_CERID_API_KEY:-}"
 SENTRY_DSN_WEB="${VITE_SENTRY_DSN_WEB:-}"
 APP_VERSION="${VITE_APP_VERSION:-}"
@@ -37,6 +36,32 @@ case "$API_KEY" in
     ;;
 esac
 
+# The proxy forwards only for the names this host is reached by. Anything else
+# is a page on another site whose name was re-pointed at this address (DNS
+# rebinding), which the browser would treat as same-origin with itself.
+# CERID_HOST lands in an nginx map, where a space adds an entry, "~" starts a
+# pattern and four words are directives.
+WEB_HOST=$(printf '%s' "${CERID_HOST:-}" | tr 'A-Z' 'a-z')
+WEB_HOST="${WEB_HOST#[}"
+WEB_HOST="${WEB_HOST%]}"
+case "$WEB_HOST" in
+  *[!a-z0-9.:-]* | default | include | hostnames | volatile)
+    echo "[entrypoint] ERROR: CERID_HOST must be a single hostname or IP address — refusing to start. Fix CERID_HOST and restart the container." >&2
+    exit 1
+    ;;
+  *:*) WEB_HOST="[$WEB_HOST]" ;;
+esac
+KNOWN_HOSTS="localhost 127.0.0.1 [::1] cerid-web"
+case " $KNOWN_HOSTS " in
+  *" $WEB_HOST "*) ;;
+  *) [ -n "$WEB_HOST" ] && KNOWN_HOSTS="$KNOWN_HOSTS $WEB_HOST" ;;
+esac
+HOSTS_INC="${CERID_HOSTS_INC_PATH:-/etc/nginx/conf.d/cerid-hosts.inc}"
+: > "$HOSTS_INC"
+for name in $KNOWN_HOSTS; do
+  printf '%s 1;\n' "$name" >> "$HOSTS_INC"
+done
+
 # The API key is a REUSABLE credential and env-config.js is served to anyone
 # who can reach this container. On a LAN bind that published the key next door
 # to the API it protects, cancelling the /mcp auth gate. So:
@@ -47,6 +72,8 @@ esac
 #     bypassing this proxy, so the browser genuinely needs the key and keeping
 #     it out would just break them. Unchanged, and now a deliberate choice.
 KEY_INC="${CERID_KEY_INC_PATH:-/etc/nginx/conf.d/cerid-api-key.inc}"
+ENV_GUARD_INC="${CERID_ENV_GUARD_INC_PATH:-/etc/nginx/conf.d/cerid-env-config.inc}"
+: > "$ENV_GUARD_INC"
 case "$MCP_URL" in
   /*)
     BROWSER_API_KEY=""
@@ -60,12 +87,15 @@ case "$MCP_URL" in
   *)
     BROWSER_API_KEY="$API_KEY"
     : > "$KEY_INC"
-    [ -n "$API_KEY" ] && echo "[entrypoint] WARNING: absolute VITE_MCP_URL — the API key is served to the browser in env-config.js"
+    if [ -n "$API_KEY" ]; then
+      echo "[entrypoint] WARNING: absolute VITE_MCP_URL — the API key is served to the browser in env-config.js"
+      printf 'if ($cerid_known_host = 0) { return 421; }\n' > "$ENV_GUARD_INC"
+    fi
     ;;
 esac
 
 cat > "$ENV_JS" <<EOF
-window.__ENV__ = {VITE_MCP_URL: "$(json_escape "$MCP_URL")", VITE_BIFROST_URL: "$(json_escape "$BIFROST_URL")", VITE_CERID_API_KEY: "$(json_escape "$BROWSER_API_KEY")", VITE_SENTRY_DSN_WEB: "$(json_escape "$SENTRY_DSN_WEB")", VITE_APP_VERSION: "$(json_escape "$APP_VERSION")"};
+window.__ENV__ = {VITE_MCP_URL: "$(json_escape "$MCP_URL")", VITE_CERID_API_KEY: "$(json_escape "$BROWSER_API_KEY")", VITE_SENTRY_DSN_WEB: "$(json_escape "$SENTRY_DSN_WEB")", VITE_APP_VERSION: "$(json_escape "$APP_VERSION")"};
 EOF
 
 # Write version manifest (used by stale-cache detection)

@@ -28,6 +28,7 @@ def log_event(
     filename: str,
     extra: dict[str, Any] | None = None,
     conversation_id: str | None = None,
+    log_key: str | None = None,
 ) -> None:
     """
     Append an event to the Redis audit log.
@@ -39,6 +40,7 @@ def log_event(
         filename: Original filename
         extra: Additional context (e.g. old_domain for recategorize)
         conversation_id: Optional conversation ID for feedback loop events
+        log_key: Redis list to append to. Defaults to the audit log.
     """
     entry: dict[str, Any] = {
         "event": event_type,
@@ -56,9 +58,10 @@ def log_event(
     payload = json.dumps(entry)
     try:
         pipe = redis_client.pipeline()
-        pipe.lpush(config.REDIS_INGEST_LOG, payload)
-        pipe.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
-        pipe.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
+        key = log_key or config.REDIS_INGEST_LOG
+        pipe.lpush(key, payload)
+        pipe.ltrim(key, 0, config.REDIS_LOG_MAX - 1)
+        pipe.expire(key, 86400 * 30)  # 30-day TTL
         pipe.execute()
     except Exception as e:
         log_swallowed_error('core.utils.cache', e)
@@ -152,6 +155,7 @@ def log_verification_metrics(
     unverified: int = 0,
     uncertain: int = 0,
     total: int = 0,
+    agreed: int = 0,
     verification_models: list[str] | None = None,
 ) -> None:
     """Store verification metrics for analytics aggregation.
@@ -166,6 +170,7 @@ def log_verification_metrics(
         "conversation_id": conversation_id,
         "model": model or "unknown",
         "verified": verified,
+        "agreed": agreed,
         "unverified": unverified,
         "uncertain": uncertain,
         "total": total,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useCallback, useEffect, useState } from "react"
-import { fetchIngestHistory } from "@/lib/api"
+import { fetchIngestActivity } from "@/lib/ingest-activity"
 import type { IngestHistoryEntry } from "@/lib/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -22,8 +22,10 @@ import {
   Minus,
   Loader2,
   RefreshCw,
-  ChevronDown,
 } from "lucide-react"
+
+// /ingest_log has no cursor; the feed shows the newest entries only.
+const FEED_LIMIT = 100
 
 // ---------------------------------------------------------------------------
 // Source type config
@@ -84,19 +86,13 @@ interface ActivityFeedProps {
 
 export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedProps) {
   const [items, setItems] = useState<IngestHistoryEntry[]>([])
-  const [total, setTotal] = useState(0)
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await fetchIngestHistory(30)
-      setItems(data.items)
-      setTotal(data.total)
-      setNextCursor(data.next_cursor)
+      setItems(await fetchIngestActivity(FEED_LIMIT))
       setLoadFailed(false)
     } catch {
       // Record the failure instead of swallowing it: with a silent catch a
@@ -107,20 +103,6 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
       setLoading(false)
     }
   }, [])
-
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const data = await fetchIngestHistory(30, nextCursor)
-      setItems((prev) => [...prev, ...data.items])
-      setNextCursor(data.next_cursor)
-    } catch {
-      // silent
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [nextCursor, loadingMore])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
@@ -165,7 +147,7 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
     <div className={className}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">
-          Recent Activity ({total} total)
+          Recent Activity
         </span>
         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={load} disabled={loading}>
           <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
@@ -204,25 +186,6 @@ export function ActivityFeed({ className, maxHeight = "400px" }: ActivityFeedPro
             )
           })}
         </div>
-
-        {nextCursor && (
-          <div className="mt-2 flex justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs h-7"
-              onClick={loadMore}
-              disabled={loadingMore}
-            >
-              {loadingMore ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : (
-                <ChevronDown className="h-3 w-3 mr-1" />
-              )}
-              Load More
-            </Button>
-          </div>
-        )}
       </ScrollArea>
     </div>
   )

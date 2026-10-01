@@ -110,3 +110,36 @@ def list_log_entries(
             context={"entity_slug": entity_slug},
         )
         return []
+
+
+def count_log_entries(
+    driver: Any,
+    *,
+    entity_slug: str | None = None,
+    since: str | None = None,
+) -> int:
+    """Count the entries :func:`list_log_entries` would return with no limit."""
+    clauses = []
+    params: dict[str, Any] = {}
+    if entity_slug:
+        clauses.append("k.entity_slug = $slug")
+        params["slug"] = entity_slug
+    if since:
+        clauses.append("k.ts >= $since")
+        params["since"] = since
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    try:
+        with driver.session() as session:
+            record = session.run(
+                f"MATCH (k:KnowledgeLog){where} RETURN count(k) AS total",
+                **params,
+            ).single()
+            return int(record["total"]) if record else 0
+    except Exception as exc:
+        log_swallowed_error(
+            "graph.knowledge_log.count",
+            exc,
+            context={"entity_slug": entity_slug},
+        )
+        raise

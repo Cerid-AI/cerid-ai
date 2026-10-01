@@ -139,8 +139,9 @@ vi.mock("@/hooks/use-model-switch", () => ({
   }),
 }))
 
+const smartSuggestions = vi.hoisted(() => ({ suggestions: [] as unknown[] }))
 vi.mock("@/hooks/use-smart-suggestions", () => ({
-  useSmartSuggestions: () => ({ suggestions: [], clear: vi.fn() }),
+  useSmartSuggestions: () => ({ suggestions: smartSuggestions.suggestions, clear: vi.fn(), dismissSuggestion: vi.fn() }),
 }))
 
 vi.mock("@/hooks/use-verification-orchestrator", () => ({
@@ -218,7 +219,7 @@ vi.mock("@/components/chat/credit-banner", () => ({
   CreditBanner: () => null,
 }))
 vi.mock("@/components/chat/degradation-banner", () => ({
-  DegradationBanner: () => null,
+  DegradationBanner: () => <div data-testid="degradation-banner" />,
 }))
 vi.mock("@/components/chat/chat-dashboard", () => ({
   ChatDashboard: () => null,
@@ -271,6 +272,33 @@ function makeWrapper() {
 beforeEach(() => {
   vi.restoreAllMocks()
   localStorage.clear()
+})
+
+// The app shell renders the banner for every pane; a second copy here would
+// show it twice on chat.
+describe("ChatPanel — server unreachable banner", () => {
+  it("is left to the app shell", () => {
+    render(<ChatPanel />, { wrapper: makeWrapper() })
+    expect(screen.getByTestId("chat-messages")).toBeInTheDocument()
+    expect(screen.queryByTestId("degradation-banner")).toBeNull()
+  })
+})
+
+describe("ChatPanel — suggested sources", () => {
+  it("shows each suggestion's relevance as a relative bar, not a percentage", () => {
+    smartSuggestions.suggestions = [
+      { artifact_id: "s1", filename: "best.md", relevance: 0.9, chunk_index: 0 },
+      { artifact_id: "s2", filename: "other.md", relevance: 0.45, chunk_index: 0 },
+    ]
+    try {
+      render(<ChatPanel />, { wrapper: makeWrapper() })
+      expect(screen.getByText("other.md")).toBeInTheDocument()
+      expect(screen.getByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.50 relative to the best match" })).toBeInTheDocument()
+      expect(screen.queryByText(/^\d+%$/)).toBeNull()
+    } finally {
+      smartSuggestions.suggestions = []
+    }
+  })
 })
 
 describe("ChatPanel — no dead Enrich affordance", () => {

@@ -38,9 +38,23 @@ cd "$(dirname "$0")/../.."   # repo root, whatever the caller's cwd was
 # never take effect — the gate discarded the credentials it had just been
 # given. The keychain hang is a macOS credential-helper problem; Linux runners
 # have no credsStore and want the login to survive.
+#
+# The empty config must still name Docker Desktop's CLI plugin dirs. Plugins
+# are found under $DOCKER_CONFIG/cli-plugins, so a bare `{}` hid buildx and
+# every build fell back to the legacy builder. On Docker Desktop's containerd
+# image store the legacy builder's layer commit failed intermittently
+# ("failed to export layer"), and each failure left its 6.5 GB `pip install`
+# step container behind: 22 of them (about 90 GB) by 2026-10-01.
+#
+# It must also hold an auth entry. A config with no auths, credsStore or
+# credHelpers makes the CLI pick the platform default store, which is
+# docker-credential-osxkeychain whenever it is on PATH: the keychain again,
+# which the legacy builder never asked for but buildx does. The empty Hub
+# entry keeps lookups on the file store, so pulls stay anonymous.
 if [ "$(uname -s)" = "Darwin" ]; then
   mkdir -p .ci-artifacts/docker-config
-  printf '{}' > .ci-artifacts/docker-config/config.json
+  printf '{"auths": {"https://index.docker.io/v1/": {}}, "cliPluginsExtraDirs": ["%s", "/Applications/Docker.app/Contents/Resources/cli-plugins"]}\n' \
+    "$HOME/.docker/cli-plugins" > .ci-artifacts/docker-config/config.json
   export DOCKER_CONFIG="$PWD/.ci-artifacts/docker-config"
 fi
 
@@ -100,8 +114,14 @@ echo "::group::docker build"
 # against Docker Hub, and a single 60s registry stall (DeadlineExceeded on
 # `load metadata`) killed run 31211706362 before the build proper started.
 # A real Dockerfile failure fails identically twice; a registry blip does not.
+#
+# --force-rm: should a build ever run on the legacy builder again, a failed
+# step's container is removed instead of left on the shared daemon (BuildKit
+# ignores the flag). The buildx check fails the gate loudly rather than
+# silently falling back.
+docker buildx version >/dev/null 2>&1 || { echo "::error::buildx is not reachable with DOCKER_CONFIG=${DOCKER_CONFIG:-<default>}; refusing the legacy builder"; exit 1; }
 build_with_retry() {
-  docker build "$@" || { echo "::warning::docker build failed once — retrying (registry stalls are the common cause)"; docker build "$@"; }
+  docker build --force-rm "$@" || { echo "::warning::docker build failed once — retrying (registry stalls are the common cause)"; docker build --force-rm "$@"; }
 }
 build_with_retry --pull --no-cache -t "$MCP_IMG" -f src/mcp/Dockerfile .
 build_with_retry --pull --no-cache -t "$WEB_IMG" src/web/
@@ -113,60 +133,7 @@ echo "::endgroup::"
 # the fixed-but-accepted ones with their rationale.
 mkdir -p .ci-artifacts
 cat > .ci-artifacts/trivyignore <<'EOF'
-# LangChain/LangGraph CVEs requiring major version migration (Phase 11)
-CVE-2026-26013
-CVE-2025-64439
-CVE-2026-27794
-# wheel privilege escalation — build-time only, not exploitable at runtime
-CVE-2026-24049
-# jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
-CVE-2026-23949
-# ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals.
-# Re-eval 2026-11-30 (verified still present in python:3.12.14-slim-trixie, ncurses-bin 6.5+20250216-2, 2026-09-01).
-CVE-2025-69720
-# nghttp2 DoS via malformed HTTP/2 — internal container traffic only, no external exposure
-CVE-2026-27135
-# perl-base Archive::Tar symlink — pulled into Debian base layer.
-# We never invoke perl from application code (no Archive::Tar calls,
-# no perl scripts in container). Trivy flags it transitively. No
-# upstream fix in Debian 13 yet. Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-42496
-# perl-base heap buffer overflow during compilation — same surface
-# as CVE-2026-42496; perl interpreter never executes in container.
-# No upstream fix; Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-8376
-# perl-base Archive::Tar memory exhaustion (HIGH) — same surface;
-# no Archive::Tar usage from application code. No upstream fix;
-# Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-9538
-# perl-base Archive::Tar hardlink — companion to CVE-2026-42496 (which
-# was the symlink variant). Same suppression rationale; no Archive::Tar
-# usage from application code. No upstream fix; Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-42497
-# perl-base perl-IO-Compress arbitrary code execution (HIGH) — same
-# perl-base surface as the entries above; the perl interpreter never
-# executes in the container (no perl scripts, no IO::Compress usage
-# from application code). No upstream fix in Debian 13 yet.
-# Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-48962
-# perl-base IO::Uncompress::Unzip CPU exhaustion on crafted zip —
-# same never-executes-perl surface as the entries above. No upstream
-# fix in Debian 13 as of 2026-06-10. Re-eval 2026-11-30 (verified still present in the base image 2026-08-31).
-CVE-2026-48959
-# chromadb 1.5.9 pre-auth code injection via trust_remote_code=true on
-# the collections endpoint. Not reachable — trust_remote_code is set
-# nowhere in the codebase (grep-verified) and the Chroma server binds
-# loopback-only. Mirrors the pip-audit ignore in the security job.
-# Re-eval 2026-09-30 (chromadb patch cadence).
-CVE-2026-45829
-# PyTorch Lightning RCE via checkpoint `_instantiator` hyperparameters
-# (GHSA-qqmf-gpg7-g8gw). The advisory's patched version is "2022.6.15", a
-# calendar-versioned line older than every 2.x release, so Trivy reports the
-# newest release (2.6.5, pinned in the lock) as "fixed" and --ignore-unfixed
-# does not exclude it; no PyPI release carries the fix commit d710d68.
-# lightning is transitive via pyannote-audio; nothing in src/mcp calls
-# load_from_checkpoint or loads checkpoints. Re-eval 2026-10-15.
-CVE-2026-58659
+# Fixed-but-accepted findings only, each with its rationale and a Re-eval date.
 EOF
 
 # Trivy runs from its own container against the shared daemon via the socket.

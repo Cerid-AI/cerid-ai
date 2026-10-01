@@ -36,6 +36,11 @@ from typing import Any, Callable
 
 import config
 from core.retrieval import bm25, sparse_index
+from core.retrieval.artifact_rows import (
+    artifact_hype_row_ids,
+    artifact_row_ids,
+    remove_artifact_hype_rows,
+)
 from core.utils.swallowed import log_swallowed_error
 
 _GRAPH_SERVING_CACHE_PATTERN = "cerid:graph:emb3d:*"
@@ -46,10 +51,17 @@ _GRAPH_SERVING_CACHE_PATTERN = "cerid:graph:emb3d:*"
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class _Ctx:
-    """Everything a participant needs to remove or probe a chunk set."""
+    """Everything a participant needs to remove or probe a chunk set.
+
+    ``artifact_ids`` names the artifacts being removed, so the rows their node
+    does not list (parent chunks, HyPE questions) go too. The rollback path
+    leaves it empty: its staged chunks share their content-addressed artifact id
+    with the concurrent ingest that won.
+    """
     chunk_ids: list[str]
     domain: str
     chroma: Any
+    artifact_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,31 +89,75 @@ def _chroma_collections(ctx: _Ctx) -> list[Any]:
     return list(ctx.chroma.list_collections())
 
 
+def _owned_rows(collection: Any, ctx: _Ctx) -> list[str]:
+    """The node's chunk_ids plus every other row its artifacts own here."""
+    rows = [cid for aid in ctx.artifact_ids for cid in artifact_row_ids(collection, aid)]
+    return list(dict.fromkeys([*ctx.chunk_ids, *rows]))
+
+
 def _chroma_remove(ctx: _Ctx) -> int:
-    if not ctx.chunk_ids:
+    if not ctx.chunk_ids and not ctx.artifact_ids:
         return 0
     removed = 0
     for collection in _chroma_collections(ctx):
         try:
-            collection.delete(ids=ctx.chunk_ids)
-            removed = len(ctx.chunk_ids)
+            ids = _owned_rows(collection, ctx)
+            if ids:
+                collection.delete(ids=ids)
+            removed = max(removed, len(ids))
         except Exception as exc:  # noqa: BLE001 — per-collection delete is best-effort
             log_swallowed_error("content_lifecycle.chroma_remove", exc)
     return removed
 
 
 def _chroma_residual(ctx: _Ctx) -> int:
-    if not ctx.chunk_ids:
+    if not ctx.chunk_ids and not ctx.artifact_ids:
         return 0
     found: set[str] = set()
     for collection in _chroma_collections(ctx):
         try:
-            got = collection.get(ids=ctx.chunk_ids)
-            for cid in (got or {}).get("ids", []) or []:
-                found.add(cid)
+            if ctx.chunk_ids:
+                got = collection.get(ids=ctx.chunk_ids)
+                found.update((got or {}).get("ids", []) or [])
+            for aid in ctx.artifact_ids:
+                found.update(artifact_row_ids(collection, aid))
         except Exception as exc:  # noqa: BLE001 — best-effort probe
             log_swallowed_error("content_lifecycle.chroma_residual", exc)
     return len(found)
+
+
+def _hype_bases(ctx: _Ctx) -> list[str]:
+    """Base collections whose ``_hype`` companions may hold the artifacts'
+    questions; the same domain fallback as :func:`_chroma_collections`."""
+    if ctx.domain:
+        return [config.collection_name(ctx.domain)]
+    return [c.name for c in ctx.chroma.list_collections()]
+
+
+def _hype_remove(ctx: _Ctx) -> int:
+    if not ctx.artifact_ids:
+        return 0
+    removed = 0
+    try:
+        for base in _hype_bases(ctx):
+            for aid in ctx.artifact_ids:
+                removed += remove_artifact_hype_rows(ctx.chroma, base, aid)
+    except Exception as exc:  # noqa: BLE001 — best-effort, like every participant
+        log_swallowed_error("content_lifecycle.hype_remove", exc)
+    return removed
+
+
+def _hype_residual(ctx: _Ctx) -> int:
+    if not ctx.artifact_ids:
+        return 0
+    try:
+        return sum(
+            len(artifact_hype_row_ids(ctx.chroma, base, aid))
+            for base in _hype_bases(ctx) for aid in ctx.artifact_ids
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort probe
+        log_swallowed_error("content_lifecycle.hype_residual", exc)
+        return 0
 
 
 def _bm25_remove(ctx: _Ctx) -> int:
@@ -144,6 +200,7 @@ REGISTRY: list[Participant] = [
     Participant("chroma", _chroma_remove, _chroma_residual),
     Participant("bm25", _bm25_remove, lambda ctx: _lexical_residual(bm25, ctx)),
     Participant("sparse", _sparse_remove, lambda ctx: _lexical_residual(sparse_index, ctx)),
+    Participant("hype", _hype_remove, _hype_residual),
 ]
 
 
@@ -217,8 +274,13 @@ def invalidate_caches(trigger: str, redis: Any | None = None, domain: str | None
 # --------------------------------------------------------------------------- #
 # Public operations
 # --------------------------------------------------------------------------- #
-def _fan_out_removal(chunk_ids: list[str], domain: str, chroma: Any) -> dict[str, int]:
-    ctx = _Ctx(chunk_ids=chunk_ids, domain=domain or "", chroma=chroma)
+def _fan_out_removal(
+    chunk_ids: list[str], domain: str, chroma: Any, artifact_ids: list[str] | None = None,
+) -> dict[str, int]:
+    ctx = _Ctx(
+        chunk_ids=chunk_ids, domain=domain or "", chroma=chroma,
+        artifact_ids=list(artifact_ids or []),
+    )
     return {p.name: p.remove(ctx) for p in REGISTRY}
 
 
@@ -233,7 +295,7 @@ def remove_content(
 
     Deletes the Neo4j ``:Artifact`` node (which yields the chunk_ids), fans the
     chunk deletion across every registry participant (Chroma + BM25 + SPLADE,
-    physically dropping the on-disk JSONL lines), then busts the query-result
+    physically dropping the on-disk JSONL lines, + HyPE), then busts the query-result
     caches (C1+C2) and the graph serving cache (C3). Every delete-shaped caller
     funnels through here so no store is ever left orphaned.
     """
@@ -248,7 +310,8 @@ def remove_content(
     chunk_ids = info.get("chunk_ids") or []
     domain = info.get("domain") or ""
     chroma = chroma or get_chroma()
-    removed = _fan_out_removal(chunk_ids, domain, chroma)
+    artifact_ids = [artifact_id, *(info.get("attachment_ids") or [])]
+    removed = _fan_out_removal(chunk_ids, domain, chroma, artifact_ids)
 
     # Stores are now clean — the delete has succeeded. The cache bust below is
     # best-effort freshness and cannot fail this result (see invalidate_caches).

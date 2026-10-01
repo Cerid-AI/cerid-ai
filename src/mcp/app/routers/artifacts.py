@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
+from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils import cache
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
@@ -70,10 +71,11 @@ def recategorize(
     if not chunk_ids:
         raise ValueError(f"No chunk IDs found for artifact {artifact_id}")
 
-    source_collection = chroma.get_or_create_collection(
-        name=config.collection_name(old_domain)
-    )
-    fetched = source_collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+    source_name = config.collection_name(old_domain)
+    source_collection = chroma.get_or_create_collection(name=source_name)
+    # The node lists only the retrievable chunks; the parent chunks move too.
+    move_ids = list(dict.fromkeys(chunk_ids + artifact_row_ids(source_collection, artifact_id)))
+    fetched = source_collection.get(ids=move_ids, include=["documents", "metadatas"])
 
     if not fetched["ids"]:
         raise ValueError(f"No chunks found in ChromaDB for artifact {artifact_id}")
@@ -119,7 +121,13 @@ def recategorize(
             f"{len(verify['ids'])}/{len(fetched['ids'])} chunks present in "
             f"'{new_domain}'; leaving stores on '{old_domain}'"
         )
-    source_collection.delete(ids=chunk_ids)
+    source_collection.delete(ids=move_ids)
+    # HyPE questions are not moved: hydration reads their source chunk from the
+    # old domain, where it no longer is. A backfill indexes the new domain.
+    try:
+        remove_artifact_hype_rows(chroma, source_name, artifact_id)
+    except Exception as exc:  # noqa: BLE001 — the chunks moved; the questions are stale either way
+        log_swallowed_error("app.routers.artifacts.recategorize_hype", exc)
 
     # Stores moved and verified — now flip Neo4j last.
     domains = graph.recategorize_artifact(driver, artifact_id, new_domain)

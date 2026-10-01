@@ -18,6 +18,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { EmptyState } from "@/components/ui/empty-state"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import AutomationDialog from "./automation-dialog"
 import {
   Plus,
@@ -121,6 +131,7 @@ export default function AutomationsPane() {
   const [saving, setSaving] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -383,7 +394,7 @@ export default function AutomationsPane() {
                           variant="ghost"
                           size="sm"
                           className="h-6 gap-1 px-2 text-xs text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(auto.id)}
+                          onClick={() => setPendingDeleteId(auto.id)}
                           disabled={isDeleting}
                         >
                           {isDeleting ? (
@@ -416,6 +427,30 @@ export default function AutomationsPane() {
         onSave={handleSave}
         saving={saving}
       />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this automation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The automation will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (pendingDeleteId) handleDelete(pendingDeleteId) }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

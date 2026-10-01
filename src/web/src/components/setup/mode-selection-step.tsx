@@ -64,6 +64,8 @@ interface ModeSelectionStepProps {
      * so users see their Step 1 choice reflected here (F-04-05).
      */
     inferenceBackend?: RecommendedLocalBackend | null
+    /** What the detected local server calls itself; replaces the backend id's label. */
+    localServerName?: string | null
   }
   hardware?: HardwareInfo | null
 }
@@ -87,7 +89,10 @@ export function ModeSelectionStep({
   // should see it reflected on the Mode summary even when no local model
   // has been pulled yet.
   const backendText = configSummary.inferenceBackend
-    ? `Backend: ${BACKEND_LABELS[configSummary.inferenceBackend]}`
+    ? `Backend: ${
+        (configSummary.inferenceBackend !== "cloud" && configSummary.localServerName) ||
+        BACKEND_LABELS[configSummary.inferenceBackend]
+      }`
     : null
 
   // Chat-model line. Hide the line entirely when there's no chat model
@@ -129,7 +134,7 @@ export function ModeSelectionStep({
             <div className="mt-1.5 flex items-center gap-1.5">
               <Zap className="h-3 w-3 text-green-500" />
               <p className="text-label-xs text-green-600 dark:text-green-400">
-                GPU acceleration available ({hardware.gpu_acceleration}) — embeddings and reranking will be faster
+                GPU detected ({hardware.gpu_acceleration})
               </p>
             </div>
           )}
@@ -139,6 +144,7 @@ export function ModeSelectionStep({
       <div className="space-y-2">
         <button
           type="button"
+          aria-pressed={selectedMode === "simple"}
           onClick={() => onSelectMode("simple")}
           className={cn(
             "w-full rounded-lg border p-3 text-left transition-colors",
@@ -162,6 +168,7 @@ export function ModeSelectionStep({
         </button>
         <button
           type="button"
+          aria-pressed={selectedMode === "advanced"}
           onClick={() => onSelectMode("advanced")}
           className={cn(
             "w-full rounded-lg border p-3 text-left transition-colors",

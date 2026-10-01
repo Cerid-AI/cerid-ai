@@ -115,6 +115,19 @@ describe("Storage gauge — unmeasured stores", () => {
     expect(await screen.findByTestId("storage-total")).toHaveTextContent(/2 of 4/i)
   })
 
+  it("shows a null size as not measured, even for an empty store", async () => {
+    stub({
+      ...UNMEASURED_STORAGE,
+      chromadb: { disk_mb: null, disk_mb_reason: "not mounted", collections: 0, chunks: 0 },
+      neo4j: { disk_mb: 12.5, nodes: 100, relationships: 40 },
+    })
+    render(<SystemCategory {...defaultProps} />, { wrapper })
+    const chroma = await screen.findByTestId("storage-segment-chromadb")
+    expect(chroma).toHaveTextContent("—")
+    expect(chroma).not.toHaveTextContent("0.0 MB")
+    expect(await screen.findByTestId("storage-total")).toHaveTextContent(/3 of 4/i)
+  })
+
   it("reports a genuinely empty store as 0.0 MB — the control", async () => {
     stub({
       ...UNMEASURED_STORAGE,

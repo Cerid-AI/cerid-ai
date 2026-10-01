@@ -109,3 +109,18 @@ describe("ObservabilityDashboard — pipeline routing truth", () => {
     expect(badge).toHaveTextContent(/feature/i)
   })
 })
+
+describe("ObservabilityDashboard — the local server's name", () => {
+  it("shows the name the server reports for a stage it serves", async () => {
+    vi.mocked(fetchHealthStatus).mockResolvedValue({
+      ...QUENCHFORGE_HEALTH,
+      local_model_server: { name: "MLX server", version: null, url: "http://models.test:11434" },
+    } as never)
+    render(<ObservabilityDashboard />, { wrapper })
+    const stage = await screen.findByTestId("pipeline-stage-chat_generation")
+    expect(stage).toHaveTextContent("MLX server")
+    expect(stage).not.toHaveTextContent(/quenchforge/i)
+    // A stage answered in-process is not the local server.
+    expect(await screen.findByTestId("pipeline-stage-reranking")).toHaveTextContent(/onnx/)
+  })
+})

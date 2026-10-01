@@ -122,3 +122,30 @@ describe("Models settings — local backend readiness", () => {
     expect(screen.queryByTestId("local-backend-model-warning")).not.toBeInTheDocument()
   })
 })
+
+describe("Models settings — the local server's name", () => {
+  it("titles the local inference row with the name the server reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/providers/ollama/status")) {
+          return ok({ ...REACHABLE_MODEL_MISSING, default_model_installed: true })
+        }
+        if (url.includes("/health/status")) {
+          return ok({
+            status: "healthy",
+            services: {},
+            local_model_server: { name: "MLX server", version: null, url: "http://models.test:11434" },
+          })
+        }
+        if (url.includes("/billing/capabilities")) return ok({ tier: "community", features: {}, buckets: {} })
+        return ok({})
+      }),
+    )
+    render(<ModelsCategory {...defaultProps} />, { wrapper })
+    await screen.findByTestId("local-backend-status-badge")
+    expect(await screen.findByText("MLX server")).toBeInTheDocument()
+    expect(screen.queryByText("Ollama / Quenchforge")).not.toBeInTheDocument()
+    expect(screen.queryByText("Ollama (local)")).not.toBeInTheDocument()
+  })
+})

@@ -49,6 +49,7 @@ import type { OllamaStatus, OllamaRecommendations } from "@/lib/types"
 import { SettingRow, AdvancedDisclosure, ConfirmActionButton } from "../settings-primitives"
 import { ApiKeySettings } from "@/components/auth/api-key-settings"
 import { getDef } from "@/lib/settings-registry"
+import { useLocalServerName } from "@/hooks/use-local-server-name"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import type { SettingsCategoryPageProps } from "./page-props"
 
@@ -572,6 +573,7 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
 
   const isActive = settings.internal_llm_provider === "ollama"
+  const localServerName = useLocalServerName()
   const ollamaReachable = ollamaStatus?.reachable ?? false
 
   // Reachable is not ready. The daemon answering /api/tags says nothing about
@@ -593,9 +595,12 @@ function OllamaWizardInline({ settings, onRefresh }: Pick<SettingsCategoryPagePr
 
   const statusDef = getDef("models.localInference.ollamaStatus")
   if (!statusDef) return null
+  // The row is titled after the two servers it can install. Once one
+  // answers, it is titled with the name that server reports.
+  const rowDef = ollamaReachable && localServerName ? { ...statusDef, label: localServerName } : statusDef
 
   return (
-    <SettingRow def={statusDef}>
+    <SettingRow def={rowDef}>
       <div className="min-w-72 space-y-3">
         <div className="flex items-center justify-between gap-4">
           {isLoading ? (

@@ -7,8 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectGroup, SelectLa
 import { MODELS, deriveModelLabel } from "@/lib/types"
 import type { ModelCapabilities, ModelOption } from "@/lib/types"
 import { fetchModelCatalog } from "@/lib/api/settings"
+import { fetchRoutingInfo } from "@/lib/api/routing"
 import { formatCost } from "@/lib/utils"
 import { estimateTurnCost } from "@/lib/model-router"
+import { useLocalServerName } from "@/hooks/use-local-server-name"
 
 interface ModelSelectProps {
   value: string
@@ -98,6 +100,18 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
 
   const grouped = useMemo(() => groupByProvider(MODELS), [])
 
+  // The chat models the host's own model server serves. The picker listed
+  // cloud models only, so an install on local inference had nothing it could
+  // choose. Same query key as the chat panel: one request.
+  const { data: routingInfo } = useQuery({
+    queryKey: ["providers-routing"],
+    queryFn: fetchRoutingInfo,
+    staleTime: 300_000,
+    retry: 1,
+  })
+  const localModels = routingInfo?.ollama_available ? routingInfo.ollama_models : []
+  const localServerName = useLocalServerName()
+
   // A model is usable when its ROUTING provider is configured (the P0-B
   // fix: catalog ids all route via "openrouter/...", while m.provider is a
   // display brand like "Google"/"Meta" that never appears in
@@ -115,16 +129,31 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
 
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-48">
+      <SelectTrigger className="w-48" aria-label="Model">
         <span className="truncate">{triggerLabel}</span>
       </SelectTrigger>
       <SelectContent position="popper" className="min-w-[20rem]"> {/* drift-allowed: pinned popper min-width so model rows and their availability hints align */}
-        {unknownSelected && (
+        {unknownSelected && !localModels.some((name) => `ollama/${name}` === value) && (
           <SelectGroup>
             <SelectLabel>Current</SelectLabel>
             <SelectItem value={value}>
               <span className="truncate">{triggerLabel}</span>
             </SelectItem>
+            <SelectSeparator />
+          </SelectGroup>
+        )}
+        {localModels.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="flex items-center justify-between">
+              <span>Local</span>
+              <span className="text-label-xxs font-normal text-muted-foreground/80">{localServerName ?? "On this machine"}</span>
+            </SelectLabel>
+            {localModels.map((name) => (
+              <SelectItem key={`ollama/${name}`} value={`ollama/${name}`}>
+                <span className="truncate">{name}</span>
+                <span className="ml-1.5 shrink-0 text-label-xs text-muted-foreground">no cost</span>
+              </SelectItem>
+            ))}
             <SelectSeparator />
           </SelectGroup>
         )}
@@ -171,7 +200,7 @@ export function ModelSelect({ value, onChange, configuredProviders }: ModelSelec
           )
         })}
         <div className="border-t px-2 py-1.5 text-label-xxs text-muted-foreground/80">
-          All models via OpenRouter. Non-US models accessible but not bundled by default.
+          {localModels.length > 0 ? "Local models run on this machine. All others via OpenRouter." : "All models via OpenRouter."} Non-US models accessible but not bundled by default.
         </div>
       </SelectContent>
     </Select>

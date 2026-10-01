@@ -12,6 +12,12 @@ plugins. For a quickstart, see [plugins/README.md](../plugins/README.md).
 2. **Manifest validation** -- `manifest.json` must contain `name`, `version`,
    `type`. Invalid manifests raise `PluginLoadError`.
 3. **Enable check** -- If `ENABLED_PLUGINS` is set, only listed plugins load.
+   Among those, a plugin switched off through `POST /plugins/{name}/disable`
+   (Settings → Extensions) is skipped; with no stored choice it loads. The
+   choice is read once per start, so it applies at the next restart, and
+   `restart_required` on the plugin payload says when one is pending. The
+   exception is a `ToolPlugin`'s tools, which are withheld as soon as the
+   plugin is switched off.
 4. **Tier check** -- Manifest `tier` (default: `community`) is checked against
    `CERID_TIER` via `is_tier_met()`. Unmet tiers are skipped.
 5. **Dependency check** -- Each `requires` entry is imported. Missing packages

@@ -222,7 +222,7 @@ def test_read_flag_state_default_is_empty(monkeypatch):
     for var in (
         "RETRIEVAL_SPARSE_ENABLED",
         "RETRIEVAL_HYPE_ENABLED",
-        "PARENT_CHILD_ENABLED",
+        "ENABLE_PARENT_CHILD_RETRIEVAL",
         "HYBRID_FUSION_MODE",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -238,10 +238,10 @@ def test_read_flag_state_picks_up_rrf_mode(monkeypatch):
 
 def test_read_flag_state_truthy_values(monkeypatch):
     monkeypatch.setenv("RETRIEVAL_SPARSE_ENABLED", "yes")
-    monkeypatch.setenv("PARENT_CHILD_ENABLED", "1")
+    monkeypatch.setenv("ENABLE_PARENT_CHILD_RETRIEVAL", "1")
     on = _read_flag_state()
     assert "RETRIEVAL_SPARSE_ENABLED" in on
-    assert "PARENT_CHILD_ENABLED" in on
+    assert "ENABLE_PARENT_CHILD_RETRIEVAL" in on
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ def test_read_flag_state_truthy_values(monkeypatch):
 def test_recommender_writes_redis_hash_when_threshold_crossed(monkeypatch):
     monkeypatch.delenv("RETRIEVAL_SPARSE_ENABLED", raising=False)
     monkeypatch.delenv("RETRIEVAL_HYPE_ENABLED", raising=False)
-    monkeypatch.delenv("PARENT_CHILD_ENABLED", raising=False)
+    monkeypatch.delenv("ENABLE_PARENT_CHILD_RETRIEVAL", raising=False)
     monkeypatch.delenv("HYBRID_FUSION_MODE", raising=False)
     # Pin the sparse encode path available so this test is about the
     # threshold plumbing on every CI image (deps vary by environment).
@@ -290,7 +290,7 @@ def test_recommender_clears_stale_entries(monkeypatch):
     # Second pass — every flag on, hash should be empty.
     monkeypatch.setenv("RETRIEVAL_SPARSE_ENABLED", "true")
     monkeypatch.setenv("RETRIEVAL_HYPE_ENABLED", "true")
-    monkeypatch.setenv("PARENT_CHILD_ENABLED", "true")
+    monkeypatch.setenv("ENABLE_PARENT_CHILD_RETRIEVAL", "true")
     monkeypatch.setenv("HYBRID_FUSION_MODE", "tri_rrf")
     run_recommender_sync(driver, redis)
     # Pipeline DELETE then no HSET ⇒ key absent OR empty.

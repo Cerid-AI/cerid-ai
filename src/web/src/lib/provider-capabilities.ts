@@ -76,7 +76,7 @@ export const CAPABILITY_STATUS_DOT: Record<CapabilityStatus, string> = {
 }
 
 export const COST_PROFILE_LABELS: Record<CostProfile, string> = {
-  "free-pipeline": "Pipeline: Free (Ollama)",
+  "free-pipeline": "Pipeline: Free (local model server)",
   "paid-pipeline": "Pipeline: Paid API calls",
   "no-cloud": "Cloud: Not configured",
   full: "Full cloud + local pipeline",
@@ -126,7 +126,7 @@ export function assessCapabilities(config: ProviderConfig): CapabilityAssessment
     const fix: FixAction = { label: "Configure Providers", target: "settings:providers" }
     warnings.push({
       severity: "error",
-      message: "No AI providers configured. Add at least one API key or set up Ollama to get started.",
+      message: "No AI providers configured. Add at least one API key or set up a local model server to get started.",
       fix,
     })
     return {
@@ -149,9 +149,9 @@ export function assessCapabilities(config: ProviderConfig): CapabilityAssessment
     warnings.push({
       severity: "info",
       message:
-        "Local-only mode — basic chat and KB search are available via Ollama. " +
-        "Adding a cloud provider (OpenRouter recommended) unlocks verification, " +
-        "web search, and access to frontier models.",
+        "Local-only mode — chat, KB search and verification run on the local model. " +
+        "Adding a cloud provider (OpenRouter recommended) unlocks cross-model " +
+        "verification, web search, and access to frontier models.",
       fix: cloudFix,
     })
     return {
@@ -159,7 +159,7 @@ export function assessCapabilities(config: ProviderConfig): CapabilityAssessment
       capabilities: [
         { label: "Chat", status: "degraded", reason: "Local models only — limited quality", fix: cloudFix },
         { label: "KB Retrieval", status: "available" },
-        { label: "Verification", status: "unavailable", reason: "Requires cloud provider", fix: cloudFix },
+        { label: "Verification", status: "available" },
         { label: "Cross-Model Verification", status: "unavailable", reason: "Requires cloud provider", fix: cloudFix },
         { label: "Web Search", status: "unavailable", reason: "Requires cloud provider", fix: cloudFix },
         { label: "Pipeline Tasks", status: "available" },
@@ -217,7 +217,7 @@ export function assessCapabilities(config: ProviderConfig): CapabilityAssessment
     label: "Pipeline Tasks",
     status: "available",
     reason: ollama ? undefined : "Using paid API calls",
-    fix: ollama ? undefined : { label: "Set Up Ollama", target: "settings:ollama" },
+    fix: ollama ? undefined : { label: "Set Up Local Inference", target: "settings:ollama" },
   })
 
   // ---- Warnings ----
@@ -251,8 +251,8 @@ export function assessCapabilities(config: ProviderConfig): CapabilityAssessment
   if (!ollama && anyCloud) {
     warnings.push({
       severity: "info",
-      message: "Ollama can run pipeline tasks (verification, routing, extraction) locally for free, reducing API costs.",
-      fix: { label: "Set Up Ollama", target: "settings:ollama" },
+      message: "A local model server can run pipeline tasks (verification, routing, extraction) on this machine for free, reducing API costs.",
+      fix: { label: "Set Up Local Inference", target: "settings:ollama" },
     })
   }
 

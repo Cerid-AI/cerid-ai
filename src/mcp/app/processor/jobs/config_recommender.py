@@ -60,7 +60,7 @@ def _read_flag_state() -> frozenset[str]:
     counts as on. The registry's ``condition_fn`` consumes this.
     """
     on: set[str] = set()
-    for var in ("RETRIEVAL_SPARSE_ENABLED", "RETRIEVAL_HYPE_ENABLED", "PARENT_CHILD_ENABLED"):
+    for var in ("RETRIEVAL_SPARSE_ENABLED", "RETRIEVAL_HYPE_ENABLED", "ENABLE_PARENT_CHILD_RETRIEVAL"):
         val = os.getenv(var, "false").strip().lower()
         if val in {"1", "true", "yes", "on"}:
             on.add(var)

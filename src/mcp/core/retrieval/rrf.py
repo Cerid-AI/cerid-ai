@@ -25,8 +25,11 @@ Implementation notes:
 * The function is intentionally pure: takes pre-ranked lists, returns
   a fused ranked list. No I/O, no side effects, fully unit-testable.
 
-This module is wired in by a follow-up commit; today it is dead code
-behind a default-off flag. See ``HYBRID_FUSION_MODE`` in settings.py.
+``multi_domain_query`` in ``core/agents/query_agent.py`` calls
+:func:`rrf_fuse_by_artifact` when ``HYBRID_FUSION_MODE`` is ``rrf`` or
+``tri_rrf``. The default mode is ``weighted_sum``, which does not use this
+module. :func:`rrf_fuse`, the chunk-level variant, has no production
+caller; only tests call it.
 """
 from __future__ import annotations
 

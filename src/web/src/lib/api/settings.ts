@@ -17,7 +17,6 @@ import type {
   AutomationCreate,
   AutomationRun,
   Plugin,
-  PluginConfig,
   PluginListResponse,
   AggregatedMetricsResponse,
   TimeSeriesResponse,
@@ -39,8 +38,16 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return res.json()
 }
 
+// A stopped API leaves the gateway holding the request until its own timeout
+// (a 504 after about a minute), and the UI shows the last good answer all
+// that time. Polled every 15 s, so an answer later than this is not news.
+const HEALTH_STATUS_TIMEOUT_MS = 10_000
+
 export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
-  const res = await fetch(`${MCP_BASE}/health/status`, { headers: mcpHeaders() })
+  const res = await fetch(`${MCP_BASE}/health/status`, {
+    headers: mcpHeaders(),
+    signal: AbortSignal.timeout(HEALTH_STATUS_TIMEOUT_MS),
+  })
   if (!res.ok) throw new Error("Health status fetch failed")
   return res.json()
 }
@@ -702,22 +709,6 @@ export async function disablePlugin(name: string): Promise<Plugin> {
   return res.json()
 }
 
-export async function getPluginConfig(name: string): Promise<PluginConfig> {
-  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/config`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Get plugin config failed: ${res.status}`))
-  return res.json()
-}
-
-export async function updatePluginConfig(name: string, config: PluginConfig): Promise<PluginConfig> {
-  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/config`, {
-    method: "PUT",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(config),
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Update plugin config failed: ${res.status}`))
-  return res.json()
-}
-
 export async function scanPlugins(): Promise<PluginListResponse> {
   const res = await fetch(`${MCP_BASE}/plugins/scan`, {
     method: "POST",
@@ -1008,17 +999,6 @@ export function wipePrivateSession(conversationId: string): void {
 export async function fetchStorageMetrics(): Promise<import("../types").StorageMetrics> {
   const res = await fetch(`${MCP_BASE}/system/storage`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`Storage metrics fetch failed: ${res.status}`)
-  return res.json()
-}
-
-export async function fetchIngestHistory(
-  limit = 50,
-  cursor?: string,
-): Promise<import("../types").IngestHistoryResponse> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (cursor) params.set("offset", cursor)
-  const res = await fetch(`${MCP_BASE}/admin/ingest-history?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Ingest history fetch failed: ${res.status}`))
   return res.json()
 }
 

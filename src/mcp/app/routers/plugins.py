@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Plugin management endpoints — discover, enable, configure, and disable plugins."""
+"""Plugin management endpoints — discover, enable, and disable plugins."""
 from __future__ import annotations
 
 import json
@@ -16,13 +16,13 @@ import config
 from app.deps import get_redis
 from config.features import is_tier_met
 from core.utils import audit_log
+from plugins import ENABLED_KEY, plugin_disabled_reason
 
 router = APIRouter(tags=["plugins"])
 logger = logging.getLogger("ai-companion.plugins")
 
 # Redis key helpers
-_KEY_ENABLED = "cerid:plugins:{name}:enabled"
-_KEY_CONFIG = "cerid:plugins:{name}:config"
+_KEY_ENABLED = ENABLED_KEY
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -47,18 +47,19 @@ class PluginInfo(BaseModel):
         description="installed | active | error | disabled | requires_pro",
     )
     file_types: list[str] = Field(default_factory=list)
-    config_schema: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    restart_required: bool = Field(
+        default=False,
+        description=(
+            "True when `enabled` differs from what this server process loaded "
+            "at start. Plugins load once, at start, so the change applies at "
+            "the next restart."
+        ),
+    )
     # ``config.features.FEATURE_FLAGS`` keys this plugin's manifest declares.
     # Empty for manifests that declare none — a caller cannot tell "no flags"
     # from "field absent", so an empty list is the honest default.
     feature_flags: list[str] = Field(default_factory=list)
-
-
-class PluginConfig(BaseModel):
-    """Arbitrary key-value configuration for a plugin."""
-
-    values: dict[str, Any] = Field(default_factory=dict)
 
 
 class PluginListResponse(BaseModel):
@@ -126,24 +127,33 @@ def _set_plugin_enabled_redis(name: str, enabled: bool) -> None:
     r.set(_KEY_ENABLED.format(name=name), "1" if enabled else "0")
 
 
-def _get_plugin_config_redis(name: str) -> dict[str, Any]:
-    """Read plugin configuration from Redis."""
-    try:
-        r = get_redis()
-        raw = r.get(_KEY_CONFIG.format(name=name))
-        if raw is None:
-            return {}
-        return json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
-    except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('app.routers.plugins', exc)
-        return {}
+def _tier_required(manifest: dict[str, Any]) -> str:
+    return str(manifest.get("tier_required", manifest.get("tier", "community")))
 
 
-def _set_plugin_config_redis(name: str, cfg: dict[str, Any]) -> None:
-    """Write plugin configuration to Redis."""
-    r = get_redis()
-    r.set(_KEY_CONFIG.format(name=name), json.dumps(cfg))
+def _effective_enabled(manifest: dict[str, Any], name: str) -> bool:
+    """Whether the loader would load this plugin at the next start.
+
+    The same three answers the loader consults: the licence tier, the
+    ``CERID_ENABLED_PLUGINS`` allowlist, and the stored choice.
+    """
+    if not is_tier_met(_tier_required(manifest)):
+        return False
+    return plugin_disabled_reason(name, _is_plugin_enabled_redis(name)) is None
+
+
+def _restart_required(name: str, enabled: bool) -> bool:
+    """Whether ``enabled`` is a choice this process has not applied yet."""
+    from plugins import get_failed_plugins, get_loaded_plugins
+
+    if name in get_loaded_plugins():
+        return not enabled
+    # Not loaded for any other reason (missing dependency, import error) is a
+    # fault a restart does not clear.
+    return enabled and any(
+        info.get("name") == name and info.get("error_type") == "PluginDisabledError"
+        for info in get_failed_plugins().values()
+    )
 
 
 def _resolve_status(manifest: dict[str, Any], enabled: bool) -> str:
@@ -179,8 +189,8 @@ def _manifest_to_info(manifest: dict[str, Any], enabled: bool) -> PluginInfo:
         enabled=enabled,
         status=status,
         file_types=manifest.get("file_types", []),
-        config_schema=manifest.get("config_schema"),
         capabilities=manifest.get("capabilities", []),
+        restart_required=_restart_required(name, enabled),
         feature_flags=list(manifest.get("feature_flags") or []),
     )
 
@@ -194,9 +204,7 @@ def list_plugins() -> PluginListResponse:
     manifests = _discover_manifests()
     plugins: list[PluginInfo] = []
     for name, manifest in manifests.items():
-        redis_enabled = _is_plugin_enabled_redis(name)
-        enabled = redis_enabled if redis_enabled is not None else False
-        plugins.append(_manifest_to_info(manifest, enabled))
+        plugins.append(_manifest_to_info(manifest, _effective_enabled(manifest, name)))
     return PluginListResponse(plugins=plugins, total=len(plugins))
 
 
@@ -207,23 +215,30 @@ def get_plugin(name: str) -> PluginInfo:
     if name not in manifests:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
     manifest = manifests[name]
-    redis_enabled = _is_plugin_enabled_redis(name)
-    enabled = redis_enabled if redis_enabled is not None else False
-    return _manifest_to_info(manifest, enabled)
+    return _manifest_to_info(manifest, _effective_enabled(manifest, name))
 
 
 @router.post("/plugins/{name}/enable", response_model=PluginInfo)
 def enable_plugin(name: str) -> PluginInfo:
-    """Enable a plugin. Returns 403 if the tier requirement is not met."""
+    """Enable a plugin. Returns 403 if the tier or the allowlist forbids it."""
     manifests = _discover_manifests()
     if name not in manifests:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
     manifest = manifests[name]
-    tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
-    if tier_required == "pro" and not is_tier_met("pro"):
+    tier_required = _tier_required(manifest)
+    if not is_tier_met(tier_required):
         raise HTTPException(
             status_code=403,
-            detail=f"Plugin '{name}' requires 'pro' tier (current: '{config.FEATURE_TIER}')",
+            detail=(
+                f"Plugin '{name}' requires '{tier_required}' tier "
+                f"(current: '{config.FEATURE_TIER}')"
+            ),
+        )
+    refused = plugin_disabled_reason(name, True)
+    if refused:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Plugin '{name}' cannot be enabled here: {refused}",
         )
     _set_plugin_enabled_redis(name, True)
     logger.info("Plugin '%s' enabled", name)
@@ -243,26 +258,6 @@ def disable_plugin(name: str) -> PluginInfo:
     return _manifest_to_info(manifests[name], False)
 
 
-@router.get("/plugins/{name}/config", response_model=PluginConfig)
-def get_plugin_config(name: str) -> PluginConfig:
-    """Get the configuration for a plugin."""
-    manifests = _discover_manifests()
-    if name not in manifests:
-        raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
-    return PluginConfig(values=_get_plugin_config_redis(name))
-
-
-@router.put("/plugins/{name}/config", response_model=PluginConfig)
-def update_plugin_config(name: str, body: PluginConfig) -> PluginConfig:
-    """Update the configuration for a plugin."""
-    manifests = _discover_manifests()
-    if name not in manifests:
-        raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
-    _set_plugin_config_redis(name, body.values)
-    logger.info("Plugin '%s' config updated", name)
-    return PluginConfig(values=_get_plugin_config_redis(name))
-
-
 @router.post("/plugins/scan", response_model=PluginListResponse)
 def scan_plugins() -> PluginListResponse:
     """Re-scan plugin directories and return updated list."""
@@ -273,8 +268,6 @@ def scan_plugins() -> PluginListResponse:
     manifests = _discover_manifests()
     plugins: list[PluginInfo] = []
     for name, manifest in manifests.items():
-        redis_enabled = _is_plugin_enabled_redis(name)
-        enabled = redis_enabled if redis_enabled is not None else False
-        plugins.append(_manifest_to_info(manifest, enabled))
+        plugins.append(_manifest_to_info(manifest, _effective_enabled(manifest, name)))
     logger.info("Scan complete: %d plugin(s) found", len(plugins))
     return PluginListResponse(plugins=plugins, total=len(plugins))

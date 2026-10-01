@@ -29,14 +29,19 @@ export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
       // @cosmos.gl/graph (B8 Live mode) imports a default from gl-bench, but
       // the resolver picks gl-bench's UMD build (a global-assign IIFE with no
       // ESM default export), which breaks the production build. Force its
       // proper ESM build (dist/gl-bench.module.js — has `export default`).
-      "gl-bench": path.resolve(__dirname, "./node_modules/gl-bench/dist/gl-bench.module.js"),
-    },
+      // Exact match only: @cosmos.gl/graph 3.4.2 imports the ESM file by its
+      // full path, and a prefix alias rewrites that into a path under itself.
+      {
+        find: /^gl-bench$/,
+        replacement: path.resolve(__dirname, "./node_modules/gl-bench/dist/gl-bench.module.js"),
+      },
+    ],
   },
   test: {
     globals: true,

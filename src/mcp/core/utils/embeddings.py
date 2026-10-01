@@ -23,6 +23,7 @@ import onnxruntime as ort
 from tokenizers import Tokenizer
 
 import config
+from core.utils.cpu import onnx_intra_op_threads
 from core.utils.embedding_cache import get_embedding_cache
 from core.utils.hf_cache import resolve_hf_file
 from core.utils.onnx_providers import resolve_providers
@@ -150,7 +151,7 @@ class OnnxEmbeddingFunction:
 
             opts = ort.SessionOptions()
             opts.inter_op_num_threads = 1
-            opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
+            opts.intra_op_num_threads = onnx_intra_op_threads()
 
             self._session = ort.InferenceSession(
                 model_path,

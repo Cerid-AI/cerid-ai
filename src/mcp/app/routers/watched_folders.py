@@ -11,6 +11,7 @@ Error types: CeridError (from errors.py)
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -23,12 +24,14 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from core.ingest.vault_config import build_profile, profile_to_dict
+from core.utils.swallowed import log_swallowed_error
 from errors import IngestionError
 from models.watched_folders import (
     WatchedFolderDetail,
     WatchedFolderListResponse,
     WatchedFolderStatusResponse,
 )
+from utils.folder_privacy import LINKED, invalidate_unsearchable_folders
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -157,6 +160,68 @@ def _remove_from_index(redis, folder_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Searchable toggle
+# ---------------------------------------------------------------------------
+
+def _searchability_changed() -> None:
+    """Make a change to which folders are searchable take effect now.
+
+    Cached answers were assembled under the previous set of folders, so both
+    query caches are flushed along with the cached folder list.
+    """
+    from utils.query_cache import invalidate_query_caches
+
+    invalidate_unsearchable_folders()
+    try:
+        invalidate_query_caches(trigger="watched_folders.search_enabled", redis=_get_redis())
+    except Exception as e:  # noqa: BLE001 — the folder change itself succeeded
+        log_swallowed_error("app.routers.watched_folders.invalidate_caches", e)
+
+
+async def _link_earlier_content(folder_id: str) -> None:
+    """Link what was ingested from the folder before chunks named their folder.
+
+    The outcome is written to the folder record. Until it reads ``complete``
+    a query reports that the folder is not yet fully excluded.
+    """
+    from app.services.folder_scanner import link_folder_artifacts
+
+    redis = _get_redis()
+    data = _load_folder(redis, folder_id)
+    if not data:
+        return
+    try:
+        counts = await link_folder_artifacts(
+            data["path"], exclude_patterns=set(data.get("exclude_patterns") or []),
+        )
+        outcome: dict[str, Any] = {
+            "state": "failed" if counts["errored"] else LINKED, **counts,
+        }
+    except Exception as e:
+        log_swallowed_error("app.routers.watched_folders.link_earlier_content", e)
+        outcome = {"state": "failed", "error": str(e)}
+    outcome["at"] = datetime.now(timezone.utc).isoformat()
+
+    # Re-load to avoid overwriting concurrent PATCH updates
+    current = _load_folder(redis, folder_id)
+    if current is None:
+        return
+    current["search_exclusion"] = outcome
+    _save_folder(redis, folder_id, current)
+    invalidate_unsearchable_folders()
+    logger.info("Linked earlier content for folder %s: %s", folder_id, outcome)
+
+
+_link_tasks: set[asyncio.Task] = set()
+
+
+def _start_linking(folder_id: str) -> None:
+    task = asyncio.create_task(_link_earlier_content(folder_id))
+    _link_tasks.add(task)
+    task.add_done_callback(_link_tasks.discard)
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -195,6 +260,9 @@ async def create_watched_folder(body: WatchedFolderCreate):
 
     _save_folder(redis, folder_id, data)
     _add_to_index(redis, folder_id)
+    if not body.search_enabled:
+        _searchability_changed()
+        _start_linking(folder_id)
 
     logger.info("Created watched folder %s: %s", folder_id, body.path)
     return data
@@ -243,6 +311,10 @@ async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
         data["domain_override"] = body.domain_override or None
     if body.exclude_patterns is not None:
         data["exclude_patterns"] = body.exclude_patterns
+    search_changed = (
+        body.search_enabled is not None
+        and body.search_enabled != data.get("search_enabled", True)
+    )
     if body.search_enabled is not None:
         data["search_enabled"] = body.search_enabled
     if body.is_vault is not None:
@@ -253,6 +325,10 @@ async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
         data["vault_config"] = body.vault_config or None
 
     _save_folder(redis, folder_id, data)
+    if search_changed:
+        _searchability_changed()
+        if not data["search_enabled"]:
+            _start_linking(folder_id)
     logger.info("Updated watched folder %s", folder_id)
     return data
 
@@ -267,6 +343,8 @@ async def delete_watched_folder(folder_id: str):
 
     redis.delete(_folder_key(folder_id))
     _remove_from_index(redis, folder_id)
+    if not data.get("search_enabled", True):
+        _searchability_changed()
 
     logger.info("Deleted watched folder %s: %s", folder_id, data.get("path"))
     return {"status": "deleted", "id": folder_id, "path": data.get("path")}

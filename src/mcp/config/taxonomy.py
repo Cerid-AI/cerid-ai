@@ -93,6 +93,10 @@ if _custom_domains_raw:
         pass  # silently ignore malformed custom domains
 
 DOMAINS = list(TAXONOMY.keys())
+# The domains defined in code. DOMAINS grows at run time (rehydrated :Domain
+# nodes, POST /taxonomy/domain); this set does not, which is how
+# utils.domain_privacy tells a consumer's operational domain from the owner's.
+BUILTIN_DOMAINS = frozenset(TAXONOMY)
 DEFAULT_DOMAIN = "general"
 DEFAULT_SUB_CATEGORY = "general"
 INBOX_DOMAIN = "inbox"  # files here trigger AI categorization

@@ -57,6 +57,7 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
 from app.services.storage_metrics import get_storage_report
 from core.context.identity import get_tenant_id
+from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils import cache
 from core.utils.embeddings import embedding_stamp
 from core.utils.swallowed import log_swallowed_error
@@ -69,6 +70,7 @@ from utils.chunker import (
     parent_child_enabled,
 )
 from utils.encryption import CHROMA_ENCRYPTED_FIELDS, encrypt_field
+from utils.folder_privacy import WATCHED_FOLDER_KEY
 from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 
 logger = logging.getLogger("ai-companion")
@@ -492,14 +494,38 @@ def _reingest_artifact(
     artifact_id = prev["id"]
     content_changed = prev.get("content_hash") != content_hash
 
-    # Delete old chunks from ChromaDB
     old_chunk_ids = json.loads(prev.get("chunk_ids", "[]") or "[]")
-    if old_chunk_ids:
+
+    # A re-ingest that names no watched folder keeps the one the old chunks
+    # named. Not guarded: rewriting the chunks without it would put content
+    # from a folder marked not searchable back into answers.
+    if old_chunk_ids and not (metadata or {}).get(WATCHED_FOLDER_KEY):
+        prior = collection.get(ids=old_chunk_ids[:1], include=["metadatas"])
+        prior_folder = next(
+            (m.get(WATCHED_FOLDER_KEY) for m in prior.get("metadatas") or [] if m),
+            None,
+        )
+        if prior_folder:
+            metadata = {**(metadata or {}), WATCHED_FOLDER_KEY: prior_folder}
+
+    # Delete old chunks from ChromaDB. The node lists only the retrievable
+    # chunks; the old parent chunks are found by artifact id, or a shorter new
+    # text leaves the old one's trailing parents answering queries.
+    try:
+        old_rows = list(dict.fromkeys(old_chunk_ids + artifact_row_ids(collection, artifact_id)))
+        if old_rows:
+            collection.delete(ids=old_rows)
+    except Exception as e:
+        log_swallowed_error('app.services.ingestion', e)
+        logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+    # HyPE questions were generated from the old text. force_reindex keeps the
+    # same text, so its questions still hold.
+    if content_changed:
         try:
-            collection.delete(ids=old_chunk_ids)
-        except Exception as e:
-            log_swallowed_error('app.services.ingestion', e)
-            logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+            remove_artifact_hype_rows(chroma, coll_name, artifact_id)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error("app.services.ingestion.hype_remove_reingest", e)
+    if old_chunk_ids:
         # BM25 + sparse indexes dedup-skip known chunk_ids, so without an
         # explicit removal they keep serving the PRE-edit text while ChromaDB
         # now holds the new text — a silent corpus divergence that survives
@@ -1882,6 +1908,8 @@ def _ingest_single_attachment(
     # by graph queries that walk HAS_ATTACHMENT in either direction.
     attachment_meta["source_type"] = _EMAIL_ATTACHMENT_SOURCE_TYPE
     attachment_meta["parent_artifact_id"] = parent_artifact_id
+    if parent_meta.get(WATCHED_FOLDER_KEY):
+        attachment_meta[WATCHED_FOLDER_KEY] = parent_meta[WATCHED_FOLDER_KEY]
     for parent_key, attach_key in (
         ("message_id", "parent_message_id"),
         ("from", "parent_email_from"),
@@ -2045,6 +2073,20 @@ async def ingest_file(
                 "page_count": None,
                 "parser": "layout_aware",
             }
+            if ext == "eml":
+                # The layout-aware parser yields chunks only. Attachments,
+                # and the header fields stamped onto them, come from the
+                # email parser. Best-effort, like the recursion they feed.
+                try:
+                    email_parsed = await asyncio.to_thread(parse_file, file_path)
+                except Exception as e:  # noqa: BLE001 — the email is still ingested
+                    log_swallowed_error(
+                        "app.services.ingestion.eml_attachment_parse", e,
+                    )
+                else:
+                    for key in ("_attachments", "subject", "message_id", "from"):
+                        if key in email_parsed:
+                            parsed[key] = email_parsed[key]
         else:
             # Run sync parser in thread pool to avoid blocking the event loop
             parsed = await asyncio.to_thread(parse_file, file_path)

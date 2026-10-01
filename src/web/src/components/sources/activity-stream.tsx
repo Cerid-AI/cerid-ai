@@ -12,13 +12,9 @@
 //     Renders settled entries with source-type icon, domain badge,
 //     ingested-chunks count, and timestamp.
 //
-//     F359: this used to read /admin/ingest-history, which serves a Redis
-//     stream whose only writer -- record_ingest_event() -- has no callers
-//     anywhere in src/mcp. The endpoint therefore answered an empty page on
-//     every deployment, however much had actually been ingested, and the pane
-//     rendered the new-user onboarding card forever. /ingest_log serves the
-//     audit log that services/ingestion.py appends to on each successful
-//     artifact creation, so it carries the events this pane exists to show.
+//     /ingest_log serves the audit log that services/ingestion.py appends
+//     to on each successful artifact creation, so it carries the events this
+//     pane exists to show.
 //
 // Entries fade in via a brief glow when they first appear (the
 // "particle" metaphor from the spec — implemented as CSS keyframe
@@ -48,55 +44,14 @@ import {
   CircleDashed,
   Loader2,
 } from "lucide-react"
-import { fetchIngestionProgress, fetchIngestLog } from "@/lib/api/kb"
-import type { IngestionFileProgress, IngestHistoryEntry, IngestLogEntry } from "@/lib/types"
+import { fetchIngestionProgress } from "@/lib/api/kb"
+import { fetchIngestActivity } from "@/lib/ingest-activity"
+import type { IngestionFileProgress, IngestHistoryEntry } from "@/lib/types"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { PaneError } from "@/components/ui/pane-error"
 
 const ACTIVE_POLL_MS = 3_000
 const HISTORY_POLL_MS = 30_000
-
-// The audit log carries every kind of event the system records (queries,
-// scheduled jobs, rectification, memory writes). Only the two that describe
-// something arriving in the corpus belong in an ingestion ledger.
-const INGEST_EVENTS: Record<string, IngestHistoryEntry["status"]> = {
-  ingest: "success",
-  duplicate: "skipped",
-}
-
-function asString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback
-}
-
-/** Shape one audit-log row into the settled entry this pane renders. */
-function toHistoryEntry(entry: IngestLogEntry, index: number): IngestHistoryEntry {
-  return {
-    id: `${entry.timestamp}-${entry.artifact_id || index}`,
-    filename: entry.filename || entry.artifact_id || "untitled",
-    source_type: asString(entry.source_type, "upload"),
-    domain: entry.domain ?? "",
-    status: INGEST_EVENTS[entry.event] ?? "success",
-    timestamp: entry.timestamp,
-    chunks: typeof entry.chunks === "number" ? entry.chunks : 0,
-    error: asString(entry.error),
-  }
-}
-
-/**
- * Read the ingestion ledger.
- *
- * /ingest_log returns cache.get_log()'s bare list; the {total, entries}
- * wrapper the client type declares was never on the wire. Accept both rather
- * than let a shape mismatch present itself as "nothing was ingested" -- that
- * failure mode is the whole reason this finding exists.
- */
-async function fetchIngestActivity(limit: number): Promise<IngestHistoryEntry[]> {
-  const raw = (await fetchIngestLog(limit)) as unknown
-  const entries: IngestLogEntry[] = Array.isArray(raw)
-    ? (raw as IngestLogEntry[])
-    : ((raw as { entries?: IngestLogEntry[] } | null)?.entries ?? [])
-  return entries.filter((e) => e.event in INGEST_EVENTS).map(toHistoryEntry)
-}
 
 // ---------------------------------------------------------------------------
 // Source-type → icon + accent

@@ -65,7 +65,7 @@ class SDKSearchResponse(_SDKBase):
 
 def _default_hallucination_summary() -> dict[str, float | int]:
     """Zero-count summary used when verification is skipped."""
-    return {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0}
+    return {"total": 0, "verified": 0, "agreed": 0, "unverified": 0, "uncertain": 0}
 
 
 class SDKHallucinationResponse(_SDKBase):
@@ -78,7 +78,11 @@ class SDKHallucinationResponse(_SDKBase):
     claims: list[dict[str, Any]] = Field(default_factory=list, description="Verified claims with status, confidence, and source info")
     summary: dict[str, float | int] = Field(
         default_factory=_default_hallucination_summary,
-        description="Verification summary: per-status counts plus assessed count and the float overall_confidence.",
+        description=(
+            "Verification summary: per-status counts plus assessed count and the float "
+            "overall_confidence. `verified` counts claims a source backs; `agreed` counts "
+            "claims a second model agreed with and no source backs."
+        ),
     )
     mode: str = Field(
         default="thorough",

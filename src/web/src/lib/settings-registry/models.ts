@@ -60,7 +60,7 @@ export const MODELS_DEFS: SettingDef[] = [
     type: "enum",
     options: [
       { value: "openrouter", label: "OpenRouter (cloud)", helpText: "Default. Routes to the best available free/cheap model." },
-      { value: "ollama", label: "Ollama (local)", helpText: "Uses the Ollama-protocol daemon on OLLAMA_URL." },
+      { value: "ollama", label: "Ollama-compatible (local)", helpText: "Uses the server that speaks the Ollama API on OLLAMA_URL." },
       { value: "quenchforge", label: "Quenchforge (local GPU)", helpText: "AMD/Intel Mac GPU acceleration via the Quenchforge gateway." },
     ],
     default: "openrouter",

@@ -35,13 +35,13 @@ const scheduler = {
   ],
 }
 
-function renderCard() {
+function renderCard(props: Partial<React.ComponentProps<typeof SchedulerStatus>> = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <SchedulerStatus scheduler={scheduler} />
+      <SchedulerStatus scheduler={scheduler} {...props} />
     </QueryClientProvider>,
   )
 }
@@ -80,5 +80,29 @@ describe("SchedulerStatus — run-now duplicate honesty (SF-2)", () => {
     expect(toast.success).not.toHaveBeenCalled()
     const [title] = (toast.info as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(title).toMatch(/already queued/)
+  })
+})
+
+describe("SchedulerStatus — recent runs (F183)", () => {
+  const run = {
+    event: "scheduled_job",
+    job: "rectify",
+    status: "error",
+    duration_s: 1.5,
+    detail: "neo4j unreachable",
+    timestamp: new Date().toISOString(),
+  }
+
+  it("lists the runs read from the scheduler log with their outcome", () => {
+    renderCard({ runs: [run, { ...run, job: "health_check", status: "success", detail: "" }] })
+    expect(screen.getByText("rectify")).toBeInTheDocument()
+    expect(screen.getByText("error")).toBeInTheDocument()
+    expect(screen.getByText("health_check")).toBeInTheDocument()
+    expect(screen.getByText("success")).toBeInTheDocument()
+  })
+
+  it("says the run log could not be read instead of showing no runs", () => {
+    renderCard({ runsError: true })
+    expect(screen.getByText(/Recent runs could not be loaded/)).toBeInTheDocument()
   })
 })

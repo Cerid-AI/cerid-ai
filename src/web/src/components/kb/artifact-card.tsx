@@ -12,7 +12,8 @@ import { DomainBadge } from "@/components/ui/domain-badge"
 import { SourceTypeBadge } from "./source-type-badge"
 import { QualityDot } from "./quality-dot"
 import type { KBQueryResult } from "@/lib/types"
-import { cn, parseTags } from "@/lib/utils"
+import { cn, parseTags, relativeRelevance } from "@/lib/utils"
+import { RelevanceBar } from "@/components/ui/relevance-bar"
 import { MCP_BASE, mcpHeaders } from "@/lib/api"
 import { TAGS_TRUSTED } from "@/lib/tag-trust"
 
@@ -88,6 +89,8 @@ function timeAgo(date: string): string {
 
 interface ArtifactCardProps {
   result: KBQueryResult
+  /** Relevance scores of every result in the list this card belongs to. */
+  relevanceAmong?: readonly number[]
   isSelected: boolean
   onSelect: () => void
   onInject: () => void
@@ -105,7 +108,7 @@ interface ArtifactCardProps {
   compact?: boolean
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, onToggleStar, onToggleEvergreen, showSource, compact }: ArtifactCardProps) {
+export function ArtifactCard({ result, relevanceAmong, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, onToggleStar, onToggleEvergreen, showSource, compact }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
@@ -133,7 +136,6 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
     })
     return () => cancelAnimationFrame(rafId)
   }, [expanded, compact])
-  const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
   const isBrowseMode = result.relevance === 0
   // WB-67: query_agent.py never parses `keywords` before returning it — it
@@ -317,12 +319,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               {showRelevance && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
-                      <ProgressBar pct={relevancePct} className="w-12" />
+                    <div className="py-1">
+                      <RelevanceBar relevance={result.relevance} among={relevanceAmong} className="w-12" />
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="left">Relevance: {relevancePct}% match to query</TooltipContent>
+                  <TooltipContent side="left">{relativeRelevance(result.relevance, relevanceAmong).label}</TooltipContent>
                 </Tooltip>
               )}
               {result.quality_score != null && (

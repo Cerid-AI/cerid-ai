@@ -225,26 +225,40 @@ def mark_superseded(
     neo4j_driver: Any,
     old_artifact_id: str,
     new_artifact_id: str,
-) -> None:
-    """Mark an existing memory artifact as superseded by a newer one."""
+) -> bool:
+    """Mark an existing memory artifact as superseded by a newer one.
+
+    Returns True only when both artifacts were found and the SUPERSEDES edge
+    exists afterwards.
+    """
     try:
         with neo4j_driver.session() as session:
-            session.run(
+            record = session.run(
                 "MATCH (old:Artifact {id: $old_id}) "
                 "SET old.superseded_by = $new_id, "
                 "    old.valid_until = $now "
                 "WITH old "
                 "MATCH (new:Artifact {id: $new_id}) "
-                "MERGE (new)-[:SUPERSEDES]->(old)",
+                "MERGE (new)-[:SUPERSEDES]->(old) "
+                "RETURN count(*) AS n",
                 old_id=old_artifact_id,
                 new_id=new_artifact_id,
                 now=utcnow_iso(),
-            )
-        logger.info(
-            "Memory %s superseded by %s", old_artifact_id, new_artifact_id,
-        )
+            ).single()
+        applied = bool(record) and int(record["n"]) > 0
     except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(
             "Failed to mark superseded: %s -> %s: %s",
             old_artifact_id, new_artifact_id, e,
         )
+        return False
+    if applied:
+        logger.info(
+            "Memory %s superseded by %s", old_artifact_id, new_artifact_id,
+        )
+    else:
+        logger.warning(
+            "Supersession matched nothing: %s -> %s",
+            old_artifact_id, new_artifact_id,
+        )
+    return applied

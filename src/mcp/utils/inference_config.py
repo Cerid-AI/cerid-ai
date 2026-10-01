@@ -96,6 +96,18 @@ class InferenceConfig:
 _config: InferenceConfig | None = None
 
 
+def sidecar_rerank_requested() -> bool:
+    """True when the operator named the sidecar as the reranker. Unset is not
+    a request: the default value is an auto-detect, and a host with no sidecar
+    that never asked for one is not degraded."""
+    return os.getenv("RERANK_PROVIDER", "").strip().lower() == "sidecar"
+
+
+def in_process_rerank_requested() -> bool:
+    """True when the operator named the in-process model as the reranker."""
+    return os.getenv("RERANK_PROVIDER", "").strip().lower() == "in-process"
+
+
 def get_inference_config() -> InferenceConfig:
     """Return the current inference config (detect on first call)."""
     global _config
@@ -348,6 +360,9 @@ async def _inference_recheck_loop() -> None:
             new.local_gen_tok_s = old.local_gen_tok_s
             new.local_probe_at = old.local_probe_at
             new.local_probe_contended = old.local_probe_contended
+            # Same for the latencies the rerank and embed legs measured.
+            new.embed_latency_ms = old.embed_latency_ms
+            new.rerank_latency_ms = old.rerank_latency_ms
 
             if new.provider != old_provider or new.tier != old_tier:
                 direction = "upgrade" if _tier_rank(new.tier) > _tier_rank(old_tier) else "downgrade"
@@ -597,10 +612,9 @@ def inference_health_payload() -> dict:
     payload says the rerank lane is degraded gave an operator two opposite
     answers about one lane. The tier is reconciled against that signal here.
 
-    The latency fields are ``None`` when nothing has measured them. They are
-    only ever written by the Quenchforge and sidecar clients, never by the
-    in-process ONNX leg, so an outage that pushes every rerank onto ONNX leaves
-    them unwritten — and ``0.0`` reads as "instant" rather than "unmeasured".
+    The latency fields are ``None`` when nothing has measured them: ``0.0``
+    reads as "instant" rather than "unmeasured". ``rerank_latency_ms`` is
+    written by whichever leg served, the in-process ONNX one included.
     """
     cfg = get_inference_config()
     tier = cfg.tier

@@ -13,9 +13,10 @@
  * - `sources` (plural) is the canonical field via `source_urls`; the
  *   singular `source_artifact_id` / `source_filename` remain for KB provenance
  *
- * The four linguistic bands derived here:
+ * The five linguistic bands derived here:
  * - "verified":   status === "verified" AND at least 1 source
- * - "partial":    status === "verified" with no strong source OR status === "uncertain"
+ * - "agreed":     status === "verified" with no source (a second model agreed)
+ * - "partial":    status === "uncertain"
  * - "refuted":    status === "unverified" from an independent check that
  *                 actively contradicted the claim (cross-model / web search)
  * - "unverified": status === "unverified" with no evidence either way
@@ -25,7 +26,7 @@
  * "refuted" member. The distinction lives in `verification_method`.
  */
 
-import { getClaimDisplayStatus } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, isSourceBacked } from "@/lib/verification-utils"
 
 export type ClaimStatus =
   | "verified"
@@ -36,7 +37,7 @@ export type ClaimStatus =
 
 export type ClaimType = "factual" | "evasion" | "ignorance" | "citation"
 
-export type VerificationBand = "verified" | "partial" | "refuted" | "unverified"
+export type VerificationBand = "verified" | "agreed" | "partial" | "refuted" | "unverified"
 
 /**
  * Canonical per-claim verification type for frontend components.
@@ -85,7 +86,8 @@ export interface ClaimVerificationFE {
  * Derive the linguistic band for a claim.
  *
  * - "verified"   → status=verified with ≥1 source
- * - "partial"    → status=uncertain OR status=verified but no source
+ * - "agreed"     → status=verified but no source
+ * - "partial"    → status=uncertain
  * - "refuted"    → status=unverified from a check that contradicted the claim
  * - "unverified" → status=unverified with no evidence, OR error, OR skipped
  *
@@ -96,11 +98,8 @@ export interface ClaimVerificationFE {
  * of its own here.
  */
 export function deriveBand(claim: ClaimVerificationFE): VerificationBand {
-  const hasSource =
-    !!(claim.source_artifact_id || (claim.source_urls?.length ?? 0) > 0)
-
   if (claim.status === "verified") {
-    return hasSource ? "verified" : "partial"
+    return isSourceBacked(claim) ? "verified" : "agreed"
   }
   if (claim.status === "uncertain") {
     return "partial"

@@ -11,6 +11,7 @@ from typing import Any
 
 import config
 from core.agents.rectify import find_stale_artifacts
+from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils.cache import log_event
 from core.utils.time import utcnow_iso
 
@@ -190,15 +191,18 @@ def purge_artifacts(
             filename = record["filename"]
             chunk_ids = json.loads(record.get("chunk_ids") or "[]")
 
-            if chunk_ids:
-                try:
-                    collection = chroma_client.get_collection(name=config.collection_name(domain))
-                    collection.delete(ids=chunk_ids)
-                except Exception as e:
-                    from core.utils.swallowed import log_swallowed_error
-                    log_swallowed_error('core.agents.maintenance', e)
-                    logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
-                _purge_lexical_indexes(domain, chunk_ids)
+            try:
+                coll_name = config.collection_name(domain)
+                collection = chroma_client.get_collection(name=coll_name)
+                rows = list(dict.fromkeys(chunk_ids + artifact_row_ids(collection, artifact_id)))
+                if rows:
+                    collection.delete(ids=rows)
+                remove_artifact_hype_rows(chroma_client, coll_name, artifact_id)
+            except Exception as e:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.maintenance', e)
+                logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
+            _purge_lexical_indexes(domain, chunk_ids)
 
             with neo4j_driver.session() as session:
                 session.run(

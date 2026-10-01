@@ -20,6 +20,7 @@
 - `PATCH /settings` (extended, Slice 7.2) — Accepts `pack_relevance_weight` (float `0.0`–`2.0`, default `0.7`, advanced / SERVER scope). Multiplier applied to knowledge-pack chunks after reranking; below `1.0` makes personal data win ties, `1.0` is neutral. Surfaced live (`config.PACK_RELEVANCE_WEIGHT`); also exposed in `GET /settings`.
 - `GET /collections` — List ChromaDB collections
 - `GET /scheduler` — Scheduled job status
+- `GET /scheduler/log` — Scheduled-job runs, newest first (`limit` 1–500, `offset`; `X-Total-Count` / `X-Has-More` headers). Runs are kept in their own capped list, not in the `/ingest_log` audit trail
 - `POST /query` — Query knowledge base (domain, top_k)
 - `POST /ingest` — Ingest text content
 
@@ -46,12 +47,12 @@
 - `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
 
 **Verification & hallucination endpoints:**
-- `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims)
+- `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims). `summary` carries integer counts `total`, `assessed`, `verified`, `agreed`, `unverified`, `uncertain`, `error` and the float `overall_confidence`. `verified` counts claims a source backs; `agreed` counts claims with `status: "verified"` that a second model agreed with and no source backs. `verified + agreed + unverified + uncertain + error == total`, less any claim with `status: "skipped"` (provider credits ran out), which this endpoint does not count.
 - `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
 - `POST /agent/hallucination/feedback` — Record user feedback on a verification claim (correct/incorrect)
-- `POST /agent/verify-stream` — SSE streaming truth verification with keepalive heartbeats, supports expert mode (Grok 4) and anti-circularity via `source_artifact_ids`
-- `POST /verification/save` — Persist verification report to Neo4j
-- `GET /verification/{conversation_id}` — Retrieve saved verification report
+- `POST /agent/verify-stream` — SSE streaming truth verification with keepalive heartbeats, supports expert mode (Grok 4) and anti-circularity via `source_artifact_ids`. The `summary` event carries `verified`, `agreed`, `unverified`, `uncertain`, `skipped`, `total` (the first five sum to `total`) plus `assessed` and `overall_confidence`; `summary_update` repeats the counts after the retry sweep.
+- `POST /verification/save` — Persist verification report to Neo4j. `agreed` is optional; when it is not sent the report is stored without an agreed count.
+- `GET /verification/{conversation_id}` — Retrieve saved verification report. `agreed` is `null` on a report stored without one: unknown, not zero.
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
 - `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
@@ -172,9 +173,9 @@
 Versioned facade for external consumers — 17 endpoints. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode`, `context_sources` and `source_config` — see [Source gates](#source-gates) below)
-- `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
+- `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`; `summary` carries the same keys, `agreed` included)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
-- `GET /sdk/v1/health` — Health check with `version`, `app_version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model). `version` is the `/sdk/v1` **wire contract** version (e.g. `1.2.0`); `app_version` is the application build (e.g. `1.0.7`) — they are different numbers.
+- `GET /sdk/v1/health` — Health check with `version`, `app_version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model). `version` is the `/sdk/v1` **wire contract** version (e.g. `1.3.0`); `app_version` is the application build (e.g. `1.0.7`) — they are different numbers.
 
 **External-client backend support.** `/sdk/v1/ingest` and `/sdk/v1/query` accept **client-defined domains** without pre-registering the domain itself — an unknown domain inside the consumer's grant degrades to empty results, never a 400. The grant is the consumer's `allowed_domains` in `CONSUMER_REGISTRY` (keyed by `X-Client-ID`); a domain outside it returns **403** `consumer_domain_restricted`, and a consumer that is not in the registry is granted `general` only. `/sdk/v1/ingest` accepts a `metadata` object (arbitrary provenance, stored + retrievable; `tags` preserved alongside). `/sdk/v1/llm/complete` accepts custom `task_type` values (unknown → safe internal routing). See [`SDK_GUIDE.md` § Using Cerid as a backend](SDK_GUIDE.md).
 
@@ -628,10 +629,12 @@ make deps-check
 ### Plugins
 - `GET /plugins` — List plugins with status
 - `GET /plugins/{name}` — Get plugin details
-- `POST /plugins/{name}/enable` — Enable plugin
+- `POST /plugins/{name}/enable` — Enable plugin. 403 when the licence tier
+  or `CERID_ENABLED_PLUGINS` does not admit it
 - `POST /plugins/{name}/disable` — Disable plugin
-- `GET /plugins/{name}/config` — Get plugin configuration
-- `PUT /plugins/{name}/config` — Update plugin configuration
+
+Plugins load once, at server start. `enabled` is what the next start will do;
+`restart_required` is true while that differs from what is running now.
 - `POST /plugins/scan` — Scan for new plugins
 
 ### Custom Agents
@@ -660,12 +663,11 @@ Browse and search community plugins from the external registry.
 
 ### System Monitor
 
-Storage metrics and ingestion history.
+Storage metrics. Ingestion history is served by `GET /ingest_log`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/system/storage` | Aggregated storage metrics across ChromaDB, Neo4j, Redis, BM25 (cached 60s). Returns status: healthy/warning/critical |
-| `GET` | `/admin/ingest-history` | Recent ingestion events from Redis stream (pagination: `limit`, `offset` as stream cursor) |
 
 ### Webhook Subscriptions
 

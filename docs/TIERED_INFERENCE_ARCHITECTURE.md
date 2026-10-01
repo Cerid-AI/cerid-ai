@@ -2,7 +2,7 @@
 
 > Automatic detection and selection of the fastest available inference provider for embeddings, reranking, and LLM pipeline stages across all supported platforms.
 
-**Version:** 1.1 | **Date:** 2026-04-05 · **Updated:** 2026-05-31 | **Status:** Implemented (Quenchforge + ONNX options live; AMD-discrete GPU shipped in Quenchforge v0.8.0-rc2)
+**Version:** 1.1 | **Date:** 2026-04-05 · **Updated:** 2026-09-30 | **Status:** Implemented (Quenchforge + ONNX options live; AMD-discrete GPU shipped in Quenchforge v0.8.0-rc2; MLX server on Apple silicon)
 
 ---
 
@@ -80,14 +80,28 @@ At startup the system probes the host environment and selects the best available
 
 Each platform follows a strict priority order. The system tries Option 1 first; if unavailable, falls through to the next.
 
+**Local backend by chip type.** On a Mac the host daemon on `:11434` follows the chip: Intel/AMD hosts run **Quenchforge**; Apple-silicon hosts run the **MLX server** (`stacks/mlx-inference`). Both speak the Ollama and OpenAI wire formats.
+
 #### macOS — Apple Silicon (M1/M2/M3/M4)
 
 | Priority | Provider | Backend | Expected Perf | Detection |
 |----------|----------|---------|---------------|-----------|
-| **Option 1** | Ollama | Metal GPU via `/api/embed` | ~3ms/batch-10 (768-dim) | `curl -s http://{OLLAMA_URL}/api/tags` returns 200 |
+| **Option 1** | MLX server (`stacks/mlx-inference/serve.py`) | Metal GPU via MLX; Ollama `/api/*` and OpenAI `/v1/*` | — (not benchmarked here) | `curl -s http://127.0.0.1:11434/api/version` returns `cerid-mlx-<revision>` |
+| **Option 1 (alt)** | Ollama | Metal GPU via `/api/embed` | ~3ms/batch-10 (768-dim) | `curl -s http://{OLLAMA_URL}/api/tags` returns 200 |
 | **Option 2** | FastEmbed sidecar | `onnxruntime-silicon` (CoreML/Metal) | ~5ms/batch-10 | Sidecar health check at `http://localhost:8889/health` |
 | **Option 3** | ONNX in-process (host) | `CoreMLExecutionProvider` | ~5ms/batch-10 | `ort.get_available_providers()` includes `CoreMLExecutionProvider` |
 | **Option 4** | ONNX Docker CPU | `CPUExecutionProvider` | ~15-25ms/batch-10 | Always available (current default) |
+
+**Env matrix for an Apple-silicon host on the MLX server:**
+
+| Variable | Value | Note |
+|----------|-------|------|
+| `INTERNAL_LLM_PROVIDER` / `OLLAMA_URL` | `ollama` / `http://host.docker.internal:11434` | Pin `INTERNAL_LLM_MODEL` to a name `/api/tags` lists. MLX serves several chat models; with no served pin the router cannot choose one and sends local work to OpenRouter |
+| `EMBEDDINGS_PROVIDER` | `quenchforge` | The setting names the client, not the daemon: it calls the OpenAI-compatible `/v1/embeddings`, which MLX serves |
+| `QUENCHFORGE_EMBED_MODEL` | `nomic-embed-text-v1.5` | Must match the model the index was built with |
+| `RERANK_PROVIDER` | `in-process` | MLX has no `/v1/rerank` (404); reranking runs on CPU in the API container |
+| `EMBEDDING_MODEL` | Snowflake pin | Only the in-process fallback. When it differs from the served embedder, a failed MLX embed is refused rather than served from a different vector space |
+| contextplus code-embed | unavailable | MLX does not serve `jina-embeddings-v2-base-code` |
 
 #### macOS — Intel + AMD Radeon
 
@@ -373,6 +387,11 @@ GET /health
 ```
 
 ### 2.4 Startup Integration
+
+> **As built:** there is no `cerid-sidecar` command and nothing starts the
+> sidecar for you. It is `python scripts/cerid-sidecar.py`, installed with
+> `scripts/install-sidecar.sh` and run by the operator. `start-cerid.sh`
+> probes for it and offers to install it; the snippet below is the design.
 
 `scripts/start-cerid.sh` gains a new phase `[0/4] Inference Sidecar`:
 

@@ -330,7 +330,8 @@ class TestVerifiedMemoryPromotion:
             "conversation_id": "conv-123",
             "claims": [
                 {"claim": "Tokyo has a population of 14 million", "verdict": "supported",
-                 "confidence": 0.9, "type": "factual", "nli_entailment": 0.85, "sources": []},
+                 "confidence": 0.9, "type": "factual", "nli_entailment": 0.85,
+                 "source_artifact_id": "art-tokyo"},
             ],
         }
         mock_chroma = MagicMock()
@@ -392,7 +393,8 @@ class TestVerifiedMemoryPromotion:
             "conversation_id": "conv-dup",
             "claims": [
                 {"claim": "Earth orbits the Sun", "verdict": "supported",
-                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9},
+                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9,
+                 "source_artifact_id": "art-orbit"},
             ],
         }
         with patch("core.agents.memory.detect_memory_conflict", new_callable=AsyncMock,
@@ -410,7 +412,8 @@ class TestVerifiedMemoryPromotion:
             "conversation_id": "conv-no-fn",
             "claims": [
                 {"claim": "The Earth orbits the Sun at a distance of 150 million km", "verdict": "supported",
-                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9},
+                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9,
+                 "source_urls": ["https://example.org/orbit"]},
             ],
         }
         with patch("core.agents.memory.detect_memory_conflict", new_callable=AsyncMock, return_value=[]):
@@ -440,7 +443,8 @@ class TestVerifiedMemoryPromotion:
             "conversation_id": "conv-race",
             "claims": [
                 {"claim": claim, "verdict": "supported",
-                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9, "sources": []},
+                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9,
+                 "source_artifact_id": "art-1"},
             ],
         }
 

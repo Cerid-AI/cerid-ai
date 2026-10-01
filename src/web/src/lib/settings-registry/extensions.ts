@@ -29,18 +29,6 @@ export const EXTENSIONS_DEFS: SettingDef[] = [
     type: "boolean",
     writer: { kind: "endpoint", method: "POST", path: "/plugins/{name}/enable" },
   },
-  {
-    id: "extensions.plugins.config",
-    category: "extensions",
-    group: "plugins",
-    level: "advanced",
-    label: "Plugin configuration",
-    helpText: "Key-value configuration for a plugin. Values are stored as strings; the plugin interprets types.",
-    scopeOfEffect: { scope: "server", display: "Applies to this server instance — all sessions." },
-    keywords: ["plugin", "config", "configuration", "settings", "Plugins"],
-    type: "string",
-    writer: { kind: "endpoint", method: "PUT", path: "/plugins/{name}/config" },
-  },
   // ── MCP Governance ─────────────────────────────────────────────────────────
   {
     id: "extensions.mcp.mode",

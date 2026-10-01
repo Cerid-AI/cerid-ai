@@ -326,6 +326,7 @@ class TestOllamaProbeCache:
     def setup_method(self):
         h._ollama_probe_cache = None
         h._ollama_probe_cache_ts = 0.0
+        h._local_server_cache = None
         import core.utils.internal_llm as internal_llm
 
         internal_llm.reset_effective_local_model_cache()
@@ -367,9 +368,11 @@ class TestOllamaProbeCache:
         # One call for the reachability probe, one for the local-model
         # resolver's own served-list fetch (Task 6), and one for the
         # resolver's chat-slot-model root fetch (Task 1) that immediately
-        # follows a successful served-list fetch — each independently
-        # cached, so none repeats across the remaining nine calls.
-        assert calls["n"] == 3, f"expected exactly three /api/tags-or-root probes, got {calls['n']}"
+        # follows a successful served-list fetch. Two more name the server:
+        # /api/version, then the landing route when the version does not say.
+        # Each is independently cached, so none repeats across the remaining
+        # nine calls.
+        assert calls["n"] == 5, f"expected exactly five probes, got {calls['n']}"
         assert result["ollama"] == {
             "reachable": True,
             "models": 1,
@@ -414,5 +417,6 @@ class TestOllamaProbeCache:
         # the local-model resolver (Task 6) resolves once per process and
         # never refetches, so the total is the probe's two calls plus the
         # resolver's own served-list fetch and its chat-slot-model root
-        # fetch (Task 1).
-        assert calls["n"] == 4
+        # fetch (Task 1). Naming the server shares the 60s TTL and takes two
+        # calls each time: /api/version, then the landing route.
+        assert calls["n"] == 8

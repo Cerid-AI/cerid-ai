@@ -13,6 +13,7 @@ vi.mock("@/lib/api", () => ({
   }),
   fetchIngestLog: vi.fn().mockResolvedValue({ entries: [] }),
   fetchSchedulerStatus: vi.fn().mockResolvedValue({ jobs: [], running: false }),
+  fetchSchedulerLog: vi.fn().mockResolvedValue([]),
   fetchDigest: vi.fn().mockResolvedValue({ summary: "", stats: {}, period_hours: 24 }),
   fetchObservabilityMetrics: vi.fn().mockResolvedValue({ metrics: {}, window_minutes: 60 }),
   fetchObservabilityHealthScore: vi.fn().mockResolvedValue({ score: 90, grade: "A", components: {}, window_minutes: 60 }),
@@ -40,12 +41,13 @@ vi.mock("@/lib/api", () => ({
   }),
 }))
 
-import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
+import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchSchedulerLog, fetchDigest } from "@/lib/api"
 import { MonitoringPane } from "@/components/monitoring/monitoring-pane"
 
 const mockFetchMaintenance = fetchMaintenance as ReturnType<typeof vi.fn>
 const mockFetchIngestLog = fetchIngestLog as ReturnType<typeof vi.fn>
 const mockFetchSchedulerStatus = fetchSchedulerStatus as ReturnType<typeof vi.fn>
+const mockFetchSchedulerLog = fetchSchedulerLog as ReturnType<typeof vi.fn>
 const mockFetchDigest = fetchDigest as ReturnType<typeof vi.fn>
 
 function makeWrapper() {
@@ -66,6 +68,7 @@ beforeEach(() => {
   })
   mockFetchIngestLog.mockResolvedValue({ entries: [] })
   mockFetchSchedulerStatus.mockResolvedValue({ jobs: [], running: false })
+  mockFetchSchedulerLog.mockResolvedValue([])
   mockFetchDigest.mockResolvedValue({ summary: "", stats: {}, period_hours: 24 })
 })
 
@@ -116,6 +119,20 @@ describe("MonitoringPane — per-card isError gating (WB-16)", () => {
     render(<MonitoringPane />, { wrapper: makeWrapper() })
     expect(await screen.findByText("Failed to load scheduler status")).toBeInTheDocument()
     expect(screen.queryByText(/Scheduler status appears when the service is running/)).not.toBeInTheDocument()
+  })
+
+  it("shows scheduled-job runs from the scheduler log", async () => {
+    mockFetchSchedulerLog.mockResolvedValue([
+      { event: "scheduled_job", job: "rectify", status: "error", duration_s: 1, detail: "", timestamp: new Date().toISOString() },
+    ])
+    render(<MonitoringPane />, { wrapper: makeWrapper() })
+    expect(await screen.findByText("rectify")).toBeInTheDocument()
+  })
+
+  it("scheduler-log fetch failure is stated, not shown as no runs", async () => {
+    mockFetchSchedulerLog.mockRejectedValue(new Error("Connection refused"))
+    render(<MonitoringPane />, { wrapper: makeWrapper() })
+    expect(await screen.findByText(/Recent runs could not be loaded/)).toBeInTheDocument()
   })
 
   it("ingest-log fetch failure shows a retry alert, not the misleading empty state", async () => {

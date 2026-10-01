@@ -461,6 +461,40 @@ class TestGraphDomainsEndpoint:
         assert data["domains"][0]["salience"] == 45.0
         assert data["domains"][1]["salience"] == 0.0  # default when absent
 
+    def _counts_with_operational(self):
+        def row(name):
+            return {"name": name, "entity_count": 3, "artifact_count": 7,
+                    "in_taxonomy": False, "sub_categories": []}
+        return {
+            "domains": [row("finance"), row("anneal_runs"), row("anneal_lessons")],
+            "uncategorized_entities": 0,
+            "derived_at": "2026-09-27T00:00:00Z",
+        }
+
+    def test_operational_domains_are_not_offered_by_default(self, domains_client):
+        """A consumer's operational corpus (anneal_*) has a :Domain node, but
+        the pickers fed by this endpoint must not list it beside the owner's."""
+        with (
+            patch("app.routers.graph.get_neo4j") as mock_get_neo4j,
+            patch("app.db.neo4j.taxonomy.get_domain_counts") as mock_counts,
+        ):
+            mock_get_neo4j.return_value = MagicMock()
+            mock_counts.return_value = self._counts_with_operational()
+            resp = domains_client.get("/graph/domains")
+        assert [d["name"] for d in resp.json()["domains"]] == ["finance"]
+
+    def test_operational_domains_are_listed_on_request(self, domains_client):
+        with (
+            patch("app.routers.graph.get_neo4j") as mock_get_neo4j,
+            patch("app.db.neo4j.taxonomy.get_domain_counts") as mock_counts,
+        ):
+            mock_get_neo4j.return_value = MagicMock()
+            mock_counts.return_value = self._counts_with_operational()
+            resp = domains_client.get("/graph/domains?include_internal=true")
+        assert [d["name"] for d in resp.json()["domains"]] == [
+            "finance", "anneal_runs", "anneal_lessons",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Strata key extension shape test

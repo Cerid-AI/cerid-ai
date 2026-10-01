@@ -32,7 +32,6 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from app.processor.model_policy import resolve_job_model
@@ -41,6 +40,7 @@ from core.processor import cost as cost_estimator
 from core.processor.job import BaseJob, JobRecord, JobResult, JobState
 from core.processor.mode import processor_is_disabled, resolve_processor_mode
 from core.processor.priority import priority_order
+from core.utils.cpu import effective_cpu_count as _effective_cpu_count
 from core.utils.internal_llm import llm_call_override
 from core.utils.swallowed import log_swallowed_error
 
@@ -50,36 +50,6 @@ logger = logging.getLogger("ai-companion.processor.worker")
 _DEFAULT_MAX_RETRIES = 3
 # Graceful-stop drain timeout in seconds.
 _STOP_TIMEOUT_S = 30.0
-# cgroup v2 CPU quota file: "<quota_us> <period_us>" or "max <period_us>".
-_CGROUP_CPU_MAX_PATH = "/sys/fs/cgroup/cpu.max"
-
-
-def _effective_cpu_count(cpu_max_path: str = _CGROUP_CPU_MAX_PATH) -> float:
-    """Return the CPU count the process can actually use.
-
-    ``os.cpu_count()`` reports the HOST's cores even inside a CPU-quota'd
-    container (observed live: ceiling 16.8 in a 2-CPU cgroup, so the load
-    throttle could mathematically never engage and the container OOM'd).
-    Prefer the cgroup v2 quota when readable; ``"max"`` (no quota) and any
-    read/parse failure fall back to ``os.cpu_count()``.
-    """
-    fallback = float(os.cpu_count() or 1)
-    try:
-        raw = Path(cpu_max_path).read_text().strip()
-    except OSError:
-        return fallback
-    parts = raw.split()
-    if parts and parts[0] == "max":
-        return fallback
-    try:
-        quota_raw, period_raw = parts
-        quota = float(quota_raw)
-        period = float(period_raw)
-    except ValueError:
-        return fallback
-    if quota <= 0 or period <= 0:
-        return fallback
-    return quota / period
 
 
 class ProcessorWorker:
@@ -518,12 +488,12 @@ def build_default_registry() -> dict[str, type[BaseJob]]:
         importlib.import_module(f"{_jobs_pkg.__name__}.{mod.name}")
 
     registry: dict[str, type[BaseJob]] = {}
-    _walk_subclasses(BaseJob, registry)  # type: ignore[arg-type]
+    _walk_subclasses(BaseJob, registry)  # type: ignore[type-abstract]  # walks from the abstract root on purpose
     logger.info("processor.registry built: %s", list(registry.keys()))
     return registry
 
 
-def _walk_subclasses(cls: type, registry: dict[str, type[BaseJob]]) -> None:
+def _walk_subclasses(cls: type[BaseJob], registry: dict[str, type[BaseJob]]) -> None:
     """Recursively collect non-abstract BaseJob subclasses into registry."""
     for sub in cls.__subclasses__():
         # Skip abstract intermediaries (they have __abstractmethods__ set)

@@ -552,6 +552,7 @@ export function KnowledgePane() {
   // Pagination
   const totalCount = results.length
   const paginatedResults = results.slice(0, displayLimit)
+  const relevanceScores = results.map((r) => r.relevance)
   const hasMore = activeSearch ? searchWindowFull : displayLimit < totalCount
   // UX-28: name the scope the count describes. An unlabeled "Showing 50 of
   // 94 artifacts" beside a corpus-wide hero count ("744 artifacts") read as
@@ -1019,6 +1020,7 @@ export function KnowledgePane() {
                       <ArtifactCard
                         key={`${result.artifact_id}-${result.chunk_index}`}
                         result={result}
+                        relevanceAmong={relevanceScores}
                         compact
                         isSelected={selectedArtifactId === result.artifact_id}
                         onSelect={() =>

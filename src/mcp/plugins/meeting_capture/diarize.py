@@ -24,9 +24,9 @@ _PIPELINE_MODEL = "pyannote/speaker-diarization-3.1"
 
 # Pinned to an IMMUTABLE Hugging Face revision, not the repo's default branch.
 #
-# The pip-audit ignore for PYSEC-2026-3624 (lightning RCE via an attacker-crafted
-# checkpoint in load_from_checkpoint — see scripts/audit-python-deps.sh) rests on
-# the claim that no untrusted checkpoint reaches that loader. A hardcoded model
+# lightning 2.6.6 fixed PYSEC-2026-3624 (RCE via an attacker-crafted checkpoint
+# in load_from_checkpoint), and its audit ignore was removed. The pin stays: it
+# is what keeps an untrusted checkpoint away from that loader. A hardcoded model
 # NAME does not establish that: the name resolves to whatever the model repo's
 # default branch points at the moment we fetch it, so a compromised or re-pushed
 # upstream would walk straight into the vulnerable path the ignore calls

@@ -57,6 +57,7 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
                 "detail": detail,
                 "timestamp": utcnow_iso(),
             },
+            log_key=config.REDIS_SCHEDULER_LOG,
         )
     except Exception as e:
         log_swallowed_error('app.scheduler', e)
@@ -151,8 +152,20 @@ async def _enqueue_and_await_completion(
         # terminal state; keep the "enqueued" log _enqueue_periodic already wrote.
         return job_id
 
-    deadline = time.time() + _STAGE_COMPLETION_TIMEOUT_S
-    while time.time() < deadline:
+    # The completion budget covers the run, not the wait behind other jobs in
+    # the processor queue, so it starts when the worker stamps started_at.
+    # Until then the only bound is the age at which the queue itself treats a
+    # pending job as orphaned.
+    get_record = getattr(queue, "get", None)
+    queue_wait_limit_s = float(getattr(config, "PROCESSOR_PENDING_STALE_TTL_S", 21600))
+    enqueued_at = time.time()
+    started_at: float | None = None
+    while True:
+        if started_at is None:
+            if time.time() - enqueued_at >= queue_wait_limit_s:
+                break
+        elif time.time() - started_at >= _STAGE_COMPLETION_TIMEOUT_S:
+            break
         await asyncio.sleep(_STAGE_COMPLETION_POLL_S)
         try:
             records = await list_recent(50)
@@ -173,15 +186,24 @@ async def _enqueue_and_await_completion(
                 _log_execution(job_name, "success", duration)
                 logger.info("%s job_id=%s completed state=%s", job_name, job_id, record.state)
             return job_id
+        if started_at is None and get_record is not None:
+            try:
+                current = await get_record(job_id)
+            except Exception as exc:  # noqa: BLE001 — polling must never crash the scheduler
+                log_swallowed_error("app.scheduler.await_completion", exc)
+                break
+            if current is not None and current.started_at is not None:
+                started_at = current.started_at.timestamp()
 
-    _log_execution(
-        job_name, "timeout", time.time() - start,
-        f"job_id={job_id} not observed completed within {_STAGE_COMPLETION_TIMEOUT_S:.0f}s",
-    )
-    logger.warning(
-        "%s job_id=%s did not reach a terminal state within %.0fs",
-        job_name, job_id, _STAGE_COMPLETION_TIMEOUT_S,
-    )
+    if started_at is None:
+        detail = f"job_id={job_id} not observed started or completed after {time.time() - enqueued_at:.0f}s"
+    else:
+        detail = (
+            f"job_id={job_id} not observed completed within "
+            f"{_STAGE_COMPLETION_TIMEOUT_S:.0f}s of starting"
+        )
+    _log_execution(job_name, "timeout", time.time() - start, detail)
+    logger.warning("%s %s", job_name, detail)
     return job_id
 
 
@@ -227,8 +249,19 @@ async def _run_daily_digest() -> None:
             f"inbox_urgent={result.inbox_urgent_count}, "
             f"skipped={result.skipped}"
         )
-        _log_execution("daily_digest", "success", duration, msg)
-        logger.info("Scheduled daily digest completed: %s", msg)
+        # The job asks for the digest to be saved, so a digest that ran
+        # but came back without an artifact id was not saved.
+        if not result.skipped and result.persisted_artifact_id is None:
+            _log_execution("daily_digest", "error", duration, f"digest was not saved; {msg}")
+            logger.error("Scheduled daily digest was not saved: %s", msg)
+            return
+        if result.partial:
+            msg = f"written summary missing ({result.partial_reason}); {msg}"
+            _log_execution("daily_digest", "partial", duration, msg)
+            logger.warning("Scheduled daily digest is partial: %s", msg)
+        else:
+            _log_execution("daily_digest", "success", duration, msg)
+            logger.info("Scheduled daily digest completed: %s", msg)
 
         # Fire the digest.ready webhook so in-app surfaces (toast,
         # SSE bridge, future email worker) can deliver it.
@@ -242,7 +275,13 @@ async def _run_daily_digest() -> None:
                     "flagged_count": result.flagged_count,
                     "inbox_urgent_count": result.inbox_urgent_count,
                     "persisted_artifact_id": result.persisted_artifact_id,
-                    "summary": "Your daily digest is ready.",
+                    "partial": result.partial,
+                    "partial_reason": result.partial_reason,
+                    "summary": (
+                        "Your daily digest has its counts but no written summary."
+                        if result.partial
+                        else "Your daily digest is ready."
+                    ),
                 })
             except Exception as exc:  # noqa: BLE001
                 log_swallowed_error("daily_digest.fire_event", exc)
@@ -2772,6 +2811,49 @@ def stop_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         logger.info("Scheduler stopped")
         _scheduler = None
+
+
+def _commercial_billing_present() -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("routers.billing") is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+async def _run_community_license_reconcile() -> None:
+    """Drop an expired key and end a lapsed trial. The status endpoints only
+    report, so without this an expiry would hold until the next restart."""
+    start = time.time()
+    try:
+        from app.routers.license import reconcile_license_state
+
+        tier = reconcile_license_state(get_redis())
+        _log_execution("license_reconcile", "ok", time.time() - start, f"tier={tier}")
+    except Exception as e:
+        log_swallowed_error("app.scheduler.license_reconcile", e)
+        _log_execution("license_reconcile", "error", time.time() - start, str(e))
+        logger.warning("Scheduled license reconcile failed: %s", e)
+
+
+def register_community_license_job(scheduler: AsyncIOScheduler) -> None:
+    # The commercial build registers its own job under the same id; both
+    # own the same Redis keys, so only one of them may run.
+    if _commercial_billing_present():
+        return
+    scheduler.add_job(
+        _run_community_license_reconcile,
+        "interval",
+        hours=1,
+        id="license_reconcile",
+        name="License expiry reconcile",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+
+_post_setup_hooks.append(register_community_license_job)
 
 
 def get_scheduler() -> AsyncIOScheduler | None:

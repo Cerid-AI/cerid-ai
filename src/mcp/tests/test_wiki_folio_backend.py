@@ -350,9 +350,13 @@ class TestWikiIndexEndpoint:
         async def _mock_list_entities(driver, *, limit=100, search=None, include_internal=False):
             return filtered
 
+        async def _mock_count_entities(driver, *, search=None, include_internal=False):
+            return len(filtered)
+
         with (
             patch("app.deps.get_neo4j", return_value=MagicMock()),
             patch("app.services.wiki_pages.list_entities", new=_mock_list_entities),
+            patch("app.services.wiki_pages.count_entities", new=_mock_count_entities),
         ):
             resp = client.get("/wiki/index?q=alpha&order=name")
 

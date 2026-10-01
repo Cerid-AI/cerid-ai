@@ -11,10 +11,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { humanizeTrigger } from "@/lib/humanize-trigger"
 import { triggerSchedulerJob } from "@/lib/api/kb"
-import type { SchedulerStatus as SchedulerStatusType } from "@/lib/types"
+import type { SchedulerRun, SchedulerStatus as SchedulerStatusType } from "@/lib/types"
 
 interface SchedulerStatusProps {
   scheduler: SchedulerStatusType | undefined
+  runs?: SchedulerRun[]
+  runsError?: boolean
+}
+
+const RUN_STATUS_STYLES: Record<string, string> = {
+  success: "bg-green-500/10 text-green-700 dark:text-green-400",
+  partial: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
+  error: "bg-red-500/10 text-red-700 dark:text-red-400",
 }
 
 // Query keys to refetch after a job runs, so the surfaces it feeds update
@@ -25,7 +33,7 @@ const JOB_AFFECTED_QUERIES: Record<string, string[]> = {
   community_refresh: ["constellation-embeddings-3d"],
 }
 
-export function SchedulerStatus({ scheduler }: SchedulerStatusProps) {
+export function SchedulerStatus({ scheduler, runs, runsError }: SchedulerStatusProps) {
   const queryClient = useQueryClient()
 
   const runJob = useMutation({
@@ -108,6 +116,29 @@ export function SchedulerStatus({ scheduler }: SchedulerStatusProps) {
             })}
           </div>
         )}
+        {runsError ? (
+          <p className="mt-3 text-xs text-muted-foreground">Recent runs could not be loaded.</p>
+        ) : runs && runs.length > 0 ? (
+          <div className="mt-3 border-t pt-2">
+            <p className="mb-1 text-xs font-medium text-muted-foreground">Recent runs</p>
+            <div className="max-h-48 space-y-1 overflow-y-auto">
+              {runs.map((run, i) => (
+                <div key={`${run.timestamp}-${i}`} className="flex items-center gap-2 text-xs">
+                  <Badge variant="outline" className={`text-label-xs ${RUN_STATUS_STYLES[run.status] ?? ""}`}>
+                    {run.status}
+                  </Badge>
+                  <span className="shrink-0 font-medium">{run.job}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground" title={run.detail}>
+                    {run.detail}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground" title={run.timestamp}>
+                    {new Date(run.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )

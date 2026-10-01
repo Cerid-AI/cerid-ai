@@ -32,7 +32,16 @@ from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
-from utils.domain_privacy import sensitive_domains_opted_in, visible_domains
+from utils.domain_privacy import (
+    owner_domains,
+    sensitive_domains_opted_in,
+    visible_domains,
+)
+from utils.folder_privacy import (
+    chunk_excluded,
+    exclude_folders,
+    exclusion_degraded_reason,
+)
 
 logger = logging.getLogger("ai-companion.query_agent")
 
@@ -226,13 +235,17 @@ def _parent_child_enabled() -> bool:
 
 
 def _pc_fuse_child_filter(where: dict | None) -> dict | None:
-    """Fuse ``{"chunk_level": "child"}`` into a Chroma ``where`` clause.
+    """Fuse a parent-excluding clause into a Chroma ``where`` clause.
 
-    Used by the multi-domain vector query so retrieval ranks only against
-    child chunks when parent-child retrieval is on. Stacks cleanly with
+    Used by the multi-domain vector query so retrieval does not rank parent
+    chunks directly when parent-child retrieval is on. Stacks cleanly with
     ``$and`` if other clauses are already present.
+
+    The clause excludes parents rather than requiring ``"child"``: chunks
+    stored before ``chunk_level`` existed carry no such key, and Chroma's
+    equality match drops a row that lacks the key while ``$ne`` keeps it.
     """
-    child_clause: dict[str, Any] = {"chunk_level": "child"}
+    child_clause: dict[str, Any] = {"chunk_level": {"$ne": "parent"}}
     if where is None:
         return child_clause
     if "chunk_level" in where:
@@ -313,9 +326,10 @@ def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
     """Return non-requested domains with their max affinity score."""
     requested_set = set(requested)
     adjacent: dict[str, float] = {}
+    candidates = owner_domains()
     for req in requested:
         explicit = config.DOMAIN_AFFINITY.get(req, {})
-        for other in config.DOMAINS:
+        for other in candidates:
             if other in requested_set:
                 continue
             weight = explicit.get(other, config.CROSS_DOMAIN_DEFAULT_AFFINITY)
@@ -519,6 +533,35 @@ def _exclude_pending(where: dict | None) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Watched folders marked not searchable
+# ---------------------------------------------------------------------------
+
+# Every Chroma read listed at ``_exclude_pending`` above, and the HyPE parent
+# fetch, also excludes the folders this returns. The reader lives in the app
+# layer and is registered at startup; unregistered means no folder store.
+_unsearchable_folders: Callable[[], tuple[str, ...]] | None = None
+
+
+def set_unsearchable_folder_provider(
+    fn: Callable[[], tuple[str, ...]] | None,
+) -> None:
+    """Register the reader of watched folders whose Searchable toggle is off."""
+    global _unsearchable_folders
+    _unsearchable_folders = fn
+
+
+def _unsearchable_folder_ids() -> tuple[str, ...]:
+    """Folder ids to exclude. Raises when the list cannot be read.
+
+    Call it outside any handler that turns an exception into an empty
+    result: a query that cannot apply the exclusion must fail, not answer.
+    """
+    if _unsearchable_folders is None:
+        return ()
+    return tuple(_unsearchable_folders())
+
+
+# ---------------------------------------------------------------------------
 # Per-collection document-count cache
 # ---------------------------------------------------------------------------
 #
@@ -588,7 +631,7 @@ async def multi_domain_query(
     the caller surfaces this as informational (``domains_skipped_empty``).
     """
     if domains is None:
-        domains = config.DOMAINS
+        domains = owner_domains()
 
     # M-PRIV chokepoint. Every retrieval path reaches Chroma through this
     # function — the main scan, decomposed sub-queries, the adjacent-domain
@@ -616,6 +659,8 @@ async def multi_domain_query(
 
     if chroma_client is None:
         raise ValueError("chroma_client is required")
+
+    folders_off = _unsearchable_folder_ids()
 
     # Pre-check which collections actually exist to skip missing domains fast
     try:
@@ -645,9 +690,11 @@ async def multi_domain_query(
             # so it can detect cross-tenant escape attempts (a caller-supplied
             # `tenant_id: <other>` nested inside `$and` would be invisible).
             # Layer the pending-exclude on AFTER tenant scoping.
-            _where = _exclude_pending(with_tenant_scope(metadata_filter))
-            # RAG C2.6 — when parent-child retrieval is on, rank only against
-            # child chunks. The post-ranking pass below swaps each child's
+            _where = exclude_folders(
+                _exclude_pending(with_tenant_scope(metadata_filter)), folders_off,
+            )
+            # RAG C2.6 — when parent-child retrieval is on, keep parent chunks
+            # out of the ranking. The post-ranking pass below swaps each child's
             # ``content`` for the parent's text so downstream rerank +
             # context assembly operate on the richer parent context while
             # the relevance score still reflects the precise child match.
@@ -699,7 +746,22 @@ async def multi_domain_query(
                     fetch_tasks.append(asyncio.to_thread(
                         sparse_mod.search_sparse, domain, query, top_k,
                     ))
-                fetch_results = await asyncio.gather(*fetch_tasks)
+                # A failed lexical arm counts as no hits from that arm; the
+                # vector hits in ``formatted`` are still returned.
+                fetch_results: list[list[tuple[str, float]]] = []
+                for fetched_hits in await asyncio.gather(
+                    *fetch_tasks, return_exceptions=True,
+                ):
+                    if isinstance(fetched_hits, Exception):
+                        log_swallowed_error(
+                            "core.agents.query_agent.lexical_search",
+                            fetched_hits,
+                        )
+                        fetch_results.append([])
+                    elif isinstance(fetched_hits, BaseException):
+                        raise fetched_hits
+                    else:
+                        fetch_results.append(fetched_hits)
 
                 # Unpack in registration order so the indices match.
                 ridx = 0
@@ -823,6 +885,8 @@ async def multi_domain_query(
                                 if _os.getenv("CERID_FILTER_PENDING_CHUNKS", "true").strip().lower() not in ("false", "0", "no", "off"):
                                     if meta.get("cerid_state") == "pending":
                                         continue
+                                if chunk_excluded(meta, folders_off):
+                                    continue
                                 # Enforce metadata_filter on BM25-only results too
                                 if metadata_filter and not all(
                                     meta.get(k) == v for k, v in metadata_filter.items()
@@ -1014,6 +1078,7 @@ async def graph_expand_results(
         raise ValueError("chroma_client is required for graph expansion")
 
     existing_ids = {r.get("chunk_id") for r in results}
+    folders_off = _unsearchable_folder_ids()
 
     async def _fetch_related(rel_artifact: dict) -> list[dict[str, Any]]:
         """Fetch and score chunks for a single related artifact."""
@@ -1030,8 +1095,11 @@ async def graph_expand_results(
             collection.query,
             query_texts=[query],
             n_results=min(3, len(chunk_ids)),
-            where=with_tenant_scope(
-                _exclude_pending({"artifact_id": rel_artifact["id"]})
+            where=exclude_folders(
+                with_tenant_scope(
+                    _exclude_pending({"artifact_id": rel_artifact["id"]})
+                ),
+                folders_off,
             ),
             include=["documents", "metadatas", "distances"],
         )
@@ -1146,6 +1214,7 @@ async def graph_expand_results_via_entities(
     existing_chunk_ids = {r.get("chunk_id") for r in results}
     existing_artifact_ids = set(seed_ids)
     expanded: list[dict[str, Any]] = []
+    folders_off = _unsearchable_folder_ids()
 
     async def _fetch_for_artifact(
         artifact_id: str, shared_count: int,
@@ -1166,8 +1235,11 @@ async def graph_expand_results_via_entities(
                 collection.query,
                 query_texts=[query],
                 n_results=2,
-                where=with_tenant_scope(
-                    _exclude_pending({"artifact_id": artifact_id})
+                where=exclude_folders(
+                    with_tenant_scope(
+                        _exclude_pending({"artifact_id": artifact_id})
+                    ),
+                    folders_off,
                 ),
                 include=["documents", "metadatas", "distances"],
             )
@@ -1489,6 +1561,7 @@ async def _rerank_cross_encoder(
         with span("retrieval.rerank", "cross_encoder", k=len(results)):
             reranked = await loop.run_in_executor(None, ce_rerank, query, results)
         _rerank_served_leg.set("onnx")
+        _record_in_process_rerank(served=True)
         return reranked
     except Exception as e:
         log_swallowed_error('core.agents.query_agent', e)
@@ -1500,7 +1573,28 @@ async def _rerank_cross_encoder(
         for r in results:
             r["reranker_status"] = "onnx_failed_no_fallback"
         _rerank_served_leg.set("onnx_failed_no_fallback")
+        _record_in_process_rerank(served=False, detail=str(e))
         return results
+
+
+def _record_in_process_rerank(*, served: bool, detail: str = "") -> None:
+    """Tell /health what the in-process reranker did, when it is the one named.
+
+    Named and serving, the lane read "serving: unknown" for ever, because only
+    the remote legs reported. When another provider is named this leg is that
+    provider's fallback, and the fallback has already been recorded; a success
+    here must not clear it.
+    """
+    from utils.inference_config import in_process_rerank_requested
+    if not in_process_rerank_requested():
+        return
+    from core.utils import inference_health
+    if served:
+        inference_health.record_success("rerank", provider="in-process")
+    else:
+        inference_health.record_fallback(
+            "rerank", configured="in-process", served_by="none", detail=detail,
+        )
 
 
 # Quenchforge serves a single rerank slot per machine; firing N concurrent
@@ -1582,6 +1676,16 @@ async def _maybe_rerank_via_sidecar(
         log_swallowed_error("core.agents.query_agent.sidecar_detect", exc)
         return None
     if cfg.provider != "fastembed-sidecar" or not cfg.sidecar_available:
+        # Asked for by name and not there: the in-process model serves, and
+        # /health has to say so. Left unrecorded, the lane read "serving:
+        # unknown, degraded: false" on a host whose sidecar had never run.
+        from utils.inference_config import sidecar_rerank_requested
+        if sidecar_rerank_requested():
+            from core.utils import inference_health
+            inference_health.record_fallback(
+                "rerank", configured="sidecar", served_by="onnx",
+                detail=f"no sidecar answered at {cfg.sidecar_url or 'the configured URL'}",
+            )
         return None
     try:
         from utils.inference_sidecar_client import sidecar_rerank
@@ -2164,7 +2268,7 @@ async def agent_query(
         # Report the domains the timed-out search was launched over — the
         # consumer-facing signal was a permanent [] on every degraded
         # envelope, which read as "nothing was searched" (kb-idle-zero).
-        env.extras["domains_searched"] = list(domains) if domains else list(config.DOMAINS)
+        env.extras["domains_searched"] = list(domains) if domains else owner_domains()
         env.mark_degraded(
             budget_seconds=budget,
             reason=(
@@ -2271,6 +2375,7 @@ async def agent_query_full(
         neo4j_driver=neo4j_driver,
         redis_client=redis_client,
         model=model,
+        budget_seconds=budget_seconds,
     )
 
     # top_k is documented as "maximum results to return", and until this cap
@@ -2322,7 +2427,9 @@ async def _hydrate_hype_hits(
     ``_exclude_pending(with_tenant_scope(...))`` filter the content path uses,
     and drop any hit whose parent that filter does not return.
     """
-    where = _exclude_pending(with_tenant_scope(None))
+    where = exclude_folders(
+        _exclude_pending(with_tenant_scope(None)), _unsearchable_folder_ids(),
+    )
     try:
         base_coll = await asyncio.to_thread(chroma_client.get_collection, coll_name)
         parents = await asyncio.to_thread(
@@ -2395,7 +2502,7 @@ async def _augment_with_hype(
     chroma_client:
         ChromaDB client.  ``None`` → skip silently.
     domains:
-        Effective domain list.  ``None`` defaults to ``config.DOMAINS``.
+        Effective domain list.  ``None`` defaults to ``owner_domains()``.
     """
     if not _hype_retrieval_enabled() or chroma_client is None:
         return results
@@ -2413,13 +2520,17 @@ async def _augment_with_hype(
         # Build the list of base collections from the effective domains, under
         # the same sensitive-domain gate the content path applies.
         _domains = visible_domains(
-            list(domains) if domains else list(config.DOMAINS),
+            list(domains) if domains else owner_domains(),
             include_sensitive=sensitive_domains_opted_in(),
         ) or []
 
-        # Embed query once.  _ef returns list[list[float]]; take first row.
+        # Embed query once and take the first row. The rows are float32
+        # ndarrays, and Chroma rejects a list of numpy scalars, so convert
+        # through tolist() rather than list().
         _raw_embeddings: list[list[float]] = await asyncio.to_thread(_ef, [query])
-        query_embedding: list[float] = list(_raw_embeddings[0])
+        query_embedding: list[float] = np.asarray(
+            _raw_embeddings[0], dtype=np.float32,
+        ).tolist()
 
         # Query each HyPE collection and collect hits.
         hype_hits: list[dict[str, Any]] = []
@@ -2450,12 +2561,14 @@ async def _augment_with_hype(
                             best_by_parent.get(parent_id, 0.0), relevance,
                         )
             except Exception as e:  # noqa: BLE001 — observability boundary
-                # HyPE collection missing (flag was off at index time) — not an error.
-                log_swallowed_error(
-                    "core.agents.query_agent._augment_with_hype.collection_get",
-                    e,
-                    context={"hype_collection": hype_coll_name},
-                )
+                # HyPE collection missing (flag was off at index time) — not an
+                # error. Matched by name: core does not import chromadb.
+                if type(e).__name__ != "NotFoundError":
+                    log_swallowed_error(
+                        "core.agents.query_agent._augment_with_hype.collection_get",
+                        e,
+                        context={"hype_collection": hype_coll_name},
+                    )
             if best_by_parent:
                 hype_hits.extend(await _hydrate_hype_hits(
                     chroma_client, coll_name, _domain, best_by_parent,
@@ -2767,7 +2880,7 @@ async def _agent_query_impl(
                 "context": "",
                 "sources": [],
                 "confidence": 0.0,
-                "domains_searched": domains if domains else config.DOMAINS,
+                "domains_searched": domains if domains else owner_domains(),
                 "total_results": 0,
                 "token_budget_used": 0,
                 "graph_results": 0,
@@ -2786,7 +2899,7 @@ async def _agent_query_impl(
     # creating circular noise (same pattern as hallucination.py:87-89).
     effective_domains = domains
     if effective_domains is None and conversation_messages:
-        _followup_domains = [d for d in config.DOMAINS if d != "conversations"]
+        _followup_domains = [d for d in owner_domains() if d != "conversations"]
         # CH4: keep the most-likely domains first and cap the tail so the
         # all-domain follow-up fan-out stays within the wall-clock budget
         # without losing coherence (least-relevant domains drop, not arbitrary).
@@ -2828,7 +2941,7 @@ async def _agent_query_impl(
     # scanned rather than what the caller asked for. "All domains" is expanded
     # first — the filter can only subtract from an explicit list.
     _visible = visible_domains(
-        list(effective_domains) if effective_domains is not None else list(config.DOMAINS),
+        list(effective_domains) if effective_domains is not None else owner_domains(),
         include_sensitive=sensitive_domains_opted_in(),
     ) or []
     if not _visible:
@@ -2931,7 +3044,7 @@ async def _agent_query_impl(
 
     # Search adjacent domains at reduced weight when specific domains are requested.
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
-    if not strict_domains and domains and set(domains) != set(config.DOMAINS):
+    if not strict_domains and domains and set(domains) != set(owner_domains()):
         adjacent = _get_adjacent_domains(domains)
         # Consumer isolation is not conditional on strict_domains: allowed_domains
         # reads as the isolation control, so the bleed stays inside it even when
@@ -3264,7 +3377,7 @@ async def _agent_query_impl(
         # Report the domains actually searched (after conversations-drop,
         # follow-up cap, and consumer allow-listing), not the raw requested set
         # (CR-074).
-        "domains_searched": list(effective_domains) if effective_domains else list(config.DOMAINS),
+        "domains_searched": list(effective_domains) if effective_domains else owner_domains(),
         # Requested domains whose collection existed but held zero documents
         # at query time — skipped before any embedding/Chroma/BM25 work.
         "domains_skipped_empty": sorted(domains_skipped_empty),
@@ -3282,6 +3395,14 @@ async def _agent_query_impl(
     if _rerank_degraded:
         result_dict["retrieval_degraded"] = True
         result_dict["degraded_reason"] = _rerank_degraded
+
+    if _unsearchable_folders is not None:
+        _folders_degraded = exclusion_degraded_reason()
+        if _folders_degraded:
+            result_dict["retrieval_degraded"] = True
+            result_dict["degraded_reason"] = " ".join(
+                r for r in (result_dict.get("degraded_reason"), _folders_degraded) if r
+            )
 
     timings = timer.result()
     if timings:

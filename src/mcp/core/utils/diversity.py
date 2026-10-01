@@ -4,16 +4,17 @@
 """Maximal Marginal Relevance (MMR) diversity reordering.
 
 Reduces redundancy in retrieval results by penalizing documents too
-similar to already-selected documents. Prefers cosine similarity over
-each result's pre-computed embedding (upstream retrieval attaches it under
-the ``"embedding"`` key) when BOTH documents in a comparison carry one;
-falls back to Jaccard similarity on stemmed term sets otherwise. This
-module never computes a new embedding — it is a pure re-ranker over
-whatever similarity signal retrieval already put in the result dict, so a
-paraphrase pair with low token overlap but high semantic similarity (which
-Jaccard is blind to) is still recognized as redundant when embeddings are
-present, while callers that never attach embeddings get the original
-Jaccard-only behavior unchanged.
+similar to already-selected documents. Similarity between two documents
+is Jaccard on stemmed term sets, unless BOTH carry a pre-computed vector
+under the ``"embedding"`` key, in which case it is cosine similarity over
+those vectors. This module never computes an embedding.
+
+No retrieval path attaches ``"embedding"`` to its results today: the Chroma
+queries in ``query_agent`` do not request embeddings and the sole caller,
+``agent_query``, passes results as retrieved. In production the diversity
+penalty is therefore always Jaccard, which does not see a paraphrase pair
+with low token overlap as redundant. The cosine branch is exercised only
+by tests and by any caller that attaches embeddings itself.
 
 Canonical location as of Sprint D. Previously at ``src/mcp/utils/diversity.py``;
 a thin bridge stays there until Sprint E retires the utils/ bridge dir.
@@ -109,10 +110,9 @@ def mmr_reorder(
 
     The ``d_selected`` similarity term uses cosine similarity over each
     result's ``"embedding"`` field when BOTH documents in a pairwise
-    comparison carry one (no embedding is computed here — see module
-    docstring); it falls back to Jaccard on stemmed term sets per-pair
-    otherwise, so partial embedding coverage degrades gracefully instead
-    of an all-or-nothing switch.
+    comparison carry one; it falls back to Jaccard on stemmed term sets
+    per-pair otherwise. Production results carry no ``"embedding"`` field,
+    so production always takes the Jaccard path (see module docstring).
     """
     if len(results) <= 1:
         return results

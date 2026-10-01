@@ -366,3 +366,121 @@ def test_reconcile_restores_a_running_trial_after_restart(client, fake_redis):
     features_mod.set_tier("community")
 
     assert lic.reconcile_license_state(fake_redis) == "pro"
+
+
+# --- Reads do not write ------------------------------------------------------
+#
+# A GET is reachable from a page load, a prefetch or a cross-site image tag,
+# so it reports the entitlement and leaves Redis and the runtime tier alone.
+
+def _seed_expired_key(fake_redis) -> dict:
+    fake_redis._state[lic._LICENSE_KEY] = _well_formed_key()
+    fake_redis._state[lic._LICENSE_TIER] = "pro"
+    fake_redis._state[lic._LICENSE_EXPIRES] = str(int(time.time()) - 60)
+    fake_redis._state[lic._LICENSE_STATUS] = json.dumps({
+        "active": True, "tier": "pro", "source": "license_key",
+        "expires_at": int(time.time()) - 60,
+    })
+    return dict(fake_redis._state)
+
+
+@pytest.mark.parametrize("path", ["/license/status", "/license/capabilities"])
+def test_a_read_leaves_an_expired_key_and_the_runtime_tier_alone(client, fake_redis, path):
+    import config.features as features_mod
+
+    stored = _seed_expired_key(fake_redis)
+    features_mod.set_tier("pro")
+
+    assert client.get(path).status_code == 200
+
+    assert fake_redis._state == stored
+    fake_redis.set.assert_not_called()
+    fake_redis.delete.assert_not_called()
+    assert features_mod.FEATURE_TIER == "pro"
+
+
+def test_status_reports_an_expired_key_as_the_baseline(client, fake_redis):
+    _seed_expired_key(fake_redis)
+
+    body = client.get("/license/status").json()
+
+    assert body["tier"] == "community"
+    assert body["active"] is False
+    assert body["source"] == "default"
+    assert body["key_masked"] is None
+    assert body["expires_at"] is None
+
+
+def test_capabilities_reports_an_expired_key_as_unlicensed(client, fake_redis):
+    _seed_expired_key(fake_redis)
+    # The trial is still on the table, so an expired key reads as community.
+    assert client.get("/license/capabilities").json()["license_state"] == lic.STATE_COMMUNITY
+
+
+def test_a_read_does_not_raise_the_runtime_tier(client, fake_redis):
+    import config.features as features_mod
+
+    fake_redis._state[lic._LICENSE_STATUS] = json.dumps({
+        "active": True, "tier": "pro", "source": "license_key", "expires_at": None,
+    })
+    features_mod.set_tier("community")
+
+    assert client.get("/license/status").json()["tier"] == "pro"
+    assert features_mod.FEATURE_TIER == "community"
+
+
+@pytest.fixture
+def community_scheduler(fake_redis, monkeypatch):
+    import app.scheduler as scheduler
+
+    monkeypatch.setattr(scheduler, "get_redis", lambda: fake_redis)
+    monkeypatch.setattr(scheduler, "_commercial_billing_present", lambda: False)
+    monkeypatch.delenv("CERID_TIER", raising=False)
+    return scheduler
+
+
+@pytest.mark.asyncio
+async def test_the_scheduled_reconcile_clears_an_expired_key(community_scheduler, fake_redis):
+    import config.features as features_mod
+
+    _seed_expired_key(fake_redis)
+    features_mod.set_tier("pro")
+
+    await community_scheduler._run_community_license_reconcile()
+
+    for key in (lic._LICENSE_KEY, lic._LICENSE_TIER, lic._LICENSE_EXPIRES, lic._LICENSE_STATUS):
+        assert key not in fake_redis._state
+    assert features_mod.FEATURE_TIER == "community"
+
+
+@pytest.mark.asyncio
+async def test_the_scheduled_reconcile_ends_a_lapsed_trial(community_scheduler, fake_redis):
+    import config.features as features_mod
+
+    past = int(time.time()) - 1
+    fake_redis._state[lic._TRIAL_STARTED] = str(past - 100)
+    fake_redis._state[lic._TRIAL_EXPIRES] = str(past)
+    features_mod.set_tier("pro")
+
+    await community_scheduler._run_community_license_reconcile()
+
+    assert features_mod.FEATURE_TIER == "community"
+
+
+def test_the_community_reconcile_is_scheduled_without_the_commercial_router(community_scheduler):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    scheduler = AsyncIOScheduler()
+    community_scheduler.register_community_license_job(scheduler)
+    assert [j.id for j in scheduler.get_jobs()] == ["license_reconcile"]
+
+
+def test_the_community_reconcile_stands_down_for_the_commercial_router(
+    community_scheduler, monkeypatch,
+):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    monkeypatch.setattr(community_scheduler, "_commercial_billing_present", lambda: True)
+    scheduler = AsyncIOScheduler()
+    community_scheduler.register_community_license_job(scheduler)
+    assert scheduler.get_jobs() == []

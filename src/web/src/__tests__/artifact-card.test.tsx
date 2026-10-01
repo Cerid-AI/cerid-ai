@@ -33,11 +33,20 @@ describe("ArtifactCard", () => {
     expect(screen.getByText("coding")).toBeInTheDocument()
   })
 
-  it("shows relevance percentage", () => {
+  it("shows relevance as a bar relative to the best result in the list", () => {
+    render(
+      <ArtifactCard result={makeResult({ relevance: 0.46 })} relevanceAmong={[0.92, 0.46]} isSelected={false} onSelect={vi.fn()} onInject={vi.fn()} />,
+    )
+    expect(screen.getByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.50 relative to the best match" })).toHaveAttribute("aria-valuenow", "50")
+    expect(screen.queryByText("46%")).toBeNull()
+  })
+
+  it("measures relevance against 1.0 when the card is not part of a list", () => {
     render(
       <ArtifactCard result={makeResult({ relevance: 0.92 })} isSelected={false} onSelect={vi.fn()} onInject={vi.fn()} />,
     )
-    expect(screen.getByText("92%")).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Relevance: 0.92 out of 1.00, single source" })).toBeInTheDocument()
+    expect(screen.queryByText("92%")).toBeNull()
   })
 
   it("shows sub-category when present and not general", () => {

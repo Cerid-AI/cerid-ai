@@ -321,6 +321,7 @@ describe("Auto-RAG Ephemeral Injection", () => {
       autoInject: true,
       autoInjectThreshold: 0.5,
       kbResults: [orchestratedChunk], // This is what effectiveKBResults provides
+      kbResultsQuery: "What about the orchestrated context?", // retrieved for this text
     })
     const { result } = renderHook(() => useChatSend(opts))
 
@@ -328,7 +329,7 @@ describe("Auto-RAG Ephemeral Injection", () => {
       await result.current.handleSend("What about the orchestrated context?")
     })
 
-    // Since queryKB returned empty, useChatSend falls back to kbResults (the orchestrated ones)
+    // The panel already retrieved for this text, so its results are used as they are
     const msgs = sentMessages(opts._sendSpy)
     const sysMsg = msgs.find((m) => m.role === "system")
     expect(sysMsg).toBeDefined()
@@ -378,6 +379,7 @@ describe("Auto-RAG Ephemeral Injection", () => {
       autoInject: true,
       autoInjectThreshold: 0.5,
       kbResults: [basicChunk], // fallback from kbContext.results
+      kbResultsQuery: "Tell me something", // retrieved for this text
     })
     const { result } = renderHook(() => useChatSend(opts))
 

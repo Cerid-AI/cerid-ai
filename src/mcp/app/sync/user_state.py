@@ -340,6 +340,25 @@ def read_settings(sync_dir: str) -> dict[str, Any]:
     return _decrypt_dict(_read_json(_user_dir(sync_dir) / "settings.json"))
 
 
+def write_host_settings(path: str, settings: dict[str, Any]) -> None:
+    """Merge *settings* into this machine's own settings file.
+
+    The file is never synced, so it is neither encrypted nor stamped with a
+    machine id.
+    """
+    target = Path(path)
+    existing = _read_json(target)
+    existing.update(settings)
+    existing["updated_at"] = _now_iso()
+    _write_json(target, existing)
+    logger.info("Wrote host settings to %s", target)
+
+
+def read_host_settings(path: str) -> dict[str, Any]:
+    """Read this machine's own settings file. Returns empty dict if missing."""
+    return _read_json(Path(path))
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------

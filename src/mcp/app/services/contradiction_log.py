@@ -236,6 +236,26 @@ async def list_recent(
         raise
 
 
+async def count_recent(
+    *,
+    entity_slug: str | None = None,
+    since: str | None = None,
+) -> int:
+    """Count the findings matching the filters :func:`list_recent` takes."""
+    from app.deps import get_neo4j
+
+    driver = get_neo4j()
+    try:
+        return _neo4j_adapter.count_contradictions(
+            driver,
+            entity_slug=entity_slug,
+            since=since,
+        )
+    except Exception as exc:
+        log_swallowed_error("contradiction_log", exc, context={"entity_slug": entity_slug})
+        raise
+
+
 async def get_by_id(finding_id: str) -> ContradictionFinding | None:
     """Fetch a single finding by its stable identifier.
 

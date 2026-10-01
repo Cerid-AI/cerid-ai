@@ -113,7 +113,7 @@ class HallucinationCheckResponse(_AgentResponseBase):
     reason: str | None = Field(default=None, description="Reason verification was skipped")
     claims: list[dict[str, Any]] = Field(default_factory=list, description="Verified claims")
     summary: dict[str, int] = Field(
-        default_factory=lambda: {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
+        default_factory=lambda: {"total": 0, "verified": 0, "agreed": 0, "unverified": 0, "uncertain": 0},
         description="Claim verification counts by status",
     )
 

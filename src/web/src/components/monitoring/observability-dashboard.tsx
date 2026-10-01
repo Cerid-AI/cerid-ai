@@ -27,9 +27,11 @@ import {
   fetchObservabilityHealthScore,
   fetchHealthStatus,
 } from "@/lib/api"
+import { isLocalProvider } from "@/lib/types"
 import type { MetricAggregation, PipelineStage } from "@/lib/types"
 import {
   isOnBoxServing,
+  providerLabel,
   readInferenceLanes,
   type InferenceLane,
   type InferenceLaneName,
@@ -448,7 +450,9 @@ export function ObservabilityDashboard() {
                           )}
                           title={degraded ? laneByStage.get(stage)?.degradedDetail : undefined}
                         >
-                          {provider}
+                          {isLocalProvider(provider) && healthStatus?.local_model_server?.name
+                            ? providerLabel(provider, healthStatus.local_model_server.name)
+                            : provider}
                           {degraded ? " (fallback)" : ""}
                         </span>
                       </span>

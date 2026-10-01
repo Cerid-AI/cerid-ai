@@ -4,6 +4,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { NEUTRAL_LOCAL_SERVER } from "@/lib/hardware-profile"
 import type { MaintenanceHealth } from "@/lib/types"
 import { Database, GitBranch, HardDrive, Cpu, Server, Bot } from "lucide-react"
 
@@ -29,7 +30,7 @@ const SERVICE_META: Record<string, { label: string; icon: typeof Database; toolt
     tooltip: "LLM gateway routing requests to the optimal AI model based on task type",
   },
   ollama: {
-    label: "Ollama",
+    label: NEUTRAL_LOCAL_SERVER,
     icon: Bot,
     tooltip: "Local LLM inference server for air-gapped or low-latency operations",
   },
@@ -44,9 +45,11 @@ const DEFAULT_META = { label: "", icon: Database, tooltip: "" }
 
 interface HealthCardsProps {
   health: MaintenanceHealth | undefined
+  /** What the local model server calls itself; titles the card keyed "ollama". */
+  localServerName?: string
 }
 
-export function HealthCards({ health }: HealthCardsProps) {
+export function HealthCards({ health, localServerName }: HealthCardsProps) {
   if (!health) return null
   // Backend may return MaintenanceHealth with `services` omitted when the
   // maintenance pipeline is degraded; default to an empty map so the grid
@@ -57,7 +60,8 @@ export function HealthCards({ health }: HealthCardsProps) {
     <TooltipProvider>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Object.entries(services).map(([name, status]) => {
-          const meta = SERVICE_META[name] ?? { ...DEFAULT_META, label: name }
+          const known = SERVICE_META[name] ?? { ...DEFAULT_META, label: name }
+          const meta = name === "ollama" && localServerName ? { ...known, label: localServerName } : known
           const Icon = meta.icon
           const normalizedStatus = status.toLowerCase()
           const isOk = normalizedStatus === "connected" || normalizedStatus === "ok" || normalizedStatus === "healthy"

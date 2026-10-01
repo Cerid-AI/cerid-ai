@@ -84,17 +84,21 @@ class _EmbeddingAwareClient:
         object.__setattr__(self, "_ef", ef)
         return ef
 
-    def get_or_create_collection(self, **kwargs: Any) -> Any:
+    # ``name`` is positional-or-keyword, as on chromadb's ClientAPI; a
+    # kwargs-only proxy turned every positional caller into a TypeError.
+    def get_or_create_collection(self, name: str, **kwargs: Any) -> Any:
         ef = self._embedding_function()
         if ef is not None and "embedding_function" not in kwargs:
             kwargs["embedding_function"] = ef
-        return object.__getattribute__(self, "_client").get_or_create_collection(**kwargs)
+        return object.__getattribute__(self, "_client").get_or_create_collection(
+            name=name, **kwargs,
+        )
 
-    def get_collection(self, **kwargs: Any) -> Any:
+    def get_collection(self, name: str, **kwargs: Any) -> Any:
         ef = self._embedding_function()
         if ef is not None and "embedding_function" not in kwargs:
             kwargs["embedding_function"] = ef
-        return object.__getattribute__(self, "_client").get_collection(**kwargs)
+        return object.__getattribute__(self, "_client").get_collection(name=name, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(object.__getattribute__(self, "_client"), name)

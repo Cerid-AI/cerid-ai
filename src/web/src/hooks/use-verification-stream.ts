@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from "react"
 import { streamVerification } from "@/lib/api"
 import type { StreamingClaim, HallucinationReport } from "@/lib/types"
+import { countPositiveVerdicts, isSourceBacked } from "@/lib/verification-utils"
+import { UX_COPY } from "@/lib/ux-copy"
 
 export type VerificationPhase = "idle" | "extracting" | "verifying" | "done" | "degraded" | "error"
 
@@ -31,6 +33,8 @@ function formatElapsed(ms: number): string {
 
 interface StreamingSummary {
   verified: number
+  /** Absent when the server sent no agreed count. */
+  agreed?: number
   unverified: number
   uncertain: number
   skipped: number
@@ -343,7 +347,9 @@ export function useVerificationStream(
                   if (!receivedSummary) setPhase("verifying")
                   const claimNum = (event.index ?? 0) + 1
                   const conf = event.confidence != null ? ` (${event.verification_method ?? "KB"} match ${(event.confidence as number).toFixed(2)})` : ""
-                  if (event.status === "verified") {
+                  if (event.status === "verified" && !isSourceBacked(event)) {
+                    logEntry(`Claim ${claimNum}: ${UX_COPY.verification.agreedLong}, no source${conf}`, "info")
+                  } else if (event.status === "verified") {
                     logEntry(`Claim ${claimNum}: supported${conf}`, "success")
                   } else if (event.status === "unverified") {
                     logEntry(`Claim ${claimNum}: refuted (${event.verification_method ?? "external"})`, "error")
@@ -390,6 +396,7 @@ export function useVerificationStream(
                   receivedSummary = true
                   setSummary({
                     verified: event.verified,
+                    ...(typeof event.agreed === "number" && { agreed: event.agreed }),
                     unverified: event.unverified,
                     uncertain: event.uncertain,
                     skipped: event.skipped ?? 0,
@@ -416,6 +423,7 @@ export function useVerificationStream(
                       ? {
                           ...prev,
                           verified: event.verified ?? prev.verified,
+                          ...(typeof event.agreed === "number" && { agreed: event.agreed }),
                           unverified: event.unverified ?? prev.unverified,
                           uncertain: event.uncertain ?? prev.uncertain,
                           total: event.total ?? prev.total,
@@ -518,6 +526,7 @@ export function useVerificationStream(
     ? {
         total: summary.total,
         verified: summary.verified,
+        ...(summary.agreed !== undefined && { agreed: summary.agreed }),
         unverified: summary.unverified,
         uncertain: summary.uncertain,
         skipped: summary.skipped,
@@ -525,7 +534,7 @@ export function useVerificationStream(
     : null
   const degradedCounts = phase === "degraded" && claims.length > 0
     ? (() => {
-        const verified = claims.filter((c) => c.status === "verified").length
+        const { verified, agreed } = countPositiveVerdicts(claims)
         const unverified = claims.filter((c) => c.status === "unverified").length
         const skipped = claims.filter((c) => c.status === "skipped").length
         return {
@@ -534,8 +543,9 @@ export function useVerificationStream(
           unverified,
           skipped,
           // Everything else (uncertain / finalized-pending / error) rolls up
-          // as uncertain so the counts always sum to the total.
-          uncertain: claims.length - verified - unverified - skipped,
+          // as uncertain so the counts always sum to the total. Claims a
+          // second model only agreed with are in no bucket, as on the server.
+          uncertain: claims.length - verified - agreed - unverified - skipped,
         }
       })()
     : null

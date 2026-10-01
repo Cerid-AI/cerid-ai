@@ -15,7 +15,10 @@ the scheduled cadence:
   POST   /digests/run-now        → queue a fresh digest pass (202)
 
 Pro-tier gated. Reads from KB artifacts in domain="digests" written
-by `core.agents.daily_digest.generate_daily_digest`.
+by `core.agents.daily_digest.generate_daily_digest`. The digest's own
+metadata (``generated_at``, the counts) is posted to ``/ingest/structured``,
+which stores it on the artifact's chunks in the vector store; the graph
+node's ``tags`` is a list of tag names and never carries it.
 
 Run-now is a queued processor job (``DigestRunJob``). It used to run
 the full digest inline — minutes on a populated corpus, which timed
@@ -34,7 +37,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from core.utils.artifact_tags import parse_tag_object
+import config
 
 logger = logging.getLogger("ai-companion.digests")
 
@@ -57,6 +60,10 @@ class DigestSummary(BaseModel):
     top_categories: list[dict[str, Any]] | None
     has_urgent: bool
     has_action_items: bool | None
+    # True when the model call failed: the counts are real and the written
+    # summary is missing. ``None`` means the digest did not record it.
+    partial: bool | None = None
+    partial_reason: str | None = None
     persisted_artifact_id: str | None = None
 
 
@@ -111,6 +118,53 @@ def _digest_artifacts_or_503(driver: Any, limit: int) -> list[dict[str, Any]]:
         ) from exc
 
 
+def _first_chunk_id(a: dict[str, Any]) -> str | None:
+    raw = a.get("chunk_ids")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    if isinstance(raw, list) and raw and isinstance(raw[0], str):
+        return raw[0]
+    return None
+
+
+def _digest_metadata_or_503(
+    artifacts: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Digest metadata keyed by artifact id, read from each first chunk.
+
+    Every chunk of an artifact carries the same ingest metadata, so one
+    chunk per digest is enough. An artifact with no readable chunk is
+    absent from the result.
+    """
+    artifact_by_chunk = {
+        chunk_id: a.get("id", "")
+        for a in artifacts
+        if (chunk_id := _first_chunk_id(a)) is not None
+    }
+    if not artifact_by_chunk:
+        return {}
+    try:
+        from app.deps import get_chroma
+        collection = get_chroma().get_collection(
+            name=config.collection_name("digests"),
+        )
+        found = collection.get(ids=list(artifact_by_chunk), include=["metadatas"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("digests metadata read failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Digest store unavailable — the digest metadata read failed.",
+        ) from exc
+    return {
+        artifact_by_chunk[chunk_id]: dict(meta)
+        for chunk_id, meta in zip(found.get("ids") or [], found.get("metadatas") or [])
+        if chunk_id in artifact_by_chunk and meta
+    }
+
+
 def _tag_top_categories(tags: dict[str, Any]) -> list[dict[str, Any]] | None:
     """Ranked categories the digest recorded, or None when it recorded none.
 
@@ -140,8 +194,16 @@ def _tag_has_action_items(tags: dict[str, Any]) -> bool | None:
         return None
 
 
-def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
-    tags = parse_tag_object(a.get("tags"))
+def _tag_partial(tags: dict[str, Any]) -> bool | None:
+    raw = tags.get("partial")
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).lower() == "true"
+
+
+def _artifact_to_summary(a: dict[str, Any], tags: dict[str, Any]) -> DigestSummary:
     return DigestSummary(
         digest_id=tags.get("digest_id", a.get("id", "")),
         generated_at=tags.get("generated_at", ""),
@@ -152,6 +214,8 @@ def _artifact_to_summary(a: dict[str, Any]) -> DigestSummary:
         top_categories=_tag_top_categories(tags),
         has_urgent=int(tags.get("inbox_urgent_count", "0") or "0") > 0,
         has_action_items=_tag_has_action_items(tags),
+        partial=_tag_partial(tags),
+        partial_reason=tags.get("partial_reason") or None,
         persisted_artifact_id=a.get("id"),
     )
 
@@ -172,7 +236,8 @@ async def get_latest_digest() -> DigestSummary | None:
     artifacts = _digest_artifacts_or_503(driver, limit=1)
     if not artifacts:
         return None
-    return _artifact_to_summary(artifacts[0])
+    metadata = _digest_metadata_or_503(artifacts)
+    return _artifact_to_summary(artifacts[0], metadata.get(artifacts[0].get("id", ""), {}))
 
 
 @router.get("/recent", response_model=list[DigestSummary])
@@ -184,7 +249,8 @@ async def list_recent_digests(limit: int = 7) -> list[DigestSummary]:
     limit = max(1, min(30, limit))
     driver = _digest_driver_or_503()
     artifacts = _digest_artifacts_or_503(driver, limit=limit)
-    return [_artifact_to_summary(a) for a in artifacts]
+    metadata = _digest_metadata_or_503(artifacts)
+    return [_artifact_to_summary(a, metadata.get(a.get("id", ""), {})) for a in artifacts]
 
 
 @router.get("/{date}", response_model=DigestSummary | None)
@@ -202,11 +268,12 @@ async def get_digest_by_date(date: str) -> DigestSummary | None:
 
     driver = _digest_driver_or_503()
     artifacts = _digest_artifacts_or_503(driver, limit=60)  # ~2-month window
+    metadata = _digest_metadata_or_503(artifacts)
     target_date = parsed.date().isoformat()
     for a in artifacts:
-        tags = parse_tag_object(a.get("tags"))
-        if tags.get("generated_at", "").startswith(target_date):
-            return _artifact_to_summary(a)
+        tags = metadata.get(a.get("id", ""), {})
+        if str(tags.get("generated_at", "")).startswith(target_date):
+            return _artifact_to_summary(a, tags)
     return None
 
 

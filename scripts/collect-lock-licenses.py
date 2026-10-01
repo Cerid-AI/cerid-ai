@@ -54,11 +54,15 @@ def parse_lock(path: Path) -> list[tuple[str, str]]:
 
 
 def _fetch(name: str, version: str) -> dict[str, str]:
+    # A local version label (torch==2.13.0+cpu, from PyTorch's CPU index) is a
+    # build variant PyPI never hosts, so its JSON API 404s on the full string.
+    # The licence is the upstream release's: look up the public version.
+    public = version.split("+", 1)[0]
     last: Exception | None = None
     for attempt in range(_RETRIES):
         try:
             req = urllib.request.Request(
-                PYPI.format(name=name, version=version),
+                PYPI.format(name=name, version=public),
                 headers={"User-Agent": "cerid-license-scan"},
             )
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:

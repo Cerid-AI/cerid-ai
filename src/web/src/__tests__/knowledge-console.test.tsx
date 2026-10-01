@@ -215,3 +215,48 @@ describe("KnowledgeConsole honest degradation (UX-01/UX-02)", () => {
     expect(screen.queryByText(/retrieval budget exceeded/i)).toBeNull()
   })
 })
+
+// The backend's quality and endorsement boosts multiply a score that is
+// already near 1, so a top hit can arrive above 1.0.
+describe("KnowledgeConsole relevance figures (audit 50)", () => {
+  it("shows each source's relevance as a bar relative to the best in its section", () => {
+    render(
+      <KnowledgeConsole
+        {...baseProps({
+          hasQueried: true,
+          kbSources: [
+            { artifact_id: "a1", chunk_index: 0, filename: "best.md", domain: "general", content: "x", relevance: 0.84 },
+            { artifact_id: "a2", chunk_index: 0, filename: "other.md", domain: "general", content: "y", relevance: 0.42 },
+          ],
+          memorySources: [{ memory_id: "m1", content: "remembered", summary: "remembered", memory_type: "empirical", relevance: 0.3, age_days: 2 }],
+          externalSources: [{ content: "external", source_name: "Web", relevance: 0.2 }],
+        })}
+      />,
+      { wrapper },
+    )
+    fireEvent.click(screen.getByText("External"))
+    expect(screen.getAllByRole("progressbar", { name: "Relevance: 1 of 2 results, 1.00 relative to the best match" })).toHaveLength(1)
+    expect(screen.getByRole("progressbar", { name: "Relevance: 2 of 2 results, 0.50 relative to the best match" })).toHaveAttribute("aria-valuenow", "50")
+    expect(screen.getAllByRole("progressbar", { name: "Relevance: 1 of 1 result, 1.00 relative to the best match" })).toHaveLength(2)
+    expect(screen.queryByText(/^\d+%$/)).toBeNull()
+  })
+
+  it("never draws a bar past full for a score above 1.0", () => {
+    render(
+      <KnowledgeConsole
+        {...baseProps({
+          hasQueried: true,
+          kbSources: [{ artifact_id: "a1", chunk_id: "c1", filename: "audit-upload-7Q4.md", domain: "general", content: "x", relevance: 1.02 }],
+          memorySources: [{ memory_id: "m1", content: "remembered", summary: "remembered", memory_type: "empirical", relevance: 1.3, age_days: 2 }],
+          externalSources: [{ content: "external", source_name: "Web", relevance: 1.1 }],
+        })}
+      />,
+      { wrapper },
+    )
+    expect(screen.getByText("audit-upload-7Q4.md")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("External"))
+    const bars = screen.getAllByRole("progressbar", { name: /^Relevance: 1 of 1 result,/ })
+    expect(bars).toHaveLength(3)
+    expect(bars.map((b) => b.getAttribute("aria-valuenow"))).toEqual(["100", "100", "100"])
+  })
+})

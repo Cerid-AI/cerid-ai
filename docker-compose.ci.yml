@@ -4,8 +4,9 @@
 # CI-only overrides for docker-compose.yml. Two purposes:
 #
 # 1. RESOURCE FIT — GitHub Actions ubuntu runners have 2 CPUs; the root
-#    compose's neo4j cpus: '4.0' (and heap+pagecache) hard-fail there with
-#    "range of CPUs is from 0.01 to 2.00". Shrink to fit the runner.
+#    compose's neo4j and mcp-server cpus: '4.0' (and neo4j's heap+pagecache)
+#    hard-fail there with "range of CPUs is from 0.01 to 2.00". Shrink to fit
+#    the runner. scripts/tests/test_ci_stack_fits_runner.py checks every service.
 #
 # 2. ISOLATION — the live-stack CI jobs (preservation, benchmark-slo) run on a
 #    SELF-HOSTED Mac Pro runner SHARED with a developer's dev stack. The root
@@ -74,6 +75,12 @@ services:
       llm-network:
         aliases:
           - ai-companion-mcp
+    # The root compose defaults CERID_MCP_CPUS to 4.0, which a 2-CPU runner
+    # refuses outright. Same fit as neo4j above.
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
 
   cerid-web:
     container_name: cerid-web-ci
@@ -81,6 +88,13 @@ services:
       llm-network:
         aliases:
           - cerid-web
+
+  cerid-sso:
+    container_name: cerid-sso-ci
+    networks:
+      llm-network:
+        aliases:
+          - cerid-sso
 
 networks:
   # Own bridge so the CI stack never shares the dev stack's external

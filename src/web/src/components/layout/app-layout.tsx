@@ -12,11 +12,14 @@ import { StatusBar } from "./status-bar"
 import { BottomTabBar } from "./bottom-tab-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
 import { ModelDownloadBanner } from "@/components/model-download-banner"
+import { DegradationBanner } from "@/components/chat/degradation-banner"
 import { useAgentConsole } from "@/hooks/use-agent-console"
 import { useTheme } from "@/hooks/use-theme"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { Button } from "@/components/ui/button"
 
 const PHONE_MQ = "(max-width: 767px)"
+const MAIN_ID = "main-content"
 
 function readBool(key: string, fallback: boolean): boolean {
   try {
@@ -107,6 +110,24 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
 
   return (
     <div className="cerid-content-rise flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
+      <Button
+        asChild
+        variant="secondary"
+        size="sm"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-2 focus-visible:top-2 focus-visible:z-50 focus-visible:h-8 focus-visible:px-3"
+      >
+        <a
+          href={`#${MAIN_ID}`}
+          onClick={(e) => {
+            // Focus is moved by hand: following the link would leave a
+            // fragment in the URL, which the pane URL sync then carries along.
+            e.preventDefault()
+            document.getElementById(MAIN_ID)?.focus()
+          }}
+        >
+          Skip to main content
+        </a>
+      </Button>
       <div className="vignette" aria-hidden="true" />
       {/* Lets the frameless window be dragged. See .app-drag-region — the only
           drag region in the repo was in a loading shell local mode never
@@ -122,11 +143,15 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
           has dismissed the banner. Sits above the main flex row so the
           layout shifts down when shown rather than overlapping. */}
       <ModelDownloadBanner />
+      <DegradationBanner />
       <NavigationProvider activePane={activePane} onPaneChange={handlePaneChange}>
         {/* Routes cerid:// links (Spotlight results) to the artifact they name.
             Inside the provider because it navigates; mounted once. */}
         <DeepLinkRouter />
-        <div className="flex flex-1 overflow-hidden">
+        {/* overflow-clip, not hidden: a hidden box can still be scrolled by a
+            focus or scrollIntoView inside it, which moved the header out of
+            view with no scrollbar to bring it back. */}
+        <div className="flex min-h-0 flex-1 overflow-clip">
           {isPhone ? (
             <Sheet open={sidebarSheetOpen} onOpenChange={setSidebarSheetOpen}>
               <SheetContent side="left" className="w-52 p-0 flex flex-col">
@@ -157,7 +182,7 @@ export function AppLayout({ children, featureTier, onCycleTier, onActivePaneChan
               activePanes={activePanes}
             />
           )}
-          <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"> {/* drift-allowed: safe-area-aware bottom-bar clearance (no static utility expresses env()) */}
+          <main key={activePane} id={MAIN_ID} tabIndex={-1} className="min-w-0 flex-1 animate-in fade-in duration-200 overflow-clip pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"> {/* drift-allowed: safe-area-aware bottom-bar clearance (no static utility expresses env()) */}
             {children(activePane, () => setSidebarSheetOpen(true))}
           </main>
         </div>

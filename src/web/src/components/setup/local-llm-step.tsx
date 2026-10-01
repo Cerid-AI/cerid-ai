@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive, Copy, Zap } from "lucide-react"
 import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
+import { NEUTRAL_LOCAL_SERVER } from "@/lib/hardware-profile"
 import { isModelInstalled } from "@/lib/model-alias"
 import { isLocalThroughputMeasured } from "@/lib/types"
 import type { EnvironmentProfile, GpuType, LocalThroughput, RecommendedLocalBackend } from "@/lib/types"
@@ -32,6 +33,10 @@ interface LocalLLMStepProps {
   /** Boot-time local throughput probe result; null/unmeasured keeps the CPU-only sentence. */
   localThroughput?: LocalThroughput | null
   suggestedProfile?: EnvironmentProfile | null
+  /** What the detected server calls itself. Absent means Ollama, the backend this step installs. */
+  localServerName?: string | null
+  /** True when an OpenRouter key is configured, so chat runs there. */
+  cloudChat?: boolean
 }
 
 const PROFILE_REASONS: Record<EnvironmentProfile, string> = {
@@ -107,13 +112,19 @@ export function LocalLLMStep({
   hardwareGpuAcceleration,
   localThroughput,
   suggestedProfile,
+  localServerName,
+  cloudChat = false,
 }: LocalLLMStepProps) {
   const backend: RecommendedLocalBackend = inferenceBackend ?? "ollama"
 
   if (backend === "cloud") {
     return <CloudBackendStep />
   }
-  if (backend === "quenchforge") {
+  // The Quenchforge step describes Quenchforge's slots. When another server
+  // is what answers, the step for a detected server describes that one.
+  const otherServerDetected =
+    ollamaDetected && !!localServerName && localServerName !== "Quenchforge"
+  if (backend === "quenchforge" && !otherServerDetected) {
     return (
       <QuenchforgeBackendStep
         ollamaDetected={ollamaDetected}
@@ -136,6 +147,8 @@ export function LocalLLMStep({
       hardwareGpuAcceleration={hardwareGpuAcceleration}
       localThroughput={localThroughput}
       suggestedProfile={suggestedProfile}
+      serverName={(ollamaDetected && localServerName) || "Ollama"}
+      cloudChat={cloudChat}
     />
   )
 }
@@ -351,6 +364,8 @@ function OllamaBackendStep({
   hardwareGpuAcceleration,
   localThroughput,
   suggestedProfile,
+  serverName,
+  cloudChat,
 }: {
   ollamaDetected: boolean
   ollamaModels: string[]
@@ -360,7 +375,12 @@ function OllamaBackendStep({
   hardwareGpuAcceleration?: string | null
   localThroughput?: LocalThroughput | null
   suggestedProfile?: EnvironmentProfile | null
+  serverName: string
+  cloudChat: boolean
 }) {
+  // The catalogue, its pulls and its speed estimates are Ollama's. A server
+  // that answers on the same port under another name has none of them.
+  const isOllama = serverName === "Ollama"
   const [pullProgress, setPullProgress] = useState<string | null>(null)
   const [pullError, setPullError] = useState<string | null>(null)
   const [hardware, setHardware] = useState<HardwareInfo | null>(null)
@@ -424,13 +444,17 @@ function OllamaBackendStep({
           <Cpu className="h-5 w-5 text-brand" />
         </div>
       </div>
-      <h3 className="mb-2 text-center text-lg font-semibold">Local LLM (Ollama)</h3>
+      <h3 className="mb-2 text-center text-lg font-semibold">Local LLM ({serverName})</h3>
       <p className="mb-4 text-center text-xs text-muted-foreground">Optional</p>
 
       <div className="space-y-4">
         <p className="text-center text-sm text-muted-foreground">
-          Ollama runs AI models locally for free. Cerid uses it for background tasks like
-          verification and claim extraction &mdash; your main chat still uses OpenRouter.
+          {isOllama
+            ? "Ollama runs AI models locally for free."
+            : `The ${serverName === NEUTRAL_LOCAL_SERVER ? "local model server" : serverName} runs AI models on this machine.`}{" "}
+          Cerid uses it for background tasks like
+          verification and claim extraction
+          {cloudChat ? " — your main chat still uses OpenRouter." : "."}
         </p>
 
         {/* Connection Status */}
@@ -488,7 +512,7 @@ function OllamaBackendStep({
             )}
 
             {/* Model recommendations (dynamic from backend) */}
-            {modelRecs.length > 0 && (
+            {isOllama && modelRecs.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-label-sm font-medium text-muted-foreground">Recommended Models</p>
                 {modelRecs.map((m) => {
@@ -541,7 +565,7 @@ function OllamaBackendStep({
             )}
 
             {/* Fallback: static recommendation if backend didn't respond */}
-            {modelRecs.length === 0 && !hasRecommendedModel && !state.model && (
+            {isOllama && modelRecs.length === 0 && !hasRecommendedModel && !state.model && (
               <div className="rounded-lg border bg-card p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -571,18 +595,31 @@ function OllamaBackendStep({
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {ollamaModels.map((model) => (
-                    <Badge key={model} variant="secondary" className="text-label-xs">
+                    <Button
+                      key={model}
+                      type="button"
+                      size="sm"
+                      variant={state.model === model ? "default" : "secondary"}
+                      className="h-6 px-2 text-label-xs"
+                      aria-pressed={state.model === model}
+                      onClick={() => onChange({ ...state, model })}
+                    >
                       {model}
-                    </Badge>
+                    </Button>
                   ))}
                 </div>
+                {!state.model && (
+                  <p className="mt-2 text-label-xs text-muted-foreground">
+                    Choose the model Cerid should use.
+                  </p>
+                )}
               </div>
             )}
 
             {state.model && (
               <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 text-center text-xs text-green-600 dark:text-green-400">
                 <Check className="mr-1 inline h-3 w-3" />
-                {state.model} ready
+                Cerid will use {state.model}
               </div>
             )}
 

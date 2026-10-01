@@ -48,7 +48,7 @@ describe("SystemCheckCard", () => {
     expect(screen.getByText("System Memory")).toBeInTheDocument()
     expect(screen.getByText("Docker")).toBeInTheDocument()
     expect(screen.getByText("Configuration")).toBeInTheDocument()
-    expect(screen.getByText("Ollama")).toBeInTheDocument()
+    expect(screen.getByText("Local model server")).toBeInTheDocument()
   })
 
   it("shows 'Detecting...' while loading", () => {

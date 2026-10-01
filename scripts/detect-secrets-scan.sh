@@ -7,6 +7,8 @@
 # secret is detected. Exclusions mirror real false-positive sources (test fakes,
 # locks, the age vault, etc.); prefer an inline `# pragma: allowlist secret` on a
 # specific line over adding a whole file here.
+# JSON has no comments, so a JSON file of model weight paths (whose repo names
+# with quantisation suffixes score as high-entropy base64) is excluded by name.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -49,6 +51,7 @@ git ls-files -z | xargs -0 "$DS" scan \
   --exclude-files 'src/mcp/routers/setup\.py$' \
   --exclude-files 'src/mcp/app/routers/setup\.py$' \
   --exclude-files 'src/mcp/config/knowledge_packs\.json$' \
+  --exclude-files 'stacks/mlx-inference/models\.json$' \
   > "$TMPFILE"
 
 # xargs may have run the scan more than once (its command buffer is 128 KiB in

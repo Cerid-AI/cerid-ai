@@ -378,7 +378,6 @@ AGENT_QUERY_FOLLOWUP_TOP_K = int(os.getenv("AGENT_QUERY_FOLLOWUP_TOP_K", "5"))
 STORAGE_WARN_PCT = int(os.getenv("CERID_STORAGE_WARN_PCT", "60"))
 STORAGE_CRITICAL_PCT = int(os.getenv("CERID_STORAGE_CRITICAL_PCT", "80"))
 STORAGE_LIMIT_MB = int(os.getenv("CERID_STORAGE_LIMIT_MB", "2048"))
-INGEST_HISTORY_RETENTION_DAYS = int(os.getenv("CERID_INGEST_HISTORY_DAYS", "7"))
 
 # AF-042: gates the ingest backpressure check in app/services/ingestion.py
 # (reject new ingest once STORAGE_CRITICAL_PCT is reached). The read-only
@@ -1401,6 +1400,9 @@ WEBHOOK_ENDPOINTS = [
 # Redis keys
 # ---------------------------------------------------------------------------
 REDIS_INGEST_LOG = "ingest:log"
+# Scheduled-job runs get their own list. Jobs run every minute or two, and
+# in the shared list they filled the cap and pushed out the ingest events.
+REDIS_SCHEDULER_LOG = "scheduler:log"
 REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
@@ -1476,6 +1478,9 @@ SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, emp
 # env var was never read by either path.
 TOMBSTONE_TTL_DAYS = int(os.getenv("TOMBSTONE_TTL_DAYS", "90"))
 TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jsonl")
+# Settings that depend on what this machine has installed. Kept out of the
+# sync directory, which is shared between machines.
+HOST_SETTINGS_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "host_settings.json")
 
 # Auto-enable sync encryption when encryption key is available
 ENCRYPT_SYNC: bool = os.getenv("CERID_ENCRYPT_SYNC", "").lower() in ("true", "1", "yes") or bool(

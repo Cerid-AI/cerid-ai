@@ -4,6 +4,20 @@ Versioned independently of the Cerid AI product. `SDK_PROTOCOL_VERSION`
 tracks the `/sdk/v1/` wire contract; the package version tracks this
 client's release cadence.
 
+## [0.2.1] — Unreleased — protocol 1.3.0
+
+### Changed
+
+- `SDK_PROTOCOL_VERSION` is `1.3.0`. The server's hallucination `summary`
+  carries an integer `agreed`: claims a second model agreed with and no source
+  backs. `summary["verified"]` now counts only claims a source backs, so it can
+  be lower than on a 1.2.0 server for the same response. A claim's own
+  `status` is unchanged. Read `summary.get("agreed")`: a report stored before
+  the server sent it has no such key.
+- Same major version, so a 0.2.0 client against a 1.3.0 server passes the
+  `ProtocolVersionError` check, and a 0.2.1 client against a 1.2.0 server
+  does too.
+
 ## [0.2.0] — 2026-09-03 — protocol 1.2.0
 
 A correctness release. Everything below was reachable from the documented

@@ -518,6 +518,61 @@ describe("useVerificationStream", () => {
       expect(result.current.report?.claims[1].status).toBe("verified")
     })
 
+    it("carries the server's agreed count from the summary and the summary_update into the report", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1.slice(0, -1),
+        { type: "summary", verified: 0, agreed: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55, extraction_method: "llm" },
+        { type: "claim_verified", index: 1, claim: "Claim B", claim_type: "factual", status: "verified", confidence: 0.9, verification_method: "cross_model" },
+        { type: "summary_update", verified: 0, agreed: 2, unverified: 0, uncertain: 0, total: 2, overall_confidence: 0.92 },
+        { type: "persisted" },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-agreed", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.summary?.uncertain).toBe(0)
+      })
+
+      expect(result.current.summary?.agreed).toBe(2)
+      expect(result.current.report?.summary.agreed).toBe(2)
+    })
+
+    it("keeps the summary's agreed count when the summary_update has none", async () => {
+      const events: SSEEvent[] = [
+        ...ROUND1.slice(0, -1),
+        { type: "summary", verified: 0, agreed: 1, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55, extraction_method: "llm" },
+        { type: "summary_update", verified: 0, unverified: 0, uncertain: 1, total: 2, overall_confidence: 0.55 },
+      ]
+      mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-agreed-kept", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      expect(result.current.report?.summary.agreed).toBe(1)
+    })
+
+    it("leaves the agreed count out of the report when the server sent none", async () => {
+      mockStreamFn.mockReturnValue(makeSSEStream(ROUND1))
+
+      const { result } = renderHook(() =>
+        useVerificationStream("text", "conv-no-agreed", true, 1),
+      )
+
+      await waitFor(() => {
+        expect(result.current.phase).toBe("done")
+      })
+
+      expect(result.current.report?.summary).not.toHaveProperty("agreed")
+    })
+
     it("CR-065: surfaces a report-persistence failure in the activity log", async () => {
       const events: SSEEvent[] = [
         ...ROUND1,

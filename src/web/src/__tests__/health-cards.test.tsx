@@ -95,3 +95,29 @@ describe("HealthCards", () => {
     expect(screen.getByText(/skipped/i)).toBeInTheDocument()
   })
 })
+
+describe("HealthCards — the local server's name", () => {
+  it("titles the local model server card with the name it reports", () => {
+    render(
+      <HealthCards
+        health={makeHealth({
+          services: { chromadb: "connected", redis: "connected", neo4j: "connected", ollama: "connected" },
+        } as Partial<MaintenanceHealth>)}
+        localServerName="MLX server"
+      />,
+    )
+    expect(screen.getByText("MLX server")).toBeInTheDocument()
+    expect(screen.queryByText("Ollama")).not.toBeInTheDocument()
+  })
+
+  it("uses the neutral name when the server's name is not known", () => {
+    render(
+      <HealthCards
+        health={makeHealth({
+          services: { chromadb: "connected", redis: "connected", neo4j: "connected", ollama: "connected" },
+        } as Partial<MaintenanceHealth>)}
+      />,
+    )
+    expect(screen.getByText("Local model server")).toBeInTheDocument()
+  })
+})

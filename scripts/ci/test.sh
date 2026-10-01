@@ -23,6 +23,18 @@ pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
 
 python -m pytest scripts/tests/ -q
 
+# The Studio MLX server (stacks/mlx-inference). Its own venv: mlx-lm pulls
+# transformers, which must not reshuffle the pins the suite above ran against.
+# MLX runs on Linux CPUs here; STRICT turns a dependency that failed to install
+# into a failure instead of a skip. The stack is internal-only, so the public
+# tree skips it.
+if [ -d stacks/mlx-inference ]; then
+  MLX_VENV="${RUNNER_TEMP:-/tmp}/mlx-stack-venv"
+  python -m venv "$MLX_VENV"
+  "$MLX_VENV/bin/pip" install -q -r stacks/mlx-inference/requirements-test.txt
+  MLX_STACK_TESTS_STRICT=1 "$MLX_VENV/bin/python" -m pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider
+fi
+
 # docker-gate cleanup() contract test — bash, so pytest's collection above
 # never touches it. Needs no daemon (the function runs against a logging
 # `docker` stub), so unlike the conflicts test below it runs everywhere.

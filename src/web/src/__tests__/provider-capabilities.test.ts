@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import {
+  COST_PROFILE_LABELS,
   assessCapabilities,
   assessRuntime,
   fromWizardState,
@@ -58,10 +59,17 @@ describe("assessCapabilities", () => {
     expect(result.warnings[0].message).toMatch(/Local-only mode/)
     expect(capStatus("Chat", result)).toBe("degraded")
     expect(capStatus("KB Retrieval", result)).toBe("available")
-    expect(capStatus("Verification", result)).toBe("unavailable")
     expect(capStatus("Web Search", result)).toBe("unavailable")
     expect(capStatus("Pipeline Tasks", result)).toBe("available")
     expect(result.costProfile).toBe("no-cloud")
+  })
+
+  it("does not say verification needs a cloud provider when a local model runs it", () => {
+    const result = assessCapabilities(withProviders({ ollamaEnabled: true }))
+    expect(capStatus("Verification", result)).toBe("available")
+    expect(capStatus("Cross-Model Verification", result)).toBe("unavailable")
+    expect(result.warnings[0].message).not.toMatch(/unlocks verification/)
+    expect(result.warnings[0].message).not.toMatch(/Ollama/)
   })
 
   it("treats ollamaDetected same as ollamaEnabled for local-only", () => {
@@ -85,7 +93,7 @@ describe("assessCapabilities", () => {
 
   it("shows info about Ollama cost savings when OpenRouter only", () => {
     const result = assessCapabilities(withProviders({ hasOpenRouter: true }))
-    const ollamaInfo = result.warnings.find((w) => w.message.includes("Ollama"))
+    const ollamaInfo = result.warnings.find((w) => w.message.includes("local model server"))
     expect(ollamaInfo).toBeDefined()
     expect(ollamaInfo?.severity).toBe("info")
   })
@@ -176,7 +184,7 @@ describe("assessCapabilities", () => {
   it("includes fix action for Ollama-only degraded chat", () => {
     const result = assessCapabilities(withProviders({ ollamaEnabled: true }))
     expect(capFix("Chat", result)?.label).toBe("Add Provider")
-    expect(capFix("Verification", result)?.target).toBe("settings:providers")
+    expect(capFix("Cross-Model Verification", result)?.target).toBe("settings:providers")
   })
 
   it("includes fix action for web search when unavailable", () => {
@@ -405,5 +413,24 @@ describe("fromHealthStatus", () => {
     expect(config.canRetrieve).toBe(true)
     expect(config.canVerify).toBe(true)
     expect(config.canGenerate).toBe(true)
+  })
+})
+
+describe("provider capabilities — wording", () => {
+  it("does not name a product for the local model server", () => {
+    const texts = [
+      ...Object.values(COST_PROFILE_LABELS),
+      ...[EMPTY, withProviders({ hasOpenRouter: true }), withProviders({ ollamaEnabled: true })].flatMap(
+        (config) => {
+          const result = assessCapabilities(config)
+          return [
+            ...result.warnings.flatMap((w) => [w.message, w.fix?.label ?? ""]),
+            ...result.capabilities.flatMap((c) => [c.reason ?? "", c.fix?.label ?? ""]),
+          ]
+        },
+      ),
+    ]
+    for (const text of texts) expect(text).not.toMatch(/Ollama|Quenchforge/)
+    expect(COST_PROFILE_LABELS["free-pipeline"]).toBe("Pipeline: Free (local model server)")
   })
 })

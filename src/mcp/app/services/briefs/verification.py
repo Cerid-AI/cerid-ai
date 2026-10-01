@@ -45,6 +45,19 @@ def status_to_band(status: str) -> str:
     return _BAND_BY_STATUS.get(status, "unverified")
 
 
+def verdict_to_band(verdict: dict[str, Any]) -> str:
+    """Map a verdict to a UI trust band.
+
+    A second model's agreement with no source is ``partial``: the ``verified``
+    band is for a claim a source backs.
+    """
+    from core.agents.hallucination.source_backing import is_agreement_only
+
+    if is_agreement_only(verdict):
+        return "partial"
+    return status_to_band(verdict.get("status", "error"))
+
+
 async def verify_brief_claims(
     sections: dict[str, str],
     *,
@@ -90,13 +103,12 @@ async def verify_brief_claims(
 
     results: list[dict[str, Any]] = []
     for claim_text, verdict in zip(claims, verdicts):
-        status = verdict.get("status", "error")
         source_artifact_id = verdict.get("source_artifact_id")
         results.append(
             {
                 "claim_id": str(uuid.uuid4()),
                 "text": claim_text,
-                "band": status_to_band(status),
+                "band": verdict_to_band(verdict),
                 "source_ids": [source_artifact_id] if source_artifact_id else [],
             }
         )

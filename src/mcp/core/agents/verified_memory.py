@@ -111,13 +111,15 @@ async def promote_verified_facts(
     2. confidence >= min_confidence (default: 0.8)
     3. claim type is not ignorance/evasion (these are meta-claims, not facts)
     4. NLI entailment against KB source >= min_nli_entailment (default: 0.7)
+    5. the verdict names a source: a KB artifact or a URL
 
     Creates :Memory nodes with memory_type="empirical", source="verification",
     and links them to the VerificationReport via VERIFIED_BY.
 
     Returns:
         {"promoted": int, "skipped_low_confidence": int,
-         "skipped_duplicate": int, "skipped_type": int, "errors": int}
+         "skipped_duplicate": int, "skipped_type": int,
+         "skipped_no_source": int, "errors": int}
     """
     if min_confidence is None:
         min_confidence = getattr(config, "VERIFIED_MEMORY_MIN_CONFIDENCE", 0.8)
@@ -132,6 +134,7 @@ async def promote_verified_facts(
         "skipped_low_confidence": 0,
         "skipped_duplicate": 0,
         "skipped_type": 0,
+        "skipped_no_source": 0,
         "errors": 0,
     }
 
@@ -179,6 +182,14 @@ async def promote_verified_facts(
             gate_value = nli_entailment if nli_entailment is not None else confidence
             if gate_value < min_nli_entailment:
                 counts["skipped_low_confidence"] += 1
+                continue
+
+            # A second model agreeing is a verdict, not a source. Without this
+            # a refusal no pattern names ("X is not a widely recognized term, I
+            # cannot provide a definition") and the sentences of a generated
+            # essay became the user's empirical memories and fed later answers.
+            if not claim_data.get("source_artifact_id") and not claim_data.get("source_urls"):
+                counts["skipped_no_source"] += 1
                 continue
 
             # Filter 5: Non-empty claim text
@@ -229,6 +240,9 @@ async def promote_verified_facts(
                     "confidence": confidence,
                     "base_score": confidence,
                     "artifact_id": primary_artifact_id,
+                    # An externally verified claim has no artifact; the URLs
+                    # it was checked against are its only provenance.
+                    "source_urls": list(claim_data.get("source_urls") or []),
                 })
 
                 # Link to VerificationReport via VERIFIED_BY relationship.
@@ -290,12 +304,19 @@ async def promote_verified_facts(
                             "decay_anchor": now_iso,
                         }],
                     )
-                except Exception:
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+
+                    log_swallowed_error("core.agents.verified_memory.chroma_ingest", exc)
                     logger.exception(
                         "verified_memory.chroma_ingest_failed",
                         extra={"memory_id": memory_id},
                     )
                     sentry_sdk.capture_exception()
+                    # Recall reads this collection, so a memory that is not in
+                    # it was not promoted.
+                    counts["errors"] += 1
+                    continue
 
                 counts["promoted"] += 1
                 logger.info(

@@ -85,6 +85,32 @@ describe("DegradationBanner", () => {
 
   // ---- Check Now button ----
 
+  it("does not announce a restored connection while a server that was never reached is retried", async () => {
+    let release: (e: Error) => void = () => {}
+    mockedFetch.mockReset()
+    // The component retries once before it reports the failure.
+    mockedFetch.mockRejectedValueOnce(new Error("fail"))
+    mockedFetch.mockRejectedValueOnce(new Error("fail"))
+    mockedFetch.mockImplementationOnce(
+      () => new Promise((_, reject) => { release = reject }),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+    })
+    render(<QueryClientProvider client={client}><DegradationBanner /></QueryClientProvider>)
+    const alert = await screen.findByRole("alert", undefined, { timeout: 4000 })
+    expect(alert.textContent).toMatch(/Unable to reach the server/)
+
+    // The retry is in flight and has not answered.
+    act(() => { void client.refetchQueries({ queryKey: ["health-status"] }) })
+    await vi.waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(3))
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
+
+    expect(screen.queryByText(/Connection restored/)).not.toBeInTheDocument()
+    expect(screen.getByRole("alert").textContent).toMatch(/Unable to reach the server/)
+    await act(async () => { release(new Error("fail")) })
+  })
+
   it("shows Check Now button when degraded", async () => {
     mockedFetch.mockResolvedValue({ degradation_tier: "lite", status: "degraded" })
     renderWithQuery(<DegradationBanner />)

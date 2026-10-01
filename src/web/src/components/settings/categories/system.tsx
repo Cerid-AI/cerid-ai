@@ -282,14 +282,15 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 /**
- * A store holding content cannot occupy zero bytes: the probe could not stat
- * the volume (Neo4j is never measured at all — see _neo4j_metrics). Reporting
+ * The API sends null for a size it could not measure. A zero beside content
+ * is treated the same way, because a store holding content cannot occupy zero
+ * bytes. Reporting
  * the failure as the number 0 sums it into the budget as free space, so the
  * usage bar and its warn/critical thresholds are computed over the stores that
  * did answer while the two largest contribute nothing.
  */
-function isUnmeasured(diskMb: number, contentCount: number): boolean {
-  return diskMb <= 0 && contentCount > 0
+function isUnmeasured(diskMb: number | null, contentCount: number): boolean {
+  return diskMb === null || (diskMb <= 0 && contentCount > 0)
 }
 
 function StorageSection() {
@@ -324,8 +325,8 @@ function StorageSection() {
 
   const { chromadb, neo4j, redis, bm25, total_mb, limit_mb, usage_pct, status } = data
   const segments = [
-    { key: "chromadb" as const, mb: chromadb.disk_mb, unmeasured: isUnmeasured(chromadb.disk_mb, chromadb.chunks), detail: `${chromadb.collections} collections, ${chromadb.chunks.toLocaleString()} chunks` },
-    { key: "neo4j" as const, mb: neo4j.disk_mb, unmeasured: isUnmeasured(neo4j.disk_mb, neo4j.nodes), detail: `${neo4j.nodes.toLocaleString()} nodes, ${neo4j.relationships.toLocaleString()} rels` },
+    { key: "chromadb" as const, mb: chromadb.disk_mb ?? 0, unmeasured: isUnmeasured(chromadb.disk_mb, chromadb.chunks), detail: `${chromadb.collections} collections, ${chromadb.chunks.toLocaleString()} chunks` },
+    { key: "neo4j" as const, mb: neo4j.disk_mb ?? 0, unmeasured: isUnmeasured(neo4j.disk_mb, neo4j.nodes), detail: `${neo4j.nodes.toLocaleString()} nodes, ${neo4j.relationships.toLocaleString()} rels` },
     { key: "redis" as const, mb: redis.memory_mb, unmeasured: false, detail: `${redis.keys.toLocaleString()} keys, peak ${redis.peak_mb} MB` },
     { key: "bm25" as const, mb: bm25.disk_mb, unmeasured: false, detail: `${bm25.index_count} indexes` },
   ].map((seg) => ({

@@ -85,6 +85,8 @@ class DigestRunJob(BaseJob):
                 "persisted_artifact_id": result.persisted_artifact_id,
                 "skipped": result.skipped,
                 "skip_reason": result.skip_reason,
+                "partial": result.partial,
+                "partial_reason": result.partial_reason,
             },
         )
 
