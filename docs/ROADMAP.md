@@ -1,10 +1,11 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-10-02 (1.0.8 shipped. Status authority: the release notes
+> **Last updated:** 2026-10-02 (1.0.9 shipped. Status authority: the release notes
 > in [CHANGELOG.md](../CHANGELOG.md) and the 2026-09 Studio audit's remediation plan.
 > Prior: the 2026-09-02 readiness audit; the 2026-08-05 v1 GA audit,
 > [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md)).
-> **Shipped:** `v1.0.8-desktop` 2026-10-02 (the Studio audit release: grounding
+> **Shipped:** `v1.0.9-desktop` 2026-10-02 (the desktop app may write to a 1.0.8+
+> server again) on top of `v1.0.8` the same day (the Studio audit release: grounding
 > from the first message, consumer domain isolation, "verified" needs a source,
 > the MLX server for Apple silicon with an installer), signed + notarized (macOS
 > universal DMG + Windows installer), Latest on the public repo where the updater
