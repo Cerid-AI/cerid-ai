@@ -1,0 +1,261 @@
+{
+  "model": "gpt-oss-120b",
+  "tool_format": "harmony",
+  "captured": "2026-09-25",
+  "server": "cerid-mlx serve.py at cerid-ai-internal 9ed0e4ae; mlx 0.32.2, mlx-lm 0.31.3",
+  "sampling": "temperature 0, raw /api/generate",
+  "cases": [
+    {
+      "name": "single_call",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What's the weather in Paris right now?"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 203,
+      "completion": "<|channel|>analysis<|message|>User asks current weather in Paris. Use get_weather function.<|end|><|start|>assistant<|channel|>commentary to=functions.get_weather <|constrain|>json<|message|>{\n  \"location\": \"Paris\",\n  \"unit\": \"celsius\"\n}<|call|>",
+      "done_reason": "stop",
+      "capture": "two requests; control tokens restored around the analysis and the call header",
+      "expect": {
+        "content": null,
+        "calls": [
+          {
+            "name": "get_weather",
+            "arguments": {
+              "location": "Paris",
+              "unit": "celsius"
+            }
+          }
+        ],
+        "finish": "tool_calls"
+      }
+    },
+    {
+      "name": "plain_text_with_tools",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is 17 + 25? Reply with just the number."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 209,
+      "completion": "<|channel|>analysis<|message|>The user asks a simple math: 17+25 = 42. They want just the number. So answer \"42\".<|end|><|start|>assistant<|channel|>final<|message|>42<|return|>",
+      "done_reason": "stop",
+      "capture": "two requests; control tokens restored around the analysis and the final answer",
+      "expect": {
+        "content": "42",
+        "calls": [],
+        "finish": "stop"
+      }
+    },
+    {
+      "name": "tool_result_followup",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What's the weather in Paris right now?"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "get_weather",
+                  "arguments": "{\"location\": \"Paris\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "{\"temperature\": 18, \"unit\": \"celsius\", \"condition\": \"light rain\"}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 256,
+      "completion": "<|channel|>analysis<|message|>We need to answer the user. Provide the weather info.<|end|><|start|>assistant<|channel|>final<|message|>The current weather in Paris is **18 °C** with **light rain**.<|return|>",
+      "done_reason": "stop",
+      "capture": "two requests; control tokens restored around the analysis and the final answer",
+      "expect": {
+        "content": "The current weather in Paris is **18 °C** with **light rain**.",
+        "calls": [],
+        "finish": "stop"
+      }
+    }
+  ]
+}

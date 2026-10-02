@@ -53,6 +53,16 @@ INTERNAL_LLM_PROVIDER=ollama
 INTERNAL_LLM_MODEL=llama3.1:8b
 ```
 
+**Option C — Apple silicon, the MLX server:**
+```bash
+stacks/mlx-inference/install.sh --write-env .env   # picks models by memory, installs a launchd agent
+./scripts/start-cerid.sh
+```
+It serves on the Ollama port with the Ollama API, adds tool calling and a
+co-resident small model, and appends only the unset settings to `.env`. Quit
+Ollama first if it holds port 11434. Manual:
+[`stacks/mlx-inference/README.md`](../stacks/mlx-inference/README.md).
+
 ### Post-Setup Model Management
 
 Change the active model at any time from Settings → System → Ollama → Change button. The model management panel shows:

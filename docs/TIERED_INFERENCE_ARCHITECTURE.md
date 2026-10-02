@@ -86,7 +86,7 @@ Each platform follows a strict priority order. The system tries Option 1 first; 
 
 | Priority | Provider | Backend | Expected Perf | Detection |
 |----------|----------|---------|---------------|-----------|
-| **Option 1** | MLX server (`stacks/mlx-inference/serve.py`) | Metal GPU via MLX; Ollama `/api/*` and OpenAI `/v1/*` | — (not benchmarked here) | `curl -s http://127.0.0.1:11434/api/version` returns `cerid-mlx-<revision>` |
+| **Option 1** | MLX server (`stacks/mlx-inference`, installed by its `install.sh`) | Metal GPU via MLX; Ollama `/api/*` and OpenAI `/v1/*` | — (not benchmarked here) | `curl -s http://127.0.0.1:11434/api/version` returns `cerid-mlx-<revision>` |
 | **Option 1 (alt)** | Ollama | Metal GPU via `/api/embed` | ~3ms/batch-10 (768-dim) | `curl -s http://{OLLAMA_URL}/api/tags` returns 200 |
 | **Option 2** | FastEmbed sidecar | `onnxruntime-silicon` (CoreML/Metal) | ~5ms/batch-10 | Sidecar health check at `http://localhost:8889/health` |
 | **Option 3** | ONNX in-process (host) | `CoreMLExecutionProvider` | ~5ms/batch-10 | `ort.get_available_providers()` includes `CoreMLExecutionProvider` |

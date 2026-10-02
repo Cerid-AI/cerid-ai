@@ -1,0 +1,17 @@
+{
+  "description": "Optional heavy rows, merged into a profile by install.sh --heavy. gpt-oss-120b is 59 GiB of weights and wants 128 GiB of memory. It loads the first time a request names it.",
+  "models": {
+    "gpt-oss-120b": {
+      "tier": "heavy",
+      "path": "models/mlx-community/gpt-oss-120b-MXFP4-Q8",
+      "source": {"repo": "mlx-community/gpt-oss-120b-MXFP4-Q8"},
+      "family": "gpt-oss",
+      "parameter_size": "120B",
+      "quantization": "MXFP4-Q8",
+      "tool_format": "harmony"
+    }
+  },
+  "tiers": {
+    "heavy": {"max_active": 1, "prompt_cache_gib": 16, "prefill_chunk": 512}
+  }
+}

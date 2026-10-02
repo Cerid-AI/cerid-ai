@@ -1,0 +1,520 @@
+{
+  "model": "qwen3.5-4b-instruct",
+  "tool_format": "qwen3_coder",
+  "captured": "2026-09-25",
+  "server": "cerid-mlx serve.py at cerid-ai-internal 9ed0e4ae; mlx 0.32.2, mlx-lm 0.31.3",
+  "sampling": "temperature 0, raw /api/generate",
+  "cases": [
+    {
+      "name": "single_call",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What's the weather in Paris right now?"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 424,
+      "completion": "<tool_call>\n<function=get_weather>\n<parameter=location>\nParis\n</parameter>\n</function>\n</tool_call>",
+      "done_reason": "stop",
+      "capture": "one request",
+      "expect": {
+        "content": null,
+        "calls": [
+          {
+            "name": "get_weather",
+            "arguments": {
+              "location": "Paris"
+            }
+          }
+        ],
+        "finish": "tool_calls"
+      }
+    },
+    {
+      "name": "parallel_calls",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Get the current weather in Paris and in Tokyo."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 425,
+      "completion": "<tool_call>\n<function=get_weather>\n<parameter=location>\nParis\n</parameter>\n</function>\n</tool_call>\n<tool_call>\n<function=get_weather>\n<parameter=location>\nTokyo\n</parameter>\n</function>\n</tool_call>",
+      "done_reason": "stop",
+      "capture": "one request",
+      "expect": {
+        "content": null,
+        "calls": [
+          {
+            "name": "get_weather",
+            "arguments": {
+              "location": "Paris"
+            }
+          },
+          {
+            "name": "get_weather",
+            "arguments": {
+              "location": "Tokyo"
+            }
+          }
+        ],
+        "finish": "tool_calls"
+      }
+    },
+    {
+      "name": "plain_text_with_tools",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is 17 + 25? Reply with just the number."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 431,
+      "completion": "42",
+      "done_reason": "stop",
+      "capture": "one request",
+      "expect": {
+        "content": "42",
+        "calls": [],
+        "finish": "stop"
+      }
+    },
+    {
+      "name": "tool_result_followup",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What's the weather in Paris right now?"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "get_weather",
+                  "arguments": "{\"location\": \"Paris\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "{\"temperature\": 18, \"unit\": \"celsius\", \"condition\": \"light rain\"}"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 488,
+      "completion": "The weather in Paris is currently 18°C with light rain.",
+      "done_reason": "stop",
+      "capture": "one request",
+      "expect": {
+        "content": "The weather in Paris is currently 18°C with light rain.",
+        "calls": [],
+        "finish": "stop"
+      }
+    },
+    {
+      "name": "typed_arguments",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Find at most 5 files matching test_*.py, including hidden directories."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "prompt_tokens": 431,
+      "completion": "<tool_call>\n<function=search_files>\n<parameter=pattern>\ntest_*.py\n</parameter>\n<parameter=max_results>\n5\n</parameter>\n<parameter=include_hidden>\nTrue\n</parameter>\n</function>\n</tool_call>",
+      "done_reason": "stop",
+      "capture": "one request",
+      "expect": {
+        "content": null,
+        "calls": [
+          {
+            "name": "search_files",
+            "arguments": {
+              "pattern": "test_*.py",
+              "max_results": 5,
+              "include_hidden": true
+            }
+          }
+        ],
+        "finish": "tool_calls"
+      }
+    },
+    {
+      "name": "named_choice",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Tell me something about Tokyo."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Current weather for a city.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "City name, e.g. Paris"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": [
+                      "celsius",
+                      "fahrenheit"
+                    ]
+                  }
+                },
+                "required": [
+                  "location"
+                ]
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "search_files",
+              "description": "Find files in the repository whose names match a glob pattern.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. *.md"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "description": "Upper bound on results"
+                  },
+                  "include_hidden": {
+                    "type": "boolean",
+                    "description": "Also search dot-directories"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ]
+              }
+            }
+          }
+        ],
+        "tool_choice": {
+          "type": "function",
+          "function": {
+            "name": "get_weather"
+          }
+        }
+      },
+      "prompt_tokens": 429,
+      "completion": "<tool_call>\n<function=get_weather>\n<parameter=location>\nTokyo\n</parameter>\n</function>\n</tool_call>",
+      "done_reason": "stop",
+      "capture": "one request; forced opener prepended",
+      "expect": {
+        "content": null,
+        "calls": [
+          {
+            "name": "get_weather",
+            "arguments": {
+              "location": "Tokyo"
+            }
+          }
+        ],
+        "finish": "tool_calls"
+      }
+    }
+  ]
+}

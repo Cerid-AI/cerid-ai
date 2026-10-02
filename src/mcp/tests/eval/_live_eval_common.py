@@ -26,7 +26,6 @@ import os
 import time
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import httpx
 
@@ -127,13 +126,19 @@ def ensure_openrouter_key() -> bool:
     return False
 
 
+# Registered in config.CONSUMER_REGISTRY with full retrieval scope. An
+# unregistered ID is scoped to the "general" domain, where none of the fixtures
+# live, so every readiness probe came back empty and the eval scored nothing.
+CLIENT_ID = "eval-live"
+
+
 def make_client() -> httpx.Client:
     """Authenticated HTTP client for the live stack. Every request carries
-    ``X-API-Key`` (when configured) and a unique ``X-Client-ID`` so the eval's
-    traffic lands in its own rate-limit bucket."""
+    ``X-API-Key`` (when configured) and the registered ``X-Client-ID``, so the
+    eval's traffic has its own rate-limit bucket and retrieval scope."""
     headers: dict[str, str] = {
         "Content-Type": "application/json",
-        "X-Client-ID": f"eval-live-{uuid4().hex[:8]}",
+        "X-Client-ID": CLIENT_ID,
     }
     key = resolve_api_key()
     if key:

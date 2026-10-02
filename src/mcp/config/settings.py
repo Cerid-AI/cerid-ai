@@ -1638,6 +1638,25 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "apple_calendar", "apple_photos", "apple_reminders",
         )
     },
+    # The live eval harnesses (src/mcp/tests/eval/). They seed fixtures across
+    # several domains and measure retrieval the way the GUI sees it, so they
+    # need the GUI's scope; their baselines were measured with it. Unregistered,
+    # _default scoped them to "general" and every nightly retrieval eval from
+    # 2026-09-23 found 0 of 18 fixtures. Full scope here is no new capability:
+    # the client ID is a scoping label, not a credential (X-API-Key is), and
+    # "gui" already has the same scope.
+    **{
+        _harness: {
+            "rate_limits": {
+                "/agent/": (120, 60),
+                "/sdk/": (120, 60),
+                "/ingest": (60, 60),
+            },
+            "allowed_domains": None,
+            "strict_domains": False,
+        }
+        for _harness in ("eval-live", "verdict-eval")
+    },
     "_default": {
         "rate_limits": {
             "/agent/": (120, 60),

@@ -1,0 +1,43 @@
+{
+  "description": "Under 48 GiB of memory. Qwen3.5 4B for utility calls, Qwen3.5 9B as the default. About 9 GiB of weights.",
+  "models": {
+    "qwen3.5-4b-instruct": {
+      "tier": "small",
+      "path": "models/mlx-community/Qwen3.5-4B-MLX-4bit",
+      "source": {"repo": "mlx-community/Qwen3.5-4B-MLX-4bit"},
+      "family": "qwen3_5",
+      "parameter_size": "4B",
+      "quantization": "Q4",
+      "tool_format": "qwen3_coder"
+    },
+    "qwen3.5-9b-instruct": {
+      "tier": "default",
+      "path": "models/mlx-community/Qwen3.5-9B-MLX-4bit",
+      "source": {"repo": "mlx-community/Qwen3.5-9B-MLX-4bit"},
+      "family": "qwen3_5",
+      "parameter_size": "9B",
+      "quantization": "Q4",
+      "tool_format": "qwen3_coder"
+    },
+    "nomic-embed-text-v1.5": {
+      "tier": "embed",
+      "path": "models/nomic-ai/nomic-embed-text-v1.5.Q8_0.gguf",
+      "source": {
+        "repo": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+        "file": "nomic-embed-text-v1.5.Q8_0.gguf",
+        "sha256": "3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7"
+      },
+      "family": "nomic-bert",
+      "parameter_size": "137M",
+      "quantization": "Q8_0",
+      "pooling": "cls"
+    }
+  },
+  "aliases": {
+    "llama3.2:3b": "small"
+  },
+  "tiers": {
+    "small": {"max_active": null, "prompt_cache_gib": 1, "prefill_chunk": 512},
+    "default": {"max_active": 2, "prompt_cache_gib": 2, "prefill_chunk": 512}
+  }
+}

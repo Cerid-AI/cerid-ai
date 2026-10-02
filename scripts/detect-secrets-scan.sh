@@ -52,6 +52,7 @@ git ls-files -z | xargs -0 "$DS" scan \
   --exclude-files 'src/mcp/app/routers/setup\.py$' \
   --exclude-files 'src/mcp/config/knowledge_packs\.json$' \
   --exclude-files 'stacks/mlx-inference/models\.json$' \
+  --exclude-files 'stacks/mlx-inference/catalogs/[a-z]+\.json$' \
   > "$TMPFILE"
 
 # xargs may have run the scan more than once (its command buffer is 128 KiB in

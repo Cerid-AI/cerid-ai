@@ -1,0 +1,10 @@
+# serve.py's tests (tests/). scripts/ci/test.sh installs these into a throwaway
+# venv and runs with MLX_STACK_TESTS_STRICT=1, so nothing may skip there.
+# MLX runs on Apple silicon, or on Linux CPUs through mlx[cpu]. Intel macOS has
+# neither MLX nor an openai-harmony wheel; there, run the suite with the repo venv
+# and the tests that need them skip with the reason.
+mlx[cpu]==0.32.2; sys_platform == "linux"
+mlx==0.32.2; sys_platform == "darwin"
+mlx-lm==0.31.3
+openai-harmony==0.0.8
+pytest
