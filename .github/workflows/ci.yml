@@ -107,6 +107,19 @@ jobs:
         # These prove the drift/lint gates can actually fail. Nothing ran them
         # until 2026-08-04.
         run: python -m pytest scripts/tests/ -q
+      # The MLX server (stacks/mlx-inference) has its own pinned packages, so its
+      # tests run in their own venv on Python 3.12 with MLX on Linux CPUs.
+      # MLX_STACK_TESTS_STRICT turns a dependency that failed to install into a
+      # failure instead of a skip. Hand-ported from the canonical
+      # scripts/ci/test.sh; this file is maintained by hand on this side.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: MLX server tests (stacks/mlx-inference)
+        run: |
+          python -m venv "$RUNNER_TEMP/mlx-stack-venv"
+          "$RUNNER_TEMP/mlx-stack-venv/bin/pip" install -q -r stacks/mlx-inference/requirements-test.txt
+          MLX_STACK_TESTS_STRICT=1 "$RUNNER_TEMP/mlx-stack-venv/bin/python" -m pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider
       - name: Upload coverage to Codecov
         if: success()
         uses: codecov/codecov-action@v7

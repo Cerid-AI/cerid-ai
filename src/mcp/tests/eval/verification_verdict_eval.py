@@ -47,6 +47,10 @@ import httpx
 
 from tests.eval._live_eval_common import gate_floor
 
+# Registered in config.CONSUMER_REGISTRY: an unregistered ID would be scoped to
+# the "general" domain and get _default's 10/min ingest budget.
+CLIENT_ID = "verdict-eval"
+
 _SCRIPT_DIR = Path(__file__).parent
 _DEFAULT_CASES = _SCRIPT_DIR / "datasets" / "verification_cases_v2.jsonl"
 _DEFAULT_OUTPUT = _SCRIPT_DIR / "out" / "verification_verdict_results.json"
@@ -324,7 +328,7 @@ async def run_case(client: httpx.AsyncClient, case: dict[str, Any], *, timeout_s
 async def run_eval(
     cases: list[dict[str, Any]], *, mcp_base: str, api_key: str | None, concurrency: int, timeout_s: float
 ) -> list[CaseResult]:
-    headers = {"X-Client-ID": "verdict-eval", "Content-Type": "application/json"}
+    headers = {"X-Client-ID": CLIENT_ID, "Content-Type": "application/json"}
     if api_key:
         headers["X-API-Key"] = api_key
 

@@ -83,6 +83,11 @@ OpenAI-compatible inference server tuned for exactly that hardware:
 `brew install cerid-ai/tap/quenchforge`. Cerid talks to it on the standard
 `:11434` port with no configuration changes.
 
+On an Apple-silicon Mac, `stacks/mlx-inference/install.sh --write-env .env`
+installs the MLX server: the same Ollama and OpenAI APIs on `:11434`, models
+picked by memory, tool calling, and a launchd agent. Manual:
+[`stacks/mlx-inference/README.md`](stacks/mlx-inference/README.md).
+
 ## Dependency Strategy
 
 43 direct runtime dependencies in `src/mcp/requirements.txt`. Each pin carries a comment saying *why* it sits where it does (CVE floor, license constraint, API break) — preserve that comment when you move a pin. Lock files are generated: edit `requirements.txt`, then `make lock-python`.
