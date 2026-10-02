@@ -60,6 +60,7 @@ from core.context.identity import get_tenant_id
 from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils import cache
 from core.utils.embeddings import embedding_stamp
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 from errors import StorageLimitExceededError
@@ -2212,7 +2213,7 @@ async def ingest_file(
 # Concurrency limiter shared with single-file ingestion — prevents overloading
 # ChromaDB / Neo4j with too many parallel writes. AF-072: reads
 # config.INGEST_CONCURRENCY (default 3) instead of hardcoding the limit.
-_ingest_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
+_ingest_semaphore = LoopLocal(lambda: asyncio.Semaphore(config.INGEST_CONCURRENCY))
 
 BATCH_MAX_ITEMS = 20
 
@@ -2241,7 +2242,7 @@ async def ingest_batch(
 
     async def _ingest_one(item: dict[str, Any]) -> dict[str, Any]:
         """Ingest a single item under the shared semaphore."""
-        async with _ingest_semaphore:
+        async with _ingest_semaphore.get():
             try:
                 if item.get("file_path"):
                     return await ingest_file(

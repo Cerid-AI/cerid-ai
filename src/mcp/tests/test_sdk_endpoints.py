@@ -255,7 +255,7 @@ class TestSDKIngest:
                 "domain": "coding",
                 "tags": "python,example",
             },
-            headers={"x-client-id": "test-consumer"},
+            headers={"x-client-id": "cli-ingest"},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -331,7 +331,7 @@ class TestSDKIngestFile:
                 "domain": "finance",
                 "tags": "quarterly",
             },
-            headers={"x-client-id": "finance-dashboard"},
+            headers={"x-client-id": "cli-ingest"},
         )
         assert resp.status_code == 200
         data = resp.json()

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
@@ -71,7 +71,11 @@ class QueryRequest(BaseModel):
     )
 
 
-@router.post("/query", response_model=QueryEndpointResponse)
+@router.post(
+    "/query",
+    response_model=QueryEndpointResponse,
+    responses={403: {"description": "Consumer is not allowed to query the requested domain"}},
+)
 async def query_endpoint(req: QueryRequest, request: Request):
     """KB search over the canonical retrieval path (rerank, provenance,
     ``exclude_packs``, tenant-scope). ``external_augmentation`` is off — this is
@@ -114,6 +118,15 @@ async def query_endpoint(req: QueryRequest, request: Request):
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
             graph_store=get_graph_store(),
+        )
+    # The consumer's allow-list removed every requested domain. An empty 200
+    # reads as "nothing indexed": a mis-registered client ID looked exactly like
+    # indexing lag for ten days (nightly retrieval eval, 2026-09-23..10-01).
+    # Same 403 as /sdk/v1/query.
+    if result.get("retrieval_reason") == "consumer_domain_restricted":
+        raise HTTPException(
+            status_code=403,
+            detail={"retrieval_reason": "consumer_domain_restricted", "retrieval_skipped": True},
         )
     return {
         "context": result.get("context", ""),

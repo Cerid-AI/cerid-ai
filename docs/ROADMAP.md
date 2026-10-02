@@ -1,21 +1,22 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-09-10 (1.0.5 shipped; v1.0 release arc closed. Status authority:
-> [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md).
-> Prior: 2026-07-24 Tier A audit + remediation T0–T4; 2026-06-13 RAG Quality Program
-> close-out; 2026-06-02 Commercial-GA Track 1).
-> **Shipped:** `v1.0.5` tagged 2026-09-10 with `v1.0.5-desktop` signed + notarized
-> (macOS universal DMG + Windows installer), now Latest on the public repo where
-> the updater polls; `v1.0.4` 2026-09-08 (performance, environment profiles);
-> `v1.0.3` 2026-08-30; previously `v1.0.2` 2026-08-15 and
-> `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop`
-> was WITHDRAWN 2026-08-16 — its binaries could not launch (restricted
-> entitlements, no provisioning profile); the tag remains, the release does not.
-> SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`), trusted publishing verified
-> 2026-08-09. The Electron runtime refresh CLOSED in 1.0.3 (33 → 43, universal
-> build, native modules rebuilt per-arch). Forward focus: Sentry go-live (web DSN +
-> alert thresholds), the soak/beta validation program, multi-user, and CI coverage
-> for the widget/SDK bundles — which still have no build or test job.
+> **Last updated:** 2026-10-02 (1.0.8 shipped. Status authority: the release notes
+> in [CHANGELOG.md](../CHANGELOG.md) and the 2026-09 Studio audit's remediation plan.
+> Prior: the 2026-09-02 readiness audit; the 2026-08-05 v1 GA audit,
+> [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md)).
+> **Shipped:** `v1.0.8-desktop` 2026-10-02 (the Studio audit release: grounding
+> from the first message, consumer domain isolation, "verified" needs a source,
+> the MLX server for Apple silicon with an installer), signed + notarized (macOS
+> universal DMG + Windows installer), Latest on the public repo where the updater
+> polls. Earlier: `v1.0.7` 2026-09-21 (web augmentation keeps knowledge-base rows),
+> `v1.0.6` 2026-09-13, `v1.0.5` 2026-09-10 (product readiness), `v1.0.4`
+> 2026-09-08 (performance, environment profiles), `v1.0.3` 2026-08-30, `v1.0.2`
+> 2026-08-15, `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop` was WITHDRAWN
+> 2026-08-16 — its binaries could not launch; the tag remains, the release does not.
+> SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`); the registries still
+> serve 0.1.1 while the tree is at 0.2.1 (wire 1.3.0), publish pending.
+> Forward focus: the Studio audit's remaining waves (W5, gates that cannot fail;
+> W6/W7), Sentry go-live, multi-user, and CI coverage for the widget/SDK bundles.
 > **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
 > Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
 > (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO

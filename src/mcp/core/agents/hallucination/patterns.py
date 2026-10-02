@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-import weakref
 
 import config
+from core.utils.loop_local import LoopLocal
 
 # ---------------------------------------------------------------------------
 # Constants — configurable via env vars in config/settings.py
@@ -64,48 +64,28 @@ def memory_authority_boost(memory_result: dict) -> float:
 # Concurrency gates
 # ---------------------------------------------------------------------------
 
-# One semaphore per event loop. An asyncio.Semaphore binds to the first loop
-# that has to wait on it, and from then on any other loop that waits raises
-# "is bound to a different event loop". The process runs more than one loop
-# (uvicorn's, core.utils.async_bridge's, asyncio.run in sync callers, and a
-# fresh one per pytest test), so a module-level instance failed verification
-# tasks whenever a second loop hit contention. Weak keys let a dead loop's
-# semaphore go with it.
+# One semaphore per event loop (core.utils.loop_local explains why a
+# module-level instance fails a second loop).
 
 # Concurrency gate for external verification — defense-in-depth against
 # bursts even on high-RPM models.
-_ext_verify_semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
-    weakref.WeakKeyDictionary()
-)
+_ext_verify_semaphore = LoopLocal(lambda: asyncio.Semaphore(config.EXTERNAL_VERIFY_MAX_CONCURRENT))
 
 # Concurrency gate for overall claim verification (KB search + reranking +
 # external LLM).  Each verification loads BM25 indices and runs ONNX
 # cross-encoder inference which is memory-intensive.  Without this,
 # 10+ parallel claims can OOM a 2 GB container.
-_claim_verify_semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
-    weakref.WeakKeyDictionary()
-)
-
-
-def _loop_semaphore(
-    semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore],
-    capacity: int,
-) -> asyncio.Semaphore:
-    loop = asyncio.get_running_loop()
-    sem = semaphores.get(loop)
-    if sem is None:
-        sem = semaphores[loop] = asyncio.Semaphore(capacity)
-    return sem
+_claim_verify_semaphore = LoopLocal(lambda: asyncio.Semaphore(config.VERIFY_CLAIM_MAX_CONCURRENT))
 
 
 def _get_ext_verify_semaphore() -> asyncio.Semaphore:
     """Return the external-verification semaphore for the running loop."""
-    return _loop_semaphore(_ext_verify_semaphores, config.EXTERNAL_VERIFY_MAX_CONCURRENT)
+    return _ext_verify_semaphore.get()
 
 
 def _get_claim_verify_semaphore() -> asyncio.Semaphore:
     """Return the claim-verification concurrency semaphore for the running loop."""
-    return _loop_semaphore(_claim_verify_semaphores, config.VERIFY_CLAIM_MAX_CONCURRENT)
+    return _claim_verify_semaphore.get()
 
 
 # ---------------------------------------------------------------------------

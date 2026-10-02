@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils.cache import log_event
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -1817,7 +1818,7 @@ async def _run_session_summaries() -> None:
 # in turn), so a run draining WEBHOOK_DRAIN_MAX_PER_RUN entries paid their
 # combined latency serially. Bounded by the same concurrency budget as the
 # rest of ingestion (config.INGEST_CONCURRENCY) rather than a new knob.
-_webhook_drain_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
+_webhook_drain_semaphore = LoopLocal(lambda: asyncio.Semaphore(config.INGEST_CONCURRENCY))
 
 
 async def _drain_webhook_entry(
@@ -1833,7 +1834,7 @@ async def _drain_webhook_entry(
 
     from app.services.ingestion import ingest_content
 
-    async with _webhook_drain_semaphore:
+    async with _webhook_drain_semaphore.get():
         try:
             entry = _json.loads(raw)
             arts = entry.get("normalized") or [

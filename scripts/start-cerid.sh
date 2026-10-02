@@ -887,6 +887,15 @@ else
     docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" up -d --no-deps cerid-sso
 fi
 
+# cerid-sso runs the bind-mounted stacks/sso/sso.py on the stock python image, so
+# --build never changes its image or config and compose leaves the old process
+# running: the 1.0.8 sign-in limiter was on disk and not in effect until a
+# manual restart. Sessions live in signed cookies, so a restart drops none.
+if [ -n "$BUILD_FLAG" ]; then
+    docker restart cerid-sso >/dev/null \
+        || echo "[build] WARNING: could not restart cerid-sso; it may still run the previous sso.py"
+fi
+
 # Optional: Caddy reverse proxy for local HTTPS
 GATEWAY_ENABLED=$(grep -s '^CERID_GATEWAY=true' "$ENV_FILE" 2>/dev/null || echo "")
 if [ -n "${GATEWAY_ENABLED}" ] || [ "${CERID_GATEWAY:-}" = "true" ]; then

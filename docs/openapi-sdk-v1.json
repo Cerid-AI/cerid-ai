@@ -1491,6 +1491,9 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Consumer is not allowed to query the requested domain"
+          },
           "422": {
             "description": "Invalid request parameters"
           },
@@ -1565,6 +1568,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Consumer is not allowed to query the requested domain"
           },
           "422": {
             "description": "Invalid request parameters"

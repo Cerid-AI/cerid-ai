@@ -4,6 +4,18 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
+## [1.0.8] — 2026-10-02
+
+The Studio audit release. The September audit of the Mac Studio install found
+that answers were not grounded in the first message, that one consumer's
+operational domains leaked into the owner's retrieval, and that a claim could
+count as verified with no source behind it; all three are fixed here, with
+five remediation batches behind them. The web port stops adding the API key
+for callers who have not signed in. The MLX model server for Apple-silicon
+Macs ships with an installer. And several places that failed quietly now
+fail where you can see it: a fully restricted query is a 403, not an empty
+answer, and the edge sign-in limits wrong passwords.
+
 ### Security
 
 - **The web port adds the API key only for a caller who has signed in.** The
@@ -34,6 +46,73 @@ All notable changes to cerid-ai are documented here.
 - Sign-in on port 3000 sets its own cookie, `cerid_portal_local`, without
   `Secure`, because browsers do not keep a `Secure` cookie on plain HTTP. The
   gateway does not accept it.
+- **The edge sign-in limits wrong passwords.** Each wrong password waits a
+  second, and after 20 inside 15 minutes the form answers `429` with
+  `Retry-After` until the oldest ages out. The limit is global, because the
+  peer is always the proxy. The API key and tailnet identity still work while
+  it is locked.
+- **A consumer writes only into its own domains on `/sdk/v1/ingest` and
+  `/sdk/v1/ingest/file`.** `/ingest/upload` already enforced this; the other
+  two took any domain the caller named. A foreign domain is `403`; no domain
+  means the consumer's only one.
+- **Consumers' operational domains stay out of the owner's retrieval** (#463),
+  and a query held strictly to named domains gets no web or memory rows (#471).
+- Dependency gates audit the hashed lock that ships, not only a fresh
+  resolution; urllib3 2.8.0, pypdf 6.19.0, oauthlib 4.0.0, next 16.3.8 and
+  PyJWT 2.15.1 clear their advisories, and suppressions that no longer fire
+  are gone (#507, #525).
+
+### Retrieval
+
+- **The answer is grounded in the text being sent, from the first message
+  on** (#464); the send shares the panel's retrieval instead of adding a
+  request (#466), and sending cancels a pending suggestion search (#467).
+- **`/query` answers `403` when the consumer's allow-list removes every
+  requested domain**, as `/sdk/v1/query` does, instead of an empty `200` that
+  reads as "nothing indexed".
+- Retrieval threads follow the container's CPU quota, and the cap is settable
+  (#469). The in-process reranker reports to `/health` when it is the one
+  named (#473).
+- HyPE retrieval works through the embedding-aware Chroma client (#514);
+  deleting or replacing an artifact removes its parent chunks and HyPE
+  questions (#515); a domain with no HyPE index is not logged as an error
+  (#518). A folder marked not searchable stays out of retrieval (#496).
+
+### Verification
+
+- **"Verified" needs a source.** Agreement by a second model is counted
+  separately as `agreed` (SDK wire 1.3.0, below) (#497, #510); a claim is
+  promoted to memory only when its verdict names a source (#465).
+- The assistant's refusals are removed before any extractor reads the
+  response (#508), and a fact in the same sentence as a refusal is still
+  checked (#513). No accuracy figure is shown without a verdict (#470).
+- The verification concurrency limits work on every event loop (#531); every
+  other module-level asyncio semaphore and lock now does too, and a lint gate
+  keeps new ones out.
+
+### Local inference
+
+- **The MLX model server for Apple-silicon Macs ships**, with
+  `stacks/mlx-inference/install.sh`: it picks a model catalog by memory,
+  downloads and verifies the weights, installs a launchd agent, checks the
+  server from a container, and appends only unset Cerid settings to `.env`
+  (#532). Tool calling, prefix-cache reuse and per-tier caps (#445), a real
+  revision on `/api/version` (#460), a listen backlog that survives bursts
+  (#511).
+- A local-only install is configured end to end, and the chat can choose a
+  local model (#475, #481).
+
+### Fixed
+
+- Remediation batches 1–5 (#481, #484, #486, #492, #495): settings, ingest,
+  reports, private mode, the web shell, the Neo4j store size, wizard resume,
+  status GETs that wrote, workflow skips and condition branches, named domains
+  holding the knowledge-base rows, and plugin choices taking effect.
+- The nightly retrieval eval can see its fixtures again: the eval harnesses
+  are registered consumers (#533).
+- `./scripts/start-cerid.sh --build` restarts the sign-in service. It runs a
+  bind-mounted script on a stock image, so a rebuild left the previous
+  `sso.py` running.
 
 ### Changed
 
@@ -41,6 +120,8 @@ All notable changes to cerid-ai are documented here.
   torchaudio and torchcodec now come from PyTorch's CPU index, so the image no
   longer carries the CUDA libraries and triton that no host ever gave it a GPU
   for. Meeting Capture diarization runs on CPU as before.
+- `./scripts/start-cerid.sh --build` prunes the dangling images its rebuild
+  leaves, and the host watchdog reports the Docker VM's disk (#519).
 
 ### Upgrading
 
@@ -52,6 +133,14 @@ All notable changes to cerid-ai are documented here.
   must send `X-API-Key`.
 - API calls on port 3000 under a name other than `CERID_HOST` answer `421`.
 - The sign-in page says "Cerid" unless `CERID_PORTAL_TITLE` is set.
+- A client that relied on an empty `200` from `/query` for a domain outside
+  its allow-list now gets `403` with `retrieval_reason:
+  consumer_domain_restricted`. Register the client ID with the domains it
+  needs (`CONSUMER_REGISTRY`).
+- `/sdk/v1/ingest` and `/ingest/file` refuse a domain outside the consumer's
+  allow-list with `403`, as `/ingest/upload` already did. An unregistered
+  `X-Client-ID` may write only to `general`; register the integration in
+  `CONSUMER_REGISTRY` to write elsewhere.
 
 ### SDK — `cerid-sdk` / `@cerid-ai/sdk` 0.2.1, wire protocol 1.3.0
 

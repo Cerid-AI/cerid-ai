@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 
 # ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ from core.utils.swallowed import log_swallowed_error
 # ---------------------------------------------------------------------------
 
 _http_client: httpx.AsyncClient | None = None
-_http_lock = asyncio.Lock()
+_http_lock = LoopLocal(lambda: asyncio.Lock())
 
 _DEFAULT_TIMEOUT = httpx.Timeout(10.0)
 _USER_AGENT = "cerid-ai/0.92.0 (+https://github.com/Cerid-AI/cerid-ai)"
@@ -47,7 +48,7 @@ async def get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is not None and not _http_client.is_closed:
         return _http_client
-    async with _http_lock:
+    async with _http_lock.get():
         if _http_client is None or _http_client.is_closed:
             _http_client = httpx.AsyncClient(
                 timeout=_DEFAULT_TIMEOUT,

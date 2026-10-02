@@ -489,8 +489,11 @@ def sdk_health():
 # ---------------------------------------------------------------------------
 
 
-@router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
+@router.post("/ingest", summary="Ingest Text", responses={403: _403, 422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
 async def sdk_ingest(req: dict, request: Request):
+    # A restricted consumer writes only into its own domains, as /ingest/upload
+    # already enforced; an unrestricted one keeps the "general" default.
+    domain = _resolve_write_domain(request, req.get("domain") or "") or "general"
     # Preserve client-supplied provenance metadata (GA P0.2): external clients
     # pass rich metadata (title / provenance / source_file / …). Keep the
     # legacy `tags` field alongside it rather than overwriting with tags-only.
@@ -502,22 +505,24 @@ async def sdk_ingest(req: dict, request: Request):
         request,
         lambda: ingest_content(
             req.get("content", ""),
-            domain=req.get("domain", "general"),
+            domain=domain,
             metadata=metadata,
         ),
     )
 
 
-@router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
+@router.post("/ingest/file", summary="Ingest File", responses={403: _403, 422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
 async def sdk_ingest_file(req: dict, request: Request):
+    # Same write scope as /ingest. An unrestricted consumer's empty domain
+    # still means "categorize it".
+    domain = _resolve_write_domain(request, req.get("domain") or "")
     # Idempotency-Key (GA P0.5 D1): a retried file ingest with the same key
-    # returns the first result instead of ingesting the file twice. `request`
-    # exists solely to reach the header — the body model is `req`.
+    # returns the first result instead of ingesting the file twice.
     return await idempotent(
         request,
         lambda: ingest_file(
             req.get("file_path", ""),
-            domain=req.get("domain", ""),
+            domain=domain,
             tags=req.get("tags", ""),
             categorize_mode=req.get("categorize_mode", ""),
         ),

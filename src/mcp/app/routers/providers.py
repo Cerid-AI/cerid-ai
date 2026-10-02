@@ -29,6 +29,7 @@ from core.routing.model_providers import (
     load_config,
     save_config,
 )
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -105,7 +106,7 @@ logger = logging.getLogger("ai-companion.providers")
 # module-level client so polls share the connection pool.
 
 _openrouter_http_client: httpx.AsyncClient | None = None
-_openrouter_http_client_lock = asyncio.Lock()
+_openrouter_http_client_lock = LoopLocal(lambda: asyncio.Lock())
 
 
 async def _openrouter_client() -> httpx.AsyncClient:
@@ -117,7 +118,7 @@ async def _openrouter_client() -> httpx.AsyncClient:
     global _openrouter_http_client
     if _openrouter_http_client is not None and not _openrouter_http_client.is_closed:
         return _openrouter_http_client
-    async with _openrouter_http_client_lock:
+    async with _openrouter_http_client_lock.get():
         if _openrouter_http_client is None or _openrouter_http_client.is_closed:
             _openrouter_http_client = httpx.AsyncClient(
                 timeout=10,

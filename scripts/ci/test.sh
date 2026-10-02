@@ -23,6 +23,9 @@ pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
 
 python -m pytest scripts/tests/ -q
 
+# The edge sign-in service (stacks/sso): stdlib only, so the suite's venv runs it.
+python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
+
 # The Studio MLX server (stacks/mlx-inference). Its own venv: mlx-lm pulls
 # transformers, which must not reshuffle the pins the suite above ran against.
 # MLX runs on Linux CPUs here; STRICT turns a dependency that failed to install

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from core.utils.circuit_breaker import get_breaker
+from core.utils.loop_local import LoopLocal
 from core.utils.tracing import get_request_id, tracing_headers
 from errors import ProviderError
 
@@ -90,7 +91,7 @@ _client: httpx.AsyncClient | None = None
 # client instead of the singleton — preventing the throwaway loop from
 # binding the singleton and leaving it dead when the thread exits.
 _client_loop: asyncio.AbstractEventLoop | None = None
-_client_lock = asyncio.Lock()
+_client_lock = LoopLocal(lambda: asyncio.Lock())
 
 # Consecutive auth-failure counter — tracks 401/403 responses that indicate the
 # connection pool was poisoned by startup failures before DNS/auth stabilised.
@@ -145,7 +146,7 @@ async def _get_client() -> httpx.AsyncClient:
 
     # Owner-loop mismatch on the main thread (e.g. pytest changed loops
     # between tests) — recycle, don't return a dead singleton.
-    async with _client_lock:
+    async with _client_lock.get():
         if _client is None or _client.is_closed or _client_loop is not current_loop:
             _client = _new_openrouter_client()
             _client_loop = current_loop
@@ -210,7 +211,7 @@ async def _recycle_client() -> None:
     stabilised at container startup.
     """
     global _client, _consecutive_401s
-    async with _client_lock:
+    async with _client_lock.get():
         if _client is not None and not _client.is_closed:
             await _client.aclose()
         _client = httpx.AsyncClient(
