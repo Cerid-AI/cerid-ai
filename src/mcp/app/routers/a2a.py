@@ -275,7 +275,7 @@ async def _execute_ingest(input_data: dict) -> dict:
     """
     from app.services.ingestion import _ingest_semaphore, ingest_content
 
-    async with _ingest_semaphore:
+    async with _ingest_semaphore.get():
         result = await asyncio.to_thread(
             ingest_content,
             input_data.get("text", input_data.get("content", "")),

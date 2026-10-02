@@ -25,8 +25,10 @@ import hashlib
 import hmac
 import html
 import os
+import threading
 import time
 import urllib.parse
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PASSWORD = os.environ.get("CERID_PORTAL_PASSWORD", "")
@@ -55,6 +57,39 @@ _SIGNING_KEY = (
 )
 
 ENABLED = bool(PASSWORD)
+
+# Wrong-password limiting. Global, not per client: requests arrive through
+# Caddy or nginx, so the peer address is the proxy's, and X-Forwarded-For is
+# whatever the client chose to send. One password guards the whole install, so
+# the bound that matters is total guesses. Each wrong password waits
+# _FAIL_DELAY_S; after _FAIL_LIMIT of them inside _FAIL_WINDOW_S the form
+# answers 429 until the oldest ages out. The operator keeps the API key and the
+# tailnet identity while it is locked.
+_FAIL_LIMIT = 20
+_FAIL_WINDOW_S = 900
+_FAIL_DELAY_S = 1.0
+_failures: deque[float] = deque()
+_failures_lock = threading.Lock()
+
+
+def _locked_for(now: float) -> int:
+    """Seconds until the form accepts another attempt; 0 when it is open."""
+    with _failures_lock:
+        while _failures and now - _failures[0] >= _FAIL_WINDOW_S:
+            _failures.popleft()
+        if len(_failures) < _FAIL_LIMIT:
+            return 0
+        return max(1, int(_failures[0] + _FAIL_WINDOW_S - now) + 1)
+
+
+def _record_failure(now: float) -> None:
+    with _failures_lock:
+        _failures.append(now)
+
+
+def _clear_failures() -> None:
+    with _failures_lock:
+        _failures.clear()
 
 
 def _sign(exp: int, scope: str = "") -> str:
@@ -259,7 +294,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if not ENABLED:
             return self._send(302, headers={"Location": "/"})
+        wait = _locked_for(time.time())
+        if wait:
+            return self._send(
+                429,
+                b"Too many sign-in attempts. Try again later.",
+                {"Content-Type": "text/plain; charset=utf-8", "Retry-After": str(wait)},
+            )
         if hmac.compare_digest(submitted, PASSWORD):
+            _clear_failures()
             # Set by the web container's nginx, which serves plain HTTP. A
             # caller who sends it through the gateway only costs themselves a
             # cookie the gateway will not accept.
@@ -268,6 +311,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 cookie = _set_cookie(COOKIE, _make_token(), TTL)
             return self._send(303, headers={"Location": next_path, "Set-Cookie": cookie})
+        _record_failure(time.time())
+        time.sleep(_FAIL_DELAY_S)
         return self._login_page(next_path, error=True)
 
 

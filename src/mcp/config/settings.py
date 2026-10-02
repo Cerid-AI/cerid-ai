@@ -1678,8 +1678,9 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         # included, while /sdk/v1/query documents results as scoped by the
         # consumer's allowed_domains. An unrecognized consumer gets the
         # non-personal general domain and nothing else; widening it is what
-        # registering an entry above is for. Ingest is unaffected: the
-        # allow-list is read on the retrieval paths only.
+        # registering an entry above is for. The /sdk/v1 ingest routes apply
+        # it to writes as well (an unregistered client writes to "general");
+        # ingest outside /sdk/v1 does not read it.
         "allowed_domains": ["general"],
         "strict_domains": True,
     },

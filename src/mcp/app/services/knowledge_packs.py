@@ -50,6 +50,7 @@ from core.knowledge.packs import (
     upsert_installed,
     verify_archive_sha256,
 )
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -68,7 +69,7 @@ IngestFn = Callable[
 DeleteFn = Callable[[str], Awaitable[dict[str, Any]]]
 
 # Single global lock — install / uninstall never run concurrently.
-_install_lock = asyncio.Lock()
+_install_lock = LoopLocal(lambda: asyncio.Lock())
 
 
 # ── Public orchestration ──────────────────────────────────────────────────
@@ -104,7 +105,7 @@ async def install_pack(
     even then only on success. Half-ingested artifacts will dedup
     cleanly on re-run because content_hash already protects us.
     """
-    async with _install_lock:
+    async with _install_lock.get():
         existing = find_installed(load_install_state(state_path), pack.id)
         if existing and existing.version == pack.version:
             logger.info(
@@ -278,7 +279,7 @@ async def uninstall_pack(
     Missing artifacts (deleted out-of-band by the operator) are tolerated:
     we drop the record either way.
     """
-    async with _install_lock:
+    async with _install_lock.get():
         state = load_install_state(state_path)
         record = find_installed(state, pack_id)
         if record is None:

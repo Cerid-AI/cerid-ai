@@ -56,12 +56,13 @@ from http import HTTPStatus
 import httpx
 
 from core.utils.circuit_breaker import get_breaker
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.quenchforge")
 
 _client: httpx.AsyncClient | None = None
-_client_lock = asyncio.Lock()
+_client_lock = LoopLocal(lambda: asyncio.Lock())
 
 
 def _get_quenchforge_url() -> str:
@@ -105,7 +106,7 @@ async def _get_client() -> httpx.AsyncClient:
         and _client_loop is current_loop
     ):
         return _client
-    async with _client_lock:
+    async with _client_lock.get():
         if (
             _client is None
             or _client.is_closed

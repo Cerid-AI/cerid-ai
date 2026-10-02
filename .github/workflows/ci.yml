@@ -107,6 +107,9 @@ jobs:
         # These prove the drift/lint gates can actually fail. Nothing ran them
         # until 2026-08-04.
         run: python -m pytest scripts/tests/ -q
+      - name: Sign-in service tests (stacks/sso)
+        # Stdlib only. Hand-ported from the canonical scripts/ci/test.sh.
+        run: python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
       # The MLX server (stacks/mlx-inference) has its own pinned packages, so its
       # tests run in their own venv on Python 3.12 with MLX on Linux CPUs.
       # MLX_STACK_TESTS_STRICT turns a dependency that failed to install into a

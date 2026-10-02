@@ -216,6 +216,12 @@ def _make_app() -> FastAPI:
 
 @pytest.fixture
 def client(redis_client):
+    # /ingestion/progress lists the router's in-process job table; ingest tests
+    # that ran earlier in the session leave entries in it.
+    from app.routers import ingestion
+
+    with ingestion._progress_lock:
+        ingestion._active_jobs.clear()
     with patch("app.routers.ingestion.get_redis", return_value=redis_client):
         yield TestClient(_make_app())
 

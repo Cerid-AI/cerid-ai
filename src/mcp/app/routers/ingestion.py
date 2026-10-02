@@ -29,6 +29,7 @@ from app.services.ingestion import ingest_batch, ingest_content, ingest_file
 from core.ingest.sources.safe_fetch import guarded_get
 from core.knowledge.adapter_html_scrape import extract_html_content
 from core.utils import cache
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from errors import CeridError
 
@@ -50,7 +51,7 @@ logger = logging.getLogger("ai-companion")
 
 # Concurrency limiter for ingestion (Workstream E Phase 0 — env-configurable
 # via INGEST_CONCURRENCY; see config/settings.py).
-_ingest_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
+_ingest_semaphore = LoopLocal(lambda: asyncio.Semaphore(config.INGEST_CONCURRENCY))
 
 # ── In-flight progress tracking ───────────────────────────────────────────────
 
@@ -266,7 +267,7 @@ def sync_state_report_endpoint(connector: str, req: SyncStateReport):
 async def ingest_endpoint(req: IngestRequest, request: Request):
     client_source = request.headers.get("X-Client-ID", "")
     metadata = {"client_source": client_source} if client_source else None
-    async with _ingest_semaphore:
+    async with _ingest_semaphore.get():
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     _record_connector_ingest(client_source, result)
     return result
@@ -371,7 +372,7 @@ async def ingest_structured_endpoint(req: StructuredIngestRequest, request: Requ
         if source_kind:
             metadata["source_kind"] = source_kind
 
-    async with _ingest_semaphore:
+    async with _ingest_semaphore.get():
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     _record_connector_ingest(client_source, result)
     return result
@@ -417,7 +418,7 @@ async def ingest_url_endpoint(req: IngestUrlRequest):
         if clean_tags:
             metadata["tags_json"] = json.dumps(clean_tags)
 
-    async with _ingest_semaphore:
+    async with _ingest_semaphore.get():
         result = await asyncio.to_thread(
             ingest_content, text, req.domain, metadata, enrich=True,
         )
@@ -429,7 +430,7 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
     filename = req.file_path.rsplit("/", 1)[-1] if "/" in req.file_path else req.file_path
     _register_job(filename)
     try:
-        async with _ingest_semaphore:
+        async with _ingest_semaphore.get():
             result = await ingest_file(
                 file_path=req.file_path,
                 domain=req.domain,
@@ -488,7 +489,7 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
         # single-item endpoints already respect — without this, concurrent
         # /ingest_batch calls bypassed _ingest_semaphore entirely, each one
         # only bounded by services/ingestion.py's own internal per-item limiter.
-        async with _ingest_semaphore:
+        async with _ingest_semaphore.get():
             result = await ingest_batch(items)
 
         for fn in filenames:

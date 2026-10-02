@@ -128,6 +128,8 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	.venv/bin/python -m flake8 --select=DUO138 src/mcp/
 	@echo "[ci-local] gate probes (scripts/tests)"
 	.venv/bin/pytest scripts/tests/ -q -p no:cacheprovider
+	@echo "[ci-local] sign-in service tests (stacks/sso)"
+	.venv/bin/pytest stacks/sso/test_sso.py -q -p no:cacheprovider
 	@echo "[ci-local] MLX server tests (stacks/mlx-inference; cases needing MLX or openai-harmony skip here, CI runs them)"
 	@if [ -d stacks/mlx-inference ]; then \
 	  .venv/bin/pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider; \
@@ -207,6 +209,8 @@ drift-check: ## Generated-doc, manifest, and lint gates the remote `lint` job ru
 	.venv/bin/python scripts/lint-import-star-without-all.py
 	@echo "[drift] no-module-getenv-mutable"
 	.venv/bin/python scripts/lint-no-module-getenv-mutable.py
+	@echo "[drift] no-module-asyncio-primitives"
+	.venv/bin/python scripts/lint-no-module-asyncio-primitives.py
 	@echo "[drift] docker-healthcheck-localhost"
 	.venv/bin/python scripts/lint-docker-healthcheck-localhost.py
 	@echo "[drift] web-no-crypto-randomuuid"

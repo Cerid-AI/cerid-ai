@@ -24,11 +24,12 @@ from app.services.external_apis.base import (
     ExternalAPIAdapter,
     get_http_client,
 )
+from core.utils.loop_local import LoopLocal
 
 _BASE_URL = "https://nominatim.openstreetmap.org"
 
 # Nominatim policy: max 1 request per second.
-_rate_lock = asyncio.Lock()
+_rate_lock = LoopLocal(lambda: asyncio.Lock())
 _MIN_INTERVAL = 1.0  # seconds
 _last_call_time: float = 0.0
 
@@ -36,7 +37,7 @@ _last_call_time: float = 0.0
 async def _rate_limited_get(client: httpx.AsyncClient, url: str, params: dict[str, Any]) -> httpx.Response:
     """Execute an HTTP GET, enforcing the 1-req/s Nominatim rate limit."""
     global _last_call_time
-    async with _rate_lock:
+    async with _rate_lock.get():
         now = asyncio.get_event_loop().time()
         elapsed = now - _last_call_time
         if elapsed < _MIN_INTERVAL:

@@ -126,3 +126,20 @@ def test_a_failing_prune_does_not_fail_the_start(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _prunes(calls) == ["image prune -f"]
     assert "prune failed" in proc.stdout + proc.stderr
+
+
+# cerid-sso runs a bind-mounted script on a stock image, so --build alone never
+# replaced its process (the 1.0.8 sign-in limiter stayed out of effect).
+@pytest.mark.parametrize("mode", [(), ("--legacy",)], ids=["unified", "legacy"])
+def test_a_build_restarts_the_sign_in_service_after_compose_up(tmp_path, mode):
+    proc, calls = _run(tmp_path, "--build", *mode)
+    assert proc.returncode == 0, proc.stderr
+    assert "restart cerid-sso" in calls
+    last_up = max(i for i, c in enumerate(calls) if c.startswith("compose") and " up " in f" {c} ")
+    assert calls.index("restart cerid-sso") > last_up
+
+
+def test_a_start_without_build_does_not_restart_the_sign_in_service(tmp_path):
+    proc, calls = _run(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert "restart cerid-sso" not in calls

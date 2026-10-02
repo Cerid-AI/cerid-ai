@@ -69,7 +69,7 @@ async def test_webhook_drain_processes_entries_concurrently(monkeypatch):
     ingests were in flight at the same instant. With sequential processing
     the observed max concurrency would be 1; the bounded-concurrency fix
     must show more than one in-flight call (bounded by config.INGEST_CONCURRENCY,
-    fixed at module import time — see app.scheduler._webhook_drain_semaphore).
+    read when this loop first takes app.scheduler._webhook_drain_semaphore).
     """
     import threading
     import time as _time
@@ -98,10 +98,9 @@ async def test_webhook_drain_processes_entries_concurrently(monkeypatch):
 
     from app.scheduler import _webhook_drain_semaphore
 
-    # The semaphore is created once at module import time from
-    # config.INGEST_CONCURRENCY, so its capacity (not the monkeypatched
-    # config value) is the real bound for this run.
-    concurrency_cap = _webhook_drain_semaphore._value
+    # One semaphore per event loop, created from config.INGEST_CONCURRENCY the
+    # first time the loop takes it; this is the bound the drain runs under.
+    concurrency_cap = _webhook_drain_semaphore.get()._value
 
     with patch("app.scheduler.get_redis", return_value=fake), \
          patch("app.scheduler.get_neo4j", return_value=None), \

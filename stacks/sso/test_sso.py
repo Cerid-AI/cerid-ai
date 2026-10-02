@@ -192,3 +192,55 @@ def test_a_configured_name_cannot_inject_markup(server, monkeypatch):
     page = call(server, "GET", "/__auth/login").text
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;" in page
+
+
+# ── Wrong-password limiting ──────────────────────────────────────────────────
+
+
+@pytest.fixture
+def few_attempts(monkeypatch):
+    monkeypatch.setattr(sso, "_FAIL_LIMIT", 3)
+    monkeypatch.setattr(sso, "_FAIL_DELAY_S", 0)
+    sso._clear_failures()
+    yield
+    sso._clear_failures()
+
+
+def wrong(server):
+    return call(
+        server, "POST", "/__auth/login",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        body="password=nope&next=/",
+    )
+
+
+def test_wrong_passwords_lock_the_form(server, few_attempts):
+    assert [wrong(server).status for _ in range(3)] == [200, 200, 200]
+    locked = wrong(server)
+    assert locked.status == 429
+    assert int(locked.getheader("Retry-After")) > 0
+
+
+def test_the_right_password_is_refused_while_locked(server, few_attempts):
+    for _ in range(3):
+        wrong(server)
+    resp = call(
+        server, "POST", "/__auth/login",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        body=f"password={PASSWORD}&next=/",
+    )
+    assert resp.status == 429
+
+
+def test_a_success_clears_the_count(server, few_attempts):
+    wrong(server)
+    wrong(server)
+    login(server)
+    assert [wrong(server).status for _ in range(3)] == [200, 200, 200]
+
+
+def test_old_failures_age_out(few_attempts, monkeypatch):
+    for t in (0.0, 1.0, 2.0):
+        sso._record_failure(t)
+    assert sso._locked_for(3.0) > 0
+    assert sso._locked_for(float(sso._FAIL_WINDOW_S) + 0.5) == 0

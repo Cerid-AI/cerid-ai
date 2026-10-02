@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 
@@ -32,7 +33,7 @@ _GITHUB_RELEASES_URL = (
 _FETCH_TIMEOUT = 5.0  # seconds — short, best-effort
 
 # Simple 1-hour in-memory cache to avoid hammering the GitHub rate limit.
-_cache_lock = asyncio.Lock()
+_cache_lock = LoopLocal(lambda: asyncio.Lock())
 _cache: dict[str, Any] = {"result": None, "expires_at": 0.0}
 _CACHE_TTL = 3600.0  # seconds
 
@@ -97,7 +98,7 @@ async def _fetch_latest_release() -> dict[str, str] | None:
 async def _cached_fetch_latest_release() -> dict[str, str] | None:
     """Return cached release info, refreshing when the TTL has expired."""
     now = time.monotonic()
-    async with _cache_lock:
+    async with _cache_lock.get():
         if now < _cache["expires_at"]:
             return _cache["result"]  # type: ignore[return-value]
         result = await _fetch_latest_release()
@@ -113,7 +114,7 @@ async def _get_release(force: bool) -> dict[str, str] | None:
     # Force path: fetch fresh, then update cache so subsequent non-forced calls see it.
     result = await _fetch_latest_release()
     now = time.monotonic()
-    async with _cache_lock:
+    async with _cache_lock.get():
         _cache["result"] = result
         _cache["expires_at"] = now + _CACHE_TTL
     return result

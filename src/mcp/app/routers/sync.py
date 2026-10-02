@@ -16,12 +16,13 @@ from pydantic import BaseModel
 
 import config
 from app.deps import get_neo4j, get_redis
+from core.utils.loop_local import LoopLocal
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.sync")
 
 # Concurrency limiter for sync operations
-_sync_semaphore = asyncio.Semaphore(1)
+_sync_semaphore = LoopLocal(lambda: asyncio.Semaphore(1))
 
 
 # -- Pydantic models ----------------------------------------------------------
@@ -46,7 +47,7 @@ class ImportRequest(BaseModel):
 async def sync_export_endpoint(req: ExportRequest):
     """Trigger an incremental (or full) export to the sync directory."""
     try:
-        async with _sync_semaphore:
+        async with _sync_semaphore.get():
             from app.sync.export import export_all
             from app.sync.manifest import read_manifest
 
@@ -82,7 +83,7 @@ async def sync_export_endpoint(req: ExportRequest):
 async def sync_import_endpoint(req: ImportRequest):
     """Trigger a merge import from the sync directory."""
     try:
-        async with _sync_semaphore:
+        async with _sync_semaphore.get():
             from app.sync.import_ import import_all
 
             result = import_all(

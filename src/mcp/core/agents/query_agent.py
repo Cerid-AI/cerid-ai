@@ -29,6 +29,7 @@ from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.loop_local import LoopLocal
 from core.utils.swallowed import log_swallowed_error
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
@@ -1018,7 +1019,7 @@ async def lightweight_kb_query(
     context assembly.  Returns raw ranked results suitable for
     claim verification where only semantic similarity matters.
     """
-    async with _VERIFY_KB_SEM:
+    async with _VERIFY_KB_SEM.get():
         results = await multi_domain_query(
             query, domains=domains, top_k=top_k, chroma_client=chroma_client,
         )
@@ -1602,10 +1603,10 @@ def _record_in_process_rerank(*, served: bool, detail: str = "") -> None:
 # Serialize at the client so production never overwhelms the daemon — eval
 # harnesses still need their own PACE_S because the semaphore protects the
 # daemon, not batch etiquette.
-_RERANK_QUENCHFORGE_SEM = asyncio.Semaphore(1)
+_RERANK_QUENCHFORGE_SEM = LoopLocal(lambda: asyncio.Semaphore(1))
 # Verification's lightweight_kb_query is off KB_POOL (HARM to pin slots while
 # waiting on OpenRouter). Cap the Chroma/BM25 hop only; NLI runs after release.
-_VERIFY_KB_SEM = asyncio.Semaphore(int(config.VERIFY_KB_MAX_CONCURRENT))
+_VERIFY_KB_SEM = LoopLocal(lambda: asyncio.Semaphore(int(config.VERIFY_KB_MAX_CONCURRENT)))
 # Once-per-process: RERANK_PROVIDER=quenchforge with no loaded slot used to
 # 503 on every query. Warn on the first miss so operators see it; do not
 # retry here — fall-through to sidecar/ONNX is the recovery path.
@@ -1635,7 +1636,7 @@ async def _maybe_rerank_via_quenchforge(
         from utils.quenchforge_client import quenchforge_rerank
         documents = [r.get("content", "") for r in results]
         with span("retrieval.rerank", "quenchforge", k=len(results)):
-            async with _RERANK_QUENCHFORGE_SEM:
+            async with _RERANK_QUENCHFORGE_SEM.get():
                 scores = await quenchforge_rerank(query, documents)
         inference_health.record_success("rerank", provider="quenchforge")
         return _apply_rerank_scores(results, scores, "quenchforge")
