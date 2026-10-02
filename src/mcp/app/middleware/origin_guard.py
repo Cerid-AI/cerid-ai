@@ -28,9 +28,21 @@ logger = logging.getLogger("ai-companion.origin")
 _STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOOPBACK_SPELLINGS = {"localhost": "127.0.0.1", "127.0.0.1": "localhost"}
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-# What the desktop app sends: its bundle is loaded from disk. A browser sends
-# "null" for a page opened from disk, so this admits no web page.
+# The desktop app loads its bundle from disk (packages/desktop main.ts,
+# loadFile). Measured on the signed 1.0.8 build: its renderer's cross-origin
+# writes carry NO Origin, with Sec-Fetch-Site: cross-site and Sec-Fetch-Mode:
+# cors. A browser always sends Origin on a cors-mode request (Fetch standard),
+# so that combination admits no web page. "file://" is kept for builds that do
+# send it; "null" (a page opened from disk in a browser, a sandboxed frame)
+# stays refused.
 _DESKTOP_ORIGIN = "file://"
+
+
+def _is_desktop_renderer(request: Request) -> bool:
+    return (
+        "origin" not in request.headers
+        and request.headers.get("sec-fetch-mode") == "cors"
+    )
 
 
 def _configured_origins() -> set[str]:
@@ -87,7 +99,11 @@ def _refusal(request: Request) -> str | None:
             f"Cross-site request refused: origin {origin!r} may not change data "
             "on this server. If the origin is yours, add it to CORS_ORIGINS."
         )
-    if request.headers.get("sec-fetch-site") == "cross-site" and not named:
+    if (
+        request.headers.get("sec-fetch-site") == "cross-site"
+        and not named
+        and not _is_desktop_renderer(request)
+    ):
         return (
             f"Cross-site request refused: the browser marked this request from "
             f"origin {origin!r} as cross-site. If the origin is yours, add it to "

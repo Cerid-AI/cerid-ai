@@ -4,6 +4,23 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
+## [1.0.9] — 2026-10-02
+
+A fix release. On a 1.0.8 server the desktop app could not chat or change
+anything: the cross-site write guard added in 1.0.8 refused every write it
+sent.
+
+### Fixed
+
+- **The desktop app may write again.** The guard admitted the desktop by
+  `Origin: file://`, which 1.0.8 assumed and nothing had measured. The signed
+  build's renderer sends no `Origin` at all, with `Sec-Fetch-Site: cross-site`
+  and `Sec-Fetch-Mode: cors`, so every desktop chat answered `403
+  CROSS_SITE_REQUEST_REFUSED`. A browser always sends `Origin` on a cors-mode
+  request, so the guard now admits that combination and still refuses `null`,
+  any unnamed origin, and an origin-less cross-site write in any other mode.
+  Found by the packaged-app smoke (gate 6) on the shipped 1.0.8 DMG.
+
 ## [1.0.8] — 2026-10-02
 
 The Studio audit release. The September audit of the Mac Studio install found

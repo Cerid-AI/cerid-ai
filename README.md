@@ -35,7 +35,7 @@ Open http://localhost:3000 — the React GUI is ready. Drop files into `~/cerid-
 
 **It's working when** the status bar shows green dots for ChromaDB, Neo4j, and Redis.
 
-Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.8](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.8-desktop).
+Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.9](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.9-desktop).
 
 ---
 
@@ -50,7 +50,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 | **Specialist agents**          | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v1.0.8)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v1.0.9)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 
@@ -156,7 +156,7 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 ### Install the SDKs
 
 Typed client libraries for the stable `/sdk/v1/` API. SDKs version **independently**
-of the product release (product **v1.0.8** · clients **0.1.1** on both registries):
+of the product release (product **v1.0.9** · clients **0.1.1** on both registries):
 
 | Client | Install | Registry |
 |--------|---------|----------|
@@ -172,7 +172,7 @@ See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and [docs/SDK_PUBLISH
 - **Verified answers by default** — claim extraction + NLI entailment gating verifies LLM responses against your knowledge base, with source attribution and streaming verification reports.
 - **55 MCP tools** (60 with the optional trading module) plus a full MCP server, so Claude and other MCP-native clients drive Cerid directly.
 - **Four retrieval surfaces, one query path** — vector, BM25/sparse hybrid, knowledge graph, and a self-refreshing wiki, routed per query intent.
-- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.8 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.8-desktop); the release build verifies the signature, the notarization staple and Gatekeeper before it publishes.
+- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.9 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.9-desktop); the release build verifies the signature, the notarization staple and Gatekeeper before it publishes.
 - **Python + TypeScript SDKs live** — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk) against the stable `/sdk/v1/` contract.
 - **FSL-1.1-ALv2 source-available licensing** — the core converts to Apache-2.0 on each version's second anniversary; SDKs and client integrations stay Apache-2.0.
 

@@ -216,6 +216,31 @@ def test_mcp_transport_keeps_its_stricter_rule(client: TestClient):
 # loadFile) and calls the API directly. A page opened from disk in a browser
 # sends "null", which stays refused: so does every sandboxed frame on the web.
 DESKTOP = "file://"
+# What the signed 1.0.8 desktop build actually sends on a cross-origin write,
+# captured from its renderer on 2026-10-02: no Origin at all. The guard admitted
+# only "file://" and refused every desktop chat as cross-site.
+DESKTOP_RENDERER = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}
+
+
+@pytest.mark.parametrize("method", WRITES)
+def test_the_packaged_desktop_renderer_may_write(client: TestClient, method: str):
+    resp = client.request(method, PROBE, headers=DESKTOP_RENDERER)
+    assert not _refused(resp), resp.text
+
+
+@pytest.mark.parametrize("mode", ["navigate", "no-cors", "same-origin", None])
+def test_a_cross_site_write_without_an_origin_outside_cors_mode_is_refused(
+    client: TestClient, mode
+):
+    headers = {"Sec-Fetch-Site": "cross-site"}
+    if mode:
+        headers["Sec-Fetch-Mode"] = mode
+    assert _refused(client.post(PROBE, headers=headers))
+
+
+@pytest.mark.parametrize("origin", ["null", "http://evil.example"])
+def test_a_cors_write_with_an_unnamed_origin_is_still_refused(client: TestClient, origin: str):
+    assert _refused(client.post(PROBE, headers={**DESKTOP_RENDERER, "Origin": origin}))
 
 
 @pytest.mark.parametrize("method", WRITES)
