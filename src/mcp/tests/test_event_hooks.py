@@ -483,6 +483,46 @@ class TestConstellationRefreshSubscriber:
 
         mock_enqueue.assert_called_once()
 
+    def test_debounce_ttl_scales_with_the_last_run(self):
+        # A 10-minute recompute must not be re-armed 3 minutes after it ends: the
+        # TTL is duty factor (default 10) x the recorded wall time.
+        from app.processor.subscribers import constellation_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"600.0"
+        mock_redis.set.return_value = True
+        with (
+            patch("app.deps.get_redis", return_value=mock_redis),
+            patch("app.db.redis.processor_queue.enqueue_job_if_absent", MagicMock()),
+        ):
+            constellation_refresh._on_entities_added(self._PAYLOAD)
+        mock_redis.get.assert_called_with("cerid:constellation:last_run_s")
+        mock_redis.set.assert_called_once_with(
+            "cerid:constellation:debounce", "1", nx=True, ex=6000,
+        )
+
+    def test_debounce_ttl_keeps_its_floor_without_a_record(self, monkeypatch):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+        assert constellation_refresh._effective_ttl(mock_redis) == 180
+        mock_redis.get.return_value = b"5.0"  # a fast run never lowers the floor
+        assert constellation_refresh._effective_ttl(mock_redis) == 180
+        mock_redis.get.return_value = b"not-a-number"
+        assert constellation_refresh._effective_ttl(mock_redis) == 180
+        monkeypatch.setenv("CONSTELLATION_REFRESH_DUTY_FACTOR", "3")
+        mock_redis.get.return_value = b"600.0"
+        assert constellation_refresh._effective_ttl(mock_redis) == 1800
+
+    def test_record_last_run_seconds_writes_the_key(self):
+        from app.processor.subscribers import constellation_refresh
+
+        mock_redis = MagicMock()
+        with patch("app.deps.get_redis", return_value=mock_redis):
+            constellation_refresh.record_last_run_seconds(612.34)
+        mock_redis.set.assert_called_once_with("cerid:constellation:last_run_s", "612.3")
+
     def test_disabled_via_env(self, monkeypatch):
         from app.processor.subscribers import constellation_refresh
 
