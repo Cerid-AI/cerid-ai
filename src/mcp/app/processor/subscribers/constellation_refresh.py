@@ -5,12 +5,18 @@
 
 The Constellation projection ("the cathedral") should grow as the corpus
 grows — not once a night. A single GLOBAL Redis debounce
-(``cerid:constellation:debounce``, TTL via
-``CONSTELLATION_REFRESH_DEBOUNCE_TTL``, default 180s) coalesces bulk
-ingests into one recompute: the projection covers every entity, so
-per-entity debouncing (the wiki_refresh pattern) would be wasted work.
-Fail-open when Redis is unavailable — the job is cheap (fallback layout
-of ~3K entities runs in <1s) and idempotent.
+(``cerid:constellation:debounce``) coalesces bulk ingests into one
+recompute: the projection covers every entity, so per-entity debouncing
+(the wiki_refresh pattern) would be wasted work.
+
+The debounce is sized to what the job COSTS, not fixed. Its TTL is the larger
+of ``CONSTELLATION_REFRESH_DEBOUNCE_TTL`` (default 180s) and
+``CONSTELLATION_REFRESH_DUTY_FACTOR`` (default 10) times the last run's
+measured wall time, which the job records. A fixed 180s assumed a sub-second
+job; at ~9K entities the force, wells and domain layouts take ~10 minutes, so
+any ingest more than 3 minutes after a run re-armed it, and a steady trickle of
+ingests kept one core pegged around the clock. Fail-open when Redis is
+unavailable (the job is idempotent), and the nightly schedule still runs.
 """
 from __future__ import annotations
 
@@ -26,11 +32,44 @@ _DEBOUNCE_KEY = "cerid:constellation:debounce"
 _DEFAULT_DEBOUNCE_TTL_S = 180
 
 
+_LAST_RUN_KEY = "cerid:constellation:last_run_s"
+_DEFAULT_DUTY_FACTOR = 10.0
+
+
 def _debounce_ttl() -> int:
     try:
         return max(0, int(os.environ.get("CONSTELLATION_REFRESH_DEBOUNCE_TTL", _DEFAULT_DEBOUNCE_TTL_S)))
     except (TypeError, ValueError):
         return _DEFAULT_DEBOUNCE_TTL_S
+
+
+def _duty_factor() -> float:
+    try:
+        return max(0.0, float(os.environ.get("CONSTELLATION_REFRESH_DUTY_FACTOR", _DEFAULT_DUTY_FACTOR)))
+    except (TypeError, ValueError):
+        return _DEFAULT_DUTY_FACTOR
+
+
+def _effective_ttl(redis: Any) -> int:
+    """The debounce TTL: the configured floor, or duty factor x the last run's wall time."""
+    floor = _debounce_ttl()
+    try:
+        last = float(redis.get(_LAST_RUN_KEY) or 0)
+    except (TypeError, ValueError):
+        return floor
+    return max(floor, int(last * _duty_factor()))
+
+
+def record_last_run_seconds(seconds: float) -> None:
+    """Called by ComputeUmap3DJob after a completed run. Best-effort."""
+    try:
+        from app.deps import get_redis  # noqa: PLC0415
+
+        redis = get_redis()
+        if redis is not None:
+            redis.set(_LAST_RUN_KEY, f"{max(0.0, seconds):.1f}")
+    except Exception as exc:  # noqa: BLE001 — bookkeeping only
+        log_swallowed_error("processor.subscribers.constellation_refresh.record_run", exc)
 
 
 def _is_enabled() -> bool:
@@ -47,7 +86,7 @@ def _try_acquire_debounce() -> bool:
         redis = get_redis()
         if redis is None:
             return True
-        acquired = redis.set(_DEBOUNCE_KEY, "1", nx=True, ex=_debounce_ttl())
+        acquired = redis.set(_DEBOUNCE_KEY, "1", nx=True, ex=_effective_ttl(redis))
         return bool(acquired)
     except Exception as exc:  # noqa: BLE001 — observability boundary
         log_swallowed_error("processor.subscribers.constellation_refresh.debounce", exc)

@@ -45,6 +45,7 @@ import json
 import logging
 import math
 import os
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -250,6 +251,7 @@ class ComputeUmap3DJob(BaseJob):
             return 0
 
     async def run(self, progress_cb: ProgressCallback) -> JobResult:
+        started = time.monotonic()
         await progress_cb(0.0)
         from app.deps import get_neo4j
 
@@ -387,6 +389,11 @@ class ComputeUmap3DJob(BaseJob):
             log_swallowed_error("processor.compute_umap_3d.l1_summary_batch", exc)
 
         self._bust_serving_cache()
+        from app.processor.subscribers.constellation_refresh import (  # noqa: PLC0415
+            record_last_run_seconds,
+        )
+
+        record_last_run_seconds(time.monotonic() - started)
         await progress_cb(1.0)
         method = coords[0]["method"] if coords else "none"
         logger.info("compute_umap_3d.wrote count=%d method=%s", len(coords), method)
