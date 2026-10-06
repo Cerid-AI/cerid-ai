@@ -196,7 +196,7 @@ jobs:
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
       - if: needs.changes.outputs.mcp == 'true'
-        run: pip install -r src/mcp/requirements.txt
+        run: pip install -r src/mcp/requirements.txt -r src/mcp/requirements-dev.txt
       - if: needs.changes.outputs.mcp == 'true'
         run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
