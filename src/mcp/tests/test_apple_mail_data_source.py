@@ -64,7 +64,10 @@ class TestConfiguration:
         with patch("platform.system", return_value="Darwin"):
             assert AppleMailDataSource(helper_path=helper_path).is_configured() is True
 
-    def test_off_darwin_the_state_is_runs_on_desktop_not_missing_configuration(self, helper_path):
+    def test_off_darwin_the_state_is_runs_on_desktop_not_missing_configuration(
+        self, helper_path, unresolvable_swift_helper,
+    ):
+        unresolvable_swift_helper(apple_mail_ds)
         with patch("platform.system", return_value="Linux"):
             assert AppleMailDataSource(helper_path=helper_path).configured_state() == "runs_on_desktop"
             assert AppleMailDataSource(helper_path=None).configured_state() == "runs_on_desktop"

@@ -15,7 +15,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 from lib.target import resolve_target
 
 MCP_BASE = resolve_target().mcp_base
@@ -43,12 +42,29 @@ def unique_marker() -> str:
     return f"EVAL_{uuid.uuid4().hex[:12]}"
 
 
+# The eval client's /ingest budget is a 60 s window (CONSUMER_REGISTRY), and the
+# retrieval seed is ~40 documents since round 4's distractors. A fixed backoff
+# that totals less than the window passed or failed on ingest speed alone; the
+# 429 says when the window resets, so wait for that.
+_SEED_MAX_WAIT_S = 70.0
+_SEED_MAX_ATTEMPTS = 8
+
+
+def _retry_after_s(resp: httpx.Response, attempt: int) -> float:
+    raw = resp.headers.get("Retry-After") or resp.headers.get("RateLimit-Reset")
+    try:
+        wait = float(raw) if raw is not None else 3.0 * (attempt + 1)
+    except ValueError:
+        wait = 3.0 * (attempt + 1)
+    return min(max(wait, 1.0), _SEED_MAX_WAIT_S)
+
+
 async def seed_content(client: httpx.AsyncClient, content: str, domain: str = "general") -> str:
-    """Ingest content via POST /ingest, return artifact_id. Retries on rate limit."""
-    for attempt in range(5):
+    """Ingest content via POST /ingest, return artifact_id. Waits out rate limits."""
+    for attempt in range(_SEED_MAX_ATTEMPTS):
         resp = await client.post("/ingest", json={"content": content, "domain": domain})
         if resp.status_code == 429:
-            await asyncio.sleep(3 * (attempt + 1))
+            await asyncio.sleep(_retry_after_s(resp, attempt))
             continue
         resp.raise_for_status()
         return resp.json()["artifact_id"]
