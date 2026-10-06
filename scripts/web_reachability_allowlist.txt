@@ -1,0 +1,20 @@
+# Deliberately-orphaned .ts/.tsx modules under src/web/src.
+# Enforced by scripts/lint-web-reachability.py --check.
+#
+# Format per line: <repo-relative path>  # <finding-id>: <reason>
+#
+# Seeded 2026-09-03 at the public release boundary (audit finding F325). Every
+# entry below is a path this gate itself reported as unreachable from the app
+# roots on this tree — nothing here was written from memory. The gate was a
+# silent no-op in this repo until the file existed, so these six are the
+# standing orphan set, not new debt: production code imports nothing from them.
+#
+# An entry is DEBT, not permission. Wire the module or delete it, and remove
+# its line in the same change. A stale entry (file wired or deleted) is
+# reported as a warning, so remediating one can never redden the gate.
+src/web/src/components/wiki/confidence-band-badge.tsx  # F325 2026-09-03: unreachable from app roots at the public release boundary
+src/web/src/lib/capability-descriptions.ts  # F325 2026-09-03: unreachable from app roots at the public release boundary
+src/web/src/lib/graph/programs/node-halo.program.ts  # F325 2026-09-03: unreachable from app roots at the public release boundary
+src/web/src/lib/query-keys.ts  # F325 2026-09-03: unreachable from app roots at the public release boundary
+src/web/src/lib/settings-presets.ts  # F325 2026-09-03: unreachable from app roots at the public release boundary
+src/web/src/lib/user-presets.ts  # F325 2026-09-03: unreachable from app roots at the public release boundary
