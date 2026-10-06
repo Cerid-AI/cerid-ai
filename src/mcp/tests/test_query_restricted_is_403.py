@@ -47,7 +47,8 @@ def test_a_fully_restricted_query_is_403(client):
 def test_the_consumer_scope_reaches_retrieval(client):
     with patch("core.agents.query_agent.agent_query_full", new_callable=AsyncMock, return_value=RESTRICTED) as spy:
         client.post("/query", json={"query": "q", "domain": "coding"}, headers={"X-Client-ID": "cerid-finance"})
-    assert spy.await_args.kwargs["allowed_domains"] == ["finance"]
+    assert spy.await_args.kwargs["allowed_domains"] == ["finance", "inbox"]
+    assert spy.await_args.kwargs["domain_record_types"] == {"inbox": ["mail_financial_card"]}
 
 
 def test_an_empty_but_permitted_query_is_still_200(client):

@@ -1,7 +1,7 @@
 """Comprehensive functional API tests for the Cerid AI MCP service.
 
-Run inside Docker on the llm-network where the MCP service is reachable at
-http://ai-companion-mcp:8888.
+Run inside Docker on the target stack's network (tests/beta/lib/target.sh),
+where the MCP service is reachable at the in-network URL lib.target resolves.
 
 Priority markers:
     pytest -m p0   # critical path
@@ -19,8 +19,9 @@ import httpx
 import pytest
 
 from lib.kb_cleanup import KbCleanup
+from lib.target import resolve_target
 
-MCP_BASE_URL = "http://ai-companion-mcp:8888"
+MCP_BASE_URL = resolve_target().mcp_base
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 
 # ---------------------------------------------------------------------------

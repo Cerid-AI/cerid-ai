@@ -9,7 +9,6 @@ import json
 
 import httpx
 import pytest
-
 from conftest import load_jsonl
 
 CASES = load_jsonl("routing_cases.jsonl")
@@ -73,14 +72,27 @@ async def get_routed_model(client: httpx.AsyncClient, query: str) -> str | None:
 _TIER_RANK = {"free_or_cheap": 0, "capable": 1, "research_online": 2}
 
 
+def routing_failure(expected: str, actual: str, model: str) -> str | None:
+    """Why a routed tier fails the case, or ``None``.
+
+    A capable or research query routed to any cheaper tier is a failure: a
+    complex analysis on a mini model degrades the answer, and a current-events
+    question on a model without web access cannot answer at all. Until
+    2026-10-05 this was a ``warnings.warn`` and the gate could not fail on it.
+    Routing a cheap query to a better model is a cost question, not a quality
+    one, and passes.
+    """
+    expected_rank = _TIER_RANK.get(expected, 0)
+    actual_rank = _TIER_RANK.get(actual, 0)
+    if expected_rank >= 1 and actual_rank < expected_rank:
+        return f"DOWNGRADE: expected '{expected}', got '{actual}' ({model})"
+    return None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["description"] for c in CASES])
 async def test_routing_case(case: dict, aclient: httpx.AsyncClient) -> None:
-    """Verify model selection reflects expected complexity routing.
-
-    Gap 5 fix: Tightened from "tier != unknown" to also catch severe downgrades.
-    A capable/research query routed to free_or_cheap is a quality regression.
-    """
+    """Verify model selection reflects expected complexity routing."""
     model = await get_routed_model(aclient, case["query"])
     assert model is not None, f"No model returned for: {case['query']}"
 
@@ -92,21 +104,8 @@ async def test_routing_case(case: dict, aclient: httpx.AsyncClient) -> None:
         f"[{case['description']}] Unrecognized model tier for: {model}"
     )
 
-    # Soft invariant: capable/research queries should NOT downgrade to free_or_cheap.
-    # Cost optimization may use a capable model for a research query (acceptable),
-    # but routing a complex analysis to gpt-4o-mini is a quality concern.
-    # This is a warnings.warn (not assert) because the smart router's cost
-    # sensitivity tuning is a separate concern from pipeline correctness.
-    expected_rank = _TIER_RANK.get(expected, 0)
-    actual_rank = _TIER_RANK.get(tier, 0)
-    if expected_rank >= 1 and actual_rank < 1:  # capable/research → free_or_cheap
-        import warnings
-        warnings.warn(
-            f"[{case['description']}] QUALITY CONCERN: expected tier "
-            f"'{expected}' but got '{tier}' ({model}). "
-            f"Complex queries routing to free/cheap models may degrade quality.",
-            stacklevel=1,
-        )
+    failure = routing_failure(expected, tier, model)
+    assert failure is None, f"[{case['description']}] {failure}"
 
     # Informational: log tier match/mismatch
     match_marker = "MATCH" if tier == expected else "MISMATCH"

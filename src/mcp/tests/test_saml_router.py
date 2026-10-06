@@ -35,15 +35,20 @@ def _isolated_log(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _enterprise_tier():
-    from config.features import FEATURE_TIER, set_tier
+def _enterprise_multi_user(monkeypatch):
+    """The state in which app/main.py mounts this router: multi-user mode on an
+    Enterprise tier. Without CERID_MULTI_USER the `sso_saml` flag is off and
+    every endpoint answers 403 — the gate test below checks that directly."""
+    import config.features as features
 
-    original = FEATURE_TIER
-    set_tier("enterprise")
+    original = features.FEATURE_TIER
+    monkeypatch.setattr(features, "CERID_MULTI_USER", True)
+    features.set_tier("enterprise")
     try:
         yield
     finally:
-        set_tier(original)
+        monkeypatch.undo()
+        features.set_tier(original)
 
 
 @pytest.fixture()
@@ -91,6 +96,16 @@ class TestGate:
 
         set_tier("pro")
         assert client.get("/auth/saml/metadata").status_code == 403
+
+    def test_enterprise_without_multi_user_is_refused(self, client, configured, monkeypatch):
+        # The flag follows the mode, not only the tier: single-user mode has
+        # no user for an IdP to attest, so SSO is neither mounted nor offered.
+        import config.features as features
+
+        monkeypatch.setattr(features, "CERID_MULTI_USER", False)
+        features.set_tier("enterprise")
+        for path in self.PATHS:
+            assert client.get(path).status_code == 403, path
 
     def test_enterprise_is_allowed(self, client, configured):
         assert client.get("/auth/saml/metadata").status_code == 200

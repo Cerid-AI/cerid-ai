@@ -239,6 +239,45 @@ VAR_COMMENTS: dict[str, tuple[str, ...]] = {
     "CERID_PORTAL_TITLE": (
         "Name shown on the sign-in page. Empty = Cerid.",
     ),
+    "CERID_INBOX_CLOUD_FALLBACK": (
+        "When a local model call fails on an inbox stage, re-send the mail body",
+        "to OpenRouter the way other stages do. Default false: the failure is the",
+        "stage's outcome and the thread is held for review.",
+        "ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false wins over this.",
+    ),
+    "CERID_RSPAMD_URL": (
+        "Inbox spam scan (Pro triage). Empty = off. In the stack the scanner is",
+        "the rspamd service in docker-compose.yml: http://rspamd:11333",
+        "A loopback URL is accepted for a host-run process; any other host is",
+        "ignored, so the scan never leaves the machine.",
+    ),
+    "CERID_INBOX_ACTIONS_ENABLED": (
+        "Mailbox writes for inbox triage: Cerid labels and flags, moves to Archive",
+        "or Cerid/<Category>, mark read, reply drafts. false = pkb_inbox_apply",
+        "reports disabled and writes nothing. true or 1 = on. Turning it on is a",
+        "recreate (not a restart) of the connector siblings and mcp-server plus a",
+        "new consent: google-mcp moves to --permissions gmail:drafts and ms365-mcp",
+        "drops --read-only (Mail.ReadWrite). Send is never requested.",
+    ),
+    "CERID_INBOX_TRIAGE_ENABLED": (
+        "Operator opt-in for the scheduled inbox triage pass, the second gate",
+        "after the inbox_triage Pro flag. The Redis key",
+        "cerid:automations:inbox_triage:enabled (Settings -> System -> Pro",
+        "Automations) overrides it at runtime.",
+    ),
+    "CERID_DAILY_DIGEST_ENABLED": (
+        "Operator opt-in for the daily digest job. The Redis key",
+        "cerid:automations:daily_digest:enabled overrides it at runtime.",
+    ),
+    "SCHEDULE_INBOX_TRIAGE": (
+        "Cron for the inbox triage pass. Empty = no job is scheduled. The Redis",
+        "key cerid:automations:inbox_triage:schedule overrides it at runtime.",
+    ),
+    "CERID_RSPAMD_PASSWORD": (
+        "Sent as the Password header on the rspamd /checkv2 scan when the local",
+        "scanner's controller has one set. Empty = no header. Only used while",
+        "CERID_RSPAMD_URL names the loopback scanner.",
+    ),
     "CERID_INBOX_REVIEW_REDACT": (
         "Comma-separated, case-insensitive substrings. scripts/inbox_review.py",
         "leaves out any message whose From, To, or Subject contains one.",

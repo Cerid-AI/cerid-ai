@@ -155,3 +155,10 @@ class TestToolRegistration:
             meta.get("cost_class") if isinstance(meta, dict) else None
         )
         assert cost == "high"
+
+
+def test_filter_source_enum_names_every_mail_provider():
+    from app.tool_registry import TOOL_REGISTRY
+
+    source = TOOL_REGISTRY["pkb_inbox_filter"].input_schema["properties"]["source"]
+    assert source["enum"] == ["gmail", "outlook", "apple_mail", ""]

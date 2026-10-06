@@ -177,8 +177,9 @@ uv run main.py --transport streamable-http --single-user --permissions gmail:dra
 That ceiling is drafts and label edits. It is not `gmail:send`.
 Classification uses the connector's existing message fetch, a short
 excerpt. It does not request `format=full`. Label names are
-`Cerid/Urgent`, `Cerid/Action`, `Cerid/Personal`, `Cerid/Newsletter`, and
-`Cerid/Promo`. The content tool does not return labels, so a later pass
+`Cerid/Urgent`, `Cerid/Action`, `Cerid/Personal`, `Cerid/Newsletter`,
+`Cerid/Promo`, and `Cerid/Spam`; a missing label is created on the first
+apply. The content tool does not return labels, so a later pass
 learns a correction only when label names are already on the message
 metadata.
 

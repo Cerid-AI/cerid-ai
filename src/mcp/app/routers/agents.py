@@ -445,6 +445,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         client_id = request.headers.get("x-client-id", "gui")
         consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
         allowed_domains = consumer.get("allowed_domains")
+        domain_record_types = consumer.get("record_types")
         # Naming domains or asking for strict tightens the consumer default; nothing loosens it
         consumer_strict = consumer.get("strict_domains", False)
         # Naming domains holds the knowledge base rows to them; it does not by
@@ -521,6 +522,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 debug_timing=debug_timing,
                 allowed_domains=allowed_domains,
                 strict_domains=strict_domains,
+                domain_record_types=domain_record_types,
                 model=req.model,
                 exclude_packs=req.exclude_packs,
                 # E1 CR-009: the smart branch previously dropped these three
@@ -564,6 +566,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 debug_timing=debug_timing,
                 allowed_domains=allowed_domains,
                 strict_domains=strict_domains,
+                domain_record_types=domain_record_types,
                 model=req.model,
                 skip_cache=req.skip_cache,
                 metadata_filter=req.metadata_filter,

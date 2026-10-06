@@ -389,6 +389,13 @@ STORAGE_LIMIT_MB = int(os.getenv("CERID_STORAGE_LIMIT_MB", "2048"))
 # this only controls whether ingest itself is allowed to enforce it.
 STORAGE_BACKPRESSURE_ENABLED = os.getenv("CERID_STORAGE_BACKPRESSURE_ENABLED", "true").lower() == "true"
 
+# External data source health (GET /data-sources). A source whose last
+# DATA_SOURCE_DEAD_CALLS relevant queries inside DATA_SOURCE_DEAD_WINDOW_S all
+# returned zero results is reported "degraded": the sources swallow their own
+# failures and return [], so the datasource-* breakers never see them.
+DATA_SOURCE_DEAD_CALLS = int(os.getenv("CERID_DATA_SOURCE_DEAD_CALLS", "5"))
+DATA_SOURCE_DEAD_WINDOW_S = int(os.getenv("CERID_DATA_SOURCE_DEAD_WINDOW_S", "86400"))
+
 QUERY_CONTEXT_MAX_CHARS = 40_000    # default max chars assembled for LLM context
 
 # Model-aware context char budgets — use larger budgets for large-context models.
@@ -704,6 +711,10 @@ VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
 ALLOW_CLOUD_EGRESS_WHEN_LOCAL = (
     os.getenv("ALLOW_CLOUD_EGRESS_WHEN_LOCAL", "true").lower() == "true"
 )
+# The inbox stages (config.stage_profiles.INBOX_STAGES) carry mail bodies and
+# are exempt from that default: a local failure there is the stage's outcome
+# unless this is true, and ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false still wins.
+INBOX_CLOUD_FALLBACK = os.getenv("CERID_INBOX_CLOUD_FALLBACK", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
@@ -934,6 +945,13 @@ MEMORY_RECALL_TIMEOUT_MS = int(os.getenv("MEMORY_RECALL_TIMEOUT_MS", "200"))
 # ---------------------------------------------------------------------------
 SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 AM
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
+# Seconds between ingest_recovery passes (scan Chroma for chunks left
+# "pending" by a half-done ingest). Pending chunks are hidden from retrieval,
+# so the cost of waiting is only the time until a failed ingest's document
+# becomes searchable; the retry budget is two attempts, so this is also half
+# the Neo4j outage an in-flight ingest survives before it is dead-lettered
+# (10 min at the default). The old 60 s ran 1,440 scans a day for nothing.
+INGEST_RECOVERY_INTERVAL_S = int(os.getenv("CERID_INGEST_RECOVERY_INTERVAL_S", "300"))
 SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * sun")  # Sunday 4 AM
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 # UX-14/20 — purge of crashed test runs' leftovers (e2e-marker-*,
@@ -1574,7 +1592,14 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/agent/": (40, 60),     # 40 req/min — dashboard + AI chat
             "/sdk/": (40, 60),
         },
-        "allowed_domains": ["finance"],
+        # `inbox` is a READ of one record type: the financial card inbox triage
+        # files there (core.agents.inbox_triage.FINANCIAL_CARD_RECORD_TYPE).
+        # record_types narrows retrieval in that domain to those rows and makes
+        # it read-only for this consumer (app/routers/sdk.py write resolution),
+        # so cerid-finance sees the cards and no other mail. Spec:
+        # docs/superpowers/specs/2026-09-17-suite-contracts-design.md.
+        "allowed_domains": ["finance", "inbox"],
+        "record_types": {"inbox": ["mail_financial_card"]},
         "strict_domains": True,      # No bleed into personal/trading/coding/general
     },
     "cerid-anneal": {
@@ -1657,6 +1682,21 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "strict_domains": False,
         }
         for _harness in ("eval-live", "verdict-eval")
+    },
+    # The browser E2E harness (tests/beta/e2e). It writes one throwaway text
+    # through /sdk/v1/ingest and reads it back through /sdk/v1/search; both
+    # routes refuse a domain outside the consumer's scope with 403, so the
+    # registration is the narrowest that lets the round trip run: the
+    # non-personal general domain and nothing else. Pinned by
+    # tests/test_e2e_consumer_registered.py, which also checks every spec
+    # sends a registered id.
+    "e2e-harness": {
+        "rate_limits": {
+            "/sdk/": (60, 60),
+            "/agent/": (60, 60),
+        },
+        "allowed_domains": ["general"],
+        "strict_domains": True,
     },
     "_default": {
         "rate_limits": {

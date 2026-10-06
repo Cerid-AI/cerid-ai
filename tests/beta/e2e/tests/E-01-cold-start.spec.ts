@@ -8,10 +8,10 @@ import { test, expect, suppressFirstRun } from "./fixtures"
  *
  * The OpeningSequence is suppressed by the shared fixture (its 1300ms
  * gold-ring reveal would otherwise gate every test on a fixed
- * timeout). Asserts the app shell + status bar + 4-pane nav are
- * mounted and the runtime __ENV__ shim is wired.
+ * timeout). Asserts the app shell + status bar + the four primary nav
+ * panes are mounted and the runtime __ENV__ shim is wired.
  *
- * Covers: content-rise wiring, health status bar, 4-pane navigation
+ * Covers: content-rise wiring, health status bar, primary navigation
  * visibility, runtime __ENV__ injection.
  */
 test("E-01 cold-start render", async ({ page }) => {
@@ -23,15 +23,21 @@ test("E-01 cold-start render", async ({ page }) => {
   // The test asserts the app booted, not which tier the stack happens to run.
   await expect(page).toHaveTitle(/Cerid (AI|Pro|Vault)/i)
 
-  // The 4-pane sidebar buttons must be present (Phase C consolidation).
+  // The four primary panes must be present (the sidebar carries more —
+  // Memories, Briefs, Workflows, Automations — but these four are the
+  // Phase C consolidation set).
   for (const pane of ["Chat", "Subjects", "Sources", "Settings"]) {
     await expect(page.getByRole("button", { name: pane, exact: true })).toBeVisible()
   }
 
-  // Bottom status bar — operational rollup is the canonical signal.
-  // The bar populates after the initial /health probe completes; give
-  // it up to 15s on a cold container start.
-  await expect(page.getByText("All systems operational")).toBeVisible({ timeout: 15_000 })
+  // Bottom status bar — the verdict is the canonical rollup. Healthy reads
+  // "All services connected" (status-bar.tsx); a lane on its fallback folds
+  // into "Inference degraded: …" even when /health/status says healthy, so a
+  // stack whose reranker runs on ONNX fails here by design. The bar populates
+  // after the initial probe; give it up to 15s on a cold container start.
+  await expect(page.getByTestId("status-bar-verdict")).toHaveText("All services connected", {
+    timeout: 15_000,
+  })
 
   // The three backing services each surface their name + connected
   // state. Use case-insensitive substring match — the StaticText

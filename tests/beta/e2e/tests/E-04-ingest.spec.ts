@@ -6,9 +6,14 @@ import { test, expect } from "@playwright/test"
 /**
  * E-04 — Ingest text + verify it's queryable.
  *
- * Drives the ingest path via the public /sdk/v1/ingest endpoint
- * (the same endpoint the Sources pane uses) and confirms the artifact
- * is searchable within a short window.
+ * Drives the ingest path via the public /sdk/v1/ingest endpoint (the
+ * SDK write path; the Sources pane itself uploads through /upload) and
+ * confirms the artifact is searchable within a short window.
+ *
+ * X-Client-ID is the registered e2e consumer (config/settings.py
+ * CONSUMER_REGISTRY["e2e-harness"], scoped to the general domain). Since
+ * 1.0.8 the /sdk/v1 ingest and search routes refuse a domain outside the
+ * consumer's scope with 403, and an unregistered id gets only general.
  *
  * Covers: ingest pipeline (Neo4j commit + Chroma flip), search round
  * trip.
@@ -18,6 +23,8 @@ import { test, expect } from "@playwright/test"
 // default actionTimeout. Give the ingest + search REST calls a generous
 // explicit ceiling rather than letting the config default fail them.
 const INGEST_TIMEOUT = 60_000
+const E2E_HEADERS = { "X-Client-ID": "e2e-harness", "Content-Type": "application/json" }
+const E2E_DOMAIN = "general"
 
 // The TEST budget must exceed the ingest allowance plus the search polls —
 // the default 30s test timeout tripped while the 60s ingest action was
@@ -27,10 +34,10 @@ test.setTimeout(120_000)
 test("E-04 ingest + search round trip", async ({ request }) => {
   const marker = `e2e-marker-${Date.now()}`
   const ingestResponse = await request.post("/api/mcp/sdk/v1/ingest", {
-    headers: { "X-Client-ID": "e2e-test", "Content-Type": "application/json" },
+    headers: E2E_HEADERS,
     data: {
       content: `${marker} — the unique phrase that lets E-04 verify the artifact actually landed in the KB.`,
-      domain: "projects",
+      domain: E2E_DOMAIN,
       tags: "e2e-marker",
     },
     timeout: INGEST_TIMEOUT,
@@ -53,8 +60,8 @@ test("E-04 ingest + search round trip", async ({ request }) => {
   let found = false
   for (let attempt = 0; attempt < 8; attempt++) {
     const searchResponse = await request.post("/api/mcp/sdk/v1/search", {
-      headers: { "X-Client-ID": "e2e-test", "Content-Type": "application/json" },
-      data: { query, domain: "projects", top_k: 10 },
+      headers: E2E_HEADERS,
+      data: { query, domain: E2E_DOMAIN, top_k: 10 },
       timeout: INGEST_TIMEOUT,
     })
     if (searchResponse.ok()) {

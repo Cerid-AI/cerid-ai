@@ -13,6 +13,14 @@ from errors import RetrievalError
 from .base import DataSource, DataSourceResult, logger
 
 _QUOTED_RE = re.compile(r'"([^"]+)"')
+# Runs of capitalised words: the named topic in a natural-language question.
+_CAP_RUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9'-]+(?:\s+[A-Z][A-Za-z0-9'-]+)*")
+_QUESTION_OPENERS = frozenset({
+    "what", "who", "when", "where", "why", "how", "which", "is", "are", "does",
+    "do", "did", "can", "could", "should", "would", "was", "were", "tell",
+    "give", "show", "find", "explain", "define", "describe", "compare", "list",
+    "the", "please",
+})
 
 
 class DuckDuckGoSource(DataSource):
@@ -32,13 +40,25 @@ class DuckDuckGoSource(DataSource):
         return result.confidence
 
     def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
-        """Use keywords plus any quoted phrases from the original query."""
+        """Reduce the query to one topic.
+
+        The Instant Answer API looks up a single entity ("Tokyo", "aspirin")
+        and answers a multi-word keyword bag with an all-empty payload, so the
+        old "up to four keywords" string returned nothing on every real query.
+        Preference: a quoted phrase, then a capitalised run that is not the
+        question opener, then the last keyword — the extractor keeps first-
+        occurrence order, so in "population of tokyo" that is the subject.
+        """
         quoted = _QUOTED_RE.findall(raw_query)
-        parts = list(keywords[:4])
-        for q in quoted[:2]:
-            if q not in " ".join(parts):
-                parts.append(f'"{q}"')
-        return " ".join(parts) if parts else raw_query
+        if quoted:
+            return quoted[0]
+        runs = [
+            run for run in _CAP_RUN_RE.findall(raw_query)
+            if run.split()[0].lower() not in _QUESTION_OPENERS
+        ]
+        if runs:
+            return max(runs, key=len)
+        return keywords[-1] if keywords else raw_query
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:

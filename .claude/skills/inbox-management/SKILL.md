@@ -13,9 +13,9 @@ Utilities:
 
 - `none` — decision row only. No body in the knowledge base.
 - `correspondence` — excerpt in domain `inbox`.
-- `financial` — a short card in domain `finance`, plus a one-line pointer in `inbox`. The raw body never enters `finance`.
+- `financial` — a short card in domain `inbox` with `record_type` `mail_financial_card`. No other row; the raw body never leaves the mail domain.
 
-`cerid-finance` reads domain `finance` only. A card is how it sees a bill. Do not grant it `inbox`, and do not create transactions or balances from mail.
+`cerid-finance` reads domain `finance`, plus `inbox` for `mail_financial_card` rows only (its `record_types` grant in `CONSUMER_REGISTRY`; read-only, no `mail_thread`). A card is how it sees a bill. Do not widen that grant, and do not create transactions or balances from mail.
 
 Folder sorting is off unless the account says otherwise. With it off, `keep` labels or flags and does not move. With it on, `keep` files into `Cerid/<Category>`, including `Cerid/Spam`. `archive` still means the provider Archive. `archive` and `undo` may move.
 

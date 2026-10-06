@@ -14,15 +14,20 @@ from errors import RetrievalError
 
 from .base import DataSource, DataSourceResult, logger
 
-_CHEMICAL_RE = re.compile(
-    r"\b(?:chemical|compound|molecule|drug|pharmaceutical|medication|"
+# Words that make a question a chemistry question but name no compound.
+_CHEMISTRY_TERMS = (
+    r"chemical|compound|molecule|drug|pharmaceutical|medication|"
     r"element|atom|ion|reaction|synthesis|formula|molecular|"
+    r"pH|molar|solubility|toxicity|pharmacology"
+)
+_COMPOUND_NAMES = (
     r"aspirin|ibuprofen|acetaminophen|caffeine|penicillin|insulin|"
     r"methane|ethanol|benzene|glucose|sucrose|protein|amino acid|"
-    r"hydrogen|oxygen|nitrogen|carbon|sodium|potassium|chlorine|"
-    r"pH|molar|solubility|toxicity|pharmacology)\b",
-    re.I,
+    r"hydrogen|oxygen|nitrogen|carbon|sodium|potassium|chlorine"
 )
+_CHEMICAL_RE = re.compile(rf"\b(?:{_CHEMISTRY_TERMS}|{_COMPOUND_NAMES})\b", re.I)
+_TRIGGER_RE = re.compile(rf"\b(?:{_CHEMISTRY_TERMS})\b", re.I)
+_COMPOUND_RE = re.compile(rf"\b(?:{_COMPOUND_NAMES})\b", re.I)
 _CAS_RE = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
 _IUPAC_RE = re.compile(r"\b\d*-?(?:methyl|ethyl|propyl|butyl|phenyl|amino|hydroxy|oxy|chloro)\b", re.I)
 
@@ -31,7 +36,11 @@ class PubChemSource(DataSource):
     name = "pubchem"
     description = "PubChem -- chemical compound data and descriptions. No API key required."
     requires_api_key = False
-    domains: list[str] = ["research", "chemistry"]
+    # Relevance is decided by is_relevant() on the query text. The registry's
+    # domain gate compares against the KB domain being searched (TAXONOMY),
+    # and no TAXONOMY domain is "chemistry" — naming one here excluded this
+    # source from every domain-scoped query.
+    domains: list[str] = []
 
     def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
         """Extract compound names, CAS numbers, or IUPAC patterns.
@@ -41,11 +50,15 @@ class PubChemSource(DataSource):
         cas = _CAS_RE.search(raw_query)
         if cas:
             return cas.group()
-        # Extract the first keyword that triggered chemical detection
         for kw in keywords:
-            if _CHEMICAL_RE.search(kw) or _IUPAC_RE.search(kw):
+            if _COMPOUND_RE.search(kw) or _IUPAC_RE.search(kw):
                 return kw
-        # Fallback: use only the first keyword (most likely the compound name)
+        # The words that made the query relevant ("molecular", "formula") are
+        # not compound names; the compound is the first keyword that is not
+        # one of them.
+        for kw in keywords:
+            if not _TRIGGER_RE.search(kw):
+                return kw
         return keywords[0] if keywords else raw_query
 
     def is_relevant(self, raw_query: str, keywords: list[str]) -> bool:

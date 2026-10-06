@@ -15,7 +15,8 @@ Helper contract (``packages/desktop/swift/CeridMail``):
     ``list_unsubscribe``, ``authentication_results``, ``spam_flag``,
     ``spam_status``, ``rfc_message_id``, ``in_reply_to``, and ``references``
     are copied onto the row when the helper sends them. ``to`` and ``date``
-    are copied when they are non-empty.
+    are copied when they are non-empty. ``flag`` is copied whenever the key
+    is present: "" is a cleared flag, a colour is the flag Mail shows.
     ``query`` uses this.
   - Full-Disk-Access denial → **exit code 77** (parity with CeridReminders).
   - Writes use Mail.app Apple events, by Message-ID: ``flag``, ``read``,
@@ -89,6 +90,12 @@ class AppleMailDataSource(DataSource):
     def is_configured(self) -> bool:
         return platform.system() == "Darwin" and bool(self._helper_path)
 
+    def configured_state(self) -> str:
+        """Finer than the boolean. Off macOS the bridge is not missing, it lives in the desktop app."""
+        if platform.system() != "Darwin":
+            return "runs_on_desktop"
+        return "configured" if self._helper_path else "not_configured"
+
     async def _invoke_helper(self, args: list[str]) -> Any:
         """Spawn the Swift helper and parse stdout as JSON.
 
@@ -123,6 +130,8 @@ class AppleMailDataSource(DataSource):
         search. Apply cannot: Mail not running and an Automation denial are
         different outcomes, and both are non-zero.
         """
+        if self.configured_state() == "runs_on_desktop":
+            return 74, {"ok": False, "error": "runs_on_desktop"}
         if not self._helper_path:
             return 74, {"ok": False, "error": "helper_missing"}
         try:
@@ -214,6 +223,9 @@ class AppleMailDataSource(DataSource):
                 metadata["message_id"] = message_id
             if mailbox:
                 metadata["mailbox"] = mailbox
+            if "flag" in msg:
+                # "" is a cleared flag and is an observation. A missing key is unknown.
+                metadata["flag"] = str(msg.get("flag") or "").strip()
             for source_key, dest in (
                 ("list_id", "list_id"),
                 ("list_unsubscribe", "list_unsubscribe"),

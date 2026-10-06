@@ -101,6 +101,8 @@ interface ChatMessagesProps {
   onRetry?: (userContent: string) => void
   /** Re-run verification for the last assistant message. */
   onReVerify?: () => void
+  /** Re-send the last user turn and replace its answer (D20-A). */
+  onRegenerate?: () => void
   /** Called when a first-run suggestion card is clicked. */
   onPickSuggestion?: (prompt: string) => void
 }
@@ -137,6 +139,7 @@ function MessageRow({
   onEnrich,
   onRetry,
   onReVerify,
+  onRegenerate,
   nowTick,
 }: MessageRowProps) {
   let divider: React.ReactNode = null
@@ -232,6 +235,9 @@ function MessageRow({
         onArtifactClick={msg.role === "assistant" ? onArtifactClick : undefined}
         onEnrich={msg.role === "assistant" && !isStreaming ? onEnrich : undefined}
         onReVerify={isLastAssistant ? onReVerify : undefined}
+        // Offered while the answer is still streaming too: regenerate cancels
+        // the stream first, which is the case the user most wants it for.
+        onRegenerate={isLastAssistant || isStreamingTarget ? onRegenerate : undefined}
       />
       {isError && precedingUserMsg && onRetry && (
         <div className="flex items-center gap-2 px-12 pb-2">

@@ -444,7 +444,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
   })
 
   // --- Chat send (extracted hook) ---
-  const { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend } = useChatSend({
+  const { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend, handleRegenerate } = useChatSend({
     activeId: activeId ?? null,
     activeMessages: active?.messages,
     create,
@@ -453,6 +453,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     replaceMessages,
     mergeCompressedHistory,
     send,
+    stop,
     selectedModel,
     setSelectedModel,
     routingMode,
@@ -838,6 +839,10 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
           smartSuggestions.clear()
         }}
         onReVerify={handleVerifyMessage}
+        onRegenerate={() => {
+          void handleRegenerate()
+          smartSuggestions.clear()
+        }}
         onPickSuggestion={(prompt) => {
           // First-run suggestion clicked — send immediately so the user sees
           // Cerid respond right away. Alternative would be to populate the

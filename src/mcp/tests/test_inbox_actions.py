@@ -220,6 +220,10 @@ class TestHeuristicAndUtility:
         assert utility_for("Your bill is ready. Amount due $40", "newsletter") == "financial"
         assert utility_for("Weekly digest", "newsletter") == "none"
 
+    def test_sale_is_a_subject_marker_only(self):
+        assert heuristic_category("a sale this week")[0] != "promo"
+        assert heuristic_category("Sale! 50% off")[0] == "promo"
+
     def test_markers_use_word_boundaries(self):
         assert heuristic_category("wholesale order")[0] != "promo"
         assert heuristic_category("noncritical notes")[0] != "urgent"

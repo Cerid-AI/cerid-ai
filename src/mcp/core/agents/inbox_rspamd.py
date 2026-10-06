@@ -1,7 +1,12 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Loopback rspamd client. Unset CERID_RSPAMD_URL disables the scan.
+"""Client for the stack's rspamd service. Unset CERID_RSPAMD_URL disables the scan.
+
+The scanner is the ``rspamd`` service in docker-compose.yml, on the stack
+network and without a host port. The client accepts that service name
+and loopback (a host-run process with its own scanner); any other host
+is ignored, so the scan never leaves the machine.
 
 The request disables reputation and authentication groups. A rebuilt
 message has no SMTP session and no DKIM signature, and those checks
@@ -21,19 +26,25 @@ SCAN_TIMEOUT_S = 2.0
 _MAX_REPLY = 1_048_576
 _DEFAULT_PORT = 11333
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+_SERVICE_HOST = "rspamd"
+_ALLOWED_HOSTS = _LOOPBACK | {_SERVICE_HOST}
 _DISABLED_GROUPS = json.dumps({
     "groups_disabled": ["rbl", "surbl", "fuzzy", "fuzzy_check", "hfilter", "spf", "dkim", "dmarc"],
 })
 
 
+class RspamdScanError(RuntimeError):
+    """The scanner answered, but not with a verdict."""
+
+
 def rspamd_url() -> str:
-    """http://127.0.0.1:11333 when configured. Any other host is ignored."""
+    """http://rspamd:11333 or a loopback URL when configured. Any other host is ignored."""
     raw = os.getenv("CERID_RSPAMD_URL", "").strip()
     if not raw:
         return ""
     parsed = urllib.parse.urlsplit(raw)
     host = (parsed.hostname or "").casefold().strip("[]")
-    if parsed.scheme != "http" or host not in _LOOPBACK or parsed.username or parsed.password:
+    if parsed.scheme != "http" or host not in _ALLOWED_HOSTS or parsed.username or parsed.password:
         return ""
     return raw
 
@@ -50,6 +61,7 @@ def _endpoint(url: str) -> tuple[str, int, str]:
 
 
 def _post(raw: bytes) -> dict | None:
+    """One /checkv2 call. A refused, slow, or non-200 scanner raises."""
     url = rspamd_url()
     if not url:
         return None
@@ -68,7 +80,7 @@ def _post(raw: bytes) -> dict | None:
         response = conn.getresponse()
         body = response.read(_MAX_REPLY)
         if response.status != HTTPStatus.OK:
-            return None
+            raise RspamdScanError(f"rspamd replied HTTP {response.status}")
     finally:
         conn.close()
     try:
@@ -79,7 +91,12 @@ def _post(raw: bytes) -> dict | None:
 
 
 async def scan_if_configured(raw: bytes) -> dict | None:
-    """POST /checkv2 when the URL is a loopback http address. Otherwise None."""
+    """POST /checkv2 when the URL names the service or loopback. Otherwise None.
+
+    A failed scan raises (``OSError`` for refused or timed out,
+    :class:`RspamdScanError` for a non-200 reply). The triage pass counts
+    those and logs them once per run.
+    """
     if not rspamd_url():
         return None
     return await asyncio.to_thread(_post, raw)

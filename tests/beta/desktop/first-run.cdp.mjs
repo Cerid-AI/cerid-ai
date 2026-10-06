@@ -25,7 +25,14 @@ const E2E_DIR = path.resolve(__dirname, "..", "e2e")
 const STATE_FILE = path.resolve(__dirname, "..", "reports", "desktop-smoke-state.json")
 
 const CDP_URL = "http://127.0.0.1:9222"
-const MCP_BASE = process.env.CERID_MCP_BASE || "http://localhost:8888"
+// desktop-smoke.sh exports this from tests/beta/lib/target.sh, the one place
+// the harness keeps a port. No fallback here: a stale default would point the
+// smoke at a stack other than the one BETA_TARGET names.
+const MCP_BASE = process.env.CERID_MCP_BASE
+if (!MCP_BASE) {
+  console.error("first-run.cdp.mjs: CERID_MCP_BASE is not set — run via tests/beta/desktop-smoke.sh")
+  process.exit(2)
+}
 const API_KEY = process.env.CERID_API_KEY || ""
 const APP_SUPPORT_DIR = path.join(os.homedir(), "Library", "Application Support", "cerid-desktop")
 const TEST_QUESTION = "In one sentence, what is a token bucket rate limiter?"
@@ -50,10 +57,13 @@ async function waitForCdpReady(timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${CDP_URL}/json/version`)
+      // A port that accepts the connection and never answers (the main
+      // thread parked in a Keychain prompt, say) must not hold this loop past
+      // its deadline: each probe gets five seconds of its own.
+      const res = await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(5000) })
       if (res.ok) return true
     } catch {
-      // not up yet
+      // not up yet, or this probe timed out
     }
     await sleep(500)
   }
@@ -115,7 +125,7 @@ async function runFirstRunAndPersisted(page) {
     await page.getByTestId("connection-test").click()
 
     // Broad match on purpose: the exact wording differs before/after Task
-    // A1 (collapsed "Connected to http://localhost:8888" today vs. an
+    // A1 (collapsed "Connected to <MCP URL>" today vs. an
     // open-form "Connected (HTTP 200)" detail once the form stays open for
     // an unsaved key) — both are a successful probe.
     const connected = await page

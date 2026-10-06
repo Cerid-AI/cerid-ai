@@ -91,8 +91,10 @@ def rag_route_hook(decision: dict) -> HookResult | None:
         return HookResult(ok=True, hook="rag_route", domain=None)
     if utility == "financial":
         if payload != "card":
-            return _fail("rag_route", "finance accepts a card, not the message body")
-        return HookResult(ok=True, hook="rag_route", domain="finance")
+            return _fail("rag_route", "a financial thread stores a card, not the message body")
+        # The card is an inbox row of its own record type; cerid-finance reads
+        # it there through its record-typed grant and sees no other mail.
+        return HookResult(ok=True, hook="rag_route", domain="inbox")
     if utility == "correspondence":
         if payload == "raw":
             return _fail("rag_route", "correspondence stores an excerpt, not the raw body")

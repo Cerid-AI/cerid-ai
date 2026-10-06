@@ -26,11 +26,18 @@ def wire_inbox_triage_di() -> None:
     from app.data_sources import registry
     from app.inbox.hooks import rag_route_hook
     from app.inbox.learn import lookup_signals
-    from core.agents.inbox_triage import set_inbox_memory, set_inbox_rag_route, set_inbox_registry
+    from app.inbox.review import included_addresses
+    from core.agents.inbox_triage import (
+        set_inbox_accounts,
+        set_inbox_memory,
+        set_inbox_rag_route,
+        set_inbox_registry,
+    )
 
     set_inbox_registry(registry)
     set_inbox_rag_route(rag_route_hook)
     set_inbox_memory(lookup_signals)
+    set_inbox_accounts(included_addresses)
 
 
 class _DigestGraphAdapter:

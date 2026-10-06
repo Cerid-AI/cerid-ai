@@ -135,20 +135,30 @@ def _reject_restricted(result: Any) -> Any:
     return result
 
 
-def _ensure_domain_allowed(request: Request, domain: str) -> None:
+def _writable_domains(request: Request) -> list[str] | None:
+    """The consumer's allow-list minus its record-typed read grants.
+
+    A ``record_types`` entry narrows what the consumer READS in that domain;
+    it is not a licence to write there. None = every domain.
+    """
     from app.services.request_policy import build_request_context
 
     ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
     allowed = ctx.allowed_domains_list()
+    if allowed is None:
+        return None
+    read_only = ctx.domain_record_types_dict() or {}
+    return [d for d in allowed if d not in read_only]
+
+
+def _ensure_domain_allowed(request: Request, domain: str) -> None:
+    allowed = _writable_domains(request)
     if allowed is not None and domain not in allowed:
         raise _restricted_http()
 
 
 def _resolve_write_domain(request: Request, domain: str) -> str:
-    from app.services.request_policy import build_request_context
-
-    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
-    allowed = ctx.allowed_domains_list()
+    allowed = _writable_domains(request)
     if allowed is None:
         return domain
     if domain:
@@ -1003,6 +1013,7 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
                 external_augmentation=False,
                 allowed_domains=ctx.allowed_domains_list(),
                 strict_domains=ctx.strict_domains,
+                domain_record_types=ctx.domain_record_types_dict(),
                 chroma_client=get_chroma(),
                 redis_client=get_redis(),
                 neo4j_driver=get_neo4j(),

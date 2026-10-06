@@ -7,6 +7,7 @@
 # Startup order (enforced via depends_on healthcheck conditions):
 #
 #   1. Infrastructure: neo4j, chromadb, redis  (no dependencies, start in parallel)
+#      rspamd:         inbox spam scan         (no dependencies; the API tolerates it down)
 #   2. MCP Server:     core API                (waits for neo4j, chromadb, redis)
 #   3. Cerid Web:      React frontend          (waits for mcp-server)
 #      Cerid SSO:      sign-in for the web port (no dependencies)
@@ -182,6 +183,36 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # Inbox spam scan for Pro triage. The API reaches it as http://rspamd:11333
+  # (CERID_RSPAMD_URL); nothing on the host needs the port, so none is
+  # published. Until 2026-10-05 this ran from stacks/rspamd on its own compose
+  # project, published on the host's loopback only — which inside
+  # ai-companion-mcp is the container's own loopback, so every scan was
+  # refused. local.d turns off the modules that query other hosts, and the
+  # client sends Settings: groups_disabled on each /checkv2. mcp-server does
+  # not depend_on it: triage continues on headers and phrases when it is down.
+  rspamd:
+    container_name: cerid-rspamd
+    logging: *default-logging
+    image: rspamd/rspamd:4.2.1-0
+    volumes:
+      - ./stacks/rspamd/local.d:/etc/rspamd/local.d:ro
+      - rspamd-data:/var/lib/rspamd
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/11333'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
 
   # ──────────────────────────────────────────────
   # Layer 2: Core API
@@ -531,3 +562,4 @@ networks:
 volumes:
   ollama-data:
   whisper-models:
+  rspamd-data:

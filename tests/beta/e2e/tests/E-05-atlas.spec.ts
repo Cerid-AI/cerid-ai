@@ -4,7 +4,8 @@
 import { test, expect, suppressFirstRun } from "./fixtures"
 
 /**
- * E-05 — Subjects pane tabs render (Atlas / Constellation / Timeline / Wiki).
+ * E-05 — Subjects pane tabs render (Atlas / Constellation / Timeline / Wiki;
+ * Communities is a fifth tab, not asserted here).
  *
  * The default-selected tab is Atlas, which since Cycle 4 (STRATA) opens on
  * the knowledge-decomposition icicle: domains tier first, drill-down to
@@ -17,7 +18,7 @@ test("E-05 Subjects pane — 4 visualization modes render", async ({ page }) => 
   await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()
 
-  // 4-tab strip: Atlas, Constellation, Timeline, Wiki.
+  // The four original tabs: Atlas, Constellation, Timeline, Wiki.
   for (const mode of ["Atlas", "Constellation", "Timeline", "Wiki"]) {
     await expect(page.getByRole("tab", { name: mode })).toBeVisible({ timeout: 15_000 })
   }

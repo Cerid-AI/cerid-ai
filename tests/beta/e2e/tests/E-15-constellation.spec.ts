@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
+import { request as apiRequest } from "@playwright/test"
 import { test, expect, suppressFirstRun } from "./fixtures"
 
 // Deterministic scene: reduced motion renders nodes full-size immediately
@@ -8,16 +9,69 @@ import { test, expect, suppressFirstRun } from "./fixtures"
 test.use({ reducedMotion: "reduce" })
 
 /**
- * E-15 — Constellation coverage (Cartographer map default + 3D toggle).
+ * E-15 — Constellation coverage (Cartographer map default + Live toggle).
  *
  * Covers the corpus-exploration surface:
  *   - Cartographer 2D map mounts as the default view
  *   - Hover over a map node raises the entity tooltip (trusted-input only —
  *     synthetic JS events can't exercise sigma's picking; offsetX/Y are zeroed)
- *   - View toggle switches to the 3D scene (links payload wired)
- *   - Quality tiers switch (High ↔ Ultra) without killing the canvas
+ *   - View toggle switches to the Live simulation scene and back
  */
-test("E-15 Constellation map hovers a node, toggles 3D, switches quality tiers", async ({ page }) => {
+
+// The map is a computed artifact: GET /graph/map serves the coordinates the
+// compute_umap_3d scheduler job writes. An empty map renders no canvas, has
+// no node to hover, and Live mode shows "No graph to simulate yet" — every
+// assertion below fails on a stack where the job has never run, and nothing
+// else in the suite ran it. Seed it through the scheduler's manual trigger
+// (POST /scheduler/jobs/{id}/run, the same call Settings → Diagnostics makes)
+// and wait for the map to fill. The job finishes its layouts and a bounded
+// LLM community-summary batch before it clears the serving cache, so the
+// wait is long; a map that already has entities is left alone.
+const MAP_SEED_TIMEOUT_MS = 10 * 60_000
+const MAP_POLL_MS = 5_000
+
+test.beforeAll(async () => {
+  test.setTimeout(MAP_SEED_TIMEOUT_MS + 30_000)
+  const { baseURL, extraHTTPHeaders } = test.info().project.use
+  const api = await apiRequest.newContext({ baseURL, extraHTTPHeaders })
+  try {
+    const readMap = async (): Promise<{ count: number; isolated_count: number }> => {
+      const response = await api.get("/api/mcp/graph/map")
+      if (!response.ok()) {
+        throw new Error(`GET /graph/map failed: HTTP ${response.status()} ${await response.text()}`)
+      }
+      const body = await response.json()
+      return { count: body.count ?? 0, isolated_count: body.isolated_count ?? 0 }
+    }
+
+    if ((await readMap()).count > 0) return
+
+    const trigger = await api.post("/api/mcp/scheduler/jobs/compute_umap_3d/run")
+    // 200 {status: started | collapsed_into_pending} and 409 (already running)
+    // both mean a run is in flight; 404 means the job is unknown or disabled.
+    if (!trigger.ok() && trigger.status() !== 409) {
+      throw new Error(`compute_umap_3d trigger failed: HTTP ${trigger.status()} ${await trigger.text()}`)
+    }
+
+    const deadline = Date.now() + MAP_SEED_TIMEOUT_MS
+    let last = await readMap()
+    while (last.count === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, MAP_POLL_MS))
+      last = await readMap()
+    }
+    if (last.count === 0) {
+      throw new Error(
+        `/graph/map is still empty ${MAP_SEED_TIMEOUT_MS / 1000}s after compute_umap_3d ` +
+          `(count=${last.count}, isolated_count=${last.isolated_count}). Entities without a ` +
+          "community_id are peripheral and hidden; run the community_refresh job first.",
+      )
+    }
+  } finally {
+    await api.dispose()
+  }
+})
+
+test("E-15 Constellation map hovers a node, switches to Live and back", async ({ page }) => {
   await suppressFirstRun(page)
   await page.goto("/")
   await page.getByRole("button", { name: "Subjects", exact: true }).click()

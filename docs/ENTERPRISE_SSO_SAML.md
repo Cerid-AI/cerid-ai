@@ -9,7 +9,10 @@ The endpoints are registered only when `CERID_MULTI_USER=true`. This is not an
 oversight to work around: SSO issues a session for an identity the IdP has
 attested to, and single-user mode has exactly one operator authenticated by API
 key, with nobody for an IdP to distinguish. On a single-user install there is
-nothing for SSO to do.
+nothing for SSO to do, and the `sso_saml` capability says so: `/billing/capabilities`
+and `/license/capabilities` report it `enabled: false` whatever the tier until
+`CERID_MULTI_USER=true`, so a buyer reading the capability matrix is not told the
+install serves something it does not mount.
 
 Multi-user mode is itself gated behind `CERID_MULTI_USER_EXPERIMENTAL=true` and
 requires `CERID_JWT_SECRET`. Read those warnings before enabling it.

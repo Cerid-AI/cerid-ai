@@ -64,10 +64,12 @@ def test_raw_body_does_not_enter_finance():
     assert result.hook == "rag_route"
 
 
-def test_financial_card_routes_to_finance():
+def test_financial_card_routes_to_inbox():
+    # Mail stays in the mail domain; cerid-finance reads the card there through
+    # its record-typed grant (CONSUMER_REGISTRY["cerid-finance"]["record_types"]).
     result = run_hooks(_decision(utility="financial", payload_kind="card"))
     assert result.ok
-    assert result.domain == "finance"
+    assert result.domain == "inbox"
 
 
 def test_unknown_account_fails():

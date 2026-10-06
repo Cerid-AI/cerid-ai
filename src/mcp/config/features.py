@@ -195,7 +195,12 @@ FEATURE_FLAGS = {
 
     # ---- Enterprise features ----
     "multi_user":                CERID_MULTI_USER or _enterprise_level(),
-    "sso_saml":                  _enterprise_level(),  # app/routers/saml.py
+    # app/routers/saml.py is mounted only under CERID_MULTI_USER (app/main.py):
+    # SSO issues a session for an IdP-attested user and single-user mode has
+    # none. The capability says so rather than advertising a router that is
+    # not there — an Enterprise install in single-user mode reports
+    # `sso_saml: enabled=false`.
+    "sso_saml":                  _enterprise_level() and CERID_MULTI_USER,
     "audit_logging":             _enterprise_level(),  # app/routers/audit_log.py
     "priority_support":          _enterprise_level(),
 
@@ -297,6 +302,7 @@ def _refresh_flags() -> None:
     for flag in _ENTERPRISE_TIER_FLAGS:
         FEATURE_FLAGS[flag] = ent
     FEATURE_FLAGS["multi_user"] = CERID_MULTI_USER or ent
+    FEATURE_FLAGS["sso_saml"] = ent and CERID_MULTI_USER
     # Community flags stay True — they're not tier-gated
 
 

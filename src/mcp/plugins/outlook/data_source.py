@@ -29,13 +29,34 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, ClassVar
 
 from app.data_sources.base import DataSource, DataSourceResult
 from core.mcp_clients.result_text import is_error_result, tool_text
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.data_sources.outlook")
+
+# A probe answer outlives the pool's in-memory flag, which a restart clears.
+_PROBE_TTL_SECONDS = 600.0
+_TRIAGE_WINDOW = timedelta(hours=24)
+_TRIAGE_SELECT = ",".join((
+    "id",
+    "conversationId",
+    "internetMessageId",
+    "subject",
+    "from",
+    "toRecipients",
+    "receivedDateTime",
+    "bodyPreview",
+    "isRead",
+    "categories",
+    "parentFolderId",
+    "webLink",
+    "internetMessageHeaders",
+))
 
 
 class OutlookDataSource(DataSource):
@@ -47,9 +68,24 @@ class OutlookDataSource(DataSource):
     # .call_tool("ms365", ...)) — lets query_all skip this source without
     # an MCP call while that connector's breaker is OPEN.
     mcp_connector_name = "ms365"
+    # (configured, checked_at) from the last probe_configured call.
+    _probed: ClassVar[tuple[bool, float] | None] = None
+
+    @classmethod
+    def forget_probe(cls) -> None:
+        cls._probed = None
+
+    @classmethod
+    def _cached_probe(cls) -> bool | None:
+        if cls._probed is None:
+            return None
+        configured, checked_at = cls._probed
+        if time.monotonic() - checked_at > _PROBE_TTL_SECONDS:
+            return None
+        return configured
 
     def is_configured(self) -> bool:
-        """True only once the sibling has actually answered a call.
+        """True once the sibling has answered a call, or a recent probe did.
 
         This returned ``bool(CERID_CONNECTORS_BEARER)`` — a value the ms365
         sibling never reads as client auth. It forwards the client's bearer
@@ -63,10 +99,17 @@ class OutlookDataSource(DataSource):
 
         `ever_succeeded` is the only signal the backend genuinely has: it is
         set when a call returns a NON-ERROR result, so it cannot be satisfied
-        by the 401s an unauthenticated sibling produces. Before the first
-        successful call this reads False, which surfaces as "not yet
-        authorized" — the honest answer.
+        by the 401s an unauthenticated sibling produces. It lives in memory,
+        so a restart cleared it and a logged-in Outlook was skipped as
+        not_configured until some other call happened to succeed. A probe
+        answer within ``_PROBE_TTL_SECONDS`` fills that gap; the pool's own
+        success still wins over a stale negative probe.
         """
+        if self._pool_succeeded():
+            return True
+        return bool(self._cached_probe())
+
+    def _pool_succeeded(self) -> bool:
         try:
             from core.mcp_clients.client_pool import get_pool
 
@@ -76,6 +119,29 @@ class OutlookDataSource(DataSource):
         except Exception as exc:  # noqa: BLE001 — status must never 500
             log_swallowed_error("outlook.is_configured", exc)
         return False
+
+    async def probe_configured(self) -> bool:
+        """One cheap read against the sibling, cached for the TTL.
+
+        Triage calls this before deciding the source is configured. A
+        non-error answer is the same evidence the pool records; an error or
+        a transport failure is cached as not configured so a down sibling is
+        not re-probed on every call inside the window.
+        """
+        if self._pool_succeeded():
+            type(self)._probed = (True, time.monotonic())
+            return True
+        cached = self._cached_probe()
+        if cached is not None:
+            return cached
+        try:
+            raw = await self._call_mcp("list-mail-folders", {"$top": 1})
+            configured = not is_error_result(raw)
+        except Exception as exc:  # noqa: BLE001 — a down sibling is "not configured", not a crash
+            log_swallowed_error("outlook.probe_configured", exc)
+            configured = False
+        type(self)._probed = (configured, time.monotonic())
+        return configured
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
         from core.mcp_clients.client_pool import get_pool
@@ -96,6 +162,29 @@ class OutlookDataSource(DataSource):
             log_swallowed_error("outlook.query", exc)
             return []
         return _to_results(parse_messages(raw))
+
+    async def triage_query(self, query: str, **kwargs) -> list[DataSourceResult]:
+        """The triage read: Inbox only, unread, received in the last day.
+
+        ``query`` is Gmail syntax and is not sent. The folder-scoped tool
+        cannot reach Junk Email or Deleted Items, and every row is stamped
+        ``folder=inbox`` so a later pass can learn a cleared category.
+        """
+        del query
+        max_results = int(kwargs.get("max_results", 30))
+        since = (datetime.now(timezone.utc) - _TRIAGE_WINDOW).strftime("%Y-%m-%dT%H:%M:%SZ")
+        args: dict[str, Any] = {
+            "mailFolderId": "inbox",
+            "$top": max_results,
+            "$filter": f"isRead eq false and receivedDateTime ge {since}",
+            "$select": _TRIAGE_SELECT,
+        }
+        try:
+            raw = await self._call_mcp("list-mail-folder-messages", args)
+        except Exception as exc:  # noqa: BLE001 — sibling MCP can fail many ways
+            log_swallowed_error("outlook.triage_query", exc)
+            return []
+        return _to_results(parse_messages(raw), folder="inbox")
 
     async def apply(self, decision: dict, *, dry_run: bool = True, ledger: Any = None) -> dict:
         """Apply one Outlook decision. Dry-run does not call the sibling."""
@@ -164,7 +253,8 @@ def _outlook_addresses(raw: object) -> str:
     return ", ".join(addresses)
 
 
-def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
+def _to_results(messages: list[dict[str, Any]], *, folder: str = "") -> list[DataSourceResult]:
+    """``folder`` names the well-known folder the fetch was scoped to, if any."""
     out: list[DataSourceResult] = []
     for m in messages:
         # Microsoft Graph fields: subject, from.{emailAddress.address},
@@ -218,7 +308,13 @@ def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
                 name = str(item.get("name") or "").strip().casefold()
                 value = str(item.get("value") or "").strip()
                 dest = header_map.get(name)
-                if dest and value and dest not in metadata:
+                if not dest or not value:
+                    continue
+                if dest == "authentication_results" and dest in metadata:
+                    # Every copy is kept so a sender's added "pass" cannot
+                    # hide the provider's "fail" from the gate.
+                    metadata[dest] = f"{metadata[dest]} ; {value}"
+                elif dest not in metadata:
                     metadata[dest] = value
         if "to" not in metadata:
             addressed = _outlook_addresses(m.get("toRecipients"))
@@ -228,9 +324,11 @@ def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
             received = str(m.get("receivedDateTime") or "").strip()
             if received:
                 metadata["date"] = received
-        folder = str(m.get("parentFolderId") or "").strip()
-        if folder.casefold() in {"inbox", "archive", "drafts", "sentitems"}:
-            metadata["folder"] = folder.casefold()
+        parent = str(m.get("parentFolderId") or "").strip()
+        if parent.casefold() in {"inbox", "archive", "drafts", "sentitems"}:
+            metadata["folder"] = parent.casefold()
+        elif folder:
+            metadata["folder"] = folder
         out.append(
             DataSourceResult(
                 title=subject,

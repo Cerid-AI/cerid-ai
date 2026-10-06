@@ -8,7 +8,9 @@ import uuid
 import httpx
 import pytest
 
-MCP_BASE = "http://ai-companion-mcp:8888"
+from lib.target import resolve_target
+
+MCP_BASE = resolve_target().mcp_base
 TIMEOUT = 30
 
 

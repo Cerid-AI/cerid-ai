@@ -23,10 +23,6 @@ import {
 } from "@/lib/api/inbox"
 
 const CATEGORIES = ["urgent", "actionable", "personal", "newsletter", "promo", "spam"] as const
-const UTILITIES = [
-  { id: "correspondence", label: "Correspondence" },
-  { id: "financial", label: "Financial cards" },
-] as const
 
 type MailProvider = "gmail" | "outlook" | "apple_mail"
 
@@ -190,6 +186,7 @@ function SetupBody({
   const accounts = inbox.accounts
   const consentFor = (value: string) =>
     accounts.find((account) => account.address === value)?.consent
+  const runsOnDesktop = provider === "apple_mail" && inbox.source_state === "runs_on_desktop"
 
   return (
     <div className="space-y-4">
@@ -198,7 +195,12 @@ function SetupBody({
           ? "Mailbox writes are on for this process. Per-category auto-apply stays off until you turn a category on."
           : "Mailbox writes are off. Set CERID_INBOX_ACTIONS_ENABLED and recreate the Gmail and Outlook connector containers, then re-consent. This page displays the flag. It does not change the containers."}
       </p>
-      {provider === "apple_mail" ? (
+      {runsOnDesktop ? (
+        <p className="text-sm text-muted-foreground" data-testid="runs-on-desktop">
+          Apple Mail runs through the desktop app. Reads, filing, and address discovery happen there; this server
+          does not run the Mail bridge, and that is not missing configuration.
+        </p>
+      ) : provider === "apple_mail" ? (
         <p className="text-sm text-muted-foreground">
           Apple Mail writes need Automation permission on this Mac. Grant it in System Settings. There is no OAuth step.
         </p>
@@ -273,7 +275,7 @@ function SetupBody({
             Add address
           </Button>
         </form>
-        {provider === "apple_mail" && (
+        {provider === "apple_mail" && !runsOnDesktop && (
           <div className="mt-2 space-y-1">
             <Button
               type="button"
@@ -455,20 +457,6 @@ function AccountCard({
           void patch({ provider: account.provider, address: account.address, folder_sort })
         }}
       />
-      {UTILITIES.map((utility) => (
-        <Toggle
-          key={utility.id}
-          label={`${utility.label} for ${account.address}`}
-          checked={account.utilities.includes(utility.id)}
-          disabled={busy}
-          onChange={(on) => {
-            const utilities = on
-              ? [...account.utilities, utility.id]
-              : account.utilities.filter((item) => item !== utility.id)
-            void patch({ provider: account.provider, address: account.address, utilities })
-          }}
-        />
-      ))}
       {CATEGORIES.map((category) => (
         <Toggle
           key={category}

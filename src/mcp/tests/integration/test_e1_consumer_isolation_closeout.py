@@ -31,7 +31,8 @@ import pytest
 # conftest skip the module whenever the stack is down, and the preservation
 # job ignores this file, so the mark left the probes unrun in both jobs.
 
-_FINANCE = ["finance"]
+# cerid-finance reads finance, plus inbox narrowed to the financial card (D3-A, 2026-10-05).
+_FINANCE = ["finance", "inbox"]
 
 
 class _FakeRequest:
@@ -147,3 +148,6 @@ async def test_custom_agent_resolves_consumer_isolation(monkeypatch):
         "restricted consumer reads across all domains via a custom agent (CR-087)"
     )
     assert ctx.strict_domains is True
+    assert ctx.domain_record_types_dict() == {"inbox": ["mail_financial_card"]}, (
+        "the inbox grant must stay narrowed to the financial card on the custom-agent path"
+    )

@@ -32,12 +32,19 @@ Utility decides the knowledge base, separate from the category:
 |---|---|
 | `none` | The ledger row only. No body. |
 | `correspondence` | An excerpt in domain `inbox`. `record_type` is `mail_thread`. |
-| `financial` | A short card in domain `finance` (`record_type` `mail_financial_card`) and a one-line pointer in domain `inbox` (`record_type` `mail_finance_pointer`). |
+| `financial` | A short card in domain `inbox` with `record_type` `mail_financial_card`. No other row. |
 
 The card names payee, amount, currency, date, subject, and the provider
-thread, and only the fields the message states. The raw body never enters
-`finance`. cerid-finance is not granted domain `inbox`. Mail does not
-create finance transactions, balances, or recurring rules.
+thread, and only the fields the message states. The raw body never
+leaves the mail domain. cerid-finance reads the card where it is filed:
+its consumer entry (`CONSUMER_REGISTRY["cerid-finance"]`) grants `inbox`
+with `record_types: {"inbox": ["mail_financial_card"]}`, so its
+retrieval in that domain is narrowed to card rows (`where` clause and
+the BM25 side) and it cannot write there. It sees no `mail_thread` row.
+The exception is recorded in the suite-contracts spec
+(`docs/superpowers/specs/2026-09-17-suite-contracts-design.md`, "RAG
+namespaces"). Mail does not create finance transactions, balances, or
+recurring rules.
 
 Apply does not ingest. The route hook only accepts or rejects a post the
 triage pass already built. Payload kind before that hook: `none` → none,
@@ -71,7 +78,10 @@ count to 1 and clears the pin. A manual pin (`pkb_inbox_sender_pin`) is
 immediate and is not sticky across a changed outcome. One or two unpinned
 hits do not skip the model. `pkb_inbox_rule_upsert` stores a rule on
 `from`, `domain`, `subject_prefix`, or `list_id`. A pin or a matching rule
-skips the model, including when the action is `draft`. A subject prefix
+skips the classification model, including when the action is `draft`; the
+draft itself is the second model call described above, so a pinned draft
+still gets its reply, or stays `needs_review` with no body when that call
+fails. A subject prefix
 matches the title as stored; an Apple title that starts with `Mail: ` does
 not match a prefix of the words after that.
 
@@ -80,11 +90,22 @@ message is back in the inbox, the learned outcome is `keep` /
 `actionable`. Several Cerid labels on one message are not learned. The
 same visible outcome as the applied decision is not a new correction.
 
+Learning does not need the actions flag. With nothing applied, the
+operator's own move against the open proposal is the correction: a
+proposed `keep` that was archived by hand learns `archive`, and a Cerid
+label, category, or flag set by hand learns that category. A message that
+still sits where it was is not a move, whatever the proposal said. One
+thread counts once however many passes re-propose it.
+
 ## Filing
 
 `CERID_INBOX_ACTIONS_ENABLED` defaults off. With it off, apply reports
 `disabled` and writes nothing to the mailbox. `pkb_inbox_apply` defaults
 to dry-run.
+
+Accounts, decisions, sender memory, rules, the Apple outbox, and sync
+cursors live in `DATA_DIR/inbox.sqlite` (SQLite, WAL journal). That file
+is the operational record; the knowledge base is a separate store.
 
 Per-account `auto_apply` defaults to no categories. Auto-apply files only
 `keep`, `archive`, and `mark_read`, oldest first, at most 50 decisions a
@@ -93,16 +114,22 @@ pass. Drafts and `needs_review` rows are not auto-applied.
 Folder sorting is off by default, per account. Off: `keep` labels or flags
 and does not move. On: `keep` files into `Cerid/<Category>`, including
 `Cerid/Spam`. `archive` is the provider Archive, including for spam.
-The provider Junk and Trash mailboxes are never destinations. Undo records
-the previous location.
+The provider Junk and Trash mailboxes are never destinations. Apply
+creates a missing destination: the Gmail label, the Outlook `Cerid`
+folder and its `<Category>` child, the Apple `Cerid/<Category>` mailbox.
+Undo records the previous location: the Gmail labels, the Outlook folder
+and the id Graph gave the moved message, the Apple mailbox.
 
 Spam is unsolicited or deceptive mail. A sale with an unsubscribe link
 stays `promo`. Mail the provider already filed into Junk is left there
-and is not read back.
+and is not read back: the Gmail query carries `-in:spam -in:trash`, the
+Outlook read is scoped to the Inbox, and the Apple bridge drops Junk and
+Trash rows.
 
 Classification also reads headers the fetch already returned. `List-Id`
 or `List-Unsubscribe` files the thread as `newsletter`, unless the
-subject is urgent or the text is a sale. Gmail labels
+subject is urgent or the subject says sale. The sale marker is read
+from the subject only. Gmail labels
 `CATEGORY_PROMOTIONS`, `CATEGORY_UPDATES`, and `CATEGORY_FORUMS` do the
 same when the content reply includes them. `CATEGORY_SOCIAL` and
 `CATEGORY_PERSONAL` are a hint, not a filing. `X-Spam-Flag: Yes` is
@@ -110,21 +137,26 @@ spam. A DMARC fail does not archive the message. It sends an otherwise
 urgent thread through the review model. A sender pin still wins, and a
 bill is not filed as spam on a score alone.
 
-Rspamd is off until `CERID_RSPAMD_URL` is `http://127.0.0.1:11333`.
-Homebrew has no rspamd formula. From the repo root, start the scanner
-with `docker compose -f stacks/rspamd/docker-compose.yml up -d`.
-Cerid posts a reconstructed message to `/checkv2` on loopback only.
-The request disables RBL, SURBL, fuzzy, and authentication groups, so
-the scan does not leave the machine. Any other host is ignored. A
-`reject` action, or a score at the daemon's required threshold, files
-`spam`. `add header` does not archive by itself. If rspamd is down,
-triage continues on the phrase list and the headers.
+Rspamd is off until `CERID_RSPAMD_URL` is `http://rspamd:11333`. The
+scanner is the `rspamd` service in `docker-compose.yml`: it starts with
+the stack, joins the stack network, and publishes no host port. Its
+`local.d` lives in `stacks/rspamd/`. Cerid posts a reconstructed message
+to `/checkv2`. The request disables RBL, SURBL, fuzzy, and
+authentication groups, so the scan does not leave the machine. The
+client accepts the service name and loopback; any other host is
+ignored. A `reject` action, or a score at the daemon's required
+threshold, files `spam`. `add header` does not archive by itself. If
+rspamd is down, triage continues on the phrase list and the headers,
+and the pass logs the failed scans once, with the count.
 
 `scripts/inbox_review.py` is the read-only IMAP check. It does not write
-the ledger, and production triage does not read Junk. Set
-`CERID_INBOX_REVIEW_REDACT` to a comma-separated, case-insensitive list
+the ledger, and production triage does not read Junk. `--mailbox`
+defaults to `INBOX`; Junk, Spam, and Trash open only with `--allow-junk`.
+Set `CERID_INBOX_REVIEW_REDACT` to a comma-separated, case-insensitive list
 of substrings and the script leaves out any message whose From, To, or
-Subject contains one; it is empty by default. Rspamd stays a
+Subject contains one; it is empty by default. The script runs on the
+host, where the service name does not resolve, so it scans only when
+`CERID_RSPAMD_URL` names a loopback scanner. Rspamd stays a
 local content score. A phrase promo or newsletter sticks. Urgent markers
 are read from the subject.
 
@@ -151,6 +183,11 @@ fetches often carry no account. If that provider has exactly one included
 address, the proposal uses it. Two or more and no account on the message
 means no proposal.
 
+Triage reads only addresses that are added and included. A thread whose
+address is removed or excluded is skipped before any model call or
+knowledge-base write, and a provider with no included address is not
+fetched at all (`no_included_account` in the skipped list).
+
 Removing an address stops later reads and applies. It does not delete
 knowledge-base cards already written. Undo of a decision for that address
 still runs. The account row stays, marked removed.
@@ -173,9 +210,12 @@ table of both automations' switches is in
 `docs/PRO_DAILY_DIGEST.md` § How to enable.
 
 Mailbox writes are a third switch, `CERID_INBOX_ACTIONS_ENABLED`, default
-off. See `docs/PRO_GMAIL.md`, `docs/PRO_OUTLOOK.md`, and
-`docs/PRO_APPLE_MAIL.md`. Turning it on requires re-consent. The router
-does not start that login.
+off. With it on, the Google sibling runs with `--permissions gmail:drafts
+calendar:readonly` and the ms365 sibling drops `--read-only` and asks for
+`Mail.ReadWrite`; no send scope is requested. Both siblings and
+`mcp-server` are recreated, not restarted, and the login is repeated. The
+router does not start that login. See `docs/PRO_GMAIL.md`,
+`docs/PRO_OUTLOOK.md`, and `docs/PRO_APPLE_MAIL.md`.
 
 Prerequisites: at least one of Gmail, Outlook, or Apple Mail configured.
 
@@ -189,6 +229,13 @@ Override via the cron expression env var:
 SCHEDULE_INBOX_TRIAGE="0 */2 * * *"   # every 2 hours
 SCHEDULE_INBOX_TRIAGE=""              # disable the cron entirely
 ```
+
+Settings → System → Pro Automations writes the Redis keys
+`cerid:automations:inbox_triage:enabled` and
+`cerid:automations:inbox_triage:schedule`
+(`PUT /settings/pro-automations/inbox_triage`). A key that is set wins over
+`CERID_INBOX_TRIAGE_ENABLED` and `SCHEDULE_INBOX_TRIAGE`; the env values
+are the fallback when the key is absent or Redis is unreachable.
 
 Each run has these cost guards:
 
@@ -207,8 +254,13 @@ Each run has these cost guards:
 (no LLM, cost_class=low):
 
 - "what's urgent today?" → `pkb_inbox_filter(category="urgent")`
-- "newsletters from this week" → `pkb_inbox_filter(category="newsletter", since_days=7)`
+- "personal mail this week" → `pkb_inbox_filter(category="personal", since_days=7)`
 - "actionable Outlook threads" → `pkb_inbox_filter(category="actionable", source="outlook")`
+
+`pkb_inbox_filter` reads the knowledge base, so it sees only threads whose
+utility wrote a card. A `newsletter`, `promo`, or `spam` thread is
+ledger-only unless it carried a financial marker; the review queue is
+where those are.
 
 **`pkb_inbox_apply`** — file proposed decisions. Dry-run unless you pass
 otherwise. Does nothing while the actions flag is off.
@@ -229,6 +281,14 @@ correspondence excerpt when those exist.
   `PROVIDER_STAGE_<NAME>` override pins another provider. The frontier
   classification stage and the draft stage are the cloud calls, and
   neither runs under the local-only profile.
+- A local model call that fails on an inbox stage is that stage's
+  outcome: the thread is held for review. Other stages re-send the
+  payload to OpenRouter when the local backend fails; the inbox stages
+  do not unless `CERID_INBOX_CLOUD_FALLBACK=true`, and
+  `ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false` (which the local-only profile
+  sets) wins over that flag. The profile that decides the ladder is the
+  one in force: a cloud profile without `OPENROUTER_API_KEY`, or under
+  Private Mode, has degraded to local-only.
 - Each model call sees one thread excerpt. No bulk mailbox is sent in a
   single call.
 - Privacy filters still apply. A privacy-gated domain cannot surface in
@@ -241,8 +301,10 @@ correspondence excerpt when those exist.
 | Scheduler logs "0 threads" repeatedly | No unread mail in the last day on a configured source | Expected. A manual `pkb_inbox_triage` can pass a wider `query` |
 | `feature_gated` in the skipped list | Pro flag off | Set `CERID_TIER=pro` and restart |
 | `not_configured` in the skipped list | That source has no completed handshake | See the connector doc for that source |
+| `no_included_account` in the skipped list | No address for that provider is added and included | Add it under Sources → Connectors |
+| `runs_on_desktop` in the skipped list, or on the Apple Mail setup page | The server is not macOS. Apple Mail reads and filing run only through the desktop app | Expected inside the container. Not missing configuration |
 | Apply returns `disabled` | `CERID_INBOX_ACTIONS_ENABLED` is off | Set it, recreate the sibling container, and re-consent. A restart is not enough |
-| Apply returns `pending_account` | Gmail address is not `USER_GOOGLE_EMAIL` | Expected for an extra Gmail address. It is not filed |
+| Apply returns `skipped` with reason `pending_account` | Gmail address is not `USER_GOOGLE_EMAIL` | Expected for an extra Gmail address. It is not filed |
 | Draft sits in the queue with no body | Local-only profile, or the cloud draft failed the checklist | Review it by hand. Auto-apply will not file a draft |
 | A correction never pins | The pass did not see labels, categories, or the mailbox | Gmail's content tool does not return labels, and an archived message drops out of the unread fetch. See Filing above |
 | Cron not firing | `CERID_INBOX_TRIAGE_ENABLED` unset, or empty `SCHEDULE_INBOX_TRIAGE` | Verify both, restart the MCP container |

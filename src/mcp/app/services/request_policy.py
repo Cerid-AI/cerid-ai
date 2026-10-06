@@ -61,6 +61,7 @@ def build_request_context(
     """
     consumer = resolve_consumer(client_id)
     allowed = consumer.get("allowed_domains")
+    record_types = consumer.get("record_types")
     consumer_strict = bool(consumer.get("strict_domains", False))
     effective_strict = bool(strict_domains) if strict_domains else consumer_strict
     level = private_level if private_level is not None else get_private_mode_level()
@@ -69,6 +70,10 @@ def build_request_context(
         client_id=client_id,
         allowed_domains=tuple(allowed) if allowed is not None else None,
         strict_domains=effective_strict,
+        domain_record_types=(
+            tuple((domain, tuple(types)) for domain, types in record_types.items())
+            if record_types else None
+        ),
         private_level=level,
         skip_cache=skip_cache,
         metadata_filter=metadata_filter,

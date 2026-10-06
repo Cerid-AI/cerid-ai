@@ -23,6 +23,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/lib/report.sh"
+# Which stack: BETA_TARGET=live (default) or isolated. Every URL, network and
+# container name below comes from here; the tiers that run inside docker get
+# the same answer through lib/target.py.
+# shellcheck source=lib/target.sh
+source "${SCRIPT_DIR}/lib/target.sh" || exit 2
 
 # Auth: the MCP enforces X-API-Key on /api routes. Resolve the key from the
 # environment, falling back to the repo .env, and forward it into the Docker
@@ -73,22 +78,23 @@ fi
 # ─────────────────────────────────────────────────
 # Docker-network resolution + MCP reachability (shared by container tiers)
 # ─────────────────────────────────────────────────
-# The internal ai-companion-mcp runs on the bare `llm-network`. Resolve that
-# name from the live container instead of guessing — a wrong network makes
-# every in-container test fail with ConnectError ("Name or service not known"),
+# The MCP container runs on the target's docker network (live: the bare
+# `llm-network`; isolated: the sandbox's own bridge). Resolve that name from
+# the running container instead of guessing — a wrong network makes every
+# in-container test fail with ConnectError ("Name or service not known"),
 # which reads as a mass test failure when it is really ONE infra problem. So we
 # resolve, then probe /health once up front, and skip the whole tier with a
 # single clear message rather than emitting N identical per-case connection
 # errors (the 2026-07-08 eval run's "65 failures" were exactly this).
 resolve_mcp_network() {
-  docker inspect ai-companion-mcp \
+  docker inspect "$BETA_MCP_CONTAINER" \
     --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null \
-    | grep -m1 'llm-network'
+    | grep -m1 -F "$BETA_DOCKER_NETWORK"
 }
 
 mcp_reachable() {  # $1 = docker network name
   docker run --rm --network "$1" python:3.11-slim \
-    python -c "import urllib.request; urllib.request.urlopen('http://ai-companion-mcp:8888/health/ping', timeout=10)" \
+    python -c "import urllib.request; urllib.request.urlopen('${BETA_MCP_BASE}/health/ping', timeout=10)" \
     >/dev/null 2>&1
 }
 
@@ -98,11 +104,11 @@ mcp_network_or_skip() {
   local net
   net=$(resolve_mcp_network)
   if [[ -z "$net" ]]; then
-    echo "ai-companion-mcp container not found on any llm-network — is the internal stack up? (docker ps | grep ai-companion-mcp)" >&2
+    echo "${BETA_MCP_CONTAINER} container not found on ${BETA_DOCKER_NETWORK} — is the ${BETA_TARGET} stack up? (docker ps | grep ${BETA_MCP_CONTAINER})" >&2
     return 1
   fi
   if ! mcp_reachable "$net"; then
-    echo "ai-companion-mcp:8888/health/ping unreachable on network '$net' — stack unhealthy or misattached network." >&2
+    echo "${BETA_MCP_BASE}/health/ping unreachable on network '$net' — stack unhealthy or misattached network." >&2
     return 1
   fi
   echo "$net"
@@ -140,7 +146,7 @@ OVERALL_EXIT=0
 MCP_NET=""
 MCP_NET_ERR=""
 if MCP_NET=$(mcp_network_or_skip 2>/tmp/cerid-beta-neterr); then
-  echo "MCP network: ${MCP_NET} (ai-companion-mcp:8888 reachable)"
+  echo "MCP network: ${MCP_NET} (${BETA_MCP_BASE} reachable)"
 else
   MCP_NET_ERR=$(cat /tmp/cerid-beta-neterr 2>/dev/null)
   MCP_NET=""
@@ -154,8 +160,8 @@ skip_tier_mcp_unreachable() {
   report_section "$1"
   report_text "\n> **MCP unreachable — ${2} tier skipped:** ${MCP_NET_ERR:-docker/stack unavailable}\n"
   report_issue "critical" "MCP unreachable (${2})" "infrastructure" "INFRA-NET" "infra" \
-    "Bring up the internal stack (scripts/start-cerid.sh), then rerun" \
-    "ai-companion-mcp:8888 reachable on llm-network" "${MCP_NET_ERR:-unavailable}"
+    "Bring up the ${BETA_TARGET} stack (${BETA_START_HINT}), then rerun" \
+    "${BETA_MCP_BASE} reachable on ${BETA_DOCKER_NETWORK}" "${MCP_NET_ERR:-unavailable}"
   OVERALL_EXIT=1
 }
 
@@ -206,7 +212,7 @@ if $RUN_FUNCTIONAL && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-net
   fi
 
   docker run --rm --network "$DOCKER_NETWORK" \
-    -e CERID_API_KEY \
+    -e CERID_API_KEY -e BETA_TARGET -e BETA_MCP_BASE \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 2>/dev/null
@@ -280,7 +286,7 @@ if $RUN_INTEGRATION && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-ne
   echo ""
 
   docker run --rm --network "$DOCKER_NETWORK" \
-    -e CERID_API_KEY \
+    -e CERID_API_KEY -e BETA_TARGET -e BETA_MCP_BASE \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 2>/dev/null
@@ -400,7 +406,9 @@ if $RUN_BROWSER; then
     # Use the reporters declared in playwright.config.ts (list + junit→
     # ../reports/e2e.xml + html). Passing --reporter here overrides the config
     # and drops the junit outputFile, leaving the report's E2E table empty.
-    (cd "${E2E_DIR}" && npx playwright test 2>&1)
+    # The specs drive the target's GUI; playwright.config.ts reads this URL.
+    CERID_WEB_URL="${CERID_WEB_URL:-$BETA_GUI_URL}" \
+      bash -c "cd '${E2E_DIR}' && npx playwright test 2>&1"
     E2E_EXIT=$?
 
     if [[ -f "${SCRIPT_DIR}/reports/e2e.xml" ]]; then
@@ -453,9 +461,16 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
   # Entity-extraction recall runs inside the MCP container: it needs the
   # production extractor and the configured local model, which the slim
   # pytest container cannot import.
-  if docker exec -e CERID_LIVE_EXTRACTION_EVAL=1 ai-companion-mcp python -m tests.eval.entity_recall_runner \
+  # The runner probes the inference server first and exits 0 with a
+  # "recall SKIPPED" line when it is loaded or unreachable: nothing was
+  # measured, so the tier neither fails nor reports the floor as met.
+  if docker exec -e CERID_LIVE_EXTRACTION_EVAL=1 "$BETA_MCP_CONTAINER" python -m tests.eval.entity_recall_runner \
       > "${SCRIPT_DIR}/eval/reports/entity-recall.log" 2>&1; then
-    report_text "\n> Entity-extraction recall: all annotated fixtures at or above the floor.\n"
+    if recall_skip=$(grep -F "recall SKIPPED" "${SCRIPT_DIR}/eval/reports/entity-recall.log"); then
+      report_text "\n> Entity-extraction recall: NOT MEASURED — ${recall_skip#recall SKIPPED: }\n"
+    else
+      report_text "\n> Entity-extraction recall: all annotated fixtures at or above the floor (best-of-3; see eval/reports/entity-recall.log for spread).\n"
+    fi
   else
     recall_actual=$(grep -F "[FAIL]" "${SCRIPT_DIR}/eval/reports/entity-recall.log" | paste -sd '; ' -)
     [[ -z "$recall_actual" ]] && recall_actual="entity_recall_runner exited non-zero; see eval/reports/entity-recall.log"
@@ -472,7 +487,7 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
   # seeding churn). Systematic failures still fail: a rerun under the
   # same defect fails again.
   docker run --rm --network "$DOCKER_NETWORK" \
-    -e CERID_API_KEY \
+    -e CERID_API_KEY -e BETA_TARGET -e BETA_MCP_BASE \
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 'pytest-asyncio>=0.23' pytest-rerunfailures 2>/dev/null

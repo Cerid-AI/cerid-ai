@@ -86,7 +86,7 @@ docker run --rm -i "$HADOLINT_IMAGE" hadolint --ignore DL3008 --ignore DL3018 --
 echo "::endgroup::"
 
 # The widget bundle must be IN the mcp image, not merely built on the host.
-# app/routers/widget.py serves /widget/script from /app/static/cerid-widget.js,
+# app/routers/widget.py serves GET /widget.js from /app/static/cerid-widget.js,
 # and until 2026-08-31 nothing put it there: `packages` was excluded wholesale
 # by .dockerignore, so the endpoint 404'd in every containerised deployment
 # while the host build looked fine. Asserted against the running image because
@@ -94,7 +94,7 @@ echo "::endgroup::"
 assert_widget_in_image() {
   local img="$1"
   if ! docker run --rm --entrypoint sh "$img" -c 'test -s /app/static/cerid-widget.js'; then
-    echo "::error::/app/static/cerid-widget.js missing from $img — /widget/script will 404."
+    echo "::error::/app/static/cerid-widget.js missing from $img — GET /widget.js will 404."
     echo "  Check the COPY in src/mcp/Dockerfile and the !packages/widget/dist exception in .dockerignore."
     return 1
   fi

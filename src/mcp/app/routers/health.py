@@ -700,6 +700,9 @@ def _invariants_snapshot() -> dict:
         # recomputed on every rebuild below, so a background snapshot frozen
         # mid-refresh (e.g. a cold model cache at boot) can't pin /health at
         # 503 for a whole INVARIANTS_REFRESH_S cycle after the model loads.
+        # The embedding_vector_space snapshot is re-probed on the same loop
+        # (not only at boot) and carries checked_at, so a reader can tell a
+        # fresh verdict from one the embedder was down for.
         from app.startup.invariants import (
             _probe_nli,
             get_invariants_snapshot,
@@ -941,7 +944,9 @@ def _pro_feature_health() -> dict:
         # CERID_MULTI_USER — so on a single-user Enterprise install the flag was
         # entitled, declared implemented, and served by nothing. That is the
         # same substitution as a residual bucket, one flag wide: a declaration
-        # that cannot be false is not a declaration.
+        # that cannot be false is not a declaration. The flag itself is now off
+        # in single-user mode (config.features), so `degraded` no longer fires
+        # there; the reason still reports so the operator can see why.
         if flag in _CONDITIONAL_IMPLEMENTATIONS:
             reason = _CONDITIONAL_IMPLEMENTATIONS[flag]()
             if reason:

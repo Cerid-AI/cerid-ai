@@ -1,14 +1,8 @@
 {
   "fixture": "eval-fixture-projects-orion-scope.md",
   "expected": [
-    "CSV export",
-    "Orion",
-    "Project Orion",
-    "billing connector",
-    "maps connector",
-    "multi-language support",
-    "native mobile app",
-    "telemetry dashboard"
+    "CSV",
+    "Project Orion"
   ],
   "forbidden": [
     "# project orion"

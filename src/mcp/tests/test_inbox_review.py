@@ -184,7 +184,16 @@ async def test_outlook_folder_sort_keep_undo_returns_to_inbox(tmp_path: Path, mo
         if call["tool"] == "move-mail-message"
     ]
     assert destinations == [LABEL_NAME["actionable"]]
-    ledger.record(decision_id, status="applied", receipt={})
+    transport = ScriptedTransport({
+        "update-mail-message": '{"id": "m1"}',
+        "list-mail-folders": '{"value": [{"id": "p", "displayName": "Cerid"}]}',
+        "list-mail-child-folders": '{"value": [{"id": "c", "displayName": "Action"}]}',
+        "move-mail-message": '{"id": "moved-1"}',
+    })
+    live = await apply_ids(
+        [decision_id], dry_run=False, ledger=ledger, transport=transport, actions_enabled=True,
+    )
+    assert live["results"][0]["status"] == "applied"
     ledger.update_account("outlook", "a@example.com", folder_sort=False)
     undone = await undo_decision(decision_id, ledger=ledger, transport=RecordingTransport())
     assert undone["status"] == "dry_run"
@@ -232,6 +241,30 @@ async def test_auto_apply_cap_skips_ineligible_rows(tmp_path: Path, monkeypatch)
     assert ledger.get_decision(ids[2])["status"] == "proposed"
     assert ledger.get_decision(ids[3])["status"] == "proposed"
     assert ledger.open_proposal("outlook", "draft")["status"] == "proposed"
+
+
+@pytest.mark.asyncio
+async def test_auto_apply_cap_counts_attempts_not_successes(tmp_path: Path, monkeypatch):
+    ledger = _ledger(tmp_path, monkeypatch)
+    _account(ledger, auto_apply=["newsletter"])
+    ids = [
+        _propose(ledger, provider_thread_id=f"n{index}", message_ids=[f"m{index}"])
+        for index in range(3)
+    ]
+
+    class FailingTransport(RecordingTransport):
+        async def call_tool(self, provider: str, tool: str, arguments: dict) -> str:
+            self.calls.append({"provider": provider, "tool": tool, "arguments": arguments})
+            raise RuntimeError("graph 503")
+
+    transport = FailingTransport()
+    result = await auto_apply_pass(ledger, transport=transport, cap=2, actions_enabled=True)
+    assert result["applied"] == 0
+    assert result["attempted"] == 2
+    assert len(transport.calls) == 2
+    assert ledger.get_decision(ids[0])["status"] == "failed"
+    assert ledger.get_decision(ids[1])["status"] == "failed"
+    assert ledger.get_decision(ids[2])["status"] == "proposed"
 
 
 @pytest.mark.asyncio
@@ -327,6 +360,28 @@ async def test_live_undo_writes_its_own_row_and_marks_the_original(tmp_path: Pat
     assert ledger.get_decision(undone["undo_id"])["status"] == "applied"
 
 
+@pytest.mark.asyncio
+async def test_live_undo_with_the_flag_off_adds_no_row(tmp_path: Path, monkeypatch):
+    ledger = _ledger(tmp_path, monkeypatch)
+    _account(ledger)
+    decision_id = _propose(ledger, provider_thread_id="live")
+    transport = RecordingTransport()
+    await apply_ids([decision_id], dry_run=False, ledger=ledger, transport=transport, actions_enabled=True)
+    reproposed = _propose(ledger, provider_thread_id="live")
+    rows_before = len(ledger.list_decisions())
+    calls_before = len(transport.calls)
+    undone = await undo_decision(
+        decision_id, dry_run=False, ledger=ledger, transport=transport, actions_enabled=False,
+    )
+    assert undone["status"] == "disabled"
+    assert undone["calls"]
+    assert "undo_id" not in undone
+    assert len(ledger.list_decisions()) == rows_before
+    assert len(transport.calls) == calls_before
+    assert ledger.get_decision(decision_id)["status"] == "applied"
+    assert ledger.get_decision(reproposed)["status"] == "proposed"
+
+
 def test_propose_skips_subject_only_groups_and_unknown_accounts(tmp_path: Path, monkeypatch):
     ledger = _ledger(tmp_path, monkeypatch)
     _account(ledger, provider="gmail")
@@ -340,8 +395,10 @@ def test_propose_skips_subject_only_groups_and_unknown_accounts(tmp_path: Path, 
     assert count == 2
     filed = {row["provider_thread_id"]: row for row in ledger.list_decisions(status="proposed")}
     assert filed["word"]["action"] == "keep"
-    domains = {item["domain"]: item["id"] for item in filed["bill"]["rag_artifact_ids"]}
-    assert domains == {"inbox": "in1", "finance": "fin1"}
+    assert filed["bill"]["rag_artifact_ids"] == [
+        {"id": "in1", "domain": "inbox"},
+        {"id": "fin1", "domain": "inbox"},  # the card is an inbox row of its own record type
+    ]
 
 
 def test_one_included_account_fills_a_thread_that_has_no_address(tmp_path: Path, monkeypatch):
@@ -371,11 +428,11 @@ def test_readding_a_removed_account_keeps_folder_sort(tmp_path: Path, monkeypatc
     assert restored["folder_sort"] is True
 
 
-def test_utility_none_is_rejected(tmp_path: Path, monkeypatch):
+def test_utilities_is_not_an_account_setting(tmp_path: Path, monkeypatch):
     ledger = _ledger(tmp_path, monkeypatch)
     _account(ledger)
-    with pytest.raises(ValueError, match="none"):
-        change_account(ledger, "outlook", "a@example.com", utilities=["none"])
+    assert change_account(ledger, "outlook", "a@example.com", utilities=["none"]) is None
+    assert "utilities" not in ledger.get_account("outlook", "a@example.com")
 
 
 @pytest.mark.asyncio
@@ -416,6 +473,37 @@ def test_discovered_addresses_do_not_scan_apple_until_asked(monkeypatch):
     loud = discovered_addresses(discover_apple=True, apple=_apple)
     assert loud["apple_mail"] == ["mac@example.com"]
     assert calls == [1]
+
+
+def test_setup_view_reports_the_source_state(tmp_path: Path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.inbox.review import setup_view
+
+    ledger = _ledger(tmp_path, monkeypatch)
+    desktop = MagicMock(spec=["is_configured", "configured_state"])
+    desktop.is_configured.return_value = False
+    desktop.configured_state.return_value = "runs_on_desktop"
+    plain = MagicMock(spec=["is_configured"])
+    plain.is_configured.return_value = True
+    sources = {"apple_mail": desktop, "gmail": plain}
+    with patch("app.data_sources.registry.get", side_effect=sources.get):
+        assert setup_view(ledger, "apple_mail")["source_state"] == "runs_on_desktop"
+        assert setup_view(ledger, "gmail")["source_state"] == "configured"
+        assert setup_view(ledger, "outlook")["source_state"] == "not_registered"
+        assert setup_view(ledger)["source_state"] == ""
+
+
+@pytest.mark.asyncio
+async def test_apple_discovery_off_darwin_names_the_desktop(monkeypatch):
+    from app.inbox.review import scan_apple_addresses
+
+    with (
+        patch("platform.system", return_value="Linux"),
+        patch("asyncio.create_subprocess_exec", side_effect=AssertionError("no helper runs here")),
+    ):
+        found = await scan_apple_addresses()
+    assert found == {"addresses": [], "error": "runs_on_desktop"}
 
 
 def test_open_ledger_uses_data_dir(monkeypatch, tmp_path: Path):
@@ -534,7 +622,7 @@ def test_morning_brief_review_is_not_urgent():
 def test_review_sale_sticks_and_a_reply_does_not_archive():
     from core.agents.inbox_review import render_record, review_message
 
-    sale = review_message(sender="ada@shop.example", subject="Hello", body="a sale this week")
+    sale = review_message(sender="ada@shop.example", subject="Sale this week", body="come by the shop")
     assert sale["category"] == "promo"
     assert sale["action"] == "archive"
     assert sale["sticks"] is True
@@ -579,8 +667,8 @@ def test_review_sale_sticks_and_a_reply_does_not_archive():
         "mailbox": "INBOX",
         "from": "ada@shop.example",
         "to": "me@icloud.com",
-        "subject": "Hello there",
-        "body": "a sale this week",
+        "subject": "Sale this week",
+        "body": "come by the shop",
     })
     assert line is not None
     assert "ada@" not in line
@@ -634,3 +722,101 @@ def test_review_module_source_carries_no_literal_domain():
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
     assert not [text for text in literals if domain.search(text)]
+
+
+@pytest.mark.asyncio
+async def test_gmail_mark_read_undo_restores_unread(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("USER_GOOGLE_EMAIL", "a@example.com")
+    monkeypatch.setenv("CERID_INBOX_ACTIONS_ENABLED", "false")
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    _account(ledger, provider="gmail")
+    decision_id = _propose(
+        ledger, source="gmail", action="mark_read", category="actionable", provider_thread_id="g2",
+    )
+    transport = _gmail_transport()
+    live = await apply_ids(
+        [decision_id], dry_run=False, ledger=ledger, transport=transport, actions_enabled=True,
+    )
+    assert live["results"][0]["status"] == "applied"
+    batches = [
+        call["arguments"] for call in transport.calls
+        if call["tool"] == "batch_modify_gmail_message_labels"
+    ]
+    assert batches[-1]["remove_label_ids"] == ["UNREAD"]
+    assert "add_label_ids" not in batches[-1]
+    undone = await undo_decision(decision_id, ledger=ledger, transport=transport)
+    assert undone["status"] == "dry_run"
+    batch = _call_args(undone)[0]
+    assert batch["add_label_ids"] == ["UNREAD"]
+    assert "remove_label_ids" not in batch
+
+
+@pytest.mark.asyncio
+async def test_outlook_undo_keeps_the_operators_own_categories(tmp_path: Path, monkeypatch):
+    import json
+
+    ledger = _ledger(tmp_path, monkeypatch)
+    _account(ledger)
+    thread = _thread(
+        source="outlook",
+        thread_id="o3",
+        action="keep",
+        category="actionable",
+        observation={"categories": "Blue category"},
+    )
+    assert propose_triage(ledger, [thread]) == 1
+    decision_id = ledger.open_proposal("outlook", "o3")["id"]
+    transport = ScriptedTransport({"update-mail-message": '{"id": "m1"}'})
+    live = await apply_ids(
+        [decision_id], dry_run=False, ledger=ledger, transport=transport, actions_enabled=True,
+    )
+    assert live["results"][0]["status"] == "applied"
+    assert transport.calls[0]["arguments"]["body"]["categories"] == ["Blue category", "Cerid/Action"]
+    receipt = json.loads(ledger.get_decision(decision_id)["receipt_json"])
+    assert receipt["current_labels"] == ["Blue category", "Cerid/Action"]
+    undone = await undo_decision(decision_id, ledger=ledger, transport=transport)
+    assert undone["status"] == "dry_run"
+    assert undone["calls"][0]["tool"] == "update-mail-message"
+    assert undone["calls"][0]["arguments"]["body"]["categories"] == ["Blue category"]
+    # The keep did not move the message, so the undo has nothing to move back.
+    assert [call["tool"] for call in undone["calls"]] == ["update-mail-message"]
+
+
+def test_apply_fields_reads_the_outlook_folder_as_the_mailbox():
+    thread = _thread(source="outlook", message_ids=[], mailbox="")
+
+    class _Message:
+        def __init__(self, metadata: dict) -> None:
+            self.metadata = metadata
+
+    _apply_fields(thread, [_Message({"provider_message_id": "m1", "folder": "inbox"})])
+    assert thread.mailbox == "inbox"
+
+
+@pytest.mark.asyncio
+async def test_outlook_undo_targets_the_moved_id_and_the_prior_folder(tmp_path: Path, monkeypatch):
+    import json
+
+    ledger = _ledger(tmp_path, monkeypatch)
+    _account(ledger, folder_sort=True)
+    thread = _thread(source="outlook", thread_id="o4", action="keep", category="actionable", mailbox="inbox")
+    assert propose_triage(ledger, [thread]) == 1
+    decision_id = ledger.open_proposal("outlook", "o4")["id"]
+    transport = ScriptedTransport({
+        "update-mail-message": '{"id": "m1"}',
+        "list-mail-folders": '{"value": [{"id": "p", "displayName": "Cerid"}]}',
+        "list-mail-child-folders": '{"value": [{"id": "c", "displayName": "Action"}]}',
+        "move-mail-message": '{"id": "moved-1", "parentFolderId": "c"}',
+    })
+    live = await apply_ids(
+        [decision_id], dry_run=False, ledger=ledger, transport=transport, actions_enabled=True,
+    )
+    assert live["results"][0]["status"] == "applied"
+    receipt = json.loads(ledger.get_decision(decision_id)["receipt_json"])
+    assert receipt["message_ids"] == ["moved-1"]
+    ledger.update_account("outlook", "a@example.com", folder_sort=False)
+    undone = await undo_decision(decision_id, ledger=ledger, transport=transport)
+    assert undone["status"] == "dry_run"
+    assert [call["arguments"]["messageId"] for call in undone["calls"]] == ["moved-1", "moved-1"]
+    assert undone["calls"][0]["arguments"]["body"]["categories"] == []
+    assert undone["calls"][1]["arguments"]["body"]["destinationId"] == "inbox"

@@ -90,6 +90,7 @@ async def guarded_agent_query_full(
         debug_timing=debug_timing,
         allowed_domains=request_context.allowed_domains_list(),
         strict_domains=request_context.strict_domains,
+        domain_record_types=request_context.domain_record_types_dict(),
         model=model,
         skip_cache=request_context.skip_cache,
         metadata_filter=request_context.metadata_filter,

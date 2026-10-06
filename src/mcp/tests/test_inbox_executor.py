@@ -142,6 +142,7 @@ async def test_outlook_keep_does_not_move_until_folder_sort_is_on():
         action="keep",
         category="actionable",
         folder_sort=False,
+        current_labels=[],
     ))
     assert [call["tool"] for call in held["calls"]] == ["update-mail-message"]
     assert held["calls"][0]["arguments"]["body"]["categories"] == ["Cerid/Action"]
@@ -152,6 +153,7 @@ async def test_outlook_keep_does_not_move_until_folder_sort_is_on():
         action="keep",
         category="actionable",
         folder_sort=True,
+        current_labels=[],
     ))
     assert [call["tool"] for call in filed["calls"]] == ["update-mail-message", "move-mail-message"]
     assert filed["calls"][1]["arguments"]["body"]["destinationId"] == "Cerid/Action"
@@ -162,7 +164,13 @@ async def test_outlook_archive_and_undo_use_well_known_folders():
     archived = await apply_decision(_decision(provider="outlook", action="archive", category="newsletter"))
     assert archived["calls"][-1]["tool"] == "move-mail-message"
     assert archived["calls"][-1]["arguments"]["body"]["destinationId"] == "archive"
-    undone = await apply_decision(_decision(provider="outlook", action="undo", category="newsletter"))
+    undone = await apply_decision(_decision(
+        provider="outlook",
+        action="undo",
+        category="newsletter",
+        current_labels=["Cerid/Newsletter"],
+        mailbox_before="inbox",
+    ))
     assert undone["calls"][0]["arguments"]["body"]["categories"] == []
     assert undone["calls"][1]["arguments"]["body"]["destinationId"] == "inbox"
 
@@ -337,7 +345,8 @@ async def test_apple_mail_not_running_queues_the_command(tmp_path: Path):
         "provider": "apple_mail",
         "commands": [["flag", "m1", "red"]],
     }
-    assert transport.calls[0]["arguments"]["argv"] == ["flag", "m1", "red"]
+    # The mailbox lookup comes first and is what finds Mail closed.
+    assert transport.calls[0]["arguments"]["argv"] == ["find", "m1"]
 
 
 async def test_apple_automation_denied_does_not_queue(tmp_path: Path):
@@ -546,7 +555,27 @@ async def test_pending_account_is_skipped():
     assert same["status"] == "dry_run"
 
 
-async def test_left_inbox_stores_the_cursor_without_a_write(monkeypatch, tmp_path: Path):
+async def test_left_inbox_stores_the_cursor_without_a_write(tmp_path: Path):
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    decision_id = _propose(ledger)
+    transport = RecordingTransport()
+    result = await apply_decision(
+        _decision(decision_id=decision_id, in_inbox=False, sync_cursor="cursor-9"),
+        dry_run=False,
+        actions_enabled=True,
+        ledger=ledger,
+        transport=transport,
+    )
+    assert result["status"] == "dropped"
+    assert result["reason"] == "left_inbox"
+    assert transport.calls == []
+    assert ledger.get_sync_cursor("gmail", "a@example.com") == "cursor-9"
+    assert ledger.get_decision(decision_id)["status"] == "dropped"
+
+
+async def test_actions_flag_off_leaves_the_ledger_alone_when_the_message_left_the_inbox(
+    monkeypatch, tmp_path: Path,
+):
     monkeypatch.delenv("CERID_INBOX_ACTIONS_ENABLED", raising=False)
     ledger = InboxLedger(tmp_path / "inbox.sqlite")
     decision_id = _propose(ledger)
@@ -557,11 +586,27 @@ async def test_left_inbox_stores_the_cursor_without_a_write(monkeypatch, tmp_pat
         ledger=ledger,
         transport=transport,
     )
-    assert result["status"] == "dropped"
-    assert result["reason"] == "left_inbox"
+    assert result["status"] == "disabled"
+    assert result["reason"] == "actions flag is off"
     assert transport.calls == []
-    assert ledger.get_sync_cursor("gmail", "a@example.com") == "cursor-9"
-    assert ledger.get_decision(decision_id)["status"] == "dropped"
+    assert ledger.get_sync_cursor("gmail", "a@example.com") == ""
+    assert ledger.get_decision(decision_id)["status"] == "proposed"
+
+
+async def test_actions_flag_off_does_not_record_a_plan_failure(tmp_path: Path):
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    decision_id = _propose(ledger, action="draft", category="actionable")
+    transport = RecordingTransport()
+    result = await apply_decision(
+        _decision(decision_id=decision_id, action="draft", category="actionable", draft_body="  "),
+        dry_run=False,
+        actions_enabled=False,
+        ledger=ledger,
+        transport=transport,
+    )
+    assert result["status"] == "disabled"
+    assert transport.calls == []
+    assert ledger.get_decision(decision_id)["status"] == "proposed"
 
 
 async def test_gmail_data_source_dry_run_does_not_call_the_sibling(monkeypatch):
@@ -618,3 +663,92 @@ def test_connector_commands_stay_read_only_until_the_flag():
     assert "Mail.Send" not in text
     assert text.count("--single-user") >= 2
     assert text.count("--read-only") >= 2
+
+
+async def test_gmail_undo_of_mark_read_restores_unread():
+    result = await apply_decision(_decision(
+        action="undo",
+        undone_action="mark_read",
+        current_labels=["INBOX"],
+    ))
+    assert result["status"] == "dry_run"
+    arguments = _batch(result)
+    assert arguments["add_label_ids"] == ["UNREAD"]
+    assert "remove_label_ids" not in arguments
+
+
+async def test_outlook_keep_adds_the_cerid_category_and_keeps_the_others():
+    kept = await apply_decision(_decision(
+        provider="outlook",
+        action="keep",
+        category="actionable",
+        current_labels=["Blue category", "Cerid/Promo"],
+    ))
+    body = kept["calls"][0]["arguments"]["body"]
+    assert body["categories"] == ["Blue category", "Cerid/Action"]
+    undone = await apply_decision(_decision(
+        provider="outlook",
+        action="undo",
+        undone_action="keep",
+        category="actionable",
+        current_labels=["Blue category", "Cerid/Action"],
+    ))
+    assert undone["calls"][0]["arguments"]["body"]["categories"] == ["Blue category"]
+    unread = await apply_decision(_decision(
+        provider="outlook",
+        action="undo",
+        undone_action="mark_read",
+        category="actionable",
+        current_labels=[],
+    ))
+    assert unread["calls"][0]["arguments"]["body"] == {"isRead": False}
+
+
+async def test_outlook_undo_moves_back_only_to_a_recorded_folder():
+    back = await apply_decision(_decision(
+        provider="outlook",
+        action="undo",
+        undone_action="archive",
+        current_labels=["Cerid/Newsletter"],
+        mailbox_before="inbox",
+    ))
+    assert [call["tool"] for call in back["calls"]] == ["update-mail-message", "move-mail-message"]
+    assert back["calls"][1]["arguments"]["body"]["destinationId"] == "inbox"
+    stays = await apply_decision(_decision(
+        provider="outlook",
+        action="undo",
+        undone_action="keep",
+        current_labels=["Cerid/Newsletter"],
+        mailbox_before="",
+    ))
+    assert [call["tool"] for call in stays["calls"]] == ["update-mail-message"]
+
+
+async def test_apple_records_the_mailbox_before_a_flag_only_keep(tmp_path: Path):
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    decision_id = _propose(ledger, source="apple_mail", action="keep", category="urgent")
+
+    class _FindingTransport(RecordingTransport):
+        async def apple(self, argv: list[str]) -> tuple[int, dict]:
+            await super().apple(argv)
+            if argv[0] == "find":
+                return 0, {"ok": True, "mailbox": "Projects"}
+            return 0, {"ok": True}
+
+    transport = _FindingTransport()
+    result = await apply_decision(
+        _decision(
+            decision_id=decision_id,
+            provider="apple_mail",
+            action="keep",
+            category="urgent",
+            folder_sort=False,
+        ),
+        dry_run=False,
+        actions_enabled=True,
+        ledger=ledger,
+        transport=transport,
+    )
+    assert result["status"] == "applied"
+    assert [call["tool"] for call in transport.calls] == ["find", "flag"]
+    assert ledger.get_decision(decision_id)["mailbox_before"] == "Projects"

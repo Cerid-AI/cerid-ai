@@ -252,3 +252,12 @@ async def test_call_internal_llm_no_stage_passes_empty_model_so_caller_default_w
     with patch("core.utils.llm_client.call_llm", new=AsyncMock(side_effect=_fake_call_llm)):
         await internal_llm.call_internal_llm([{"role": "user", "content": "hi"}])
     assert captured.get("model") == ""
+
+
+def test_inbox_stages_are_the_local_first_and_escalation_sets():
+    from config.stage_profiles import CLOUD_ESCALATION_STAGES, INBOX_STAGES, LOCAL_FIRST_STAGES
+
+    assert INBOX_STAGES == LOCAL_FIRST_STAGES | CLOUD_ESCALATION_STAGES
+    assert INBOX_STAGES == {
+        "inbox_triage", "inbox_triage_review", "inbox_triage_escalate", "inbox_triage_draft",
+    }

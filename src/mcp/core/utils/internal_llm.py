@@ -1157,15 +1157,18 @@ async def _call_ollama(
     # Local backend exhausted. Falling back to OpenRouter re-sends the identical
     # payload (user content) to the cloud — which is exactly what an operator who
     # chose local inference for privacy does not want. Honour the opt-out before
-    # egressing.
-    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
+    # egressing. The inbox stages carry mail bodies and opt out by default:
+    # CERID_INBOX_CLOUD_FALLBACK=true lets them through, the global switch
+    # still wins.
+    refused_by = _cloud_fallback_refused_by(stage)
+    if refused_by:
         logger.error(
-            "%s failed and ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false — not falling "
-            "back to OpenRouter (stage=%s)", label, stage or "<none>",
+            "%s failed and %s — not falling back to OpenRouter (stage=%s)",
+            label, refused_by, stage or "<none>",
         )
         raise RuntimeError(
-            f"Local inference provider {provider!r} is unavailable and cloud "
-            f"fallback is disabled (ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false)."
+            f"Local inference provider {provider!r} is unavailable for stage "
+            f"{stage or '<none>'!r} and cloud fallback is disabled ({refused_by})."
         ) from last_exc
 
     # Record the degradation so /health.inference_routing.llm reports
@@ -1199,6 +1202,43 @@ async def _call_ollama(
         max_tokens=max_tokens,
         response_format=fallback_response_format,
     )
+
+
+def _cloud_fallback_refused_by(stage: str | None) -> str:
+    """Which setting forbids the local-to-cloud fallback for *stage*; "" allows it."""
+    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
+        return "ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false"
+    from config.stage_profiles import INBOX_STAGES
+
+    if stage in INBOX_STAGES and not getattr(config, "INBOX_CLOUD_FALLBACK", False):
+        return "CERID_INBOX_CLOUD_FALLBACK is not true"
+    return ""
+
+
+def effective_environment_profile() -> str:
+    """The profile in force now, or "" when none is configured.
+
+    ``config.CERID_ENVIRONMENT_PROFILE`` is the request. ``resolve_profile``
+    degrades a cloud profile to local-only without a cloud key or under
+    Private Mode; the live level comes from the probe the app layer registers,
+    and from the boot posture before that.
+    """
+    from config.environment_profiles import classify_hardware, resolve_profile
+    from utils.host_info import get_host_hardware
+
+    if _private_mode_level_probe is not None:
+        level = _private_mode_level_probe()
+    elif os.getenv("CERID_PRIVATE_MODE", "false").lower() == "true":
+        level = int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))
+    else:
+        level = 0
+    effective, _reason = resolve_profile(
+        getattr(config, "CERID_ENVIRONMENT_PROFILE", ""),
+        classify_hardware(get_host_hardware()),
+        bool(os.getenv("OPENROUTER_API_KEY")),
+        level,
+    )
+    return effective
 
 
 async def _stream_ollama(

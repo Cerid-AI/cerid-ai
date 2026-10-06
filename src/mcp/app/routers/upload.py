@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 import config
 from config.features import require_feature
+from core.utils.swallowed import log_swallowed_error
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
@@ -53,6 +54,12 @@ async def upload_file_endpoint(
         False,
         description="Skip 4-dimension quality score (stores neutral 0.5). "
                     "Use with skip_metadata for sub-100ms wizard ingest.",
+    ),
+    quick: bool = Query(
+        False,
+        description="Quick capture: persist with a provisional domain and minimal "
+                    "metadata, return at once, and enrich (categorise, title) in a "
+                    "background job that updates the artifact in place.",
     ),
 ):
     """Accept a multipart file upload, validate it, and ingest into the knowledge base.
@@ -141,7 +148,11 @@ async def upload_file_endpoint(
         mode = categorize_mode or (
             "manual" if domain and domain in config.DOMAINS else config.CATEGORIZE_MODE
         )
-        if mode != "manual" and not domain:
+        # Quick capture never awaits the classifier inside the request: a
+        # two-line note took 45 s on the Studio while a wiki-refresh sweep
+        # held the chat slot. QuickCaptureEnrichJob runs the same call after
+        # the persist and moves the artifact if the domain changes.
+        if mode != "manual" and not domain and not quick:
             try:
                 ai_result = await ai_categorize(text, file.filename, mode)
             except Exception as e:  # noqa: BLE001 — auto-detect is best-effort, never blocks upload
@@ -156,10 +167,12 @@ async def upload_file_endpoint(
         # pipeline for filename-derived keywords so Try-It-Out doesn't block
         # on NLP cold-start. Enriched metadata can be re-computed later by
         # the curator agent without re-ingesting the file.
-        if skip_metadata:
+        if skip_metadata or quick:
             metadata = extract_metadata_minimal(text, file.filename, domain)
         else:
             metadata = extract_metadata(text, file.filename, domain)
+        if quick:
+            metadata["quick_capture"] = "true"
         metadata["file_type"] = parsed.get("file_type", metadata.get("file_type", ""))
         metadata["sub_category"] = sub_category
         metadata["client_source"] = "upload"
@@ -197,7 +210,7 @@ async def upload_file_endpoint(
             text,
             domain,
             metadata,
-            skip_quality=skip_quality,
+            skip_quality=skip_quality or quick,
         )
         # AF-025: when an explicit domain skipped the ai_categorize tier run
         # above, echo "manual" — the declared tier never actually executed,
@@ -207,6 +220,25 @@ async def upload_file_endpoint(
 
         # Override filename in result with the original upload name
         result["filename"] = file.filename
+
+        if quick and result.get("artifact_id"):
+            # The persist is already acknowledged; a queue that is down must
+            # not turn a saved note into a failed save.
+            from app.processor.jobs.quick_capture_enrich import enqueue_quick_capture_enrichment
+
+            try:
+                enqueue_quick_capture_enrichment(
+                    str(result["artifact_id"]),
+                    domain_locked=domain_was_explicit,
+                    categorize_mode=mode,
+                )
+                result["enrichment"] = "queued"
+            except Exception as exc:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.routers.upload.quick_enqueue", exc,
+                    context={"artifact_id": result["artifact_id"]},
+                )
+                result["enrichment"] = "unavailable"
 
         # Archive mode: copy the file to archive/{domain}/ for Dropbox sync
         if config.STORAGE_MODE == "archive" and tmp_path:

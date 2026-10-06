@@ -7,13 +7,14 @@ import httpx
 import pytest
 
 from lib.kb_cleanup import KbCleanup
+from lib.target import resolve_target
 
-MCP_BASE_URL = os.getenv("BETA_MCP_BASE", "http://ai-companion-mcp:8888")
+MCP_BASE_URL = resolve_target().mcp_base
 
 
 @pytest.fixture(scope="session")
 def client() -> httpx.Client:
-    """HTTP client pre-configured for the MCP service on the llm-network."""
+    """HTTP client pre-configured for the MCP service on the target's docker network."""
     headers: dict = {
         "X-Client-ID": "beta-test",
         "Content-Type": "application/json",

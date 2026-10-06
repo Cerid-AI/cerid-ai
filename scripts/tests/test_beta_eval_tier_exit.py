@@ -25,7 +25,7 @@ RUN_SH = REPO / "tests" / "beta" / "run.sh"
 
 DOCKER_STUB = """#!/bin/bash
 case "$1" in
-  exec) exit "${FAKE_RECALL_EXIT:-0}" ;;
+  exec) [[ -n "${FAKE_RECALL_OUTPUT:-}" ]] && echo "$FAKE_RECALL_OUTPUT"; exit "${FAKE_RECALL_EXIT:-0}" ;;
   run)  exit "${FAKE_PYTEST_EXIT:-0}" ;;
 esac
 exit 0
@@ -41,7 +41,7 @@ def _tier_block() -> str:
     return block
 
 
-def _run(tmp_path: Path, recall_exit: int, pytest_exit: int) -> str:
+def _run(tmp_path: Path, recall_exit: int, pytest_exit: int, recall_output: str = "") -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
@@ -50,12 +50,13 @@ def _run(tmp_path: Path, recall_exit: int, pytest_exit: int) -> str:
     script = tmp_path / "tier.sh"
     script.write_text(
         "set -uo pipefail\n"
-        "report_text() { :; }\n"
+        "report_text() { printf '%b\\n' \"$*\"; }\n"
         "report_issue() { :; }\n"
         "report_section() { :; }\n"
         "skip_tier_mcp_unreachable() { :; }\n"
         "mcp_network_or_skip() { echo stubnet; }\n"
         "RUN_EVAL=true\n"
+        "BETA_MCP_CONTAINER=stub-mcp\n"
         f'SCRIPT_DIR="{tmp_path / "beta"}"\n'
         f'EVAL_REPORT="{tmp_path / "eval-report.md"}"\n'
         "CERID_API_KEY=stub\n"
@@ -68,6 +69,7 @@ def _run(tmp_path: Path, recall_exit: int, pytest_exit: int) -> str:
         PATH=f"{bin_dir}:{env['PATH']}",
         FAKE_RECALL_EXIT=str(recall_exit),
         FAKE_PYTEST_EXIT=str(pytest_exit),
+        FAKE_RECALL_OUTPUT=recall_output,
     )
     proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, check=False)
     return proc.stdout + proc.stderr
@@ -85,3 +87,16 @@ def _run(tmp_path: Path, recall_exit: int, pytest_exit: int) -> str:
 def test_tier_exit_combines_recall_and_pytest(tmp_path: Path, recall_exit: int, pytest_exit: int, expected: int) -> None:
     out = _run(tmp_path, recall_exit, pytest_exit)
     assert f"OVERALL_EXIT={expected}" in out, out
+
+
+def test_recall_skip_on_a_loaded_host_is_reported_not_passed(tmp_path: Path) -> None:
+    """A skipped recall run exits 0 but must not read as the floor being met."""
+    out = _run(tmp_path, 0, 0, recall_output="recall SKIPPED: inference server loaded: probe 7400ms > 3000ms")
+    assert "OVERALL_EXIT=0" in out, out
+    assert "NOT MEASURED — inference server loaded: probe 7400ms > 3000ms" in out, out
+    assert "at or above the floor" not in out, out
+
+
+def test_recall_pass_reports_the_floor_met(tmp_path: Path) -> None:
+    out = _run(tmp_path, 0, 0, recall_output="recall[x.md] = 1.00 attempts=[1.00, 1.00, 1.00] spread=0.00 forbidden_hits=[] [PASS]")
+    assert "OVERALL_EXIT=0" in out and "at or above the floor" in out, out

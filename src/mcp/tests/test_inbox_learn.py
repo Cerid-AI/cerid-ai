@@ -13,8 +13,13 @@ from app.data_sources.base import DataSourceResult
 from app.inbox.learn import signals_for
 from app.inbox.ledger import InboxLedger
 from app.inbox.review import record_and_apply
-from core.agents.inbox_actions import operator_outcome
-from core.agents.inbox_triage import TriagedThread, _categorize_thread, set_inbox_memory
+from core.agents.inbox_actions import operator_outcome, proposed_outcome
+from core.agents.inbox_triage import (
+    TriagedThread,
+    _categorize_thread,
+    set_inbox_accounts,
+    set_inbox_memory,
+)
 
 _SENDER = "alice@example.com"
 
@@ -22,8 +27,10 @@ _SENDER = "alice@example.com"
 @pytest.fixture(autouse=True)
 def _reset_memory():
     set_inbox_memory(None)
+    set_inbox_accounts(None)
     yield
     set_inbox_memory(None)
+    set_inbox_accounts(None)
 
 
 def _msg(subject: str, body: str, sender: str = _SENDER) -> DataSourceResult:
@@ -89,6 +96,44 @@ class TestOperatorOutcome:
     def test_mark_read_does_not_treat_an_empty_flag_as_a_correction(self):
         decision = {"provider": "apple_mail", "action": "mark_read", "category": "personal", "receipt": {}}
         assert operator_outcome(decision, {"flag": ""}) is None
+
+
+class TestProposedOutcome:
+    """The user's own move against a proposal nothing applied. Sitting still is not a move."""
+
+    def _proposed(self, provider: str, action: str = "keep", category: str = "actionable") -> dict:
+        return {"provider": provider, "action": action, "category": category, "receipt": {}}
+
+    def test_gmail_archived_by_hand_is_archive(self):
+        assert proposed_outcome(self._proposed("gmail"), {"labels": ""}) == ("archive", "actionable")
+
+    def test_gmail_still_in_the_inbox_is_not_a_move(self):
+        assert proposed_outcome(self._proposed("gmail"), {"labels": "INBOX"}) is None
+        assert proposed_outcome(self._proposed("gmail", "archive", "newsletter"), {"labels": "INBOX"}) is None
+
+    def test_gmail_hand_label_is_that_category(self):
+        assert proposed_outcome(self._proposed("gmail"), {"labels": "INBOX,Cerid/Personal"}) == ("keep", "personal")
+
+    def test_several_labels_are_not_learned(self):
+        observation = {"labels": "INBOX,Cerid/Personal,Cerid/Urgent"}
+        assert proposed_outcome(self._proposed("gmail"), observation) is None
+
+    def test_unknown_location_is_unknown(self):
+        assert proposed_outcome(self._proposed("gmail"), {}) is None
+        assert proposed_outcome(self._proposed("apple_mail"), {"flag": ""}) is None
+
+    def test_apple_archived_by_hand(self):
+        assert proposed_outcome(self._proposed("apple_mail"), {"mailbox": "Archive"}) == ("archive", "actionable")
+
+    def test_apple_flag_set_by_hand(self):
+        outcome = proposed_outcome(self._proposed("apple_mail"), {"mailbox": "INBOX", "flag": "blue"})
+        assert outcome == ("keep", "personal")
+        assert proposed_outcome(self._proposed("apple_mail"), {"mailbox": "INBOX", "flag": ""}) is None
+
+    def test_outlook_category_set_by_hand(self):
+        decision = self._proposed("outlook", "archive", "newsletter")
+        assert proposed_outcome(decision, {"folder": "inbox", "categories": ""}) is None
+        assert proposed_outcome(decision, {"folder": "inbox", "categories": "Cerid/Urgent"}) == ("keep", "urgent")
 
 
 def test_three_corrections_pin_and_a_different_outcome_resets(tmp_path: Path):
@@ -192,20 +237,48 @@ async def test_a_pinned_sender_skips_the_model(tmp_path: Path):
     assert "draft_body" not in result
 
 
-async def test_a_pinned_draft_does_not_call_the_draft_model(tmp_path: Path):
-    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+def _pin_draft(ledger: InboxLedger) -> None:
     ledger.pin_sender(source="gmail", sender=_SENDER, category="actionable", action="draft")
     set_inbox_memory(lambda source, sender, subject, list_id="": signals_for(
         ledger, source, sender, subject, list_id,
     ))
-    mock = AsyncMock()
+
+
+async def test_a_pinned_draft_skips_classification_and_still_writes_the_reply(tmp_path: Path):
+    """A pin skips the classification model. A draft is a second model call and still runs."""
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    _pin_draft(ledger)
+    mock = AsyncMock(return_value='{"draft": "Yes, 3pm works for the meeting time."}')
     with patch("core.utils.internal_llm.call_internal_llm", mock):
         result = await _categorize_thread(
             "t", [_msg("Meeting", "Can you confirm the meeting time?")], source="gmail",
         )
-    mock.assert_not_called()
+    assert mock.await_count == 1
+    assert mock.await_args.kwargs["stage"] == "inbox_triage_review"
+    assert "category is one of" not in mock.await_args.args[0][0]["content"]
     assert result["action"] == "draft"
-    assert result["band"] == "skip"
+    assert result["category"] == "actionable"
+    assert result["draft_body"] == "Yes, 3pm works for the meeting time."
+    assert result["band"] == "local-chat"
+    assert "classification_reason" not in result
+
+
+async def test_a_pinned_draft_that_fails_locally_stays_needs_review_under_local_only(
+    monkeypatch, tmp_path: Path,
+):
+    import config
+
+    monkeypatch.setattr(config, "CERID_ENVIRONMENT_PROFILE", "local-only", raising=False)
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    _pin_draft(ledger)
+    mock = AsyncMock(return_value='{"draft": ""}')
+    with patch("core.utils.internal_llm.call_internal_llm", mock):
+        result = await _categorize_thread(
+            "t", [_msg("Meeting", "Can you confirm the meeting time?")], source="gmail",
+        )
+    assert mock.await_count == 1
+    assert result["action"] == "draft"
+    assert result["band"] == "needs_review"
     assert "draft_body" not in result
 
 
@@ -232,10 +305,28 @@ async def test_a_sender_rule_skips_without_memory(tmp_path: Path):
 
 def test_wiring_memory_does_not_open_the_ledger(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.agents_di import wire_inbox_triage_di
     from app.inbox.learn import lookup_signals
+    from core.agents.inbox_triage import get_inbox_accounts
 
     set_inbox_memory(lookup_signals)
+    wire_inbox_triage_di()
+    assert get_inbox_accounts() is not None
     assert not (tmp_path / "inbox.sqlite").exists()
+
+
+def test_included_addresses_leave_out_removed_and_excluded_rows(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.inbox.review import included_addresses, open_ledger
+
+    ledger = open_ledger()
+    ledger.upsert_account(provider="gmail", address="Kept@example.com", included=True)
+    ledger.upsert_account(provider="gmail", address="off@example.com", included=False)
+    ledger.upsert_account(provider="gmail", address="gone@example.com", included=True)
+    ledger.remove_account("gmail", "gone@example.com")
+    ledger.upsert_account(provider="outlook", address="other@example.com", included=True)
+    assert included_addresses("gmail") == ["kept@example.com"]
+    assert included_addresses("apple_mail") == []
 
 
 async def test_pin_and_rule_tools_are_gated_before_the_ledger(monkeypatch, tmp_path: Path):
@@ -293,6 +384,49 @@ async def test_reconcile_learns_one_hit_and_does_not_repeat_it(tmp_path: Path):
     assert stored["action"] == "keep"
     assert stored["category"] == "personal"
     assert stored["last_decision"] == decision_id
+
+
+async def test_a_hand_archive_of_a_proposed_keep_is_learned_with_actions_off(
+    monkeypatch, tmp_path: Path,
+):
+    monkeypatch.delenv("CERID_INBOX_ACTIONS_ENABLED", raising=False)
+    ledger = InboxLedger(tmp_path / "inbox.sqlite")
+    ledger.upsert_account(provider="apple_mail", address="me@example.com", included=True)
+    thread = TriagedThread(
+        thread_id="<m1@example.com>",
+        source="apple_mail",
+        participants=[_SENDER],
+        subject="Plan",
+        message_count=1,
+        latest_at="0",
+        category="actionable",
+        summary="plan",
+        suggested_action="review",
+        action="keep",
+        writable=True,
+        message_ids=["<m1@example.com>"],
+        account="me@example.com",
+        mailbox="INBOX",
+        sender=_SENDER,
+        observation={"mailbox": "INBOX"},
+    )
+    seen = type("R", (), {"threads": [thread]})()
+    first = await record_and_apply(seen, ledger=ledger)
+    assert first["learned"] == 0 and first["proposed"] == 1
+    assert ledger.get_sender("apple_mail", _SENDER) is None
+
+    thread.mailbox = "Archive"
+    thread.observation = {"mailbox": "Archive"}
+    second = await record_and_apply(seen, ledger=ledger)
+    assert second["learned"] == 1
+    stored = ledger.get_sender("apple_mail", _SENDER)
+    assert stored is not None
+    assert (stored["action"], stored["category"], stored["hits"]) == ("archive", "actionable", 1)
+
+    third = await record_and_apply(seen, ledger=ledger)
+    assert third["learned"] == 0
+    assert ledger.get_sender("apple_mail", _SENDER)["hits"] == 1
+    assert ledger.list_decisions(status="applied") == []
 
 
 def test_two_hits_do_not_reach_the_skip_band(tmp_path: Path):

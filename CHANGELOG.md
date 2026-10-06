@@ -4,6 +4,33 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The vector-space probe sees a minority and does not freeze at boot.** It
+  read the first three chunks of each collection and compared a median, so on
+  the Studio it reported `ok` while a full walk found 1,075 of 7,495 chunks
+  (26% of `coding`) outside the serving space; and it ran once, so a server
+  that booted while the embedder was hung served `unverified` until the next
+  restart. It now samples twelve chunks per collection at evenly spaced
+  offsets, reports each collection's `sampled` / `out_of_space` / `fraction`
+  and flags one whose out-of-space share passes 10%, re-runs on the
+  invariants refresh cadence (`INVARIANTS_REFRESH_S`), and dates the verdict
+  with `checked_at`.
+
+### Changed
+
+- **The desktop toolchain moves to Electron 44.** Both desktop packages
+  (`packages/desktop` and the Hub desktop) run Electron 44.5.1, inside the
+  band upstream patches, with `@types/node` 26 on the Node 22 line. With it,
+  `electron-vite` 5 (the deprecated `externalizeDepsPlugin` becomes the
+  `build.externalizeDeps` option; the bundle is unchanged), `@electron/notarize`
+  3 (ESM-only and notarytool-only, so the `afterSign` hook is now
+  `scripts/notarize.mjs`; electron-builder loads it through its `import()`
+  fallback), and `dockerode` 5 (which drops `uuid`, so the override that
+  pinned it is gone). Both native modules rebuilt against Electron 44's ABI
+  149 with the existing `nan` 2.28 floor; `better-sqlite3` keeps using its
+  N-API prebuilds.
+
 ## [1.0.9] — 2026-10-02
 
 A fix release. On a 1.0.8 server the desktop app could not chat or change
@@ -572,12 +599,13 @@ the merge queue" — but there was no merge queue. `test`, `security`, `frontend
 with it. The sharp edge showed up in this very release: the pull request that
 FIXED a red `security` job ran with `security: skipping`.
 
-There is a merge queue now, and the heavy tier runs in it. The obvious way to do
-that costs double — `merge_group` and the follow-on `push: main` both fire for
-one change — so `MERGE_QUEUE_ENABLED=1` suppresses the post-merge repeat. It is
-a variable rather than a hardcoded condition so the thing fails safe: clear it
-and the gates go straight back to running on `push: main`. There is no state in
-which they run nowhere.
+The first fix here claimed a merge queue and a `MERGE_QUEUE_ENABLED=1` variable
+to suppress the post-merge repeat. That was wrong and is corrected below in
+"The heavy gates gate now, on the other side of the merge": a merge queue is not
+available on this plan at all, so the heavy tier moved to `pull_request`
+instead. The paragraph is left in place rather than rewritten because the wrong
+turn is the useful part — `merge_group` triggers look like they work right up
+until you check whether the event ever fires.
 
 **Two gates had not run at all since 2026-08-17.** `preservation` and
 `benchmark-slo` were routed by `vars.LIVESTACK_RUNNER`, set to the self-hosted

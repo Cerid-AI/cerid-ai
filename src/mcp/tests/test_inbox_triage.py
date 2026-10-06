@@ -11,6 +11,15 @@ import pytest
 from app.data_sources.base import DataSource, DataSourceResult
 
 
+@pytest.fixture(autouse=True)
+def _unwire_accounts():
+    from core.agents.inbox_triage import set_inbox_accounts
+
+    set_inbox_accounts(None)
+    yield
+    set_inbox_accounts(None)
+
+
 class _StubSource(DataSource):
     def __init__(self, name: str, results: list[DataSourceResult]):
         self.name = name
@@ -248,9 +257,13 @@ class TestTriageInboxes:
         from app.agents_di import wire_inbox_triage_di
 
         wire_inbox_triage_di()
+        # The account lookup opens the real ledger; tests that gate on
+        # accounts wire their own. The rest read every stubbed address.
+        _m._accounts = None
         yield
         _m._registry = None
         _m._rag_route = None
+        _m._accounts = None
 
     @pytest.mark.asyncio
     async def test_skips_when_feature_off(self):
@@ -272,6 +285,130 @@ class TestTriageInboxes:
             result = await triage_inboxes(persist=False)
         assert result.threads == []
         assert any(s["reason"] == "not_registered" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_outlook_takes_the_triage_fetch_and_gmail_excludes_spam_and_trash(self):
+        from core.agents.inbox_triage import triage_inboxes
+
+        seen: dict[str, object] = {}
+
+        class _Gmail(_StubSource):
+            async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
+                seen["gmail"] = query
+                return []
+
+        class _Outlook(_StubSource):
+            def is_configured(self) -> bool:
+                raise AssertionError("the probe decides, not the import-time flag")
+
+            async def probe_configured(self) -> bool:
+                seen["probed"] = True
+                return True
+
+            async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
+                raise AssertionError("triage must not send the Gmail query as KQL")
+
+            async def triage_query(self, query: str, **kwargs) -> list[DataSourceResult]:
+                seen["outlook"] = (query, kwargs.get("max_results"))
+                return []
+
+        sources = {"gmail": _Gmail("gmail", []), "outlook": _Outlook("outlook", [])}
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.data_sources.base.registry.get", side_effect=sources.get),
+        ):
+            result = await triage_inboxes(persist=False, max_results_per_source=9)
+        assert seen["gmail"] == "is:unread newer_than:1d -in:spam -in:trash"
+        assert seen["outlook"] == ("is:unread newer_than:1d", 9)
+        assert seen["probed"] is True
+        assert sorted(result.sources_queried) == ["gmail", "outlook"]
+
+    @pytest.mark.asyncio
+    async def test_a_source_that_runs_on_the_desktop_is_skipped_with_that_state(self):
+        from core.agents.inbox_triage import triage_inboxes
+
+        class _Apple(_StubSource):
+            def is_configured(self) -> bool:
+                return False
+
+            def configured_state(self) -> str:
+                return "runs_on_desktop"
+
+        apple = _Apple("apple_mail", [])
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.data_sources.base.registry.get", side_effect={"apple_mail": apple}.get),
+        ):
+            result = await triage_inboxes(persist=False)
+        assert {"source": "apple_mail", "reason": "runs_on_desktop"} in result.skipped
+        assert not any(s["source"] == "apple_mail" and s["reason"] == "not_configured" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_a_negative_probe_skips_the_source_as_not_configured(self):
+        from core.agents.inbox_triage import triage_inboxes
+
+        class _Outlook(_StubSource):
+            async def probe_configured(self) -> bool:
+                return False
+
+            async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
+                raise AssertionError("an unconfigured source is not read")
+
+        outlook = _Outlook("outlook", [])
+        with (
+            patch("config.features.is_feature_enabled", return_value=True),
+            patch("app.data_sources.base.registry.get", side_effect={"outlook": outlook}.get),
+        ):
+            result = await triage_inboxes(persist=False)
+        assert {"source": "outlook", "reason": "not_configured"} in result.skipped
+
+    @pytest.mark.asyncio
+    async def test_a_removed_address_is_skipped_before_the_model(self):
+        from core.agents.inbox_triage import set_inbox_accounts, triage_inboxes
+
+        kept = _msg("Plan", "thoughts", metadata={**_provider("t-kept", "m-kept"), "account": "kept@example.com"})
+        gone = _msg("Bill", "amount due", metadata={**_provider("t-gone", "m-gone"), "account": "Gone@example.com"})
+        gmail = _StubSource("gmail", [kept, gone])
+        seen: list[str] = []
+
+        async def _mock_llm(messages, **kwargs):
+            seen.append(messages[0]["content"])
+            return '{"category":"actionable","summary":"x","suggested_action":"y","confidence":0.9}'
+
+        set_inbox_accounts(lambda source: ["kept@example.com"] if source == "gmail" else [])
+        try:
+            with (
+                patch("config.features.is_feature_enabled", return_value=True),
+                patch("app.data_sources.base.registry.get", side_effect={"gmail": gmail}.get),
+                patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock, side_effect=_mock_llm),
+            ):
+                result = await triage_inboxes(persist=False)
+        finally:
+            set_inbox_accounts(None)
+        assert [t.thread_id for t in result.threads] == ["t-kept"]
+        assert len(seen) == 1 and "amount due" not in seen[0]
+        assert {"source": "gmail", "reason": "account_not_included"} in result.skipped
+
+    @pytest.mark.asyncio
+    async def test_a_provider_with_no_included_address_is_not_read(self):
+        from core.agents.inbox_triage import set_inbox_accounts, triage_inboxes
+
+        class _Outlook(_StubSource):
+            async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
+                raise AssertionError("a provider with no included address is not read")
+
+        set_inbox_accounts(lambda source: [])
+        try:
+            with (
+                patch("config.features.is_feature_enabled", return_value=True),
+                patch("app.data_sources.base.registry.get", side_effect={"outlook": _Outlook("outlook", [])}.get),
+            ):
+                result = await triage_inboxes(persist=False)
+        finally:
+            set_inbox_accounts(None)
+        assert result.threads == []
+        assert result.sources_queried == []
+        assert {"source": "outlook", "reason": "no_included_account"} in result.skipped
 
     @pytest.mark.asyncio
     async def test_full_pipeline_with_llm_mock(self):
@@ -718,7 +855,7 @@ class TestTriageInboxes:
         assert client.posts == []
 
     @pytest.mark.asyncio
-    async def test_financial_card_goes_to_finance_and_leaves_the_body_out(self):
+    async def test_financial_card_goes_to_inbox_as_its_own_record_type_and_leaves_the_body_out(self):
         from core.agents.inbox_triage import triage_inboxes
 
         body = "Your bill is ready. Amount due $42.10 on 2026-10-01. Patio work account 999."
@@ -736,8 +873,7 @@ class TestTriageInboxes:
         ):
             result = await triage_inboxes(persist=True, mcp_base_url="http://test")
 
-        domains = [post["domain"] for post in client.posts]
-        assert domains == ["finance", "inbox"]
+        assert [post["domain"] for post in client.posts] == ["inbox"], "the card only; no pointer row"
         card = client.posts[0]["content"]
         assert "42.10" in card
         assert "2026-10-01" in card
@@ -745,12 +881,10 @@ class TestTriageInboxes:
         assert "999" not in card
         assert "Marker: amount due" in card
         assert client.posts[0]["metadata"]["record_type"] == "mail_financial_card"
-        assert client.posts[1]["content"] == "City Power — finance card"
-        assert "Patio" not in client.posts[1]["content"]
         thread = result.threads[0]
         assert thread.utility == "financial"
-        assert thread.finance_artifact_id == "art:finance"
-        assert thread.artifact_id == "art:inbox"
+        assert thread.finance_artifact_id == "art:inbox"
+        assert thread.artifact_id is None
 
     @pytest.mark.asyncio
     async def test_unwired_route_does_not_ingest(self):
@@ -796,3 +930,41 @@ class _RecordingClient:
                 return {"artifact_id": f"art:{json['domain']}"}
 
         return _Resp()
+
+
+class TestEffectiveProfile:
+    """_profile() is the profile in force, not the configured string."""
+
+    def test_hybrid_with_a_cloud_key_is_hybrid(self, monkeypatch):
+        import config
+        from core.agents.inbox_triage import _profile
+
+        monkeypatch.setattr(config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")  # pragma: allowlist secret
+        monkeypatch.delenv("CERID_PRIVATE_MODE", raising=False)
+        assert _profile() == "hybrid"
+
+    def test_hybrid_without_a_cloud_key_is_local_only(self, monkeypatch):
+        import config
+        from core.agents.inbox_triage import _profile
+
+        monkeypatch.setattr(config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        assert _profile() == "local-only"
+
+    def test_private_mode_degrades_a_cloud_profile(self, monkeypatch):
+        import config
+        import core.utils.internal_llm as il
+        from core.agents.inbox_triage import _profile
+
+        monkeypatch.setattr(config, "CERID_ENVIRONMENT_PROFILE", "cloud-first", raising=False)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")  # pragma: allowlist secret
+        monkeypatch.setattr(il, "_private_mode_level_probe", lambda: 1)
+        assert _profile() == "local-only"
+
+    def test_no_profile_reads_as_hybrid(self, monkeypatch):
+        import config
+        from core.agents.inbox_triage import _profile
+
+        monkeypatch.setattr(config, "CERID_ENVIRONMENT_PROFILE", "", raising=False)
+        assert _profile() == "hybrid"

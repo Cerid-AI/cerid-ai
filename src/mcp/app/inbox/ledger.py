@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     included INTEGER NOT NULL DEFAULT 1,
     folder_sort INTEGER NOT NULL DEFAULT 0,
     auto_apply TEXT NOT NULL DEFAULT '[]',
-    utilities TEXT NOT NULL DEFAULT '["correspondence","financial"]',
     consent TEXT NOT NULL DEFAULT 'readonly',
     removed INTEGER NOT NULL DEFAULT 0,
     last_read TEXT NOT NULL DEFAULT '',
@@ -111,6 +110,9 @@ class InboxLedger:
         for name, decl in extras:
             if name not in cols:
                 conn.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
+        # A per-account utilities list was stored and edited but never read.
+        if "utilities" in cols:
+            conn.execute("ALTER TABLE accounts DROP COLUMN utilities")
         memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(sender_memory)")}
         if "last_decision" not in memory_cols:
             conn.execute(
@@ -126,7 +128,6 @@ class InboxLedger:
         included: bool = True,
         folder_sort: bool = False,
         auto_apply: list[str] | None = None,
-        utilities: list[str] | None = None,
         consent: str = "readonly",
     ) -> None:
         with self._connect() as conn:
@@ -134,14 +135,13 @@ class InboxLedger:
                 """
                 INSERT INTO accounts (
                     provider, address, display_name, included, folder_sort,
-                    auto_apply, utilities, consent
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    auto_apply, consent
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, address) DO UPDATE SET
                     display_name=excluded.display_name,
                     included=excluded.included,
                     folder_sort=excluded.folder_sort,
                     auto_apply=excluded.auto_apply,
-                    utilities=excluded.utilities,
                     consent=excluded.consent
                 """,
                 (
@@ -151,7 +151,6 @@ class InboxLedger:
                     int(included),
                     int(folder_sort),
                     json.dumps(auto_apply or []),
-                    json.dumps(utilities if utilities is not None else ["correspondence", "financial"]),
                     consent,
                 ),
             )
@@ -334,7 +333,7 @@ class InboxLedger:
             value: object = fields[name]
             if name in ("included", "folder_sort", "removed"):
                 value = int(bool(value))
-            elif name in ("auto_apply", "utilities"):
+            elif name == "auto_apply":
                 if not isinstance(value, list):
                     raise TypeError(f"{name} must be a list")
                 value = json.dumps(value)
@@ -579,7 +578,6 @@ _ACCOUNT_FIELDS = (
     "included",
     "folder_sort",
     "auto_apply",
-    "utilities",
     "consent",
     "removed",
     "last_read",
@@ -596,7 +594,6 @@ def _account(row: sqlite3.Row | None) -> dict:
     data["folder_sort"] = bool(data["folder_sort"])
     data["removed"] = bool(data.get("removed") or 0)
     data["auto_apply"] = json.loads(data["auto_apply"])
-    data["utilities"] = json.loads(data["utilities"])
     return data
 
 

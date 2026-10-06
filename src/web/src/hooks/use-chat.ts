@@ -116,6 +116,10 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           aborted = true
+          // A flush scheduled before the abort would write the partial text
+          // into whatever message is last by then — after a regenerate that
+          // is a different turn's answer. Drop it with the stream.
+          if (rafId) { cancelAnimationFrame(rafId); rafId = null }
         } else {
           const errorText = err instanceof Error ? err.message : "Unknown error"
           accumulated += accumulated ? `\n\n---\n**Error:** ${errorText}` : `**Error:** ${errorText}`

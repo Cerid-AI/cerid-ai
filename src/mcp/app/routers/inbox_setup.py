@@ -31,7 +31,6 @@ class AccountPatch(BaseModel):
     included: bool | None = None
     folder_sort: bool | None = None
     auto_apply: list[str] | None = None
-    utilities: list[str] | None = None
 
 
 class RemoveBody(BaseModel):

@@ -114,6 +114,7 @@ async def query_endpoint(req: QueryRequest, request: Request):
             external_augmentation=False,
             allowed_domains=ctx.allowed_domains_list(),
             strict_domains=ctx.strict_domains,
+            domain_record_types=ctx.domain_record_types_dict(),
             chroma_client=get_chroma(),
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),

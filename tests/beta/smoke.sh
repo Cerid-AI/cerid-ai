@@ -6,6 +6,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Before assert.sh: the isolated target sets the compose project S-01 lists.
+# shellcheck source=lib/target.sh
+source "${SCRIPT_DIR}/lib/target.sh" || exit 2
 
 # Resolve the MCP API key before assert.sh snapshots it. /health and the /api
 # routes require X-API-Key once the server binds off loopback (LAN mode), and a
@@ -21,7 +24,7 @@ source "${SCRIPT_DIR}/lib/assert.sh"
 export RESULTS_FILE="${SCRIPT_DIR}/reports/smoke.results"
 > "$RESULTS_FILE"
 
-MCP_BASE="http://localhost:8888"
+MCP_BASE="$BETA_MCP_URL"
 # Read REDIS_PASSWORD from the canonical operator .env when the test
 # harness shell didn't inherit it. The hardcoded `cerid-dev` fallback
 # only works for fresh-clone bootstraps; live stacks use the .env
@@ -53,7 +56,7 @@ s01_check() {
   duration=$(awk "BEGIN{printf \"%.2f\", ($end - $start)/1000000000}")
 
   local missing=""
-  for svc in ai-companion-mcp ai-companion-neo4j ai-companion-chroma ai-companion-redis; do
+  for svc in "$BETA_MCP_CONTAINER" "$BETA_NEO4J_CONTAINER" "$BETA_CHROMA_CONTAINER" "$BETA_REDIS_CONTAINER"; do
     if ! echo "$ps_out" | grep -q "$svc.*running"; then
       missing="${missing} ${svc}"
     fi
@@ -73,22 +76,25 @@ assert_json_field "${MCP_BASE}/health" '.status' "healthy" "S-02" "Health endpoi
 
 # S-03: ChromaDB heartbeat — v1 was deprecated in Chroma 1.x (returns
 # HTTP 410); v2 is the current endpoint shipping with chromadb==1.5.9.
-assert_http_status "http://localhost:8001/api/v2/heartbeat" "200" "S-03" "ChromaDB heartbeat" || FAILED=1
+assert_http_status "${BETA_CHROMA_URL}/api/v2/heartbeat" "200" "S-03" "ChromaDB heartbeat" || FAILED=1
 
 # S-04: Neo4j browser
-assert_http_status "http://localhost:7474" "200" "S-04" "Neo4j HTTP reachable" || FAILED=1
+assert_http_status "$BETA_NEO4J_URL" "200" "S-04" "Neo4j HTTP reachable" || FAILED=1
 
 # S-05: Redis ping
-assert_command_output "docker exec ai-companion-redis redis-cli -a ${REDIS_PW} ping 2>/dev/null" "PONG" "S-05" "Redis ping" || FAILED=1
+assert_command_output "docker exec ${BETA_REDIS_CONTAINER} redis-cli -a ${REDIS_PW} ping 2>/dev/null" "PONG" "S-05" "Redis ping" || FAILED=1
 
 # S-06: Frontend reachable
-assert_http_status "http://localhost:3000" "200" "S-06" "Frontend reachable" || FAILED=1
+assert_http_status "$BETA_GUI_URL" "200" "S-06" "Frontend reachable" || FAILED=1
 
 # S-07: Collections endpoint
 assert_json_exists "${MCP_BASE}/collections" '.total' "S-07" "Collections endpoint" || FAILED=1
 
-# S-08: validate-env.sh --quick
-if [[ -f "${SCRIPT_DIR}/../../scripts/validate-env.sh" ]]; then
+# S-08: validate-env.sh --quick — probes the live stack's containers, so it
+# says nothing about any other target.
+if [[ "$BETA_TARGET" != "live" ]]; then
+  _skip "S-08" "validate-env.sh --quick" "validate-env.sh probes the live stack (BETA_TARGET=${BETA_TARGET})"
+elif [[ -f "${SCRIPT_DIR}/../../scripts/validate-env.sh" ]]; then
   assert_command "cd \"${SCRIPT_DIR}/../..\" && bash scripts/validate-env.sh --quick" "0" "S-08" "validate-env.sh --quick" || FAILED=1
 else
   _skip "S-08" "validate-env.sh --quick" "Script not found"

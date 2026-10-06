@@ -3,8 +3,9 @@
 #
 # Drives a real installed Cerid AI.app through first-run, over the Chrome
 # DevTools Protocol (tests/beta/desktop/first-run.cdp.mjs). Opt-in only —
-# it needs a macOS install of the app and the personal stack on :8888; it
-# is not part of tests/beta/run.sh's default tiers or --full.
+# it needs a macOS install of the app and the MCP of the stack BETA_TARGET
+# names (lib/target.sh); it is not part of tests/beta/run.sh's default tiers
+# or --full.
 #
 # Usage:
 #   ./tests/beta/desktop-smoke.sh            # smoke the installed app
@@ -80,6 +81,12 @@ fi
 # Same resolution as run.sh: env wins, fall back to the repo .env.
 CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "${REPO_ROOT}/.env" 2>/dev/null | cut -d= -f2-)}"
 export CERID_API_KEY
+
+# The CDP script reaches the MCP over the host port of the stack BETA_TARGET
+# names; it takes the URL from the environment rather than keeping its own.
+# shellcheck source=lib/target.sh
+source "${SCRIPT_DIR}/lib/target.sh" || exit 2
+export CERID_MCP_BASE="${CERID_MCP_BASE:-$BETA_MCP_URL}"
 
 APP_SUPPORT_DIR="${HOME}/Library/Application Support/cerid-desktop"
 

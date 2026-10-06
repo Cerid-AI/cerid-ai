@@ -13,6 +13,9 @@ findings of 2026-04-17:
     * Chroma collections with zero embeddings (10/13 found empty in audit).
     * Neo4j :VerificationReport nodes with no outgoing edges (audit: 16/16).
     * NLI model load status (see ``core.utils.nli.warmup``).
+    * Whether stored vectors are in the serving embedder's space
+      (``probe_vector_space``) — run at boot and again on every refresh
+      tick, so a boot-time ``unverified`` heals once the embedder is back.
 
 Each check is independently fault-tolerant — a broken subsystem contributes
 an entry to ``errors`` rather than crashing the snapshot.
@@ -370,7 +373,13 @@ def run_startup_dim_check() -> list[dict[str, Any]]:
 # -0.05 to 0.03. Same width, orthogonal spaces — which is why the dim check
 # above cannot see a provider flip. 0.9 sits far from both.
 _VECTOR_SPACE_MIN_SELF_SIM = 0.9
-_VECTOR_SPACE_SAMPLE = 3
+# Measured 2026-10-06 on the Studio: the leading three chunks of ``coding`` were
+# in-space while 984 of its 3,744 (26%) were not, and the probe said ok. Twelve
+# chunks at evenly spaced offsets see a minority of that size; a collection
+# whose sampled out-of-space share passes a tenth is reported even when the
+# median is still in-space.
+_VECTOR_SPACE_SAMPLE = 12
+_VECTOR_SPACE_MAX_OUT_FRACTION = 0.1
 
 _vector_space_snapshot: dict[str, Any] = {"status": "pending"}
 
@@ -391,19 +400,47 @@ def in_serving_space(stored: Any, fresh: Any) -> bool:
     return _cosine(stored, fresh) >= _VECTOR_SPACE_MIN_SELF_SIM
 
 
+def _sample_stored_chunks(collection: Any, sample: int) -> list[tuple[str, Any]]:
+    """Up to ``sample`` (document, embedding) pairs at evenly spaced offsets, so
+    a minority re-embedded by another model anywhere in the collection is as
+    likely to be seen as one at the head. A collection no larger than the
+    sample is read whole."""
+    include = ["documents", "embeddings"]
+    total = int(collection.count())
+    if total == 0:
+        return []
+    if total <= sample:
+        pages = [collection.get(limit=sample, include=include)]
+    else:
+        pages = [collection.get(limit=1, offset=i * total // sample, include=include) for i in range(sample)]
+    pairs: list[tuple[str, Any]] = []
+    for got in pages:
+        docs = got.get("documents") or []
+        raw = got.get("embeddings")
+        embs = list(raw) if raw is not None else []
+        pairs.extend((d, e) for d, e in zip(docs, embs) if d and e is not None)
+    return pairs
+
+
 def probe_vector_space(client: Any, embed: Any, sample: int = _VECTOR_SPACE_SAMPLE) -> dict[str, Any]:
-    """Re-embed a few stored chunks per collection with the serving embedder and
-    require each lands back on its own stored vector.
+    """Re-embed stored chunks sampled across each collection with the serving
+    embedder and require they land back on their own stored vectors.
 
     This checks the invariant that the per-chunk ``embedding_model`` stamp and
     the ONNX revision pin only assert: that queries and documents share one
     vector space. The stamps cannot be trusted for it — chunks written before
     ``serving_embedding_model`` existed record the ONNX config name even when
     Quenchforge produced the vector.
+
+    A collection is mismatched when its median self-similarity is under the
+    floor (the whole index was built by another model) or when more than
+    ``_VECTOR_SPACE_MAX_OUT_FRACTION`` of its sample is out of space (a
+    minority was). Each collection reports ``sampled``, ``out_of_space``,
+    ``fraction`` and the median; the totals are rolled up at the top level.
     """
     import statistics
 
-    checked = 0
+    collections: list[dict[str, Any]] = []
     mismatched: list[dict[str, Any]] = []
     for c in client.list_collections():
         name = _collection_name(c) or "<unknown>"
@@ -411,41 +448,56 @@ def probe_vector_space(client: Any, embed: Any, sample: int = _VECTOR_SPACE_SAMP
             # Keyword-only: app.deps' _EmbeddingAwareClient takes **kwargs, so a
             # positional name raised, was swallowed, and left every collection
             # unprobed — the check reported "unverified" forever.
-            got = client.get_collection(name=name).get(limit=sample, include=["documents", "embeddings"])
+            pairs = _sample_stored_chunks(client.get_collection(name=name), sample)
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error("app.startup.invariants.probe_vector_space", exc)
             continue
-        docs = got.get("documents") or []
-        raw = got.get("embeddings")
-        embs = list(raw) if raw is not None else []
-        pairs = [(d, e) for d, e in zip(docs, embs) if d and e is not None]
         if not pairs:
             continue
         fresh = embed([d for d, _ in pairs])
-        median = round(statistics.median(_cosine(e, f) for (_, e), f in zip(pairs, fresh)), 3)
-        checked += 1
-        if median < _VECTOR_SPACE_MIN_SELF_SIM:
-            mismatched.append({"collection": name, "median_self_similarity": median})
-    if not checked:
+        sims = [_cosine(e, f) for (_, e), f in zip(pairs, fresh)]
+        out_of_space = sum(1 for s in sims if s < _VECTOR_SPACE_MIN_SELF_SIM)
+        report: dict[str, Any] = {
+            "collection": name,
+            "sampled": len(sims),
+            "out_of_space": out_of_space,
+            "fraction": round(out_of_space / len(sims), 3),
+            "median_self_similarity": round(statistics.median(sims), 3),
+        }
+        collections.append(report)
+        if (
+            report["median_self_similarity"] < _VECTOR_SPACE_MIN_SELF_SIM
+            or report["fraction"] > _VECTOR_SPACE_MAX_OUT_FRACTION
+        ):
+            mismatched.append(report)
+    if not collections:
         return {"status": "unverified", "reason": "no stored chunks to sample", "collections_checked": 0}
     return {
         "status": "mismatch" if mismatched else "ok",
-        "collections_checked": checked,
+        "collections_checked": len(collections),
+        "sampled": sum(r["sampled"] for r in collections),
+        "out_of_space": sum(r["out_of_space"] for r in collections),
+        "max_fraction": max(r["fraction"] for r in collections),
         "mismatched": mismatched,
+        "collections": collections,
     }
 
 
 def run_startup_vector_space_check() -> dict[str, Any]:
-    """Boot-time vector-space check; soft-fail like ``run_startup_dim_check``.
+    """Vector-space check, run at boot and on every ``refresh_invariants_loop``
+    tick; soft-fail like ``run_startup_dim_check``.
 
     A mismatch means retrieval compares queries against documents from another
     model and returns near-noise with no error anywhere — the failure a flip of
     ``EMBEDDINGS_PROVIDER`` would cause on an index built under the other leg.
     An embedder that cannot run (daemon down at boot) is "unverified", not a
-    mismatch.
+    mismatch, and the next tick replaces that verdict. ``checked_at`` dates the
+    result so a ``/health`` reader can tell a fresh verdict from a stale one.
     """
     global _vector_space_snapshot
+    from datetime import datetime, timezone
+
     try:
         from app.deps import get_chroma
         from core.utils.embeddings import get_embedding_function
@@ -466,6 +518,7 @@ def run_startup_vector_space_check() -> dict[str, Any]:
             "embedder the index was built with, or re-embed.",
             result.get("mismatched"),
         )
+    result["checked_at"] = datetime.now(tz=timezone.utc).isoformat()
     _vector_space_snapshot = result
     return result
 
@@ -686,6 +739,9 @@ async def refresh_invariants_loop() -> None:
     from the ~1,300/day /health rebuild cadence that used to trigger it
     inline. Never raises out: a failed refresh just leaves the previous
     snapshot (or the pending state) in place until the next tick.
+
+    Each tick also re-runs the vector-space probe, so its verdict tracks the
+    embedder and the index rather than freezing at whatever boot saw.
     """
     while True:
         try:
@@ -698,6 +754,7 @@ async def refresh_invariants_loop() -> None:
                 await asyncio.to_thread(
                     refresh_invariants_snapshot, chroma, redis_client, neo4j_driver,
                 )
+            await asyncio.to_thread(run_startup_vector_space_check)
             await asyncio.sleep(INVARIANTS_REFRESH_S)
         except asyncio.CancelledError:
             return

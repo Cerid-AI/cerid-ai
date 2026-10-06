@@ -81,7 +81,7 @@ async def _enqueue_periodic(queue: Any, job: Any, job_name: str, start: float) -
     same type + payload that is still pending or running is not stacked
     again — the cadence tick that fires after it settles re-enqueues.
     Without collapse, any cadence faster than the queue's drain rate grows
-    the queue forever (live-proven by the 60 s ``ingest_recovery`` cron:
+    the queue forever (live-proven by the ``ingest_recovery`` interval job:
     1,459 pending duplicates). Falls back to plain ``enqueue`` for queue
     implementations without collapse support.
 
@@ -131,8 +131,8 @@ async def _enqueue_and_await_completion(
 
     Used only by the compute_entity_embeddings/compute_umap_3d/
     compute_trust_state/derive_domains graph-pipeline stages (AF-013) — the
-    other ``_enqueue_periodic`` callers (e.g. the 60 s ``ingest_recovery``
-    cron) deliberately keep fire-and-forget semantics; blocking those would
+    other ``_enqueue_periodic`` callers (e.g. the ``ingest_recovery``
+    interval job) deliberately keep fire-and-forget semantics; blocking those would
     change their cadence contract.
 
     Polls ``queue.list_recent`` (the same read path ``/processor/recent``
@@ -2776,13 +2776,14 @@ def start_scheduler() -> AsyncIOScheduler:
             max_instances=1,
         )
 
-    # Phase O.1 — ingest recovery: scan for stale pending Chroma chunks every
-    # 60 s and roll them forward or purge.  Uses a processor_queue if one is
+    # Phase O.1 — ingest recovery: scan for stale pending Chroma chunks and
+    # roll them forward or purge. Cadence: INGEST_RECOVERY_INTERVAL_S (the
+    # justification is on the setting). Uses a processor_queue if one is
     # available on app.state; falls back to direct service call otherwise.
     _scheduler.add_job(
         _run_ingest_recovery,
         "interval",
-        seconds=60,
+        seconds=config.INGEST_RECOVERY_INTERVAL_S,
         id="ingest_recovery",
         name="Ingest orphan recovery",
         replace_existing=True,
