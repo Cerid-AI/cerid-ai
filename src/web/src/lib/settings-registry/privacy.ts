@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
+import {
+  PRIVATE_MODE_EGRESS_NOTE,
+  PRIVATE_MODE_LEVELS,
+} from "@/lib/private-mode-levels"
 import type { SettingDef } from "./types"
 
 export const PRIVACY_DEFS: SettingDef[] = [
@@ -12,12 +16,9 @@ export const PRIVACY_DEFS: SettingDef[] = [
     level: "core",
     label: "Private Mode",
     helpText:
-      "Controls how much context persists as you chat. " +
-      "L0 = off (standard). " +
-      "L1 = skip saves & sync. " +
-      "L2 = also skip KB injection. " +
-      "L3 = also no logging — nothing reaches Redis. " +
-      "L4 = full ephemeral — session erased on tab close.",
+      "Controls how much of a chat persists and what the model is given. " +
+      PRIVATE_MODE_LEVELS.map((l) => `L${l.level} = ${l.name}.`).join(" ") +
+      " " + PRIVATE_MODE_EGRESS_NOTE,
     scopeOfEffect: {
       scope: "server",
       display: "Global for this server — all tabs and sessions.",
@@ -27,13 +28,7 @@ export const PRIVACY_DEFS: SettingDef[] = [
       "wipe", "no logging", "Essentials",
     ],
     type: "enum",
-    options: [
-      { value: 0, label: "L0 — Off", helpText: "Standard behaviour. Conversations persist to server and local cache." },
-      { value: 1, label: "L1 — Skip saves & sync", helpText: "Don't save this conversation; don't sync to other devices." },
-      { value: 2, label: "L2 — Also skip KB injection", helpText: "Also bypass KB injection — the model sees only what you type." },
-      { value: 3, label: "L3 — Also no logging", helpText: "Also skip audit log entries. Nothing reaches Redis." },
-      { value: 4, label: "L4 — Full ephemeral", helpText: "One-shot per tab. Session erased on tab close — even the audit log is bypassed. Requires confirmation." },
-    ],
+    options: PRIVATE_MODE_LEVELS.map((l) => ({ value: l.level, label: l.label, helpText: l.description })),
     default: 0,
     writer: { kind: "endpoint", method: "POST", path: "/settings/private-mode" },
     mirrors: ["chat-toolbar"],

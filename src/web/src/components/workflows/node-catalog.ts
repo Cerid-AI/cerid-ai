@@ -40,7 +40,7 @@ export const FALLBACK_NODE_CATALOG: WorkflowNodeCatalog = {
     {
       type: "condition",
       label: "Condition",
-      description: "Evaluates a comparison expression against the data flowing in. Edges leaving it run their target when the expression is true; an edge whose condition is \"false\" runs its target when the expression is false instead. Nodes reachable only through the branch not taken are skipped.",
+      description: "Evaluates a comparison expression against the data flowing in. Edges leaving it run their target when the expression is true; an edge whose condition is \"false\" runs its target when the expression is false instead. Nodes reachable only through the branch not taken are skipped. An expression that cannot be evaluated counts as false and the run records the reason as condition_error on that step.",
       inputs: "Upstream node outputs merged with the workflow input.",
       outputs: "A passed flag plus the unchanged upstream data.",
       config_schema_summary: "expression — a comparison of one field against a value, e.g. confidence > 0.5 (operators: == != > < >= <=).",

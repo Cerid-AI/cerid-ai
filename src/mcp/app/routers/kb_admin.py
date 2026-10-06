@@ -29,6 +29,7 @@ from core.retrieval.bm25 import rebuild_all as rebuild_bm25_all
 from core.retrieval.hype_index import hype_collection_name
 from core.retrieval.semantic_cache import invalidate_cache as invalidate_semantic_cache
 from core.utils import audit_log
+from core.utils.embeddings import serving_embedding_model, serving_embedding_version
 from core.utils.swallowed import log_swallowed_error
 from utils.encryption import decrypt_field
 from utils.query_cache import invalidate_cache_non_blocking, invalidate_query_caches
@@ -211,6 +212,20 @@ class ReembedRequest(BaseModel):
         False,
         description="Re-embed every chunk regardless of its current version stamp",
     )
+    restamp_only: bool = Field(
+        False,
+        description=(
+            "Rewrite embedding_model / embedding_model_version on stale chunks whose "
+            "stored vector the serving embedder already reproduces, without re-embedding; "
+            "vectors it cannot reproduce keep their stamp and are counted"
+        ),
+    )
+    dry_run: bool = Field(
+        False,
+        description=(
+            "With restamp_only: walk and count per current stamp value, write nothing"
+        ),
+    )
 
 
 class ReembedResponse(BaseModel):
@@ -240,7 +255,9 @@ class HypeBackfillResponse(BaseModel):
 class DomainVersionDistribution(BaseModel):
     total: int
     versions: dict[str, int]
+    models: dict[str, int]
     current_version: str
+    current_model: str
     mixed: bool
 
 
@@ -499,6 +516,8 @@ async def reembed_corpus(req: ReembedRequest | None = None):
     """
     domain = req.domain if req else None
     force = req.force if req else False
+    restamp_only = req.restamp_only if req else False
+    dry_run = req.dry_run if req else False
 
     if domain is not None and domain not in config.DOMAINS:
         raise HTTPException(status_code=404, detail=f"Unknown domain: {domain}")
@@ -506,10 +525,18 @@ async def reembed_corpus(req: ReembedRequest | None = None):
     from app.db.redis.processor_queue import RedisJobQueue
     from app.processor.jobs.reembed_chunks import ReembedChunksJob
 
+    # The worker rebuilds the job from this payload, and enqueue_if_absent
+    # dedupes on it — so the mode flags travel in it, or a dry run would
+    # collapse into (or be mistaken for) a pending real run.
+    payload = {
+        "domain": domain, "force": force, "restamp_only": restamp_only, "dry_run": dry_run,
+    }
     try:
         queue = RedisJobQueue(get_redis())
-        job = ReembedChunksJob(domain=domain, force=force)
-        record = job.new_record(payload={"domain": domain, "force": force})
+        job = ReembedChunksJob(
+            domain=domain, force=force, restamp_only=restamp_only, dry_run=dry_run,
+        )
+        record = job.new_record(payload=payload)
         job_id = await queue.enqueue_if_absent(record)
     except Exception as e:
         logger.error("Failed to enqueue reembed job: %s", e)
@@ -524,13 +551,16 @@ async def reembed_corpus(req: ReembedRequest | None = None):
         )
 
     scope = f"domain={domain}" if domain else "all domains"
+    what = "restamp" if restamp_only else "re-embed"
+    if restamp_only and dry_run:
+        what = "restamp dry run"
     return ReembedResponse(
         status="enqueued",
         job_id=job_id,
         domain=domain,
         message=(
-            f"Enqueued re-embed job {job_id} for {scope}"
-            f"{' (force=true)' if force else ''}."
+            f"Enqueued {what} job {job_id} for {scope}"
+            f"{' (force=true)' if force else ''}. Result on GET /processor/recent."
         ),
     )
 
@@ -609,9 +639,10 @@ def _domain_version_distribution(chroma_client: Any, domain: str) -> dict[str, A
             "app.routers.kb_admin.domain_version_distribution.get_collection", exc,
             context={"domain": domain},
         )
-        return {"total": 0, "versions": {}}
+        return {"total": 0, "versions": {}, "models": {}}
 
     versions: dict[str, int] = {}
+    models: dict[str, int] = {}
     total = 0
     offset = 0
     page = 1000
@@ -630,23 +661,27 @@ def _domain_version_distribution(chroma_client: Any, domain: str) -> dict[str, A
         for meta in metadatas:
             version = (meta or {}).get("embedding_model_version") or "unstamped"
             versions[version] = versions.get(version, 0) + 1
+            model = (meta or {}).get("embedding_model") or "unstamped"
+            models[model] = models.get(model, 0) + 1
         total += len(metadatas)
         if len(metadatas) < page:
             break
         offset += page
-    return {"total": total, "versions": versions}
+    return {"total": total, "versions": versions, "models": models}
 
 
 @router.get("/admin/kb/embedding-versions", response_model=EmbeddingVersionsResponse)
 async def embedding_versions(domain: str | None = None):
-    """Per-domain ``embedding_model_version`` distribution.
+    """Per-domain ``embedding_model_version`` (and ``embedding_model``) distribution.
 
     Detects a mixed-version corpus — multiple stamped versions, or a mix
     of stamped + unstamped legacy chunks — so an operator knows when
     ``POST /admin/kb/reembed`` (or the manual
     ``scripts/reembed_collection.py`` dual-collection path) has work to
     do. ``total - versions[current_version]`` is the count of chunks the
-    re-embed job would touch on a non-force run for that domain.
+    re-embed job would touch on a non-force run for that domain, and the
+    number a ``restamp_only`` dry run should account for. ``current_*`` is
+    the serving artifact, the same for every domain.
     """
     import asyncio
 
@@ -656,17 +691,21 @@ async def embedding_versions(domain: str | None = None):
     chroma = get_chroma()
     target_domains = [domain] if domain else list(config.DOMAINS)
 
+    # The serving artifact is the same for every domain; resolve once.
+    current = serving_embedding_version()
+    current_model = serving_embedding_model()
     out: dict[str, DomainVersionDistribution] = {}
     for d in target_domains:
         dist = await asyncio.to_thread(_domain_version_distribution, chroma, d)
-        current = config.embedding_version_for_domain(d)
         dist_versions: dict[str, int] = dist["versions"]
         total = dist["total"]
         mixed = total > 0 and (len(dist_versions) > 1 or dist_versions.get(current, 0) != total)
         out[d] = DomainVersionDistribution(
             total=total,
             versions=dist_versions,
+            models=dist["models"],
             current_version=current,
+            current_model=current_model,
             mixed=mixed,
         )
     return EmbeddingVersionsResponse(domains=out)

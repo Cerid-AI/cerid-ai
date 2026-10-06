@@ -467,6 +467,29 @@ describe("Error mapping", () => {
     await expect(client.system.health()).rejects.toThrow(CeridSDKError);
   });
 
+  it("surfaces the server's error_code", async () => {
+    // The origin guard and SLO budget name the refusal in error_code; a
+    // client that reads only detail cannot branch on it.
+    const mockFetch = vi.fn().mockResolvedValue(
+      jsonResponse({ detail: "Cross-site request refused", error_code: "CROSS_SITE_REQUEST_REFUSED" }, 403),
+    );
+    const client = createClient(mockFetch);
+    try {
+      await client.system.health();
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthenticationError);
+      expect((err as AuthenticationError).errorCode).toBe("CROSS_SITE_REQUEST_REFUSED");
+      expect((err as AuthenticationError).message).toContain("CROSS_SITE_REQUEST_REFUSED");
+    }
+  });
+
+  it("errorCode is null when the body has none", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(jsonResponse({ detail: "Not found" }, 404));
+    const client = createClient(mockFetch);
+    await expect(client.system.health()).rejects.toMatchObject({ errorCode: null });
+  });
+
   it("preserves error body for inspection", async () => {
     const errorBody = { detail: "Rate limit exceeded", retry_after: 30 };
     const mockFetch = vi.fn().mockResolvedValue(jsonResponse(errorBody, 429));

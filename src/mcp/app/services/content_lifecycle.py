@@ -334,6 +334,57 @@ def remove_content(
     )
 
 
+CONVERSATIONS_DOMAIN = "conversations"
+_TRANSCRIPT_FILENAME_PREFIX = "chat_"
+
+
+def remove_conversation_transcripts(
+    conversation_id: str,
+    *,
+    neo4j: Any | None = None,
+    chroma: Any | None = None,
+    redis: Any | None = None,
+) -> list[RemovalResult]:
+    """HARD delete every chat-turn artifact a conversation produced.
+
+    Each turn is ingested by ``FeedbackIngestJob`` as its own content-addressed
+    artifact in the ``conversations`` domain; the conversation id is stamped on
+    its Chroma rows only, never on the ``:Artifact`` node. So the rows are the
+    index: every distinct ``artifact_id`` whose filename is a ``chat_*``
+    transcript goes through :func:`remove_content`. Memory artifacts extracted
+    from the same conversation share the metadata key but have their own
+    lifecycle (``/memories``, the L4 session wipe) and are left alone.
+
+    Idempotent: a transcript already removed has no rows left to find, and one
+    whose node is already gone comes back ``found=False``. A turn identical to
+    one in another conversation shares its artifact (ingest dedups by content),
+    so that artifact goes with whichever conversation is deleted first.
+    """
+    from app.deps import get_chroma, get_neo4j
+
+    chroma = chroma or get_chroma()
+    collection = chroma.get_or_create_collection(name=config.collection_name(CONVERSATIONS_DOMAIN))
+    rows = collection.get(where={"conversation_id": conversation_id}, include=["metadatas"])
+    artifact_ids: list[str] = []
+    for meta in rows.get("metadatas") or []:
+        artifact_id = str((meta or {}).get("artifact_id") or "")
+        filename = str((meta or {}).get("filename") or "")
+        if (
+            artifact_id
+            and filename.startswith(_TRANSCRIPT_FILENAME_PREFIX)
+            and artifact_id not in artifact_ids
+        ):
+            artifact_ids.append(artifact_id)
+    if not artifact_ids:
+        return []
+
+    neo4j = neo4j or get_neo4j()
+    return [
+        remove_content(artifact_id, neo4j=neo4j, chroma=chroma, redis=redis)
+        for artifact_id in artifact_ids
+    ]
+
+
 def remove_orphan_chunks(
     chunk_ids: list[str],
     domain: str,

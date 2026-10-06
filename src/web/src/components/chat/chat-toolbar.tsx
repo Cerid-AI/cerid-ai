@@ -33,6 +33,11 @@ import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldO
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
+import {
+  PRIVATE_MODE_EGRESS_NOTE,
+  PRIVATE_MODE_LEVELS,
+  privateModeLevel as describePrivateLevel,
+} from "@/lib/private-mode-levels"
 import { toast } from "sonner"
 
 /* ── Reusable menu primitives (replaces ContextMenu items) ── */
@@ -356,7 +361,7 @@ export function ChatToolbar({
           title="Private Mode"
           tooltip={
             privateModeEnabled
-              ? `Private mode: Level ${privateModeLevel} — ${["Off", "Skip saves & sync", "Also skip KB injection", "Also no logging", "Full ephemeral — nothing persisted"][privateModeLevel]}`
+              ? `Private mode: Level ${privateModeLevel} — ${describePrivateLevel(privateModeLevel).name}`
               : "Private mode: OFF — normal operation"
           }
           className={cn(
@@ -368,47 +373,18 @@ export function ChatToolbar({
           menuContent={
             <>
               <MenuLabel>Privacy Level</MenuLabel>
-              <MenuRadioItem
-                checked={privateModeLevel === 0}
-                onClick={() => requestPrivateLevel(0)}
-                description="Standard behaviour. Conversations saved, KB used, audit logged."
-              >
-                Off
-              </MenuRadioItem>
-              <MenuRadioItem
-                checked={privateModeLevel === 1}
-                onClick={() => requestPrivateLevel(1)}
-                description="Don't save this conversation; don't sync to other devices."
-              >
-                L1 — Skip saves &amp; sync
-              </MenuRadioItem>
-              <MenuRadioItem
-                checked={privateModeLevel === 2}
-                onClick={() => requestPrivateLevel(2)}
-                description="Also bypass KB injection — model sees only what you type."
-              >
-                L2 — Also skip KB injection
-              </MenuRadioItem>
-              <MenuRadioItem
-                checked={privateModeLevel === 3}
-                onClick={() => requestPrivateLevel(3)}
-                description="Also skip audit log entries. Nothing reaches Redis."
-              >
-                L3 — Also no logging
-              </MenuRadioItem>
-              <MenuRadioItem
-                checked={privateModeLevel === 4}
-                onClick={() => requestPrivateLevel(4)}
-                description="One-shot per tab. Session is erased automatically on tab close — even the audit log is bypassed."
-                destructive
-              >
-                L4 — Full ephemeral
-              </MenuRadioItem>
-              <MenuFootnote>
-                Data routes: L0 persists to server + local cache. L1 keeps the
-                local cache only. L2 also bypasses KB injection. L3 also skips
-                Redis audit logs. L4 is in-memory only and disappears with the tab.
-              </MenuFootnote>
+              {PRIVATE_MODE_LEVELS.map((l) => (
+                <MenuRadioItem
+                  key={l.level}
+                  checked={privateModeLevel === l.level}
+                  onClick={() => requestPrivateLevel(l.level)}
+                  description={l.description}
+                  destructive={l.level === 4}
+                >
+                  {l.level === 0 ? l.name : l.label}
+                </MenuRadioItem>
+              ))}
+              <MenuFootnote>{PRIVATE_MODE_EGRESS_NOTE}</MenuFootnote>
             </>
           }
         />
@@ -427,9 +403,8 @@ export function ChatToolbar({
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              This tab is in full-ephemeral mode. Closing the tab will erase the
-              conversation, memory state, and any cached query results. No
-              recovery path.
+              This tab is in full-ephemeral mode. Nothing from this session is
+              saved; when the last L4 tab closes, Private Mode switches itself off.
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -443,9 +418,8 @@ export function ChatToolbar({
           <AlertDialogHeader>
             <AlertDialogTitle>Switch to Level 4 (Full ephemeral)?</AlertDialogTitle>
             <AlertDialogDescription>
-              Closing the tab will wipe this conversation, its memory state, and any
-              cached query results from Redis. There is no recovery path — even the
-              audit log is bypassed.
+              {describePrivateLevel(4).description} It does not block requests to the
+              model provider.
               <br />
               <br />
               Use this for highly sensitive one-off questions. For everyday privacy,

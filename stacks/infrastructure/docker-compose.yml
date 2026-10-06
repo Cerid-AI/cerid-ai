@@ -22,6 +22,9 @@ services:
       # Mac Pro has 160 GB RAM — pagecache of 2G keeps the full graph in
       # memory and eliminates disk reads from the ~600ms graph traversal.
       - NEO4J_server_memory_pagecache_size=2G
+      # Same value as the root docker-compose.yml, which explains it; both
+      # paths mount the same store, so the bound must not differ.
+      - NEO4J_db_tx__log_rotation_retention__policy=2 days 1G
     networks:
       - llm-network
     restart: unless-stopped

@@ -200,6 +200,29 @@ def test_chroma_size_is_measured_when_the_directory_is_mounted(monkeypatch, tmp_
     assert report["total_mb"] == 3.0
 
 
+def test_both_mounted_stores_leave_nothing_unmeasured(monkeypatch, tmp_path):
+    """The deployed shape: docker-compose.yml mounts both persist directories
+    read-only into the API container, so the total is a full measurement."""
+    neo4j_data = tmp_path / "neo4j-data"
+    (neo4j_data / "databases" / "neo4j").mkdir(parents=True)
+    (neo4j_data / "databases" / "neo4j" / "neostore.nodestore.db").write_bytes(b"\0" * (4 * _MB))
+    chroma_data = tmp_path / "chroma-data"
+    (chroma_data / "collection").mkdir(parents=True)
+    (chroma_data / "chroma.sqlite3").write_bytes(b"\0" * (2 * _MB))
+    (chroma_data / "collection" / "data_level0.bin").write_bytes(b"\0" * _MB)
+    monkeypatch.setenv("NEO4J_DATA_DIR", str(neo4j_data))
+    monkeypatch.setenv("CHROMA_PERSIST_DIR", str(chroma_data))
+
+    report = _report(chroma=_chroma(chunks=10), neo4j=_neo4j(nodes=7, store_error=_procedure_not_found()))
+
+    assert report["chromadb"]["disk_mb"] == 3.0
+    assert report["neo4j"]["disk_mb"] == 4.0
+    assert report["unmeasured"] == []
+    assert report["total_mb"] == 7.0
+    assert "disk_mb_reason" not in report["chromadb"]
+    assert "disk_mb_reason" not in report["neo4j"]
+
+
 def test_unmeasured_stores_do_not_change_the_backpressure_verdict():
     """The status ingest backpressure reads is the measured lower bound."""
     unreachable = RuntimeError("no such procedure")

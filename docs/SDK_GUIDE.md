@@ -4,7 +4,7 @@ Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
 **1.3.0**. Client packages are `cerid-sdk`
 ([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
-([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.1** in this
+([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.2** in this
 tree; the registries still serve 0.1.1 until it is published, which is a
 separate step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
 product. New in 1.3.0: the hallucination `summary` carries an integer

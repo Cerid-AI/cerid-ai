@@ -229,6 +229,9 @@ async def cache_verdict(
             "source_domain": verdict.get("source_domain", ""),
             "cached": True,
         }
+        if verdict.get("nli_entailment") is not None:
+            # Memory promotion gates on it; a hit that dropped it could never promote.
+            cache_entry["nli_entailment"] = verdict["nli_entailment"]
         if response_context:
             cache_entry["response_context"] = response_context[:200]
         _l1_set(key, cache_entry)  # populate L1 immediately

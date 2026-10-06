@@ -618,27 +618,16 @@ class TestEmbeddingStamp:
         stamp = embedding_stamp("code")
         assert stamp["embedding_model"] == cfg.EMBEDDING_MODEL
 
-    def test_version_falls_back_to_global_when_no_override(self):
-        import config as cfg
-        from core.utils.embeddings import embedding_stamp
+    def test_version_is_the_serving_artifact_for_every_domain(self):
+        """The version names the artifact serving right now (ruling D13-A),
+        not a config label — so it is the same for every domain and starts
+        with the model that serves."""
+        from core.utils.embeddings import embedding_stamp, serving_embedding_version
 
-        stamp = embedding_stamp("nonexistent_domain")
-        assert stamp["embedding_model_version"] == cfg.EMBEDDING_MODEL_VERSION
-
-    def test_version_honors_per_domain_override(self, monkeypatch):
-        from config import settings as _settings
-        from core.utils.embeddings import embedding_stamp
-
-        monkeypatch.setitem(
-            _settings.EMBEDDING_MODEL_VERSIONS_PER_DOMAIN,
-            "code",
-            "arctic-embed-l-v2.0",
-        )
         stamp = embedding_stamp("code")
-        assert stamp["embedding_model_version"] == "arctic-embed-l-v2.0"
-        # An untouched domain still gets the global version.
-        other = embedding_stamp("finance")
-        assert other["embedding_model_version"] == _settings.EMBEDDING_MODEL_VERSION
+        assert stamp["embedding_model_version"] == serving_embedding_version()
+        assert stamp["embedding_model_version"].startswith(stamp["embedding_model"] + "@")
+        assert embedding_stamp("finance")["embedding_model_version"] == stamp["embedding_model_version"]
 
 
 # ---------------------------------------------------------------------------

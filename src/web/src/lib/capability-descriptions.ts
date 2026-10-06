@@ -11,6 +11,8 @@
  * The optional ``tier`` field signals when a capability requires a
  * higher tier than community — surfaced as a sub-line in the tooltip.
  */
+import { PRIVATE_MODE_EGRESS_NOTE, PRIVATE_MODE_LEVELS } from "@/lib/private-mode-levels"
+
 export interface CapabilityDescriptor {
   description: string
   tier?: "pro" | "vault"
@@ -113,8 +115,10 @@ export const CAPABILITY_DESCRIPTIONS: Record<string, CapabilityDescriptor> = {
     description: "Real-time observability metrics (latency p95, cache hit rate, throughput) on the Health tab.",
   },
   private_mode: {
-    description: "Escalating privacy levels: skip saves (L1), bypass the knowledge base (L2), skip audit logging (L3), full ephemeral session (L4). Does not block LLM egress — choose a local provider for that.",
-    tier: "vault",
+    description:
+      "Escalating privacy levels: " +
+      PRIVATE_MODE_LEVELS.slice(1).map((l) => `${l.name} (L${l.level})`).join(", ") +
+      ". " + PRIVATE_MODE_EGRESS_NOTE,
   },
   basic_workflows: {
     description: "Scheduled automations — recurring digests, RSS ingest, watched-folder polls.",

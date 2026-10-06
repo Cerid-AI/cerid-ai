@@ -285,7 +285,9 @@ export function KindSpecificFields({
         <label className="flex cursor-pointer items-center gap-2 text-xs">
           <input
             type="checkbox"
-            checked={Boolean(config.require_hmac)}
+            // New sources require a signature unless the user opts out (the
+            // server defaults the same way); an existing source shows what it stored.
+            checked={config.require_hmac == null ? !editMode : Boolean(config.require_hmac)}
             onChange={(e) =>
               onConfig({ ...config, require_hmac: e.target.checked })
             }

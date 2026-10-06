@@ -172,8 +172,10 @@ def _promote_one(claim: dict) -> tuple[dict, list[dict]]:
     return counts, created
 
 
+# An entailment score is given here so the SOURCE gate is what each test below
+# exercises; a claim without one never reaches it (see the entailment tests).
 _AGREED = {"status": "verified", "similarity": 1.0, "claim_type": "factual",
-           "verification_method": "cross_model"}
+           "verification_method": "cross_model", "nli_entailment": 0.95}
 
 
 def test_cross_model_agreement_alone_does_not_make_a_memory():
@@ -211,3 +213,36 @@ def test_a_claim_verified_against_an_artifact_is_promoted():
     })
     assert counts["skipped_no_source"] == 0
     assert created[0]["artifact_id"] == "art-relay"
+
+
+# ---------------------------------------------------------------------------
+# A verdict with no entailment score is not promoted
+# ---------------------------------------------------------------------------
+
+
+def test_a_claim_without_an_entailment_score_is_not_promoted():
+    """Cross-model agreement and external verdicts carry no NLI score. The
+    promoter used to fall back to confidence for them, so a second model
+    agreeing at 1.0 cleared a bar meant for entailment against evidence."""
+    counts, created = _promote_one({
+        "status": "verified", "similarity": 1.0, "claim_type": "factual",
+        "verification_method": "cross_model",
+        "claim": "The relay service listens on port 7443",
+        "source_artifact_id": "art-relay",
+    })
+    assert created == []
+    assert counts["promoted"] == 0
+    assert counts["skipped_no_entailment"] == 1
+    assert counts["skipped_low_confidence"] == 0
+
+
+def test_a_claim_with_an_entailment_score_and_a_source_is_promoted():
+    counts, created = _promote_one({
+        "status": "verified", "similarity": 0.9, "claim_type": "factual",
+        "verification_method": "kb",
+        "nli_entailment": 0.8,
+        "claim": "The relay service listens on port 7443",
+        "source_artifact_id": "art-relay",
+    })
+    assert counts["skipped_no_entailment"] == 0
+    assert len(created) == 1

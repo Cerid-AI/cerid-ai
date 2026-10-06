@@ -32,7 +32,7 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 - **ChromaDB metadata is strings/ints only.** Lists stored as JSON strings. Lists-of-lists violate `validate_embeddings`.
 - **ChromaDB embeddings return `list[np.ndarray]`** (individual slices, not `.tolist()`) for 0.5.x compatibility.
 - **Neo4j Cypher:** use explicit `RETURN` clauses, not map projections (breaks with Python string ops).
-- **Deduplication:** SHA-256 of parsed text, atomic via Neo4j `UNIQUE CONSTRAINT` on `content_hash`.
+- **Deduplication:** SHA-256 of parsed text, atomic via Neo4j `UNIQUE CONSTRAINT` on `content_hash`. For a PDF, DOCX, XLSX or `.eml` the parsed text is the layout-aware parser's extracted text (`content_hash_version=2` on its chunks); artifacts from before that change carry the hash of the file's decoded bytes, and `_check_duplicate` / the watched-folder linker match either.
 - **Batch ChromaDB writes:** single `collection.add()` call per ingest, not per-chunk.
 - **Neo4j auth validation:** `deps.py::get_neo4j()` runs `RETURN 1` (not just `verify_connectivity()`) — empty `NEO4J_PASSWORD` raises `RuntimeError` at startup.
 - **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest paths. A 2026-03 inconsistency between `keywords` and `keywords_json` caused silent data loss; this name is now canonical.

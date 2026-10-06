@@ -38,6 +38,26 @@ Two gates — both must be open:
 2. **Operator opt-in**: set `CERID_DAILY_DIGEST_ENABLED=true` in
    `.env` then restart the MCP container.
 
+Each Pro automation has the same two switches plus a Redis override. The
+cron registers whenever the schedule is non-empty; the job body then
+checks the enable switch on every run and skips when it is off. Both
+automations ship **off** (`.env.example` lists the switch as `false`):
+
+| Automation | Enable switch (`.env`, default `false`) | Schedule (`.env`) | Redis override |
+|---|---|---|---|
+| `daily_digest` | `CERID_DAILY_DIGEST_ENABLED` | `SCHEDULE_DAILY_DIGEST` (default `0 7 * * *`) | `cerid:automations:daily_digest:{enabled,schedule}` |
+| `inbox_triage` | `CERID_INBOX_TRIAGE_ENABLED` | `SCHEDULE_INBOX_TRIAGE` (default `*/15 * * * *`) | `cerid:automations:inbox_triage:{enabled,schedule}` |
+
+The Redis override is what Settings → Automations writes
+(`PUT /settings/pro-automations/{name}` with `enabled` and/or `schedule`);
+when the key is present it wins over the env value, and a schedule change
+re-registers the running cron without a restart. `DELETE
+/settings/pro-automations/{name}` clears the override and falls back to
+`.env`. `POST /settings/pro-automations/{name}/run-now` honours the Pro
+flag but bypasses the enable switch. The env value therefore decides only
+until someone touches the toggle in the UI; after that, read the effective
+state from `GET /settings/pro-automations`.
+
 ## Cadence + budget
 
 ```bash

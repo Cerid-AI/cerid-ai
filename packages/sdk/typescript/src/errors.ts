@@ -11,6 +11,11 @@
 export class CeridSDKError extends Error {
   public readonly status: number;
   public readonly body: unknown;
+  /**
+   * The server's machine-readable `error_code` (for example
+   * `CROSS_SITE_REQUEST_REFUSED`), or null when the body has none.
+   */
+  public errorCode: string | null = null;
 
   constructor(message: string, status: number, body?: unknown) {
     super(message);
@@ -111,14 +116,24 @@ export async function raiseForStatus(response: Response): Promise<void> {
     body = await response.text().catch(() => null);
   }
 
-  const detail =
+  const rawDetail =
     typeof body === "object" && body !== null && "detail" in body
       ? String((body as Record<string, unknown>).detail)
       : `HTTP ${response.status}`;
+  const rawCode =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>).error_code : undefined;
+  const errorCode = typeof rawCode === "string" && rawCode ? rawCode : null;
+  const detail = errorCode ? `${rawDetail} (${errorCode})` : rawDetail;
 
   const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
 
-  if (response.status === 403) {
+  const err = buildError(response.status, detail, body, retryAfter);
+  err.errorCode = errorCode;
+  throw err;
+}
+
+function buildError(status: number, detail: string, body: unknown, retryAfter: number | null): CeridSDKError {
+  if (status === 403) {
     const reason =
       typeof body === "object" &&
       body !== null &&
@@ -128,23 +143,23 @@ export async function raiseForStatus(response: Response): Promise<void> {
         ? (body as { detail: { retrieval_reason?: string } }).detail.retrieval_reason
         : undefined;
     if (reason === "consumer_domain_restricted") {
-      throw new DomainRestrictedError(detail, body);
+      return new DomainRestrictedError(detail, body);
     }
-    throw new AuthenticationError(detail, response.status, body);
+    return new AuthenticationError(detail, status, body);
   }
 
-  switch (response.status) {
+  switch (status) {
     case 401:
-      throw new AuthenticationError(detail, response.status, body);
+      return new AuthenticationError(detail, status, body);
     case 404:
-      throw new NotFoundError(detail, body);
+      return new NotFoundError(detail, body);
     case 422:
-      throw new ValidationError(detail, body);
+      return new ValidationError(detail, body);
     case 429:
-      throw new RateLimitError(detail, body, retryAfter);
+      return new RateLimitError(detail, body, retryAfter);
     case 503:
-      throw new ServiceUnavailableError(detail, body, retryAfter);
+      return new ServiceUnavailableError(detail, body, retryAfter);
     default:
-      throw new CeridSDKError(detail, response.status, body);
+      return new CeridSDKError(detail, status, body);
   }
 }

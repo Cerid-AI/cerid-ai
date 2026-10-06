@@ -48,6 +48,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,13 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+# Stamped as ``content_hash_version`` on the chunks of a PDF, DOCX, XLSX or
+# ``.eml`` whose content hash is defined on the parser's extracted text.
+# Artifacts without the stamp were hashed on the file's decoded bytes (version
+# 1, for those formats) or on text that never changed (plain-text formats).
+CONTENT_HASH_VERSION_EXTRACTED_TEXT = "2"
+
+
 def _recovery_correlation_key(content: str, source_uri: str, tenant: str) -> str:
     """Stable correlation key for the two-phase ingest boundary.
 
@@ -438,14 +446,22 @@ def _rollback_chromadb(chunk_ids: list[str], domain: str = "") -> None:
         )
 
 
-def _check_duplicate(content_hash: str, domain: str) -> dict | None:
+def _check_duplicate(content_hashes: Sequence[str], domain: str) -> dict | None:
+    """The artifact already holding this content under any of ``content_hashes``.
+
+    The first hash is the current one; the rest are the hashes earlier
+    releases computed for the same file (see ``ingest_content``'s
+    ``prior_hashes``), so an artifact ingested under an older definition still
+    counts as the same content.
+    """
     try:
         driver = get_neo4j()
         with driver.session() as session:
             result = session.run(
-                "MATCH (a:Artifact {content_hash: $hash})-[:BELONGS_TO]->(d:Domain) "
+                "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
+                "WHERE a.content_hash IN $hashes "
                 "RETURN a.id AS id, a.filename AS filename, d.name AS domain",
-                hash=content_hash,
+                hashes=list(content_hashes),
             )
             record = result.single(strict=False)
             if record:
@@ -897,8 +913,15 @@ def ingest_content(
     pre_chunked: list[dict[str, Any]] | None = None,
     enrich: bool = True,
     force_reindex: bool = False,
+    prior_hashes: Sequence[str] = (),
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
+
+    ``prior_hashes`` are the content hashes earlier releases computed for this
+    same input (``ingest_file`` passes the decoded-bytes hash for a PDF, DOCX,
+    XLSX or ``.eml``, whose canonical text is now the parser's). The dedup
+    check matches on any of them, so re-ingesting a file already held under
+    the old hash is a duplicate, not a second artifact.
 
     ``force_reindex`` (Phase 2.6): re-embed + re-index an artifact whose content
     is UNCHANGED so newly-enabled retrieval features (contextual chunking,
@@ -953,7 +976,7 @@ def ingest_content(
     # force_reindex deliberately re-embeds unchanged content, so the exact-hash
     # dedup short-circuit is skipped; the filename re-ingest branch below routes
     # to _reingest_artifact (which owns idempotent old-chunk cleanup).
-    existing = None if force_reindex else _check_duplicate(content_hash, domain)
+    existing = None if force_reindex else _check_duplicate((content_hash, *prior_hashes), domain)
     if existing:
         fname = (metadata or {}).get("filename", "?")
         logger.info(
@@ -2061,19 +2084,28 @@ async def ingest_file(
     # chunk with structural metadata. Falls through to the legacy parse_file
     # path on any failure or unsupported extension.
     pre_chunked: list[dict[str, Any]] | None = None
+    prior_hashes: tuple[str, ...] = ()
+    hash_version: str | None = None
     parsed: dict[str, Any]
     if config.ENABLE_LAYOUT_AWARE_PARSING:
-        from core.ingest.dispatch import layout_aware_parse
+        from core.ingest.dispatch import layout_aware_parse, legacy_hash_text
         layout_result = await asyncio.to_thread(layout_aware_parse, file_path)
         if layout_result is not None:
-            raw_text, pre_chunked = layout_result
+            text, pre_chunked = layout_result
             ext = Path(file_path).suffix.lstrip(".").lower()
             parsed = {
-                "text": raw_text,
+                "text": text,
                 "file_type": ext,
                 "page_count": None,
                 "parser": "layout_aware",
             }
+            # A binary or MIME file was hashed by its decoded bytes before its
+            # canonical text became the parser's. Carry that hash so dedup
+            # still recognises the artifact, and stamp the definition used.
+            legacy_text = await asyncio.to_thread(legacy_hash_text, file_path)
+            if legacy_text is not None:
+                prior_hashes = (_content_hash(legacy_text),)
+                hash_version = CONTENT_HASH_VERSION_EXTRACTED_TEXT
             if ext == "eml":
                 # The layout-aware parser yields chunks only. Attachments,
                 # and the header fields stamped onto them, come from the
@@ -2131,6 +2163,8 @@ async def ingest_file(
     meta["file_type"] = parsed.get("file_type", "")
     if parsed.get("page_count") is not None:
         meta["page_count"] = parsed["page_count"]
+    if hash_version is not None:
+        meta["content_hash_version"] = hash_version
     if client_source:
         meta["client_source"] = client_source
     # C2.4 — stamp ``source_type="email"`` on .eml/.mbox parents so the
@@ -2159,6 +2193,7 @@ async def ingest_file(
         skip_quality=skip_quality,
         pre_chunked=pre_chunked,
         force_reindex=force_reindex,
+        prior_hashes=prior_hashes,
     )
     result["filename"] = filename
     result["categorize_mode"] = mode

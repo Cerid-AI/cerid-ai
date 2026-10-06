@@ -1,0 +1,106 @@
+{
+  "egress": "No level blocks requests to the model provider: what you type still goes to the configured model. Use a local provider for that.",
+  "columns": [
+    {
+      "key": "retrieval",
+      "title": "Retrieval"
+    },
+    {
+      "key": "memory",
+      "title": "Memory extraction"
+    },
+    {
+      "key": "server",
+      "title": "Server persistence"
+    },
+    {
+      "key": "browser",
+      "title": "Browser persistence"
+    },
+    {
+      "key": "audit",
+      "title": "Audit"
+    },
+    {
+      "key": "egress",
+      "title": "LLM egress"
+    }
+  ],
+  "levels": [
+    {
+      "level": 0,
+      "short": "off",
+      "name": "Off",
+      "label": "L0 — Off",
+      "description": "Standard behaviour: conversations are saved and synced, the knowledge base is used, the audit line is written.",
+      "withholds": {
+        "retrieval": "Knowledge-base and memory context are injected as usual.",
+        "memory": "Memories are extracted after qualifying turns and verified facts are promoted.",
+        "server": "Conversations are saved and synced; verification reports, verified facts and claim feedback are stored.",
+        "browser": "Conversations are cached in this browser's local storage.",
+        "audit": "The MCP tool-call audit line is written.",
+        "egress": "The request goes to the configured model provider."
+      }
+    },
+    {
+      "level": 1,
+      "short": "skip saves",
+      "name": "Skip saves & sync",
+      "label": "L1 — Skip saves & sync",
+      "description": "Nothing from this conversation is saved, synced or turned into memories. The knowledge base is still used and the model still receives what you type.",
+      "withholds": {
+        "retrieval": "Unchanged: knowledge-base and memory context are still injected.",
+        "memory": "Withheld: memory extraction and verified-fact promotion return without storing anything.",
+        "server": "Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped.",
+        "browser": "Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload.",
+        "audit": "Unchanged: the MCP tool-call audit line is written.",
+        "egress": "Not blocked: the chat still goes to the configured provider. Under the hybrid or cloud-first profile, internal pipeline stages pinned to the cloud run on the local provider instead."
+      }
+    },
+    {
+      "level": 2,
+      "short": "skip KB",
+      "name": "Also skip the knowledge base",
+      "label": "L2 — Also skip the knowledge base",
+      "description": "Also no knowledge-base or memory context: the model sees only what you type. The request to the model itself is still sent.",
+      "withholds": {
+        "retrieval": "Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty.",
+        "memory": "Withheld: memory extraction and verified-fact promotion return without storing anything.",
+        "server": "Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped.",
+        "browser": "Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload.",
+        "audit": "Unchanged: the MCP tool-call audit line is written.",
+        "egress": "Not blocked: what you type still goes to the configured provider."
+      }
+    },
+    {
+      "level": 3,
+      "short": "skip audit",
+      "name": "Also skip the audit line",
+      "label": "L3 — Also skip the audit line",
+      "description": "Also no MCP tool-call audit line. Metrics counters, the enterprise audit log and ordinary server logs are still written.",
+      "withholds": {
+        "retrieval": "Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty.",
+        "memory": "Withheld: memory extraction and verified-fact promotion return without storing anything.",
+        "server": "Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped.",
+        "browser": "Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload.",
+        "audit": "Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs.",
+        "egress": "Not blocked: what you type still goes to the configured provider."
+      }
+    },
+    {
+      "level": 4,
+      "short": "full ephemeral",
+      "name": "Full ephemeral",
+      "label": "L4 — Full ephemeral",
+      "description": "As L3, and when the last L4 tab closes Private Mode switches itself off. Nothing from the session was saved to begin with.",
+      "withholds": {
+        "retrieval": "Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty.",
+        "memory": "Withheld: memory extraction and verified-fact promotion return without storing anything.",
+        "server": "Withheld as at L1. When the last L4 tab closes the browser posts a session wipe and the level resets to 0; the wipe carries a per-tab id, not the conversation id, so it erases nothing beyond that reset. Cached query results are not wiped; they expire on their own.",
+        "browser": "Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload.",
+        "audit": "Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs.",
+        "egress": "Not blocked: what you type still goes to the configured provider."
+      }
+    }
+  ]
+}

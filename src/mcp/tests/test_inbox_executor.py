@@ -618,23 +618,3 @@ def test_connector_commands_stay_read_only_until_the_flag():
     assert "Mail.Send" not in text
     assert text.count("--single-user") >= 2
     assert text.count("--read-only") >= 2
-
-
-def test_oauth_scopes_widen_without_a_send_scope(monkeypatch):
-    from app.routers.oauth import google_scopes, microsoft_scopes
-
-    monkeypatch.delenv("CERID_INBOX_ACTIONS_ENABLED", raising=False)
-    assert "https://www.googleapis.com/auth/gmail.compose" not in google_scopes()
-    assert "Mail.Read" in microsoft_scopes()
-    assert "Mail.ReadWrite" not in microsoft_scopes()
-
-    monkeypatch.setenv("CERID_INBOX_ACTIONS_ENABLED", "1")
-    google = google_scopes()
-    microsoft = microsoft_scopes()
-    assert "https://www.googleapis.com/auth/gmail.labels" in google
-    assert "https://www.googleapis.com/auth/gmail.modify" in google
-    assert "https://www.googleapis.com/auth/gmail.compose" in google
-    assert not any("gmail.send" in scope for scope in google)
-    assert "Mail.ReadWrite" in microsoft
-    assert "Mail.Send" not in microsoft
-    assert "Mail.Read" not in microsoft

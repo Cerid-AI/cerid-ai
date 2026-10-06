@@ -83,6 +83,9 @@ _EXTERNAL_CLAIM = {
     "verification_method": "web_search",
     "verification_model": "placeholder-model",
     "source_urls": ["https://example.org/tokyo", "https://example.org/japan"],
+    # The promoter requires an entailment score; without one the claim is
+    # skipped_no_entailment and this test would exercise nothing.
+    "nli_entailment": 0.9,
 }
 
 

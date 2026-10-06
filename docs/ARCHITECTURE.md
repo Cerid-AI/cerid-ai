@@ -200,6 +200,26 @@ env vars (URL + three model names) are the operator's surface; the
 `docs/AMD_GPU_MODEL_RECOMMENDATIONS.md` matrix picks GGUFs by VRAM
 tier.
 
+**Embedding provenance stamp.** Every chunk written to ChromaDB carries
+`embedding_model` and `embedding_model_version`, merged in by
+`core/utils/embeddings.py::embedding_stamp` at both chunk-write paths
+(`app/services/ingestion.py`) and by the managed re-embed job. Both
+fields describe the leg that is about to produce the vector, never a
+config string: `embedding_model` is `serving_embedding_model()` (the
+served model when the local server embeds, else the ONNX pin) and
+`embedding_model_version` is `serving_embedding_version()` — the serving
+*artifact*, `<model>@<artifact>`: the local server's own version
+(`cerid-mlx-<rev>` from `/api/version`; for Quenchforge the model digest
+from `/api/tags`, else `quenchforge-<version>`), the HF revision the
+in-process ONNX leg loads, or the bare model id when ChromaDB embeds
+server-side. `<model>@unknown` means the artifact could not be read and
+is never cached. A different artifact therefore gets a different value,
+which is what lets `POST /admin/kb/reembed` key its selection on the
+stamp; `GET /admin/kb/embedding-versions` shows the distribution. The
+stamp is a claim, not proof — the boot-time vector-space probe
+(`app/startup/invariants.py::probe_vector_space`) is what verifies that
+stored vectors and the serving embedder share one space.
+
 Three workloads stay CPU on Intel Mac + AMD even with Quenchforge
 configured:
 

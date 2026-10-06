@@ -23,8 +23,14 @@ def _mock_redis():
     """Prevent accidental Redis connections and disable private mode."""
     mock_redis = MagicMock()
     mock_redis.get.return_value = None  # no private mode flag
+    # The conversation delete looks its transcript artifacts up in Chroma; an
+    # empty collection stands in for a conversation that was never ingested.
+    mock_chroma = MagicMock()
+    mock_chroma.get_or_create_collection.return_value.get.return_value = {"ids": [], "metadatas": []}
     with patch("app.deps._redis", mock_redis), \
          patch("app.deps.get_redis", return_value=mock_redis), \
+         patch("app.deps.get_chroma", return_value=mock_chroma), \
+         patch("app.deps.get_neo4j", return_value=MagicMock()), \
          patch("app.services.private_mode.get_private_mode_level", _private_mode_zero):
         yield
 

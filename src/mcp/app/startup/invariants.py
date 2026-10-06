@@ -383,6 +383,14 @@ def _cosine(a: Any, b: Any) -> float:
     return float(va @ vb / denom) if denom else 0.0
 
 
+def in_serving_space(stored: Any, fresh: Any) -> bool:
+    """The boot probe's per-vector check: a stored vector is in the serving
+    space when the serving embedder lands the same text back on it. Shared
+    with the restamp mode of the managed re-embed job so "already in the
+    serving space" means one thing everywhere."""
+    return _cosine(stored, fresh) >= _VECTOR_SPACE_MIN_SELF_SIM
+
+
 def probe_vector_space(client: Any, embed: Any, sample: int = _VECTOR_SPACE_SAMPLE) -> dict[str, Any]:
     """Re-embed a few stored chunks per collection with the serving embedder and
     require each lands back on its own stored vector.

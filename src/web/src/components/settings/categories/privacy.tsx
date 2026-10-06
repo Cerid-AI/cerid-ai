@@ -14,53 +14,32 @@ import { SettingRow, AdvancedDisclosure, ReadOnlyEnvHint } from "@/components/se
 import { getDef } from "@/lib/settings-registry"
 import { useSettings } from "@/hooks/use-settings"
 import { DataEgressSection } from "@/components/settings/data-egress-section"
+import {
+  PRIVATE_MODE_EGRESS_NOTE,
+  PRIVATE_MODE_LEVELS,
+  PRIVATE_MODE_WITHHOLDS_COLUMNS,
+} from "@/lib/private-mode-levels"
 import type { SettingsCategoryPageProps } from "./page-props"
 
 // ── Private Mode level metadata ───────────────────────────────────────────────
+// Copy comes from the shared contract (private-mode-levels.json); only the
+// visual treatment is decided here.
 
-const LEVEL_META: {
-  value: number
-  label: string
-  description: string
-  colorClass: string
-  icon: React.ComponentType<{ className?: string }>
-}[] = [
-  {
-    value: 0,
-    label: "L0 — Off",
-    description: "Standard behaviour. Conversations persist to server and local cache.",
-    colorClass: "border-border bg-muted/40 text-muted-foreground",
-    icon: Eye,
-  },
-  {
-    value: 1,
-    label: "L1 — Skip saves & sync",
-    description: "Don't save this conversation; don't sync to other devices.",
-    colorClass: "border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400",
-    icon: EyeOff,
-  },
-  {
-    value: 2,
-    label: "L2 — Also skip KB injection",
-    description: "Also bypass KB injection — model sees only what you type.",
-    colorClass: "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
-    icon: EyeOff,
-  },
-  {
-    value: 3,
-    label: "L3 — Also no logging",
-    description: "Also skip audit log entries. Nothing reaches Redis.",
-    colorClass: "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400",
-    icon: Shield,
-  },
-  {
-    value: 4,
-    label: "L4 — Full ephemeral",
-    description: "One-shot per tab. Session is erased automatically on tab close — even the audit log is bypassed.",
-    colorClass: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
-    icon: Shield,
-  },
+const LEVEL_STYLE: { colorClass: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { colorClass: "border-border bg-muted/40 text-muted-foreground", icon: Eye },
+  { colorClass: "border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400", icon: EyeOff },
+  { colorClass: "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400", icon: EyeOff },
+  { colorClass: "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400", icon: Shield },
+  { colorClass: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400", icon: Shield },
 ]
+
+const LEVEL_META = PRIVATE_MODE_LEVELS.map((l) => ({
+  value: l.level,
+  label: l.label,
+  description: l.description,
+  withholds: l.withholds,
+  ...LEVEL_STYLE[l.level],
+}))
 
 // ── Private Mode section ──────────────────────────────────────────────────────
 
@@ -118,10 +97,12 @@ function PrivateModeSection() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Enable L4 — Full ephemeral?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Activating L4 registers a tab-close handler that sends a session wipe to
-                        the server via <code className="font-mono text-xs">sendBeacon</code>. The
-                        scope is <strong>global for this server — all tabs and sessions</strong>.
-                        Switching away from L4 later does not un-wipe already-closed tabs.
+                        L4 withholds everything L3 does. Activating it registers a tab-close
+                        handler that sends a session wipe to the server via{" "}
+                        <code className="font-mono text-xs">sendBeacon</code>; when the last L4
+                        tab closes, Private Mode switches itself off. The scope is{" "}
+                        <strong>global for this server — all tabs and sessions</strong>. It does
+                        not block requests to the model provider.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -156,13 +137,22 @@ function PrivateModeSection() {
             )
           })}
         </div>
+        <dl className="grid gap-x-4 gap-y-1 text-label-xs sm:grid-cols-[max-content_1fr]">
+          {PRIVATE_MODE_WITHHOLDS_COLUMNS.map((col) => (
+            <div key={col.key} className="contents">
+              <dt className="font-medium text-foreground">{col.title}</dt>
+              <dd className="text-muted-foreground">{current.withholds[col.key]}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="text-label-xs text-muted-foreground">{PRIVATE_MODE_EGRESS_NOTE}</p>
         {privateModeLevel === 4 && (
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="text-xs">
-              L4 is active. Session data will be wiped via{" "}
-              <code className="font-mono">sendBeacon</code> when this tab closes. This setting
-              affects all tabs on this server.
+              L4 is active. When the last L4 tab closes the browser posts a session wipe via{" "}
+              <code className="font-mono">sendBeacon</code> and Private Mode switches itself off.
+              This setting affects all tabs on this server.
             </AlertDescription>
           </Alert>
         )}

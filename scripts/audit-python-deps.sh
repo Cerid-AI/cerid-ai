@@ -81,15 +81,50 @@ for v in "${IGNORES[@]}"; do IGNORE_ARGS="${IGNORE_ARGS} --ignore-vuln ${v}"; do
 # and reports the same advisories for everything else (compared 2026-10-01).
 SERVICE_ARGS="--vulnerability-service osv"
 
+# pip-audit exits 1 for a finding and for a failed vulnerability-service
+# lookup alike; the two are told apart by text. pip-audit 2.10.0 logs
+# "Could not connect to <service>'s vulnerability feed" for a connection
+# error (_cli.py:576) and lets an HTTP 5xx/429 escape as an uncaught
+# requests.HTTPError traceback (_service/osv.py:79). One OSV 503 red-lit two
+# PRs in 2026-10 that a rerun cleared. Three attempts, 20 s then 40 s apart;
+# a finding, or any other failure, fails on the first attempt.
+TRANSIENT_RE="Could not connect to .* vulnerability feed|HTTPError: (5[0-9][0-9]|429) |Max retries exceeded|Read timed out"
+AUDIT_RETRY_BASE_DELAY="${AUDIT_RETRY_BASE_DELAY:-20}"
+export TRANSIENT_RE AUDIT_RETRY_BASE_DELAY
+# POSIX sh: the same text is eval'd here and pasted into the image's sh -c.
+# No `local` in sh, so the names are prefixed: a plain `rc` here clobbered
+# the caller's `rc` and let a lock finding pass once the fresh audit was clean.
+# shellcheck disable=SC2016
+AUDIT_RETRY='
+audit_with_retry() {
+  audit_attempt=1
+  while :; do
+    audit_out=$(mktemp)
+    audit_rc=0
+    "$@" >"$audit_out" 2>&1 || audit_rc=$?
+    cat "$audit_out"
+    if [ "$audit_rc" -eq 0 ] || [ "$audit_attempt" -ge 3 ] || ! grep -Eq "$TRANSIENT_RE" "$audit_out"; then
+      rm -f "$audit_out"
+      return "$audit_rc"
+    fi
+    rm -f "$audit_out"
+    audit_delay=$((audit_attempt * AUDIT_RETRY_BASE_DELAY))
+    echo "pip-audit: vulnerability-service lookup failed (attempt $audit_attempt of 3); retrying in ${audit_delay}s" >&2
+    sleep "$audit_delay"
+    audit_attempt=$((audit_attempt + 1))
+  done
+}'
+eval "$AUDIT_RETRY"
+
 # Both audits always run, so a lock finding does not hide a fresh-tree one.
 if [ "${1:-}" = "--native" ]; then
   rc=0
   echo "== pinned src/mcp/requirements.lock (what the image ships)"
   # shellcheck disable=SC2086
-  "$PY" -m pip_audit --desc -r src/mcp/requirements.lock --require-hashes --disable-pip ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1
+  audit_with_retry "$PY" -m pip_audit --desc -r src/mcp/requirements.lock --require-hashes --disable-pip ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1
   echo "== this environment (fresh resolution of requirements.txt)"
   # shellcheck disable=SC2086
-  "$PY" -m pip_audit --desc ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1
+  audit_with_retry "$PY" -m pip_audit --desc ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1
   exit "$rc"
 fi
 
@@ -100,15 +135,17 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Auditing dependencies in ${PYTHON_IMAGE}..."
-docker run --rm -v "$(pwd)/src/mcp:/work" -w /work "${PYTHON_IMAGE}" \
-  sh -c "pip install --quiet --upgrade 'pip>=26.0' && \
+docker run --rm -e TRANSIENT_RE -e AUDIT_RETRY_BASE_DELAY \
+  -v "$(pwd)/src/mcp:/work" -w /work "${PYTHON_IMAGE}" \
+  sh -c "${AUDIT_RETRY}
+         pip install --quiet --upgrade 'pip>=26.0' && \
          pip install --quiet pip-audit==${PIP_AUDIT_VERSION} || exit 1; rc=0; \
          echo '== pinned requirements.lock (what the image ships)'; \
-         pip-audit --desc -r requirements.lock --require-hashes --disable-pip ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1; \
+         audit_with_retry pip-audit --desc -r requirements.lock --require-hashes --disable-pip ${SERVICE_ARGS} ${IGNORE_ARGS} || rc=1; \
          echo '== fresh resolution of requirements.txt'; \
          { pip install --quiet -r requirements.txt && \
            pip install --quiet --upgrade 'setuptools>=83.0.0' && \
-           pip-audit --desc ${SERVICE_ARGS} ${IGNORE_ARGS}; } || rc=1; \
+           audit_with_retry pip-audit --desc ${SERVICE_ARGS} ${IGNORE_ARGS}; } || rc=1; \
          exit \$rc"
 # The image's own pip (25.0.1) trips PYSEC-2026-1795/1796 (tar/wheel extraction
 # outside the install dir). Upgraded past the fix rather than added to IGNORES,

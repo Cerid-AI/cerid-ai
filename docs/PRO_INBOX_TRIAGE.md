@@ -165,6 +165,13 @@ Two gates — both must be open:
    `.env` then restart the MCP container. (This double-gate prevents
    inadvertent LLM cost on every Pro install.)
 
+A toggle set in Settings → Automations (`PUT
+/settings/pro-automations/inbox_triage`) is stored in Redis at
+`cerid:automations:inbox_triage:{enabled,schedule}` and wins over the env
+value until `DELETE /settings/pro-automations/inbox_triage` clears it. The
+table of both automations' switches is in
+`docs/PRO_DAILY_DIGEST.md` § How to enable.
+
 Mailbox writes are a third switch, `CERID_INBOX_ACTIONS_ENABLED`, default
 off. See `docs/PRO_GMAIL.md`, `docs/PRO_OUTLOOK.md`, and
 `docs/PRO_APPLE_MAIL.md`. Turning it on requires re-consent. The router

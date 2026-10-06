@@ -121,9 +121,10 @@ class ToolDef:
     deprecated_replaced_by: str | None = None
 
     # ``feature_flag`` = env var name. When set, the tool only loads
-    # when the env var is truthy ("1"/"true"/"yes"/"on"). Used for
-    # destructive tools (pkb_artifact_delete) that operators may want
-    # to gate, or experimental tools that aren't ready for default-on.
+    # when the env var is truthy ("1"/"true"/"yes"/"on"). Meant for
+    # experimental tools that aren't ready for default-on; no registered
+    # tool sets it today (``pkb_artifact_delete`` is NOT gated — operators
+    # hide tools with ``MCP_DISABLED_TOOLS``).
     feature_flag: str | None = None
 
     @property
@@ -293,8 +294,8 @@ def resolve_enabled() -> None:
     Enablement itself is decided per dispatch by ``ToolDef.enabled``, so
     calling this is optional and skipping it cannot leave a tool ungated —
     which is what happened while this function *was* the gate and had no
-    caller. Kept because "pkb_artifact_delete gated off" in the boot log is
-    worth having when an operator wonders where a tool went.
+    caller. Kept because "<tool> gated off" in the boot log is worth having
+    when an operator wonders where a tool went.
     """
     disabled = _disabled_tool_names()
     for name, t in TOOL_REGISTRY.items():

@@ -190,6 +190,10 @@ MUTANTS: list[tuple[str, str, str, str]] = [
      "src/mcp/core/agents/verified_memory.py",
      'if not claim_data.get("source_artifact_id") and not claim_data.get("source_urls"):',
      "if False:"),
+    ("verified_memory: gate a verdict with no entailment score on its confidence instead",
+     "src/mcp/core/agents/verified_memory.py",
+     '            if nli_entailment is None:\n                counts["skipped_no_entailment"] += 1\n                continue',
+     "            if nli_entailment is None:\n                nli_entailment = confidence"),
 ]
 
 

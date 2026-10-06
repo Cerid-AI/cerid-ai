@@ -1338,8 +1338,9 @@ async def _run_knowledge_stats_snapshot() -> None:
         from app.deps import get_neo4j
 
         driver = get_neo4j()
-        snapshot = fetch_current_stats(driver)
-        write_stats_snapshot(driver, snapshot)
+        # Synchronous driver calls; keep them off the scheduler's event loop.
+        snapshot = await asyncio.to_thread(fetch_current_stats, driver)
+        await asyncio.to_thread(write_stats_snapshot, driver, snapshot)
         duration = time.time() - start
         artifacts = snapshot.get("nodes", {}).get("artifacts", 0)
         _log_execution(

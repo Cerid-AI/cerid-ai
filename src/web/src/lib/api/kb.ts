@@ -631,7 +631,9 @@ export async function adminClearDomain(domain: string): Promise<{ artifacts_dele
 export interface DomainVersionDistribution {
   total: number
   versions: Record<string, number>
+  models: Record<string, number>
   current_version: string
+  current_model: string
   mixed: boolean
 }
 

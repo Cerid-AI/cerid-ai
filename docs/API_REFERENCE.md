@@ -692,6 +692,9 @@ Subscribe to events and receive webhook notifications.
 - `POST /workflows/{id}/run` — Execute workflow
 - `GET /workflows/{id}/runs` — List workflow runs
 
+### Sources (ingest connectors)
+- `POST /sources/{id}/webhook-url` — Receiver URL for a webhook source, with the token in cleartext. POST only (GET answers 405) and `Cache-Control: no-store`, so the token never lands in a cache, prefetch, or history. The URL is built from `MCP_EXTERNAL_HOST`, not the request's Host header. New `kind=webhook` sources default to `require_hmac: true` (an HMAC secret is minted; pass `config.require_hmac: false` to opt out); sources created before this default keep their stored value.
+
 ### Data Sources (External Knowledge)
 - `GET /data-sources` — List registered external data sources with enabled status
 - `POST /data-sources/{name}/enable` — Enable an external data source
@@ -745,9 +748,11 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 - `GET /agents/activity/stream` — SSE stream of real-time agent activity events (exempted from API key auth)
 
 ### Private Mode
-- `POST /settings/private-mode` — Enable private mode with security level (1-4)
-- `DELETE /settings/private-mode` — Disable private mode, optionally clear Redis cache
-- `GET /settings/private-mode` — Get current private mode status
+Levels 0-4 and what each withholds: [`docs/PRIVATE_MODE.md`](PRIVATE_MODE.md). No level blocks LLM egress.
+- `POST /settings/private-mode` — Set the global level (0-4); `conversation_id` optional, registers an L4 session
+- `DELETE /settings/private-mode` — Reset the level to 0
+- `GET /settings/private-mode` — Current level
+- `POST /settings/private-mode/session-wipe` — L4 tab-close wipe for a conversation id; resets the level to 0 when no L4 session remains
 
 ### Watched Folders
 - `POST /watched-folders` — Create watched folder config

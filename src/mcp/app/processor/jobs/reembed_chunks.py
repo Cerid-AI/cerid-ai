@@ -5,27 +5,38 @@
 
 Promotes ``scripts/reembed_collection.py``'s manual dual-collection
 migration logic into a resumable processor job for the common case: an
-in-place re-embed of a domain's LIVE collection under the model that is
-already active (no collection rename, no operator shell session). The
+in-place re-embed of a domain's LIVE collection under the embedder that is
+already serving (no collection rename, no operator shell session). The
 script stays the documented path for a full dual-collection A/B
 migration (stage a new model, validate, atomic-swap) — see
 ``docs/EMBEDDING_MIGRATIONS.md``. This job answers a narrower question:
-"my `EMBEDDING_MODEL` / `EMBEDDING_MODEL_VERSIONS_PER_DOMAIN` already
-changed — bring the stale chunks up to date."
+"the serving embedder changed — bring the stale chunks up to date."
 
 Mechanics
 ---------
 For each target domain, pages through the collection's chunks
 (``documents`` + ``metadatas``, same offset-paginated shape as the
 script's ``_existing_target_ids``). A chunk is "stale" when its
-``embedding_model_version`` metadata does not match
-``config.embedding_version_for_domain(domain)`` — including chunks with
-no stamp at all (pre-Phase-4.4 legacy). Stale chunks are rewritten via
+``embedding_model_version`` metadata is not the serving artifact
+(``core.utils.embeddings.serving_embedding_version``) — including chunks
+with no stamp at all (pre-Phase-4.4 legacy). Stale chunks are rewritten via
 ``collection.update(ids=, documents=, metadatas=)`` with NO
 ``embeddings=`` kwarg: ChromaDB recomputes the vector from ``documents``
 using the collection's bound embedding function (the same
 ``_EmbeddingAwareClient``-injected embedder ``ingest_content`` uses), so
-re-embedding and re-stamping happen in the same write.
+re-embedding and re-stamping happen in the same write. Both stamp fields
+come from the serving functions; ``config.EMBEDDING_MODEL`` is the ONNX
+pin, not necessarily the producer, and stamping it here is how ~700
+nomic-produced chunks came to say Snowflake.
+
+``restamp_only=True`` fixes exactly that mislabel without re-embedding: for
+each stale chunk it re-embeds the text with the serving embedder and, when
+the stored vector is already in the serving space (the boot probe's check,
+``app.startup.invariants.in_serving_space``), rewrites only the two stamp
+fields. A vector the serving embedder cannot reproduce keeps its old stamp
+and is counted ``out_of_serving_space`` — a restamp must never claim a
+vector it did not produce; re-embed those. ``dry_run=True`` does the same
+walk and writes nothing, reporting counts per current stamp value.
 
 Chunk TEXT never changes, so BM25 / SPLADE sparse indexes (which index
 over text, not vectors) are untouched — no re-index call here, unlike
@@ -38,13 +49,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from typing import Any
 
 import config
+from app.startup.invariants import in_serving_space
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
+from core.utils.embeddings import (
+    get_embedding_function,
+    serving_embedding_model,
+    serving_embedding_version,
+)
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.processor.reembed_chunks")
@@ -56,9 +74,35 @@ logger = logging.getLogger("ai-companion.processor.reembed_chunks")
 # failures within one domain.
 _MAX_CONSECUTIVE_BATCH_FAILURES = 3
 
+_UNSTAMPED = "unstamped"
+
+
+@dataclass
+class DomainOutcome:
+    """What one domain's scan did. ``failed_offsets`` is non-empty when one or
+    more pages could not be read — the caller must not report the domain as
+    fully scanned when it isn't (AF-037). ``by_stamp`` (restamp mode) counts
+    stale chunks per current ``embedding_model / embedding_model_version``
+    value, split by whether the stored vector is in the serving space."""
+
+    processed: int = 0
+    reembedded: int = 0
+    restamped: int = 0
+    skipped: int = 0
+    in_serving_space: int = 0
+    out_of_serving_space: int = 0
+    failed_offsets: list[int] = field(default_factory=list)
+    by_stamp: dict[str, dict[str, int]] = field(default_factory=dict)
+
+
+def _stamp_key(meta: dict[str, Any]) -> str:
+    model = meta.get("embedding_model") or _UNSTAMPED
+    version = meta.get("embedding_model_version") or _UNSTAMPED
+    return f"{model} / {version}"
+
 
 class ReembedChunksJob(BaseJob):
-    """Re-embed chunks whose ``embedding_model_version`` stamp is stale."""
+    """Re-embed (or restamp) chunks whose stamp is not the serving artifact."""
 
     job_type = "reembed_chunks"
 
@@ -68,11 +112,16 @@ class ReembedChunksJob(BaseJob):
         force: bool = False,
         batch_size: int | None = None,
         pace_s: float | None = None,
+        restamp_only: bool = False,
+        dry_run: bool = False,
     ) -> None:
         self._domain = domain
         self._force = force
+        self._restamp_only = restamp_only
+        self._dry_run = dry_run
         self._batch = batch_size if batch_size is not None else config.REEMBED_JOB_BATCH_SIZE
         self._pace = pace_s if pace_s is not None else config.REEMBED_JOB_PACE_S
+        self._target: dict[str, str] | None = None
 
     @property
     def priority(self) -> Priority:
@@ -92,42 +141,48 @@ class ReembedChunksJob(BaseJob):
             confidence="low",
         )
 
+    def _target_stamp(self) -> dict[str, str]:
+        """The stamp every touched chunk gets — resolved once per run so a
+        provider flip mid-scan cannot split one run across two artifacts."""
+        if self._target is None:
+            self._target = {
+                "embedding_model": serving_embedding_model(),
+                "embedding_model_version": serving_embedding_version(),
+            }
+        return self._target
+
     async def run(self, progress_cb: ProgressCallback) -> JobResult:
         await progress_cb(0.0)
         from app.deps import get_chroma, get_redis  # noqa: PLC0415
 
         chroma = get_chroma()
         domains = [self._domain] if self._domain else list(config.DOMAINS)
+        target = self._target_stamp()
 
-        total_processed = 0
-        total_reembedded = 0
-        total_skipped = 0
+        totals = DomainOutcome()
         by_domain: dict[str, dict[str, Any]] = {}
         truncated_domains: list[str] = []
 
         for i, domain in enumerate(domains):
-            processed, reembedded, skipped, failed_offsets = await self._reembed_domain(
-                chroma, domain
-            )
-            by_domain[domain] = {
-                "processed": processed,
-                "reembedded": reembedded,
-                "skipped": skipped,
-                "failed_offsets": failed_offsets,
-            }
-            if failed_offsets:
+            out = await self._reembed_domain(chroma, domain)
+            by_domain[domain] = asdict(out)
+            if out.failed_offsets:
                 truncated_domains.append(domain)
-            total_processed += processed
-            total_reembedded += reembedded
-            total_skipped += skipped
+            totals.processed += out.processed
+            totals.reembedded += out.reembedded
+            totals.restamped += out.restamped
+            totals.skipped += out.skipped
+            totals.in_serving_space += out.in_serving_space
+            totals.out_of_serving_space += out.out_of_serving_space
             await progress_cb((i + 1) / len(domains))
 
         # Re-embedding changes vector geometry for every affected domain, so
         # any cached /agent/query result computed against the old vectors is
         # stale. Bust BOTH query-result caches through the unified contract —
         # the flat cache C1 was previously left stale here (AF-105); the C2-only
-        # hook could not see the flat qcache:* entries.
-        if total_reembedded:
+        # hook could not see the flat qcache:* entries. A restamp changes no
+        # vector, so it leaves the caches alone.
+        if totals.reembedded:
             try:
                 from utils.query_cache import invalidate_query_caches_non_blocking
                 await invalidate_query_caches_non_blocking(
@@ -145,21 +200,29 @@ class ReembedChunksJob(BaseJob):
                 truncated_domains,
             )
         logger.info(
-            "reembed_chunks.done domains=%s processed=%d reembedded=%d skipped=%d "
-            "force=%s truncated=%s",
-            domains, total_processed, total_reembedded, total_skipped, self._force,
-            truncated_domains,
+            "reembed_chunks.done domains=%s processed=%d reembedded=%d restamped=%d "
+            "skipped=%d out_of_serving_space=%d force=%s restamp_only=%s dry_run=%s "
+            "target=%s truncated=%s",
+            domains, totals.processed, totals.reembedded, totals.restamped,
+            totals.skipped, totals.out_of_serving_space, self._force,
+            self._restamp_only, self._dry_run, target, truncated_domains,
         )
         return JobResult(
             job_id=f"reembed_chunks:{self._domain or 'all'}",
             actual_tokens_in=0,
             actual_tokens_out=0,
             metadata={
-                "processed": total_processed,
-                "reembedded": total_reembedded,
-                "skipped": total_skipped,
+                "processed": totals.processed,
+                "reembedded": totals.reembedded,
+                "restamped": totals.restamped,
+                "skipped": totals.skipped,
+                "in_serving_space": totals.in_serving_space,
+                "out_of_serving_space": totals.out_of_serving_space,
                 "by_domain": by_domain,
+                "target": target,
                 "force": self._force,
+                "restamp_only": self._restamp_only,
+                "dry_run": self._dry_run,
                 # AF-037: a domain scan that hit unreadable pages is NOT the
                 # same as one that scanned everything and found nothing stale
                 # — distinguish "complete" from "truncated" instead of
@@ -169,18 +232,13 @@ class ReembedChunksJob(BaseJob):
             },
         )
 
-    async def _reembed_domain(
-        self, chroma: Any, domain: str,
-    ) -> tuple[int, int, int, list[int]]:
-        """Page through one domain's collection, re-embedding stale chunks.
-
-        Returns ``(processed, reembedded, skipped, failed_offsets)`` for that
-        domain. ``failed_offsets`` is non-empty when one or more pages could
-        not be read — the caller must not report the domain as fully scanned
-        when it isn't (AF-037).
-        """
-        target_version = config.embedding_version_for_domain(domain)
+    async def _reembed_domain(self, chroma: Any, domain: str) -> DomainOutcome:
+        """Page through one domain's collection, re-embedding (or restamping)
+        the chunks whose stamp is not the serving artifact."""
+        target = self._target_stamp()
+        target_version = target["embedding_model_version"]
         coll_name = config.collection_name(domain)
+        out = DomainOutcome()
         try:
             collection = await asyncio.to_thread(chroma.get_collection, name=coll_name)
         except Exception as exc:  # noqa: BLE001 — domain has no collection yet, nothing to do
@@ -188,28 +246,25 @@ class ReembedChunksJob(BaseJob):
                 "app.processor.jobs.reembed_chunks.get_collection", exc,
                 context={"domain": domain},
             )
-            return 0, 0, 0, []
+            return out
 
-        processed = 0
-        reembedded = 0
-        skipped = 0
+        include = ["documents", "metadatas"]
+        if self._restamp_only:
+            include.append("embeddings")
+
         offset = 0
-        failed_offsets: list[int] = []
         consecutive_failures = 0
         while True:
             try:
                 batch = await asyncio.to_thread(
-                    collection.get,
-                    limit=self._batch,
-                    offset=offset,
-                    include=["documents", "metadatas"],
+                    collection.get, limit=self._batch, offset=offset, include=include,
                 )
             except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
                 log_swallowed_error(
                     "app.processor.jobs.reembed_chunks.get_batch", exc,
                     context={"domain": domain, "offset": offset},
                 )
-                failed_offsets.append(offset)
+                out.failed_offsets.append(offset)
                 consecutive_failures += 1
                 if consecutive_failures >= _MAX_CONSECUTIVE_BATCH_FAILURES:
                     logger.warning(
@@ -230,42 +285,23 @@ class ReembedChunksJob(BaseJob):
                 break
             documents = batch.get("documents") or []
             metadatas = batch.get("metadatas") or []
+            raw_embeddings = batch.get("embeddings")
+            embeddings = list(raw_embeddings) if raw_embeddings is not None else [None] * len(ids)
 
-            stale_ids: list[str] = []
-            stale_docs: list[str] = []
-            stale_metas: list[dict[str, Any]] = []
-            for cid, doc, meta in zip(ids, documents, metadatas, strict=True):
-                processed += 1
+            stale: list[tuple[str, str, dict[str, Any], Any]] = []
+            for cid, doc, meta, emb in zip(ids, documents, metadatas, embeddings, strict=True):
+                out.processed += 1
                 current_meta = dict(meta or {})
-                current_version = current_meta.get("embedding_model_version")
-                if not self._force and current_version == target_version:
-                    skipped += 1
+                if not self._force and current_meta.get("embedding_model_version") == target_version:
+                    out.skipped += 1
                     continue
-                current_meta["embedding_model"] = config.EMBEDDING_MODEL
-                current_meta["embedding_model_version"] = target_version
-                stale_ids.append(cid)
-                stale_docs.append(doc)
-                stale_metas.append(current_meta)
+                stale.append((cid, doc, current_meta, emb))
 
-            if stale_ids:
-                try:
-                    # No `embeddings=` kwarg — ChromaDB recomputes the vector
-                    # from `documents` via the collection's bound embedding
-                    # function (chromadb.api.models.Collection.update
-                    # docstring: "If embeddings are not provided, the
-                    # embeddings will be computed based on documents").
-                    await asyncio.to_thread(
-                        collection.update,
-                        ids=stale_ids,
-                        documents=stale_docs,
-                        metadatas=stale_metas,  # type: ignore[arg-type]
-                    )
-                    reembedded += len(stale_ids)
-                except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
-                    log_swallowed_error(
-                        "app.processor.jobs.reembed_chunks.update_batch", exc,
-                        context={"domain": domain, "offset": offset, "batch_size": len(stale_ids)},
-                    )
+            if stale:
+                if self._restamp_only:
+                    await self._restamp_batch(collection, domain, offset, stale, out)
+                else:
+                    await self._reembed_batch(collection, domain, offset, stale, out)
 
             offset += len(ids)
             if self._pace > 0:
@@ -273,4 +309,85 @@ class ReembedChunksJob(BaseJob):
             if len(ids) < self._batch:
                 break
 
-        return processed, reembedded, skipped, failed_offsets
+        return out
+
+    async def _reembed_batch(
+        self,
+        collection: Any,
+        domain: str,
+        offset: int,
+        stale: list[tuple[str, str, dict[str, Any], Any]],
+        out: DomainOutcome,
+    ) -> None:
+        target = self._target_stamp()
+        ids = [cid for cid, _, _, _ in stale]
+        docs = [doc for _, doc, _, _ in stale]
+        metas = [{**meta, **target} for _, _, meta, _ in stale]
+        try:
+            # No `embeddings=` kwarg — ChromaDB recomputes the vector from
+            # `documents` via the collection's bound embedding function
+            # (chromadb.api.models.Collection.update docstring: "If embeddings
+            # are not provided, the embeddings will be computed based on
+            # documents").
+            await asyncio.to_thread(
+                collection.update, ids=ids, documents=docs, metadatas=metas,
+            )
+            out.reembedded += len(ids)
+        except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
+            log_swallowed_error(
+                "app.processor.jobs.reembed_chunks.update_batch", exc,
+                context={"domain": domain, "offset": offset, "batch_size": len(ids)},
+            )
+
+    async def _restamp_batch(
+        self,
+        collection: Any,
+        domain: str,
+        offset: int,
+        stale: list[tuple[str, str, dict[str, Any], Any]],
+        out: DomainOutcome,
+    ) -> None:
+        target = self._target_stamp()
+        embed = get_embedding_function()
+        fresh: list[Any]
+        if embed is None:
+            # Store-side embedding: nothing in this process can reproduce a
+            # stored vector, so nothing can be shown to be in the serving space.
+            fresh = [None] * len(stale)
+        else:
+            try:
+                fresh = list(await asyncio.to_thread(embed, [doc for _, doc, _, _ in stale]))
+            except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
+                log_swallowed_error(
+                    "app.processor.jobs.reembed_chunks.restamp_embed", exc,
+                    context={"domain": domain, "offset": offset, "batch_size": len(stale)},
+                )
+                out.failed_offsets.append(offset)
+                return
+
+        ids: list[str] = []
+        metas: list[dict[str, Any]] = []
+        for (cid, _, meta, stored), vec in zip(stale, fresh, strict=True):
+            bucket = out.by_stamp.setdefault(
+                _stamp_key(meta), {"in_serving_space": 0, "out_of_serving_space": 0},
+            )
+            if stored is not None and vec is not None and in_serving_space(stored, vec):
+                bucket["in_serving_space"] += 1
+                out.in_serving_space += 1
+                ids.append(cid)
+                metas.append({**meta, **target})
+            else:
+                bucket["out_of_serving_space"] += 1
+                out.out_of_serving_space += 1
+
+        if self._dry_run or not ids:
+            return
+        try:
+            # metadatas only — the vector stays exactly as stored.
+            await asyncio.to_thread(collection.update, ids=ids, metadatas=metas)
+            out.restamped += len(ids)
+        except Exception as exc:  # noqa: BLE001 — one bad batch must not abort the domain
+            log_swallowed_error(
+                "app.processor.jobs.reembed_chunks.restamp_batch", exc,
+                context={"domain": domain, "offset": offset, "batch_size": len(ids)},
+            )

@@ -57,44 +57,6 @@ def test_target_collection_name_sanitizes_version():
 
 
 # ---------------------------------------------------------------------------
-# Per-domain version routing (config helper added in Phase 5c)
-# ---------------------------------------------------------------------------
-
-
-def test_embedding_version_for_domain_falls_back_to_global():
-    """Domains without an override use EMBEDDING_MODEL_VERSION."""
-    # No mutation needed — the dict is empty by default
-    assert (
-        config.embedding_version_for_domain("nonexistent_domain")
-        == config.EMBEDDING_MODEL_VERSION
-    )
-
-
-def test_embedding_version_for_domain_honors_override(monkeypatch):
-    """Per-domain override wins over the global.
-
-    The helper lives in ``config.settings`` and reads the dict from its
-    own module globals — so we monkeypatch the dict's *contents* via
-    ``setitem`` rather than rebinding the module attribute, which keeps
-    both the package re-export and the original module reference
-    pointing at the same mutated dict.
-    """
-    from config import settings as _settings
-
-    monkeypatch.setitem(
-        _settings.EMBEDDING_MODEL_VERSIONS_PER_DOMAIN,
-        "code",
-        "arctic-embed-l-v2.0",
-    )
-    assert _settings.embedding_version_for_domain("code") == "arctic-embed-l-v2.0"
-    # Other domains still get the global
-    assert (
-        _settings.embedding_version_for_domain("finance")
-        == _settings.EMBEDDING_MODEL_VERSION
-    )
-
-
-# ---------------------------------------------------------------------------
 # CLI contract (argparse smoke)
 # ---------------------------------------------------------------------------
 

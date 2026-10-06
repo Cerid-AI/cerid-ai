@@ -103,3 +103,78 @@ def test_a_fresh_tree_finding_still_fails(tmp_path: Path) -> None:
     rc, calls = _run(tmp_path, env_rc=1)
     assert rc != 0
     _lock_call(calls)
+
+
+# --- Transient lookup failures retry; findings do not -------------------------
+#
+# pip-audit exits 1 both for a finding and for a vulnerability-service failure.
+# On 2026-10 two PRs went red on a single OSV 503 (an uncaught HTTPError
+# traceback) that a rerun cleared. The script retries what reads as a lookup
+# failure and fails at once on anything else. These fakes put a `pip-audit`
+# on PATH, which the stand-in interpreter execs for `-m pip_audit`, so the
+# retry is exercised through the script's real invocation form.
+
+_DELEGATING_PY = """#!/usr/bin/env bash
+[ "$1" = "-c" ] && exit 0
+if [ "$1" = "-m" ] && [ "$2" = "pip_audit" ]; then shift 2; exec pip-audit "$@"; fi
+exit 97
+"""
+
+_FAKE_PIP_AUDIT = """#!/usr/bin/env bash
+case "$*" in *requirements.lock*) key=lock ;; *) key=env ;; esac
+echo "$key $*" >> "$AUDIT_LOG"
+n=$(grep -c "^$key " "$AUDIT_LOG")
+if [ -n "${VULN:-}" ]; then
+  echo "Found 1 known vulnerability in 1 package"
+  echo "Name   Version ID             Fix Versions"
+  exit 1
+fi
+if [ "$n" -le "${FAIL_TIMES:-0}" ]; then
+  echo "Traceback (most recent call last):" >&2
+  echo "requests.exceptions.HTTPError: 503 Server Error: Service Unavailable for url: https://api.osv.dev/v1/querybatch" >&2
+  exit 1
+fi
+echo "No known vulnerabilities found"
+"""
+
+
+def _run_with_fake_pip_audit(tmp_path: Path, **fake_env: str) -> tuple[int, str, dict[str, int]]:
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python").write_text(_DELEGATING_PY)
+    (bindir / "pip-audit").write_text(_FAKE_PIP_AUDIT)
+    for f in bindir.iterdir():
+        f.chmod(0o755)
+    log = tmp_path / "calls.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        "PYTHON": str(bindir / "python"),
+        "AUDIT_LOG": str(log),
+        "AUDIT_RETRY_BASE_DELAY": "0",
+        **fake_env,
+    }
+    proc = subprocess.run(["bash", str(SCRIPT), "--native"], capture_output=True, text=True, env=env)
+    lines = log.read_text().splitlines() if log.exists() else []
+    counts = {"lock": sum(l.startswith("lock ") for l in lines), "env": sum(l.startswith("env ") for l in lines)}
+    return proc.returncode, proc.stdout + proc.stderr, counts
+
+
+def test_a_transient_lookup_failure_is_retried_and_then_passes(tmp_path: Path) -> None:
+    rc, output, counts = _run_with_fake_pip_audit(tmp_path, FAIL_TIMES="2")
+    assert rc == 0, output
+    assert counts == {"lock": 3, "env": 3}
+    assert "retrying" in output
+
+
+def test_a_real_finding_fails_without_retrying(tmp_path: Path) -> None:
+    rc, output, counts = _run_with_fake_pip_audit(tmp_path, VULN="1")
+    assert rc != 0
+    assert counts == {"lock": 1, "env": 1}, output
+    assert "Found 1 known vulnerability" in output
+
+
+def test_a_persistent_lookup_failure_stops_after_three_attempts(tmp_path: Path) -> None:
+    rc, output, counts = _run_with_fake_pip_audit(tmp_path, FAIL_TIMES="99")
+    assert rc != 0
+    assert counts == {"lock": 3, "env": 3}, output

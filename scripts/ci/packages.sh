@@ -71,6 +71,10 @@ echo "::endgroup::"
 # from hanging the job. No typecheck or build here: the web build is the
 # gateway image, and the desktop build is an Electron package.
 for pkg in stacks/gateway/hub/web stacks/gateway/hub/desktop; do
+  if [ ! -d "$pkg" ]; then
+    echo "$pkg absent (internal-only mirror); skipped"
+    continue
+  fi
   echo "::group::$pkg"
   (
     cd "$pkg"

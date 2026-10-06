@@ -267,3 +267,29 @@ async def test_create_generic_webhook_stays_provider_optional():
             CreateSourceRequest(kind="webhook", display_name="hook", config={}),
         )
     assert rec.kind == "webhook"
+
+
+@pytest.mark.asyncio
+async def test_create_generic_webhook_requires_hmac_by_default():
+    mock_create, p_neo, p_tok, p_sec = _patch_create()
+    with mock_create as create_mock, p_neo, p_tok, p_sec:
+        await create_source(
+            CreateSourceRequest(kind="webhook", display_name="hook", config={}),
+        )
+    cfg = create_mock.call_args.kwargs["config"]
+    assert cfg["require_hmac"] is True
+    assert cfg["hmac_secret"] == "sec_x"  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_create_generic_webhook_honours_an_explicit_opt_out():
+    mock_create, p_neo, p_tok, p_sec = _patch_create()
+    with mock_create as create_mock, p_neo, p_tok, p_sec:
+        await create_source(
+            CreateSourceRequest(
+                kind="webhook", display_name="hook", config={"require_hmac": False},
+            ),
+        )
+    cfg = create_mock.call_args.kwargs["config"]
+    assert cfg["require_hmac"] is False
+    assert "hmac_secret" not in cfg

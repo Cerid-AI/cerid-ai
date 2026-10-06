@@ -151,6 +151,24 @@ class TestCacheVerdict:
         assert stored["cached"] is True
 
     @pytest.mark.asyncio
+    async def test_carries_the_entailment_score(self):
+        """Promotion gates on nli_entailment; a cached verdict that dropped it
+        could never be promoted on a cache hit."""
+        redis = MagicMock()
+        await cache_verdict(redis, "test claim", {
+            "status": "verified", "verification_method": "kb", "nli_entailment": 0.41,
+        })
+        stored = json.loads(redis.set.call_args[0][1])
+        assert stored["nli_entailment"] == 0.41
+
+    @pytest.mark.asyncio
+    async def test_does_not_invent_an_entailment_score(self):
+        redis = MagicMock()
+        await cache_verdict(redis, "test claim", {"status": "verified", "verification_method": "cross_model"})
+        stored = json.loads(redis.set.call_args[0][1])
+        assert "nli_entailment" not in stored
+
+    @pytest.mark.asyncio
     async def test_respects_ttl(self):
         redis = MagicMock()
         verdict = {"status": "verified"}

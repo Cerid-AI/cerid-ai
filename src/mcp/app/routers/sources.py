@@ -15,7 +15,8 @@ Endpoints:
   the live connector
 * ``DELETE /sources/{id}``          — remove the node + clear cursor
 * ``POST   /sources/{id}/policy``   — patch retention_policy / quality_floor
-* ``GET    /sources/{id}/webhook-url`` — webhook source's receiver URL
+* ``POST   /sources/{id}/webhook-url`` — webhook source's receiver URL
+  (token in cleartext; POST-only and ``Cache-Control: no-store``)
 
 Webhook sources are created here, but inbound traffic flows through
 ``POST /sdk/v1/ingest/webhook/{token}`` (the security boundary).
@@ -25,9 +26,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
+import config
 from app.db.neo4j import sources as srcdb
 from app.deps import get_neo4j, get_redis
 from app.services import sync_cursor, webhook_tokens
@@ -447,10 +449,15 @@ async def create_source(body: CreateSourceRequest):
 
         token = webhook_tokens.generate_token()
         config_to_store: dict[str, Any] = {"token": token, **config_in}
-        # Mint an HMAC secret when the caller opts in OR the provider mandates it
-        # (github / stripe set requires_signature) — without it the receiver
-        # rejects that provider's traffic as "mandated but unconfigured".
-        if config_in.get("require_hmac") or requires_sig:
+        if kind == "webhook":
+            # A generic receiver has no provider recipe to mandate a signature,
+            # so new ones require HMAC unless the caller opts out. Sources
+            # created before this default keep whatever they stored.
+            config_to_store.setdefault("require_hmac", True)
+        # Mint an HMAC secret when the source requires one OR the provider
+        # mandates it (github / stripe set requires_signature) — without it the
+        # receiver rejects that provider's traffic as "mandated but unconfigured".
+        if config_to_store.get("require_hmac") or requires_sig:
             config_to_store["hmac_secret"] = webhook_tokens.generate_hmac_secret()
         src = srcdb.create_source(
             get_neo4j(),
@@ -579,12 +586,27 @@ async def test_source(source_id: str):
     return HealthProbeResult(ok=probe.ok, detail=probe.detail, last_error=probe.last_error)
 
 
-@router.get("/{source_id}/webhook-url", response_model=GetWebhookUrlResponse)
-async def get_webhook_url(source_id: str, request: Request):
+def _external_base_url(request: Request) -> str:
+    """Scheme + host the outside world reaches us on.
+
+    ``MCP_EXTERNAL_HOST`` is the operator's word, not the request's Host
+    header, so a spoofed Host cannot steer the share URL. A bare host keeps
+    the request's scheme; a value with its own scheme is used as given.
+    """
+    host = config.MCP_EXTERNAL_HOST.strip().rstrip("/")
+    if "://" in host:
+        return host
+    return f"{request.url.scheme}://{host}"
+
+
+@router.post("/{source_id}/webhook-url", response_model=GetWebhookUrlResponse)
+async def get_webhook_url(source_id: str, request: Request, response: Response):
     """Return the live webhook receiver URL (with token) for a
     webhook-kind source. Drives the F7 share card — the only place
-    we deliberately surface the token in cleartext.
+    we deliberately surface the token in cleartext, which is why it is
+    POST-only (no link prefetch, no history entry) and ``no-store``.
     """
+    response.headers["Cache-Control"] = "no-store"
     src = srcdb.get_source(get_neo4j(), source_id)
     if src is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -594,8 +616,7 @@ async def get_webhook_url(source_id: str, request: Request):
     token = config.get("token") if isinstance(config, dict) else None
     if not token:
         raise HTTPException(status_code=500, detail="Source missing token")
-    base = str(request.base_url).rstrip("/")
-    url = f"{base}/sdk/v1/ingest/webhook/{token}"
+    url = f"{_external_base_url(request)}/sdk/v1/ingest/webhook/{token}"
     require_hmac = bool(config.get("hmac_secret"))
     return {
         "url": url,

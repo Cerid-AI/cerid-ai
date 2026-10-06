@@ -172,4 +172,35 @@ describe("WorkflowEditor — run input (UX-21)", () => {
     // dots alone left them undiscoverable.
     expect(await screen.findByText(/select a node to inspect its result/i)).toBeInTheDocument()
   })
+
+  it("shows why a condition could not be evaluated instead of 'did not pass'", async () => {
+    const { runWorkflow } = await import("@/lib/api")
+    vi.mocked(runWorkflow).mockResolvedValue({
+      id: "run-2",
+      workflow_id: "wf-1",
+      status: "completed",
+      results: {
+        check_ghi: {
+          node: "check",
+          type: "condition",
+          passed: false,
+          condition_error: "cannot parse condition expression 'nonsense!!!'",
+        },
+      },
+      error: null,
+      started_at: "2026-08-13T00:00:00Z",
+      finished_at: "2026-08-13T00:00:05Z",
+    })
+
+    render(<WorkflowEditor workflow={mockWorkflow} onSave={noop} onBack={noop} />)
+    fireEvent.change(screen.getByLabelText(/run input/i), { target: { value: "q" } })
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }))
+    await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole("button", { name: "check (Condition node)" }))
+
+    expect(await screen.findByText(/could not evaluate/i)).toBeInTheDocument()
+    expect(screen.getByText(/cannot parse condition expression/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^did not pass$/i)).not.toBeInTheDocument()
+  })
 })
