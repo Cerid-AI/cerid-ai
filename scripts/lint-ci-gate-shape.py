@@ -25,7 +25,8 @@ the missing half — it pins the SHAPE of ci.yml:
 * the rule-6 dependabot filter is on the jobs that must carry it, and actually
   suppresses a bot PR;
 * the rule-3 area filters gate the real work of the jobs they belong to;
-* the widget-in-image assertion runs the command it claims to run.
+* the widget-in-image assertion runs the command it claims to run — inline, or
+  through ``scripts/ci/docker-gate.sh``, which is read with the same rules.
 
 Every assertion reads the PARSED document. Substring checks against the file
 text are not acceptable here: ``'/app/static/cerid-widget.js' in text`` passes
@@ -102,8 +103,12 @@ CHANGES_OUTPUTS = ("code", "web", "mcp", "packages")
 
 #: The docker job's widget assertion. `app/routers/widget.py` serves
 #: GET /widget.js from this path; nothing put it in the image until 2026-08-31.
+#: The job runs it through WIDGET_GATE_SCRIPT (one definition shared with the
+#: internal tree), so the script is read the way a `run:` block is: comments
+#: stripped, the command and a `docker run` both required.
 WIDGET_JOB = "docker"
 WIDGET_COMMAND = "test -s /app/static/cerid-widget.js"
+WIDGET_GATE_SCRIPT = "scripts/ci/docker-gate.sh"
 
 #: merge_group is kept in `on:` and in the `if:` expressions because it is
 #: harmless, not because it works. There is no merge queue on this account and
@@ -406,8 +411,14 @@ def _strip_shell_comments(script: str) -> str:
     )
 
 
-def check_document(doc: object, label: str = ".github/workflows/ci.yml") -> list[str]:
-    """Return every way this workflow document fails the required shape."""
+def check_document(
+    doc: object, label: str = ".github/workflows/ci.yml", repo_root: Path = REPO
+) -> list[str]:
+    """Return every way this workflow document fails the required shape.
+
+    `repo_root` is where WIDGET_GATE_SCRIPT is read from when the docker job
+    delegates the widget assertion to it.
+    """
     problems: list[str] = []
     if not isinstance(doc, dict):
         return [f"{label}: not a mapping — the workflow did not parse"]
@@ -503,7 +514,7 @@ def check_document(doc: object, label: str = ".github/workflows/ci.yml") -> list
             continue
         problems += _check_area_filter(label, name, job, area)
 
-    problems += _check_widget_assertion(label, defined.get(WIDGET_JOB))
+    problems += _check_widget_assertion(label, defined.get(WIDGET_JOB), repo_root)
     return problems
 
 
@@ -530,24 +541,54 @@ def _check_area_filter(label: str, name: str, job: dict, area: str) -> list[str]
     ]
 
 
-def _check_widget_assertion(label: str, job: dict | None) -> list[str]:
-    """The widget-in-image step must RUN the command, not mention it."""
+def _asserts_widget(script: str) -> bool:
+    """A shell body (comments already stripped) that runs the assertion."""
+    return WIDGET_COMMAND in script and "docker run" in script
+
+
+def _check_widget_assertion(label: str, job: dict | None, repo_root: Path) -> list[str]:
+    """The widget-in-image check must RUN the command, not mention it.
+
+    Either a step runs it inline, or a step runs WIDGET_GATE_SCRIPT and that
+    script runs it. The script is read with the same comment-stripping rule as
+    a `run:` block, so commenting the assertion out there fails here too, and
+    a step that names the script is not taken on trust.
+    """
     if job is None:
         return []
     for step in job.get("steps") or []:
         if not isinstance(step, dict):
             continue
         script = _strip_shell_comments(str(step.get("run") or ""))
-        if WIDGET_COMMAND in script and "docker run" in script:
+        if _asserts_widget(script):
             return []
+        if WIDGET_GATE_SCRIPT in script:
+            gate = repo_root / WIDGET_GATE_SCRIPT
+            if not gate.is_file():
+                return [
+                    f"{label}: job {WIDGET_JOB!r} runs {WIDGET_GATE_SCRIPT}, which "
+                    f"does not exist under {repo_root}"
+                ]
+            if _asserts_widget(_strip_shell_comments(gate.read_text(encoding="utf-8"))):
+                return []
+            return [
+                f"{label}: job {WIDGET_JOB!r} runs {WIDGET_GATE_SCRIPT}, but that "
+                f"script never runs {WIDGET_COMMAND!r} against the built image — "
+                f"GET /widget.js can 404 in every container with CI green"
+            ]
     return [
         f"{label}: job {WIDGET_JOB!r} never runs {WIDGET_COMMAND!r} against the "
-        f"built image — GET /widget.js can 404 in every container with CI green"
+        f"built image (inline or via {WIDGET_GATE_SCRIPT}) — GET /widget.js can "
+        f"404 in every container with CI green"
     ]
 
 
 def check_workflow(path: Path) -> list[str]:
-    return check_document(yaml.safe_load(path.read_text(encoding="utf-8")), str(path))
+    # A workflow lives at <repo>/.github/workflows/<name>.yml; the gate script
+    # it delegates to is resolved against that repo, not against this file's.
+    resolved = path.resolve()
+    repo_root = resolved.parents[2] if resolved.parent.name == "workflows" else REPO
+    return check_document(yaml.safe_load(path.read_text(encoding="utf-8")), str(path), repo_root)
 
 
 def main() -> int:

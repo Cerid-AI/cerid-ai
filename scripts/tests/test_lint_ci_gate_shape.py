@@ -136,11 +136,15 @@ def test_removing_an_area_path_filter_is_caught(doc):
     assert any("no rule-3 filter on needs.changes.outputs.web" in p for p in _flagged(doc))
 
 
+def _mentions_widget(step) -> bool:
+    run = str(step.get("run") or "")
+    return shape.WIDGET_COMMAND in run or shape.WIDGET_GATE_SCRIPT in run
+
+
 def test_deleting_the_widget_assertion_is_caught(doc):
+    """Drop the step that asserts it, inline or through docker-gate.sh."""
     steps = doc["jobs"]["docker"]["steps"]
-    doc["jobs"]["docker"]["steps"] = [
-        s for s in steps if shape.WIDGET_COMMAND not in str(s.get("run") or "")
-    ]
+    doc["jobs"]["docker"]["steps"] = [s for s in steps if not _mentions_widget(s)]
     assert any("never runs" in p for p in _flagged(doc))
 
 
@@ -148,10 +152,45 @@ def test_a_widget_assertion_that_only_appears_in_a_comment_is_caught(doc):
     """The substring trap the audit named: `'/app/static/cerid-widget.js' in
     text` passes when the literal survives only as a comment."""
     for step in doc["jobs"]["docker"]["steps"]:
-        run = str(step.get("run") or "")
-        if shape.WIDGET_COMMAND in run:
+        if _mentions_widget(step):
+            run = str(step.get("run") or "")
             step["run"] = "\n".join(f"# {line}" for line in run.splitlines())
     assert any("never runs" in p for p in _flagged(doc))
+
+
+def test_the_real_docker_gate_script_runs_the_assertion():
+    """ci.yml delegates to scripts/ci/docker-gate.sh; the gate reads it."""
+    script = shape._strip_shell_comments((REPO / shape.WIDGET_GATE_SCRIPT).read_text())
+    assert shape._asserts_widget(script)
+
+
+def _repo_with_gate_script(tmp_path, body: str):
+    gate = tmp_path / shape.WIDGET_GATE_SCRIPT
+    gate.parent.mkdir(parents=True)
+    gate.write_text(body)
+    return tmp_path
+
+
+def test_a_gate_script_without_the_assertion_is_caught(doc, tmp_path):
+    """Naming docker-gate.sh in the step is not taken on trust: the script
+    itself has to run the command."""
+    root = _repo_with_gate_script(tmp_path, "docker build -t x .\n")
+    problems = shape.check_document(doc, repo_root=root)
+    assert any("that script never runs" in p for p in problems)
+
+
+def test_a_gate_script_asserting_only_in_a_comment_is_caught(doc, tmp_path):
+    root = _repo_with_gate_script(
+        tmp_path,
+        f"# docker run --rm img sh -c '{shape.WIDGET_COMMAND}'\ndocker build -t x .\n",
+    )
+    problems = shape.check_document(doc, repo_root=root)
+    assert any("that script never runs" in p for p in problems)
+
+
+def test_a_missing_gate_script_is_caught(doc, tmp_path):
+    problems = shape.check_document(doc, repo_root=tmp_path)
+    assert any("does not exist" in p for p in problems)
 
 
 def test_dropping_the_pull_request_trigger_is_caught(doc):
