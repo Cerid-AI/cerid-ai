@@ -11,6 +11,27 @@ on:
     # which leaves required checks "expected, never reported" → PR blocked
     # forever. The `changes` job below skips the real work on docs-only PRs, so
     # cost is preserved without the deadlock.
+  # LATENT trigger — kept because it is harmless, not because it fires.
+  #
+  # Rule 7 ("high-cost gates are merge-only, gated at merge time via the merge
+  # queue") describes a mechanism this account does not have. On the canonical
+  # private repo the API refuses the rule outright — `422 Invalid rule
+  # 'merge_queue'`, because a merge queue on a private repository requires
+  # GitHub Enterprise Cloud and this org is on Team — and no queue is
+  # configured on this public mirror either (`gh api
+  # repos/Cerid-AI/cerid-ai/rulesets` returns `[]`). So a gate scheduled onto
+  # merge_group runs NOWHERE: not before the merge, and not after it.
+  #
+  # Rule 7 is therefore reconciled on the other side of the merge instead. The
+  # heavy gates run on `pull_request`, where `ci / all-required-gates-ran` is
+  # the required check, and still on `push: main`, which is how this mirror is
+  # actually written. Cost is held down by path filters, the rule-6 dependabot
+  # filter and `cancel-in-progress`, not by declining to run.
+  #
+  # Nothing here may DEPEND on this event: scripts/lint-ci-gate-shape.py fails
+  # any job reachable only through merge_group. If a queue ever becomes
+  # available, the gates already accept the event and nothing needs changing.
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,6 +46,9 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.detect.outputs.code }}
+      web: ${{ steps.detect.outputs.web }}
+      mcp: ${{ steps.detect.outputs.mcp }}
+      packages: ${{ steps.detect.outputs.packages }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -35,16 +59,47 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags --depth=200 origin "${{ github.base_ref }}" >/dev/null 2>&1 || true
             files=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>/dev/null || true)
-          else
+          elif [ "${{ github.event_name }}" = "push" ]; then
             files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null || true)
+          else
+            # merge_group: the queue branch has no stable base to diff against,
+            # and merge time is exactly when narrowing the run is wrong. An
+            # empty list means "run everything" below.
+            files=""
           fi
           # code=false ONLY when we got a non-empty list AND every file is docs.
           if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|tasks/|[^/]*\.md$)'; then
             code=false
           fi
+          # Per-area scoping (policy rule 3): a web-only change should not pay
+          # for the pytest suite, and a backend-only change should not pay for
+          # npm. Same fail-safe as `code` — an empty or unreadable diff yields
+          # true for every area, so a detector bug over-runs CI rather than
+          # silently skipping a gate. Every pattern includes this workflow file
+          # so a CI change re-runs the jobs it edits.
+          #
+          # These gate STEPS, never jobs. A job skipped by a path filter reports
+          # as skipped, and ci-ok's --enforce-ran (pull_request and push:main)
+          # reads a skip as a gate that did not run. Keeping the job and
+          # skipping its work keeps both properties: no wasted minutes, and no
+          # grey check standing in for a green one.
+          area() {
+            if [ -z "$files" ]; then echo true; return; fi
+            if printf '%s\n' "$files" | grep -qE "$1"; then echo true; else echo false; fi
+          }
+          web=$(area '^(src/web/|scripts/ci/frontend|scripts/check-bundle-size\.sh$|\.github/workflows/ci\.yml$)')
+          # `mcp` is the Python side as a whole: the MCP server, the scripts
+          # the gate probes test, and the stacks/ services whose tests ride the
+          # same `test` job (stacks/sso, stacks/mlx-inference).
+          mcp=$(area '^(src/mcp/|scripts/|stacks/|pyproject\.toml$|\.github/workflows/ci\.yml$)')
+          packages=$(area '^(packages/|scripts/ci/packages\.sh$|\.github/workflows/ci\.yml$)')
           echo "changed files:"; printf '%s\n' "$files"
-          echo "code=$code"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          {
+            echo "code=$code"
+            echo "web=$web"
+            echo "mcp=$mcp"
+            echo "packages=$packages"
+          } | tee -a "$GITHUB_OUTPUT"
 
   # Python backend
   lint:
@@ -67,6 +122,39 @@ jobs:
         # skipped gate reads as a passing one. Static half; the runtime half
         # runs in `ci-ok` itself.
         run: python scripts/lint-ci-required-gates.py --workflow .github/workflows/ci.yml
+      # The three gates below are stdlib-only by design, so they run here on a
+      # bare interpreter rather than waiting for the dependency install in
+      # `typecheck` or `test`.
+      - name: lint / web-reachability
+        # An exported module no production code imports. Skipped in this repo
+        # until 2026-09-03 because the Makefile guarded it on an allowlist that
+        # only existed on the other side of the mirror — a gate whose absent
+        # input made it a silent no-op.
+        run: python scripts/lint-web-reachability.py --check
+      - name: lint / route-has-client
+        # A FastAPI route nothing under the client surfaces ever calls. Same
+        # allowlist-guard history as web-reachability; the companion gate that
+        # stops a route being laundered through a dead client file.
+        run: python scripts/lint-route-has-client.py --check
+      - name: lint / http-singleton-thread-guard
+        # Module-level httpx client singletons bind to whichever event loop
+        # first touches them — the 2026-04-22 "Event loop is closed" incident.
+        # Zero violations today, so it goes in strict: a warn-only gate that
+        # cannot fail is not a gate.
+        run: python scripts/lint-http-singleton-thread-guard.py --strict src/mcp/
+      # Last in the job because it is the only lint gate that needs a
+      # dependency: the assertions read the PARSED workflow, and a substring
+      # check against the file text passes on a gate that survives only inside
+      # a comment. Everything above still runs on the bare interpreter.
+      - name: lint / ci-gate-shape
+        # `ci-required-gates` asks whether the jobs that exist are aggregated.
+        # This asks whether the jobs that must exist do, and whether their
+        # `if:` still lets them run before the merge — deleting a job together
+        # with its `ci-ok.needs` entry satisfies the first check and fails this
+        # one.
+        run: |
+          pip install -q pyyaml
+          python scripts/lint-ci-gate-shape.py --workflow .github/workflows/ci.yml
 
   typecheck:
     needs: [changes]
@@ -84,8 +172,20 @@ jobs:
 
   test:
     needs: [changes, lint, typecheck]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Runs on every event that can reach main. This guard used to read
+    # `github.event_name != 'pull_request'`, so the entire pytest suite first
+    # executed AFTER a PR was already merged into main — the branch that ships
+    # was where regressions were discovered.
+    #
+    # Rule 6: a dependency bump does not need the behavioural suite at PR time.
+    # It opts in with the `dependabot-full-ci` label. The filter is scoped to
+    # pull_request, so the push:main run — the one a mirror sync goes through —
+    # still runs it regardless and ci-ok still enforces it there.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -95,19 +195,24 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
-      - run: pip install -r src/mcp/requirements.txt
-      - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
+      - if: needs.changes.outputs.mcp == 'true'
+        run: pip install -r src/mcp/requirements.txt -r src/mcp/requirements-dev.txt
+      - if: needs.changes.outputs.mcp == 'true'
+        run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
+        if: needs.changes.outputs.mcp == 'true'
         # `not integration` deselects tests that require live external services
         # (Redis, MCP HTTP server). Those tests run under the preservation gate
         # which boots the full stack; running them here would fail with
         # connection-refused on the bare ubuntu runner.
         run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo and not integration" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Gate probes (scripts/tests)
+        if: needs.changes.outputs.mcp == 'true'
         # These prove the drift/lint gates can actually fail. Nothing ran them
         # until 2026-08-04.
         run: python -m pytest scripts/tests/ -q
       - name: Sign-in service tests (stacks/sso)
+        if: needs.changes.outputs.mcp == 'true'
         # Stdlib only. Hand-ported from the canonical scripts/ci/test.sh.
         run: python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
       # The MLX server (stacks/mlx-inference) has its own pinned packages, so its
@@ -116,23 +221,28 @@ jobs:
       # failure instead of a skip. Hand-ported from the canonical
       # scripts/ci/test.sh; this file is maintained by hand on this side.
       - uses: actions/setup-python@v7
+        if: needs.changes.outputs.mcp == 'true'
         with:
           python-version: "3.12"
       - name: MLX server tests (stacks/mlx-inference)
+        if: needs.changes.outputs.mcp == 'true'
         run: |
           python -m venv "$RUNNER_TEMP/mlx-stack-venv"
           "$RUNNER_TEMP/mlx-stack-venv/bin/pip" install -q -r stacks/mlx-inference/requirements-test.txt
           MLX_STACK_TESTS_STRICT=1 "$RUNNER_TEMP/mlx-stack-venv/bin/python" -m pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider
       - name: Upload coverage to Codecov
-        if: success()
+        if: success() && needs.changes.outputs.mcp == 'true'
         uses: codecov/codecov-action@v7
         with:
           files: src/mcp/coverage.xml
           fail_ci_if_error: false
 
   security:
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Runs on every event. Secret detection, bandit and pip-audit are the gates
+    # that most need to fire BEFORE a commit reaches main, and they were among
+    # the ones skipped on pull_request. No dependabot filter either (rule 6:
+    # a bump is exactly when a dependency audit matters most).
+    if: needs.changes.outputs.code == 'true'
     needs: [changes, lint, typecheck]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -179,8 +289,14 @@ jobs:
   # Frontend
   frontend:
     needs: [changes, lint, typecheck]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # eslint + tsc + vitest + vite build. Same reasoning as `test`: a PR that
+    # breaks the web build must go red on the PR, not on main.
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # No job-level working-directory: scripts/ci/frontend.sh runs from the repo
@@ -199,7 +315,85 @@ jobs:
       # blocking-production / advisory-dev npm audit split all live in the
       # script. The dev-toolchain audit stays advisory INSIDE it; do not
       # "simplify" it to a bare command under `set -e`.
-      - run: bash scripts/ci/frontend.sh
+      - if: needs.changes.outputs.web == 'true'
+        run: bash scripts/ci/frontend.sh
+
+  # ---------------------------------------------------------------------------
+  # SDK contract. packages/sdk/python and packages/sdk/typescript are PUBLISHED
+  # artifacts, and six documents (both SDK READMEs shipped to PyPI/npm,
+  # docs/SDK_PUBLISHING.md, src/mcp/app/routers/sdk_version.py,
+  # packages/sdk/python/src/cerid/__version__.py and release-sdk-python.yml)
+  # tell consumers a `sdk-contract` / `sdk-openapi-drift` gate enforces the
+  # contract. Until now that gate existed on this repo only as two scripts
+  # nothing invoked and a Makefile target a developer had to remember.
+  #
+  # The drift step is the reason the job installs the runtime stack:
+  # gen_sdk_openapi.py imports the real MCP app so the committed baseline
+  # matches what the server publishes at /sdk/v1/openapi.json byte-for-byte.
+  # ---------------------------------------------------------------------------
+  sdk-contract:
+    needs: [changes, lint, typecheck]
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/mcp/requirements.lock
+      - name: Python SDK contract tests
+        run: bash scripts/ci/sdk-contract-python.sh
+      - name: sdk-openapi-drift
+        # The name six documents promise. Needs the MCP runtime, not just the
+        # SDK: the spec is rendered from the live FastAPI routes.
+        run: |
+          pip install -r src/mcp/requirements.txt
+          python scripts/gen_sdk_openapi.py --check
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/sdk/typescript/package-lock.json
+      - name: TypeScript SDK contract tests
+        run: bash scripts/ci/sdk-contract-ts.sh
+
+  # ---------------------------------------------------------------------------
+  # Distributed npm artifacts: the embeddable widget, the TypeScript SDK and
+  # the browser extension. `npm run build` is the point, not an extra — the
+  # widget's committed CDN bundle was broken from 2026-06-08 and no check
+  # reported it, because nothing in CI ever built these packages. The script
+  # re-hashes packages/widget/dist around a fresh build so a stale committed
+  # bundle goes red.
+  # ---------------------------------------------------------------------------
+  packages:
+    needs: [changes, lint, typecheck]
+    # Rule 6 dependabot filter — see `test`.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            packages/widget/package-lock.json
+            packages/sdk/typescript/package-lock.json
+            packages/extension/package-lock.json
+      - if: needs.changes.outputs.packages == 'true'
+        run: bash scripts/ci/packages.sh
 
   # ---------------------------------------------------------------------------
   # License denylist. Replaces the two inline `--fail-on` / `--failOn` audits
@@ -270,8 +464,28 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan]
-    # Rule 7: heavy job — merge-time only (push:main), not every PR push.
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    # Rule 7, reconciled with what this account offers. This is the repository's
+    # single highest-cost gate — two image builds plus two Trivy scans — and
+    # rule 7 defers that class to merge time via the merge queue. There is no
+    # merge queue (see the `merge_group` note at the top of this file), so
+    # "merge-only" meant `push: main`, which is AFTER the merge: the job could
+    # report a broken image but never stop one. It also meant the widget-in-image
+    # assertion in scripts/ci/docker-gate.sh could not fail a pull request.
+    #
+    # So it moves in front of the merge and stays behind it as well. On
+    # pull_request it blocks; on push:main it still covers the direct
+    # mirror-sync commits that never open one. Cost, in order of effect:
+    # `cancel-in-progress` at the top of this file kills superseded runs, so an
+    # eight-push branch pays once, not eight times; `changes.code` skips it
+    # entirely on docs-only work; and the rule-6 dependabot filter (which this
+    # job could omit while it never saw a pull request) keeps bot bumps off it
+    # unless they are labelled. The remainder is the deliberate cost of a gate
+    # that can actually fail before the merge.
+    if: >-
+      needs.changes.outputs.code == 'true'
+      && (github.event_name != 'pull_request'
+      || github.actor != 'dependabot[bot]'
+      || contains(github.event.pull_request.labels.*.name, 'dependabot-full-ci'))
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -302,19 +516,25 @@ jobs:
   # the `changes` gate and must still get a green required check (otherwise the
   # required check never reports and the PR is blocked forever).
   #
-  # But on a CODE push to main, a skip means a dependency failed and the gate
-  # behind it never executed — and GitHub renders that as a grey check, not a
-  # red one. `docker` sat skipped for eight consecutive main runs on
-  # 2026-08-03 behind a failing `security` job, accumulating Trivy drift with
-  # no red signal. So `--enforce-ran` is passed for exactly that case:
-  # push + main + changes.code == 'true'.
+  # But on a CODE change, a skip means a dependency failed and the gate behind
+  # it never executed — and GitHub renders that as a grey check, not a red one.
+  # `docker` sat skipped for eight consecutive main runs on 2026-08-03 behind a
+  # failing `security` job, accumulating Trivy drift with no red signal. So
+  # `--enforce-ran` is passed whenever changes.code == 'true' and the run is one
+  # of: a human pull request, push:main, or (latently) merge_group.
+  #
+  # pull_request is in that list because PR-time is now the merge gate — this
+  # is the run that has to be exhaustive, and every job is required to be able
+  # to run there (scripts/lint-ci-gate-shape.py asserts exactly that). Bot PRs
+  # are excluded because rule 6 lets them skip the expensive jobs by design;
+  # their push:main run is still enforced.
   #
   # The old inline form collapsed results with join(needs.*.result), which lost
   # the job NAMES — its error read "a required CI job failed", with no way to
   # tell which. The script names every offender.
   ci-ok:
     name: ci / all-required-gates-ran
-    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan, docker]
+    needs: [changes, lint, typecheck, test, security, lock-sync, frontend, license-scan, sdk-contract, packages, docker]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -329,4 +549,4 @@ jobs:
         run: |
           python scripts/lint-ci-required-gates.py \
             --needs "$NEEDS_JSON" \
-            ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
+            ${{ (((github.event_name == 'pull_request' && github.actor != 'dependabot[bot]') || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true') && '--enforce-ran' || '' }}
