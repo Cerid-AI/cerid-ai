@@ -355,7 +355,45 @@ class TestJunkNameGate:
     def test_admits_valid_entities(self, name):
         assert is_junk_entity_name(name) is False
 
+    # -- admits: shapes the version gate mistook for versions (D27-A) --------
+    # is_junk_quantity_name admitted both shapes already, but this gate runs
+    # first in _normalise_entities and dropped them: live gemma-4-26b-a4b
+    # returned "2024-09-15" and "2024-06-01" as DATE for the Vega fixture and
+    # neither reached the output.
+
+    @pytest.mark.parametrize("name", [
+        "10.0.0.1",
+        "192.168.1.1",
+        "2025-04-20",
+        "2024-09-15",
+    ])
+    def test_admits_ipv4_addresses_and_iso_dates(self, name):
+        assert is_junk_entity_name(name) is False
+
+    @pytest.mark.parametrize("name", [
+        "256.1.1.1",    # an octet past 255 is not an address
+        "1.5.0",
+        "2025-13-40",   # no such month or day
+    ])
+    def test_still_rejects_version_shapes_that_are_neither(self, name):
+        assert is_junk_entity_name(name) is True
+
     # -- end-to-end through the extraction pipeline ---------------------------
+
+    @pytest.mark.asyncio
+    async def test_extraction_keeps_ipv4_addresses_and_iso_dates(self):
+        caller = _llm_caller_returning({
+            "entities": [
+                {"name": "10.0.0.1", "type": "OTHER", "confidence": 0.9},
+                {"name": "2025-04-20", "type": "DATE", "confidence": 0.9},
+                {"name": "v3.6.1", "type": "OTHER", "confidence": 0.9},
+            ]
+        })
+        result = await extract_entities_from_text(
+            "The router answers on 10.0.0.1 since 2025-04-20, running v3.6.1.",
+            llm_caller=caller,
+        )
+        assert [e.name for e in result] == ["10.0.0.1", "2025-04-20"]
 
     @pytest.mark.asyncio
     async def test_extraction_drops_junk_keeps_valid(self):
@@ -754,12 +792,13 @@ class TestExtractedNamesMustAppearInTheText:
 
     async def test_the_prompt_carries_no_named_examples(self):
         """Removing the bait is half the fix; this is the half that can rot."""
-        from core.agents.entity_extraction import _EXTRACTION_PROMPT
+        from core.agents.entity_extraction import _build_messages
 
+        prompt = "\n".join(m["content"] for m in _build_messages(""))
         for bait in ("Elon Musk", "Tim Cook", "Apple Inc.", "BTC", "GPT-4",
                      "Tesla Model 3", "WWDC", "San Francisco", "Wall Street",
                      "Federal Reserve", "Q3 2024"):
-            assert bait not in _EXTRACTION_PROMPT, (
+            assert bait not in prompt, (
                 f"{bait!r} is back in the extraction prompt — the model copies "
                 "these into its output as extracted entities"
             )
@@ -838,6 +877,39 @@ class TestExtractedNamesMustAppearInTheText:
         assert "person:matt-butcher" in ids, "line-broken emphasis must not delete a real person"
         assert "org:azure-kubernetes-service" in ids, "table-split name must survive"
         assert "person:tim-cook" not in ids, "a name sharing no tokens with the text is fabricated"
+
+    async def test_every_prompt_example_name_copied_into_output_is_dropped(self):
+        """The prompt carries worked examples again (D27-A), so the copy
+        failure above is possible again: each example name the model echoes
+        on an unrelated document must fall to _drop_unsupported, including
+        its token-overlap widening."""
+        from core.agents.entity_extraction import _PROMPT_EXAMPLES
+
+        caller = _llm_caller_returning({"entities": [
+            {"name": name, "type": etype, "confidence": 1.0}
+            for _text, entities in _PROMPT_EXAMPLES
+            for name, etype in entities
+        ] + [{"name": "asyncio", "type": "OTHER", "confidence": 1.0}]})
+        text = (
+            "Runners\n\nSource code:Lib/asyncio/runners.py\n"
+            "This section outlines high-level asyncio primitives to run "
+            "asyncio code. They are built on top of an event loop."
+        )
+        result = await extract_entities_from_text(text, llm_caller=caller)
+        assert [e.name for e in result] == ["asyncio"]
+
+    async def test_the_prompt_example_output_is_what_the_pipeline_keeps(self):
+        """An example teaches by its output; an example entity the extractor's
+        own filters would reject teaches the model to emit junk."""
+        from core.agents.entity_extraction import _PROMPT_EXAMPLES
+
+        for text, entities in _PROMPT_EXAMPLES:
+            caller = _llm_caller_returning({"entities": [
+                {"name": name, "type": etype, "confidence": 1.0}
+                for name, etype in entities
+            ]})
+            result = await extract_entities_from_text(text, llm_caller=caller)
+            assert [(e.name, e.entity_type) for e in result] == list(entities)
 
 
 # ---------------------------------------------------------------------------

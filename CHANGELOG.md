@@ -4,6 +4,35 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
+### Security
+- `sharp` 0.35.4 → 0.35.5 in the web app (its `overrides` pin), for CVE-2026-96889 in its bundled librsvg; the production audit is clean again.
+
+### Changed
+- **Entity extraction recall on the local model (ruling D27-A).** The extractor sends two worked examples as prior turns (a technical note and a personal note, on invented names) and names the classes it under-extracted: standards, formats and data types, index and algorithm names, header names, IP addresses and network identifiers, cultivars, titled works, places with their alternate names, and dates in each written form. The version-token gate no longer drops IPv4 addresses (`10.0.0.1`) or ISO calendar dates (`2025-04-20`), which the quantity gate already admitted but the version gate rejected first. On gemma-4-26b-a4b the recall gate went from 5 of 14 fixtures at the floor (mean 0.57) to 13 of 14 (mean 0.96); `projects-orion-scope` still misses `CSV`. The floor stays 0.8. A test fails if any message sent to the model names something the recall fixtures expect.
+- **The beta faithfulness gate is raised (D28-A).** The mean floor moves from 0.15 to 0.4, and any one scored answer below 0.3 now fails the gate on its own, named with its query, score and the judge's reasoning; parse failures and abstentions are not scores and do not trip it. On 2026-10-06 the live mean was 0.52–0.53 with one answer at 0.20 that gave the model's 2023 401(k) figures over the retrieved 2025 ones, so the gate is expected red on the live stack until that grounding defect is fixed. Both floors are to be revisited after the fix.
+- **Neo4j 2026.04.0 → 2026.09.0, in both compose files.** APOC and GDS follow
+  the image (`2026.09.0`); `wget` is still in the image for the healthcheck;
+  the six migrations run clean against it. Neo4j now answers every `id()` with
+  a deprecation that carries a removal notice, so `pkb_graph_communities`
+  projects with the GDS aggregation form over the nodes themselves and maps
+  Louvain's node ids back to each artifact's own `id` inside the statement,
+  and the `CO_MENTIONED` pair ordering uses `elementId()`. The previous
+  projection had never run on 2026.04 either: GDS refuses the string columns
+  its node query returned. Deploying to a live stack needs the backup window
+  in `docs/DEPENDENCY_UPGRADES.md`.
+- **Redis 7.4.8 → 8.10.2 and redis-py `<8` → `>=8.1,<9`.** The image moves in
+  the two compose files and in `scripts/lib/healthcheck.sh`, which runs
+  `redis-check-aof` from it; a test holds the three pins equal because
+  Dependabot does not see the third. redis-py 8 speaks RESP3 by default with
+  the RESP2 response shapes kept, and `xadd(maxlen=)` is unchanged. A Redis 8
+  AOF cannot be read by a 7.x server, so the rollback is the backup copy.
+- **mcp 1.x → 2.3.** Only the two clients use the SDK (the server is
+  hand-rolled JSON-RPC): `streamablehttp_client` became
+  `streamable_http_client`, which takes headers and timeouts on an `httpx2`
+  client rather than as arguments; `stdio_client`, `sse_client` and
+  `ClientSession` are unchanged. A test resolves every imported name against
+  the installed SDK, since both clients import it lazily.
+
 ## [1.0.10] — 2026-10-06
 
 ### Added

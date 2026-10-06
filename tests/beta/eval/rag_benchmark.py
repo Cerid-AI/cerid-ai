@@ -52,11 +52,10 @@ REFERENCE = {
 }
 NDCG_5_THRESHOLD = 0.80
 MRR_THRESHOLD = 0.70
-# Faithfulness threshold lowered after Gap 4 fix: independent judge model
-# (Claude Sonnet 4.6) is stricter than self-grading. The answer model adds
-# knowledge beyond RAG context, which an independent judge correctly penalizes.
-# This is expected behavior — LLM answers aren't limited to RAG context alone.
-FAITHFULNESS_THRESHOLD = 0.15
+# D28-A (2026-10-06, live mean 0.52/0.53, min 0.20): mean floor raised from 0.15; revisit after the grounding fix.
+FAITHFULNESS_THRESHOLD = 0.4
+# D28-A: any one scored answer below this fails the gate (the 0.20 answer used 2023 401(k) figures over the KB's 2025).
+FAITHFULNESS_ANSWER_THRESHOLD = 0.3
 RELEVANCY_THRESHOLD = 0.6
 
 
@@ -197,7 +196,9 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
     Parse failures and abstentions are excluded from the mean — the first is
     the instrument breaking, the second is the grounding rules working — and
     a run in which the judge scored nothing fails as UNMEASURABLE rather than
-    as a quality miss.
+    as a quality miss. Otherwise faithfulness fails on a mean below
+    ``FAITHFULNESS_THRESHOLD`` or on any one scored answer below
+    ``FAITHFULNESS_ANSWER_THRESHOLD`` (``assert_faithfulness_floors``, D28-A).
     """
     records: list[dict] = []
     faithfulness: list[JudgeResult] = []
@@ -235,8 +236,7 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
     print(f"  RAGAS relevancy:    {rel_summary}")
     print(f"  Worst {WORST_N} faithfulness answers (full report: {PER_ANSWER_REPORT}):")
     for r in worst:
-        flag = "PARSE_FAILED" if r["parse_failed"] else "ABSTAINED" if r["abstained"] else f"{r['score']:.2f}"
-        print(f"    [{flag}] {r['query'][:50]:50s} {r['reasoning'][:120]}")
+        print(f"    {format_judgement(r)}")
 
     # Instrument before quality: a judge that answered nothing measured nothing.
     for name, summary in (("faithfulness", faith_summary), ("relevancy", rel_summary)):
@@ -248,11 +248,7 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
         if summary["mean"] is None:
             pytest.fail(f"{name} UNMEASURABLE: no scored answers ({summary})")
 
-    assert faith_summary["mean"] >= FAITHFULNESS_THRESHOLD, (
-        f"avg faithfulness {faith_summary['mean']:.3f} < {FAITHFULNESS_THRESHOLD} "
-        f"(n_scored={faith_summary['n_scored']}, abstained={faith_summary['n_abstained']}); "
-        f"worst: {[(r['query'][:30], r['score']) for r in worst]}"
-    )
+    assert_faithfulness_floors(faith_summary, [r for r in records if r["metric"] == "faithfulness"])
     assert rel_summary["mean"] >= RELEVANCY_THRESHOLD, (
         f"avg relevancy {rel_summary['mean']:.3f} < {RELEVANCY_THRESHOLD}"
     )
@@ -352,6 +348,36 @@ def worst_n(records: list[dict], n: int) -> list[dict]:
     scored = sorted((r for r in records if not (r["parse_failed"] or r["abstained"])), key=lambda r: r["score"])
     excluded = [r for r in records if r["parse_failed"] or r["abstained"]]
     return (scored + excluded)[:n]
+
+
+def format_judgement(r: dict) -> str:
+    """One per-answer line: score (or why it was not scored), query, judge's reasoning."""
+    flag = "PARSE_FAILED" if r["parse_failed"] else "ABSTAINED" if r["abstained"] else f"{r['score']:.2f}"
+    return f"[{flag}] {r['query'][:50]:50s} {r['reasoning'][:120]}"
+
+
+def assert_faithfulness_floors(summary: dict, records: list[dict]) -> None:
+    """The gate: the mean at or above FAITHFULNESS_THRESHOLD and no scored answer
+    below FAITHFULNESS_ANSWER_THRESHOLD. ``summary`` is ``judge_mean`` over
+    ``records`` and must have a mean (the UNMEASURABLE checks run first). Parse
+    failures and abstentions are not scores, so neither trips the answer floor."""
+    failures = []
+    if summary["mean"] < FAITHFULNESS_THRESHOLD:
+        failures.append(
+            f"avg faithfulness {summary['mean']:.3f} < {FAITHFULNESS_THRESHOLD} "
+            f"(n_scored={summary['n_scored']}, abstained={summary['n_abstained']}); worst:\n"
+            + "\n".join(f"  {format_judgement(r)}" for r in worst_n(records, WORST_N))
+        )
+    below = [
+        r for r in worst_n(records, len(records))
+        if not (r["parse_failed"] or r["abstained"]) and r["score"] < FAITHFULNESS_ANSWER_THRESHOLD
+    ]
+    if below:
+        failures.append(
+            f"{len(below)} answer(s) below the per-answer floor {FAITHFULNESS_ANSWER_THRESHOLD}:\n"
+            + "\n".join(f"  {format_judgement(r)}" for r in below)
+        )
+    assert not failures, "\n".join(failures)
 
 
 async def _judge_metric(

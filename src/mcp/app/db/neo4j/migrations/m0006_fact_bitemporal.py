@@ -58,7 +58,8 @@ writes NO properties. It is pure index scaffolding for a writer that
 does not exist yet.
 
 Index decision — composite vs single-property (verified against the
-deployed image, ``neo4j:2026.04.0-community``, docker-compose.yml:42):
+deployed image, ``neo4j:2026.04.0-community``, docker-compose.yml:42; the
+same holds on ``neo4j:2026.09.0-community``):
 Neo4j Community Edition supports composite *range* indexes on nodes
 (``CREATE INDEX ... FOR (n:Label) ON (n.a, n.b)``) — that is not
 Enterprise-gated; only composite/NODE-KEY *constraints* are (m0004's

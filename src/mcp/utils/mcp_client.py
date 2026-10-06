@@ -346,7 +346,7 @@ class MCPClientManager:
             from mcp import ClientSession, StdioServerParameters
         except ImportError:
             raise ImportError(
-                "MCP Python SDK not installed. Run: pip install 'mcp>=1.0'"
+                "MCP Python SDK not installed. Run: pip install 'mcp>=2.2'"
             ) from None
 
         if cfg.transport == "stdio":

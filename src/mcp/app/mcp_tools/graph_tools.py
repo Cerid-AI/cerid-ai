@@ -6,7 +6,7 @@
 The Neo4j graph has been accumulating `:Artifact` + relationship data
 since v0.83. These tools surface that latent value via the MCP
 interface so LLMs can reason about connection structure, not just
-chunk content. GDS 2026.04.0 is enabled (`NEO4J_PLUGINS` includes
+chunk content. GDS 2026.09.0 is enabled (`NEO4J_PLUGINS` includes
 ``graph-data-science``) so the community-detection tool runs at
 production speed.
 
@@ -417,38 +417,22 @@ async def pkb_graph_communities(
             except Exception as exc:  # noqa: BLE001 — drop-on-missing is best-effort cleanup
                 log_swallowed_error(__name__, exc)
 
-            # Project + run Louvain. Native projection on (:Artifact)
-            # with the connection relationships. We treat all edges
-            # as undirected for community detection.
+            # Project + run Louvain. The Cypher aggregation form takes the
+            # nodes themselves, so the projection names no node ids: id()
+            # is deprecated on the server with a removal notice, and GDS
+            # cannot take elementId() strings. Every edge is undirected
+            # for community detection; an artifact with no edge projects
+            # alone (null target) so it still counts toward graph_size.
             session.run(
-                """
-                CALL gds.graph.project.cypher(
-                    $name,
-                    $node_query,
-                    $rel_query,
-                    {validateRelationships: false}
-                ) YIELD graphName
-                RETURN graphName
-                """,
+                "MATCH (a:Artifact) "
+                + (f"{domain_filter} AND " if domain else "WHERE ")
+                + "coalesce(a.archived, false) = false "
+                + "OPTIONAL MATCH (a)-[r]->(b:Artifact) "
+                + ("WHERE b.domain = $domain AND " if domain else "WHERE ")
+                + "coalesce(b.archived, false) = false "
+                + "WITH gds.graph.project($name, a, b, {}, {undirectedRelationshipTypes: ['*']}) AS g "
+                + "RETURN g.graphName AS graphName",
                 name=graph_name,
-                node_query=(
-                    "MATCH (a:Artifact) "
-                    + domain_filter
-                    + " AND coalesce(a.archived, false) = false "
-                    if domain
-                    else
-                    "MATCH (a:Artifact) WHERE coalesce(a.archived, false) = false "
-                ) + "RETURN id(a) AS id, a.id AS artifact_id, a.filename AS filename, a.domain AS domain",
-                rel_query=(
-                    "MATCH (a:Artifact)-[r]-(b:Artifact) "
-                    + (
-                        "WHERE a.domain = $domain AND b.domain = $domain "
-                        if domain else ""
-                    )
-                    + "AND coalesce(a.archived, false) = false "
-                    + "AND coalesce(b.archived, false) = false "
-                    + "RETURN id(a) AS source, id(b) AS target, type(r) AS type"
-                ),
                 domain=domain or "",
             ).consume()
 
@@ -460,14 +444,16 @@ async def pkb_graph_communities(
             node_count = int(size_row["nodeCount"]) if size_row else 0
 
             if node_count == 0:
-                session.run("CALL gds.graph.drop($name, false)", name=graph_name).consume()
+                session.run("CALL gds.graph.drop($name, false) YIELD graphName RETURN graphName", name=graph_name).consume()
                 return {"communities": [], "graph_size": 0}
 
-            # Run Louvain
+            # Run Louvain. The GDS node ids map back to artifacts inside the
+            # same statement, so what leaves the server is the application
+            # id (`a.id`) and nothing downstream holds an internal id.
             result = session.run(
                 """
                 CALL gds.louvain.stream($name) YIELD nodeId, communityId
-                WITH communityId, collect(nodeId) AS member_ids, count(*) AS size
+                WITH communityId, collect(gds.util.asNode(nodeId).id) AS member_ids, count(*) AS size
                 WHERE size >= $min_size
                 RETURN communityId AS community_id, size, member_ids
                 ORDER BY size DESC
@@ -486,8 +472,7 @@ async def pkb_graph_communities(
                 member_ids = c["member_ids"]
                 enrich = session.run(
                     """
-                    UNWIND $ids AS nid
-                    MATCH (a:Artifact) WHERE id(a) = nid
+                    MATCH (a:Artifact) WHERE a.id IN $ids
                     RETURN a.id AS artifact_id, a.filename AS filename, a.domain AS domain
                     LIMIT 200
                     """,
@@ -508,7 +493,7 @@ async def pkb_graph_communities(
                 })
 
             # Cleanup projection
-            session.run("CALL gds.graph.drop($name, false)", name=graph_name).consume()
+            session.run("CALL gds.graph.drop($name, false) YIELD graphName RETURN graphName", name=graph_name).consume()
             return {"communities": communities, "graph_size": node_count}
 
     try:

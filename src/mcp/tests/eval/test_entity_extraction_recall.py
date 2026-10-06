@@ -33,6 +33,22 @@ async def test_recall_against_annotations(annot):
     assert not result.forbidden, (result.fixture, result.forbidden)
 
 
+def test_the_extraction_prompt_names_nothing_the_fixtures_expect():
+    """The prompt's worked examples (D27-A) teach entity classes; a name the
+    gate scores would make the recall number measure the examples instead of
+    the extractor. Whole-word, case-insensitive, over every message sent."""
+    from core.agents.entity_extraction import _build_messages
+
+    prompt = "\n".join(m["content"] for m in _build_messages("")).lower()
+    leaked = sorted({
+        name
+        for annot in annotation_files()
+        for name in json.loads(annot.read_text())["expected"]
+        if re.search(rf"(?<!\w){re.escape(name.lower())}(?!\w)", prompt)
+    })
+    assert not leaked, f"fixture-expected names in the extraction prompt: {leaked}"
+
+
 def test_every_expected_name_occurs_in_its_fixture():
     for annot in annotation_files():
         spec = json.loads(annot.read_text())

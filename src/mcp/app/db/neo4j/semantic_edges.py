@@ -14,8 +14,8 @@ qualifying (entity, neighbour) pair.
     MATCH ()-[r:SIMILAR_TO]-() DELETE r   # purge previous run
     ... MERGE (a)-[r:SIMILAR_TO]->(b) SET r.score = <cosine>
 
-**Edge direction** mirrors ``CO_MENTIONED``: ``WHERE id(e1) < id(e2)`` ensures
-one canonical directed edge per undirected pair (lower internal Neo4j id →
+**Edge direction** mirrors ``CO_MENTIONED``: ``WHERE elementId(e1) < elementId(e2)`` ensures
+one canonical directed edge per undirected pair (lower element id →
 higher).  Because we only have ``canonical_id`` strings (not Neo4j internal
 ids) in the Python layer, we use lexicographic order on ``canonical_id`` as
 the tiebreaker — stable across runs.

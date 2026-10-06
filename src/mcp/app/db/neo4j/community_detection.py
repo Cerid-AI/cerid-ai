@@ -97,7 +97,7 @@ def detect_communities(
         session.run(
             """
             MATCH (e1:Entity)<-[:MENTIONS]-(a:Artifact)-[:MENTIONS]->(e2:Entity)
-            WHERE id(e1) < id(e2)
+            WHERE elementId(e1) < elementId(e2)
             WITH e1, e2, count(DISTINCT a) AS w
             MERGE (e1)-[r:CO_MENTIONED]->(e2)
             SET r.weight = w
