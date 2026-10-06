@@ -221,7 +221,13 @@ async def upload_file_endpoint(
         # Override filename in result with the original upload name
         result["filename"] = file.filename
 
-        if quick and result.get("artifact_id"):
+        if quick and result.get("status") == "duplicate":
+            # Ingest returned an EXISTING artifact (content-addressed ids), not
+            # a new note. Enriching it would retitle it and could move it to
+            # another domain on the strength of a re-pasted text; the note the
+            # user already has stays exactly as it is.
+            result["enrichment"] = "duplicate"
+        elif quick and result.get("artifact_id"):
             # The persist is already acknowledged; a queue that is down must
             # not turn a saved note into a failed save.
             from app.processor.jobs.quick_capture_enrich import enqueue_quick_capture_enrichment

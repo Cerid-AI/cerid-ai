@@ -119,6 +119,24 @@ class TestQuickMode:
         assert resp.status_code == 200
         assert resp.json()["enrichment"] == "unavailable"
 
+    def test_a_duplicate_is_acknowledged_but_never_re_enriched(self, deps, monkeypatch):
+        """Ingest is content-addressed: the same text returns the EXISTING
+        artifact's id with status duplicate. Enrichment on it would retitle
+        the note and could move it to another domain, so nothing is queued."""
+        import app.services.ingestion as ingestion_mod
+
+        def duplicate(text, domain, metadata, **kwargs):
+            return {"status": "duplicate", "artifact_id": "art-existing", "domain": "coding",
+                    "duplicate_of": "drill.md"}
+
+        monkeypatch.setattr(ingestion_mod, "ingest_content", duplicate)
+        resp = _make_client().post("/upload", files={"file": _NOTE}, params={"quick": "true"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["artifact_id"] == "art-existing"
+        assert body["enrichment"] == "duplicate"
+        assert deps.enqueue == []
+
     def test_default_mode_still_categorises_inline(self, deps):
         resp = _make_client().post("/upload", files={"file": _NOTE})
         assert resp.status_code == 200

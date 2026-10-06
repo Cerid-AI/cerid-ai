@@ -25,6 +25,7 @@
 //   (context: CanvasRenderingContext2D, data: ..., settings: ...) => void
 //   Return type: NodeHoverDrawingFunction (re-exported below for Agent B's use)
 
+import type { Attributes } from "graphology-types"
 import type { NodeHoverDrawingFunction } from "sigma/rendering"
 import type { MapTokens } from "@/components/subjects/constellation/map/community-layer"
 
@@ -55,7 +56,10 @@ export function resolveCanvasFont(root: Element): string {
  *     // On theme change (inside the setSetting loop that updates labelColor):
  *     sigma.setSetting("defaultDrawNodeHover", makeDrawNodeHover(currentTokens))
  */
-export function makeDrawNodeHover(tokens: MapTokens): NodeHoverDrawingFunction {
+export function makeDrawNodeHover<
+  N extends Attributes = Attributes,
+  E extends Attributes = Attributes,
+>(tokens: MapTokens): NodeHoverDrawingFunction<N, E> {
   return function drawNodeHover(context, data, settings) {
     const size = settings.labelSize
     const font = settings.labelFont

@@ -68,8 +68,13 @@ echo "::endgroup::"
 
 # Hub portal and desktop. Their suites sat red on main once and no job ran
 # them. `test` is already `vitest run`; `--run` keeps a future watch script
-# from hanging the job. No typecheck or build here: the web build is the
-# gateway image, and the desktop build is an Electron package.
+# from hanging the job.
+#
+# The portal's `build` is `tsc -b && vite build`, and until 2026-10-06 nothing
+# in CI ran it: the gateway serves a `dist/` built on the host (bind-mounted
+# into Caddy by stacks/gateway/docker-compose.yml), so a type error in the
+# portal reached main unseen. It runs here now. The desktop build is an
+# Electron package and stays out.
 for pkg in stacks/gateway/hub/web stacks/gateway/hub/desktop; do
   if [ ! -d "$pkg" ]; then
     echo "$pkg absent (internal-only mirror); skipped"
@@ -80,6 +85,9 @@ for pkg in stacks/gateway/hub/web stacks/gateway/hub/desktop; do
     cd "$pkg"
     npm ci --no-audit --no-fund
     npm test -- --run
+    if [ "$pkg" = stacks/gateway/hub/web ]; then
+      npm run build
+    fi
   )
   echo "::endgroup::"
 done

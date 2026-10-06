@@ -58,3 +58,15 @@ if (!("any" in AbortSignal)) {
     configurable: true,
   });
 }
+
+// vitest 5's `JestAssertion` no longer extends `jest.Matchers`, which is the
+// only interface `@types/jest-axe` augments, so the matcher is declared here.
+// The empty export makes this file a module: in a script file the block
+// below would be an ambient declaration that replaces vitest's types instead
+// of merging into them.
+export {};
+declare module "vitest" {
+  interface Matchers<R, T> {
+    toHaveNoViolations(): R;
+  }
+}

@@ -134,6 +134,40 @@ async def test_hype_hydration_applies_tenant_and_pending_scope(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_hype_on")
+async def test_hype_hydration_carries_the_consumer_record_type_scope_and_the_caller_filter() -> None:
+    """A consumer allowed one record_type in a domain (cerid-finance reads only
+    mail_financial_card rows of inbox) must not receive other rows of that
+    domain through a HyPE hit; the caller's own filter rides along too."""
+    import json
+
+    import config
+    from core.agents import query_agent
+    from core.retrieval.hype_index import hype_collection_name
+
+    base_name = config.collection_name("inbox")
+    base = _FakeBaseCollection({
+        "chunk-1": ("a mail body", {"filename": "mail.eml", "record_type": "mail_body"}),
+    })
+    hype = _FakeHypeCollection([
+        ("hype-1", "a question", {"source_chunk_id": "chunk-1"}),
+    ])
+    client = _FakeChroma({base_name: base, hype_collection_name(base_name): hype})
+
+    await query_agent._augment_with_hype(
+        query="q", results=[], chroma_client=client, domains=["inbox"],
+        metadata_filter={"source": "statement"},
+        domain_record_types={"inbox": ["mail_financial_card"]},
+    )
+
+    assert base.get_calls, "parent chunks were never fetched"
+    where = json.dumps(base.get_calls[0].get("where"), sort_keys=True)
+    assert '"record_type": "mail_financial_card"' in where, where
+    assert '"source": "statement"' in where, where
+    assert '"cerid_state": {"$ne": "pending"}' in where, where
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_hype_on")
 async def test_unhydratable_hype_hit_is_dropped() -> None:
     """A hit whose parent is out of scope must not reach the caller."""
     import config

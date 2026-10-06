@@ -2466,6 +2466,7 @@ async def _hydrate_hype_hits(
     coll_name: str,
     domain: str,
     best_by_parent: dict[str, float],
+    scope_where: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve HyPE question hits to their parent chunks, under request scope.
 
@@ -2477,8 +2478,11 @@ async def _hydrate_hype_hits(
     ``_exclude_pending(with_tenant_scope(...))`` filter the content path uses,
     and drop any hit whose parent that filter does not return.
     """
+    # ``scope_where`` is the request's own scope — the caller's metadata filter
+    # fused with the consumer's record_type allow for this domain — exactly
+    # what the content path applies; a HyPE hit must not widen it.
     where = exclude_folders(
-        _exclude_pending(with_tenant_scope(None)), _unsearchable_folder_ids(),
+        _exclude_pending(with_tenant_scope(scope_where)), _unsearchable_folder_ids(),
     )
     try:
         base_coll = await asyncio.to_thread(chroma_client.get_collection, coll_name)
@@ -2529,6 +2533,8 @@ async def _augment_with_hype(
     results: list[dict[str, Any]],
     chroma_client: Any | None,
     domains: list[str] | None,
+    metadata_filter: dict | None = None,
+    domain_record_types: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Augment retrieval results with HyPE (Hypothetical Prompt Embeddings).
 
@@ -2622,6 +2628,9 @@ async def _augment_with_hype(
             if best_by_parent:
                 hype_hits.extend(await _hydrate_hype_hits(
                     chroma_client, coll_name, _domain, best_by_parent,
+                    scope_where=_with_record_types(
+                        metadata_filter, (domain_record_types or {}).get(_domain),
+                    ),
                 ))
 
         if not hype_hits:
@@ -3203,6 +3212,8 @@ async def _agent_query_impl(
             results=results,
             chroma_client=chroma_client,
             domains=effective_domains,
+            metadata_filter=metadata_filter,
+            domain_record_types=domain_record_types,
         )
 
     from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
