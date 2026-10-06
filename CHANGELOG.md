@@ -4,20 +4,24 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
-### Fixed
+## [1.0.10] — 2026-10-06
 
-- **The vector-space probe sees a minority and does not freeze at boot.** It
-  read the first three chunks of each collection and compared a median, so on
-  the Studio it reported `ok` while a full walk found 1,075 of 7,495 chunks
-  (26% of `coding`) outside the serving space; and it ran once, so a server
-  that booted while the embedder was hung served `unverified` until the next
-  restart. It now samples twelve chunks per collection at evenly spaced
-  offsets, reports each collection's `sampled` / `out_of_space` / `fraction`
-  and flags one whose out-of-space share passes 10%, re-runs on the
-  invariants refresh cadence (`INVARIANTS_REFRESH_S`), and dates the verdict
-  with `checked_at`.
+### Added
+- **Quick capture acknowledges on persist.** `/upload?quick=true` saves the note at once with a provisional title and domain and returns; a processor job derives the title, categorises and files it, and the capture dialog shows "Filed as … in …" when the job's event arrives. A re-pasted text that matches an existing note is acknowledged as a duplicate and left exactly as it is. (#559, #572)
+- **Chat regenerate and a visible rename action.** The last assistant answer can be regenerated with the same retrieval and routing; the conversation row has a rename action that opens the inline editor the double-click used. (#559)
+- **Mail triage made true.** rspamd runs as a service of the stack (`CERID_RSPAMD_URL=http://rspamd:11333`); inbox stages never fall back to a cloud model unless `CERID_INBOX_CLOUD_FALLBACK=true`; the financial card is written to the `inbox` domain with a `record_types` consumer scope for cerid-finance; a remembered sender is still scanned, and a rejecting scan, a DMARC failure or a silent scanner sets the pin aside; Apple Mail reports that it runs through the desktop app, decodes MIME and reads the flag bits; undo restores Gmail's UNREAD and Outlook's prior categories. (#557)
+- **Eval gates that can fail.** The beta harness runs against a named target (`BETA_TARGET=live|isolated`); entity recall is best of three with a load probe and a floor; the retrieval benchmark carries near-topic distractors with floors derived from the seed (NDCG@5 ≥ 0.80, MRR ≥ 0.70); faithfulness is judged per answer with parse failures excluded; a routing downgrade fails. The recall fixtures are annotated to the extractor's proper-noun contract. (#558, #560)
+- **Dead external sources read as degraded** in `GET /data-sources`, with the counts; PubChem passes the domain gate on its own relevance check; DuckDuckGo is sent one topic. (#559)
+- `/system/storage` reports Neo4j's transaction-log size beside the store size. (#559)
 
 ### Changed
+- **Embedding stamps come from the serving embedder**, with a restamp job (`POST /admin/kb/reembed {"restamp_only": true}`) that relabels vectors already in the serving space and counts the rest; the vector-space probe samples twelve chunks per collection at spread offsets, reports per-collection fractions and re-runs on the invariants refresh with `checked_at`. (#555, #560)
+- **Memory promotion requires entailment**: the fetched source must support the claim; a URL match alone no longer promotes. (#555)
+- **Private mode is a written contract** (`docs/PRIVATE_MODE.md`, `private-mode-levels.json`); the capability text, the settings page and the code agree. (#555)
+- Deleting a conversation deletes its transcript artifact; the layout-aware parser hashes extracted text for `.eml`, `.pdf` and `.docx`; workflow conditions fail closed; the webhook URL endpoint is POST-only with `no-store`; the unmounted OAuth router is retired. (#555)
+- `ingest_recovery` reads the graph before repairing it and runs every five minutes; Neo4j's transaction-log retention is `2 days 1G`; the Chroma persist directory is mounted and measured. (#555, #559)
+- Spotlight donates the title and domain only and purges the index on sign-out; the dormant Stripe webhook is removed; `sso_saml` is advertised only in multi-user mode; the desktop quit dialog asks about export only when a sync is unsynced. (#559)
+- `make push` runs the full pre-push gate when the target is `main`; the beta eval tier's exit status is no longer overwritten; CI pulls the stack's public images keychain-free before `compose up`. (#552, #557)
 
 - **The desktop toolchain moves to Electron 44.** Both desktop packages
   (`packages/desktop` and the Hub desktop) run Electron 44.5.1, inside the
@@ -30,6 +34,31 @@ All notable changes to cerid-ai are documented here.
   pinned it is gone). Both native modules rebuilt against Electron 44's ABI
   149 with the existing `nan` 2.28 floor; `better-sqlite3` keeps using its
   N-API prebuilds.
+- **vitest 5 and TypeScript 7 where the toolchain allows it.** vitest moves
+  from 4.1.11 to 5.0.3 in the web app, the widget, the TypeScript SDK and the
+  Hub portal with no test changed; the jest-axe and `toBeAccessible` matchers
+  are declared on vitest's `Matchers` interface, which vitest 5's type graph
+  requires. The Hub portal and the TypeScript SDK take TypeScript 7.0.2 (the
+  native compiler). The SDK is built by tsdown instead of the unmaintained
+  tsup, with the same two output files and the same exported surface. CI now
+  builds the Hub portal, which it had only ever tested. The web app and the
+  widget stay on TypeScript 6 until typescript-eslint and vite-plugin-dts
+  support 7.
+
+### Fixed
+- Quick capture no longer enriches an existing artifact on duplicate content. (#572)
+- The review script's redaction list is a setting (`CERID_INBOX_REVIEW_REDACT`), not a hardcoded domain list. (#552)
+
+- **The vector-space probe sees a minority and does not freeze at boot.** It
+  read the first three chunks of each collection and compared a median, so on
+  the Studio it reported `ok` while a full walk found 1,075 of 7,495 chunks
+  (26% of `coding`) outside the serving space; and it ran once, so a server
+  that booted while the embedder was hung served `unverified` until the next
+  restart. It now samples twelve chunks per collection at evenly spaced
+  offsets, reports each collection's `sampled` / `out_of_space` / `fraction`
+  and flags one whose out-of-space share passes 10%, re-runs on the
+  invariants refresh cadence (`INVARIANTS_REFRESH_S`), and dates the verdict
+  with `checked_at`.
 
 ## [1.0.9] — 2026-10-02
 

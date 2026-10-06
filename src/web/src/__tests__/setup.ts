@@ -57,6 +57,15 @@ vi.mock("@testing-library/react", async () => {
 // surfaced in the 2026-04-23 Settings UX walkthrough.
 expect.extend(toHaveNoViolations)
 
+// vitest 5's `JestAssertion` no longer extends `jest.Matchers`, which is the
+// only interface `@types/jest-axe` augments, so the matcher is declared here.
+declare module "vitest" {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- merging requires vitest's parameter list
+  interface Matchers<R, T> {
+    toHaveNoViolations(): R
+  }
+}
+
 // Global mock for sonner so any test that renders a component using
 // toast (or the <Toaster /> in main.tsx) doesn't throw in jsdom.
 vi.mock("sonner", () => ({
