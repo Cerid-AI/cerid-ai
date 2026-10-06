@@ -88,7 +88,10 @@ jobs:
             if printf '%s\n' "$files" | grep -qE "$1"; then echo true; else echo false; fi
           }
           web=$(area '^(src/web/|scripts/ci/frontend|scripts/check-bundle-size\.sh$|\.github/workflows/ci\.yml$)')
-          mcp=$(area '^(src/mcp/|scripts/|pyproject\.toml$|\.github/workflows/ci\.yml$)')
+          # `mcp` is the Python side as a whole: the MCP server, the scripts
+          # the gate probes test, and the stacks/ services whose tests ride the
+          # same `test` job (stacks/sso, stacks/mlx-inference).
+          mcp=$(area '^(src/mcp/|scripts/|stacks/|pyproject\.toml$|\.github/workflows/ci\.yml$)')
           packages=$(area '^(packages/|scripts/ci/packages\.sh$|\.github/workflows/ci\.yml$)')
           echo "changed files:"; printf '%s\n' "$files"
           {
@@ -209,6 +212,7 @@ jobs:
         # until 2026-08-04.
         run: python -m pytest scripts/tests/ -q
       - name: Sign-in service tests (stacks/sso)
+        if: needs.changes.outputs.mcp == 'true'
         # Stdlib only. Hand-ported from the canonical scripts/ci/test.sh.
         run: python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
       # The MLX server (stacks/mlx-inference) has its own pinned packages, so its
@@ -217,9 +221,11 @@ jobs:
       # failure instead of a skip. Hand-ported from the canonical
       # scripts/ci/test.sh; this file is maintained by hand on this side.
       - uses: actions/setup-python@v7
+        if: needs.changes.outputs.mcp == 'true'
         with:
           python-version: "3.12"
       - name: MLX server tests (stacks/mlx-inference)
+        if: needs.changes.outputs.mcp == 'true'
         run: |
           python -m venv "$RUNNER_TEMP/mlx-stack-venv"
           "$RUNNER_TEMP/mlx-stack-venv/bin/pip" install -q -r stacks/mlx-inference/requirements-test.txt
@@ -464,7 +470,7 @@ jobs:
     # merge queue (see the `merge_group` note at the top of this file), so
     # "merge-only" meant `push: main`, which is AFTER the merge: the job could
     # report a broken image but never stop one. It also meant the widget-in-image
-    # assertion below could not fail a pull request.
+    # assertion in scripts/ci/docker-gate.sh could not fail a pull request.
     #
     # So it moves in front of the merge and stays behind it as well. On
     # pull_request it blocks; on push:main it still covers the direct
