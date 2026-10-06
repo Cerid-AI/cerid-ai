@@ -16,9 +16,12 @@ the live OpenRouter path. The default caller wraps
 """
 from __future__ import annotations
 
+import ipaddress
+import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Iterable, Literal
 
 from config.settings import ENTITY_MIN_CONFIDENCE
@@ -113,15 +116,36 @@ def _is_doc_path_like(name: str) -> bool:
     return "/" in name and ends_with_doc_extension(name)
 
 
+def _is_ipv4_address(name: str) -> bool:
+    try:
+        ipaddress.IPv4Address(name)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_iso_calendar_date(name: str) -> bool:
+    """True for ``YYYY-MM-DD`` naming a real calendar day ("2025-04-20")."""
+    try:
+        datetime.strptime(name, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
 def _is_version_token(name: str) -> bool:
     """True when the WHOLE name is a version string.
 
     Shape: optional "v"/"ver"/"version" prefix, then digits joined by
     ``.`` / ``-`` / ``_`` / space, with at least one separator between digit
     groups ("3.6", "v3.6.1", "version-3-6"). A bare number with no separator
-    ("2024", "V8") is admitted — it may be a year or a product name. Plain
-    string walk; no regex (DUO138).
+    ("2024", "V8") is admitted — it may be a year or a product name. An IPv4
+    address ("10.0.0.1") and an ISO calendar date ("2025-04-20") share the
+    shape but are not versions; both are admitted. Plain string walk; no
+    regex (DUO138).
     """
+    if _is_ipv4_address(name) or _is_iso_calendar_date(name):
+        return False
     lowered = name.lower()
     rest = lowered
     for prefix in _VERSION_PREFIXES:
@@ -473,7 +497,7 @@ def is_junk_quantity_name(name: str, entity_type: str) -> bool:
 # Prompt + extraction
 # ---------------------------------------------------------------------------
 
-# NO NAMED EXAMPLES IN THIS PROMPT. The type list used to read
+# EVERY NAME IN THE PROMPT IS BAIT. The type list used to read
 # `PERSON: real individuals (e.g., "Elon Musk", "Tim Cook")` and so on across
 # every type, and the model copied those illustrations straight into its output
 # as if it had found them in the text. Reproduced 2026-08-03 on a Python
@@ -489,6 +513,49 @@ def is_junk_quantity_name(name: str, entity_type: str) -> bool:
 # Types are described by their defining property instead. Any future edit that
 # reintroduces a named example must keep _drop_unsupported() below, which is
 # what actually enforces this.
+#
+# Worked examples came back under ruling D27-A (2026-10-06). Described by
+# property alone, gemma-4-26b-a4b returned {"entities": []} for a database
+# note naming its index types, a garden log naming two cultivars and a date,
+# and a network note naming a VLAN and the router's address. The examples show
+# those classes on invented names, as prior conversation turns: one example
+# inlined into the instructions still left three technical notes empty, one
+# example turn left the network note empty, and a technical turn plus a
+# personal-note turn emptied none. Two tests hold the line: every example name
+# echoed onto an unrelated document is dropped by _drop_unsupported(), and no
+# message names anything the entity-recall fixtures expect.
+_PROMPT_EXAMPLES: tuple[tuple[str, tuple[tuple[str, EntityType], ...]], ...] = (
+    (
+        "The Quillfeather ingest service writes Avro files into an HNSW index, "
+        "keeps an LSM tree for the hot set and returns an X-Quillfeather-Shard "
+        "header; a retry waits 30 seconds. The gateway at 192.168.40.1 serves "
+        "VLAN 105.",
+        (
+            ("Quillfeather", "ASSET"),
+            ("Avro", "OTHER"),
+            ("HNSW", "OTHER"),
+            ("LSM tree", "OTHER"),
+            ("X-Quillfeather-Shard", "OTHER"),
+            ("192.168.40.1", "OTHER"),
+            ("VLAN 105", "OTHER"),
+        ),
+    ),
+    (
+        "On 2023-11-07 (November 7, 2023) I planted Brandywine seedlings, "
+        "finished \"The Saltmarsh Almanac\" and booked the ferry to Hailuoto "
+        "(Karlö) in Finland.",
+        (
+            ("2023-11-07", "DATE"),
+            ("November 7, 2023", "DATE"),
+            ("Brandywine", "OTHER"),
+            ("The Saltmarsh Almanac", "OTHER"),
+            ("Hailuoto", "LOC"),
+            ("Karlö", "LOC"),
+            ("Finland", "LOC"),
+        ),
+    ),
+)
+
 _EXTRACTION_PROMPT = """\
 Extract named entities from the text. Output ONLY valid JSON in the exact \
 schema below.
@@ -501,16 +568,21 @@ Types (use ONLY these):
 - ORG: named companies, institutions, agencies or governments
 - ASSET: named tradeable instruments, products or models
 - EVENT: named occurrences with a proper-noun identity
-- DATE: discrete named time periods
-- LOC: named physical or political places
-- OTHER: significant proper nouns that don't fit above
+- DATE: calendar dates and discrete named time periods, each written form \
+as it appears (an ISO date and the same date spelled out are two entries)
+- LOC: named physical or political places, including countries, islands and \
+their abbreviations or alternate names (each name is its own entry)
+- OTHER: other proper nouns and named identifiers: named standards, formats, \
+data types, index and algorithm names, protocol header names, IP addresses \
+and network identifiers, plant cultivars, titled works
 
 Schema:
 {{"entities": [{{"name": "<verbatim span>", "type": "<TYPE>", "confidence": <0.0-1.0>}}, ...]}}
 
 Skip:
 - Common nouns and pronouns
-- Generic temporal markers
+- Quantities, measurements, durations, money and times of day
+- Generic or relative temporal markers
 - Single first names without a surname, unless globally unambiguous
 
 Text:
@@ -521,17 +593,28 @@ Text:
 JSON:
 """
 
+_SYSTEM_MESSAGE = (
+    "You are a precise named-entity extractor. Always respond "
+    "with valid JSON matching the requested schema. Never add "
+    "explanatory prose."
+)
+
+
+def _example_turns() -> list[dict[str, str]]:
+    turns: list[dict[str, str]] = []
+    for text, entities in _PROMPT_EXAMPLES:
+        answer = {"entities": [
+            {"name": name, "type": etype, "confidence": 1.0} for name, etype in entities
+        ]}
+        turns.append({"role": "user", "content": _EXTRACTION_PROMPT.format(text=text)})
+        turns.append({"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)})
+    return turns
+
 
 def _build_messages(text: str) -> list[dict[str, str]]:
     return [
-        {
-            "role": "system",
-            "content": (
-                "You are a precise named-entity extractor. Always respond "
-                "with valid JSON matching the requested schema. Never add "
-                "explanatory prose."
-            ),
-        },
+        {"role": "system", "content": _SYSTEM_MESSAGE},
+        *_example_turns(),
         {"role": "user", "content": _EXTRACTION_PROMPT.format(text=text)},
     ]
 

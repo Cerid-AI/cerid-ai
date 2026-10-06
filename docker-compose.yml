@@ -59,7 +59,7 @@ services:
     # Direct upgrade from 5.26 is supported (no intermediate version, no
     # store-format change between 4.4 and 2026.x; existing databases
     # default to Cypher 5 on first 2026.x boot — backward compatible).
-    image: neo4j:2026.04.0-community
+    image: neo4j:2026.09.0-community
     ports:
       - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
       - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
@@ -72,7 +72,7 @@ services:
       # accepted on 5.x but rejected on 2026.x ("not a known plugin";
       # accepted options: apoc, apoc-extended, bloom, fleet-management,
       # genai, graph-data-science). Verified empirically against
-      # neo4j:2026.04.0-community.
+      # neo4j:2026.04.0-community and again against neo4j:2026.09.0-community.
       - NEO4J_PLUGINS=["apoc","graph-data-science"]
       # Heap bumped 1G -> 4G for GDS in-memory graph projections (Leiden
       # community detection planned for E.4b; loads the entire graph into
@@ -105,7 +105,7 @@ services:
           # GDS Leiden peak before the OOM-killer fires.
           memory: 8G
     healthcheck:
-      # wget IS present in neo4j:2026.04.0-community (verified). Bumped
+      # wget IS present in neo4j:2026.09.0-community (verified, as it was in 2026.04). Bumped
       # start_period 30s -> 60s — calver+APOC+GDS init takes longer than
       # 5.26+APOC alone (GDS catalog registration adds 5-8s on cold boot).
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
@@ -161,7 +161,7 @@ services:
   redis:
     container_name: ai-companion-redis
     logging: *default-logging
-    image: redis:7.4.8-alpine
+    image: redis:8.10.2-alpine
     ports:
       - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
     volumes:

@@ -471,7 +471,7 @@ ensure_redis_aof_healthy() {
     local data_dir="$1"
     local aof_dir="$data_dir/appendonlydir"
     # Keep this in step with the redis image pinned in docker-compose.yml.
-    local redis_image="redis:7.4.8-alpine"
+    local redis_image="redis:8.10.2-alpine"
     [ -f "$aof_dir/appendonly.aof.manifest" ] || return 0   # no multi-part AOF yet
     command -v docker >/dev/null 2>&1 || return 0
 

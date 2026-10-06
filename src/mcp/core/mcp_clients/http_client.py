@@ -61,7 +61,7 @@ class MCPHTTPClient:
     async def _session_scope(self) -> AsyncIterator[Any]:
         """One initialized session, opened and closed inside the CALLER's task.
 
-        Sessions are deliberately NOT reused across calls. ``streamablehttp_client``
+        Sessions are deliberately NOT reused across calls. ``streamable_http_client``
         hands back anyio memory-object streams owned by the task group that
         entered it; the moment that task finishes — a FastAPI request handler,
         or the startup lifespan — anyio closes them. A later call from a
@@ -77,18 +77,27 @@ class MCPHTTPClient:
         # Lazy import — the ``mcp`` package is heavy and imports openssl
         # primitives that some CI environments don't have without extras.
         try:
+            import httpx2
             from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
+            from mcp.client.streamable_http import streamable_http_client
         except ImportError as exc:
             raise RuntimeError(
                 f"mcp package not installed or incompatible: {exc}. "
-                "Install with `pip install 'mcp>=1.27'`."
+                "Install with `pip install 'mcp>=2.2'`."
             ) from exc
 
         async with AsyncExitStack() as stack:
-            # streamablehttp_client returns (read_stream, write_stream, terminator)
-            read_stream, write_stream, _terminator = await stack.enter_async_context(
-                streamablehttp_client(self.url, headers=self._headers or None)
+            # mcp 2 takes headers and timeouts on an httpx2 client rather than
+            # as arguments; the read timeout stays at the SDK's 300 s because a
+            # server may hold a response stream open across a slow tool call.
+            http_client = await stack.enter_async_context(
+                httpx2.AsyncClient(
+                    headers=self._headers or None,
+                    timeout=httpx2.Timeout(self.timeout, read=300.0),
+                )
+            )
+            read_stream, write_stream = await stack.enter_async_context(
+                streamable_http_client(self.url, http_client=http_client)
             )
             session = await stack.enter_async_context(
                 ClientSession(read_stream, write_stream)

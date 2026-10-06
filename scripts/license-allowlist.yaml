@@ -28,9 +28,9 @@ external_services:
     license: "GPL-3.0"
     reason: >
       Runs as a separate Docker container (the project's neo4j:*-community
-      image -- currently neo4j:2026.04.0-community in docker-compose.yml
-      and neo4j:5.26.21-community in stacks/infrastructure/docker-compose.yml;
-      check both files for the live tag, it moves independently of this
+      image -- currently neo4j:2026.09.0-community in docker-compose.yml
+      and in stacks/infrastructure/docker-compose.yml, held equal by
+      scripts/tests/test_compose_store_contracts.py; the tag moves independently of this
       entry), started/stopped independently of the application process
       and reached only over the network (bolt + http). It is never imported,
       statically or dynamically linked,

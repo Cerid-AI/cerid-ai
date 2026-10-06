@@ -14,6 +14,7 @@ on the live report.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -83,3 +84,22 @@ def test_neo4j_transaction_log_retention_is_bounded_and_identical_in_both_stacks
     assert infra, f"stacks/infrastructure/docker-compose.yml does not set {key}"
     assert root == infra, f"retention policies differ: {root!r} vs {infra!r}"
     assert root not in {"true", "keep_all"}
+
+
+def test_redis_image_is_pinned_identically_in_every_place_that_runs_it() -> None:
+    """Three places name the Redis image: both compose files start the store
+    from it, and ``scripts/lib/healthcheck.sh`` runs ``redis-check-aof`` from
+    it against the store's AOF before the stack starts. Dependabot watches
+    only the compose files, so the healthcheck pin falls behind silently and
+    an AOF written by a newer server is then checked by an older tool."""
+    image = re.compile(r"redis:\d[\w.\-]*")
+    root = _services()["redis"]["image"]
+    legacy = yaml.safe_load((REPO / "stacks" / "infrastructure" / "docker-compose.yml").read_text())
+    infra = legacy["services"]["redis"]["image"]
+    healthcheck = (REPO / "scripts" / "lib" / "healthcheck.sh").read_text()
+    match = re.search(r'redis_image="(' + image.pattern + r')"', healthcheck)
+
+    assert match, "healthcheck.sh no longer pins redis_image"
+    assert image.fullmatch(root), root
+    assert root == infra, f"compose files disagree on the redis image: {root!r} vs {infra!r}"
+    assert root == match.group(1), f"healthcheck.sh pins {match.group(1)!r}, compose pins {root!r}"

@@ -86,7 +86,7 @@ class ChromaNeo4jRetriever(ExternalRetriever):
             default database).
     """
 
-    VERIFY_NEO4J_VERSION = False  # Cerid uses neo4j 2026.04 calver; lib's 5.x check is too narrow
+    VERIFY_NEO4J_VERSION = False  # Cerid uses neo4j 2026.x calver; lib's 5.x check is too narrow
 
     def __init__(
         self,
