@@ -307,8 +307,19 @@ def remove_content(
     if not info.get("deleted"):
         return RemovalResult(found=False, artifact_id=artifact_id)
 
-    chunk_ids = info.get("chunk_ids") or []
+    from app.sync.tombstones import record_tombstone
+
+    chunk_ids = list(info.get("chunk_ids") or [])
     domain = info.get("domain") or ""
+    record_tombstone(
+        artifact_id,
+        chunk_ids,
+        domain=domain,
+        filename=info.get("filename") or "",
+    )
+    for child_id in info.get("attachment_ids") or []:
+        record_tombstone(str(child_id), [], domain=domain, filename="")
+
     chroma = chroma or get_chroma()
     artifact_ids = [artifact_id, *(info.get("attachment_ids") or [])]
     removed = _fan_out_removal(chunk_ids, domain, chroma, artifact_ids)

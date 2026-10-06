@@ -113,7 +113,7 @@ Thumbs.db
 *.csv
 /archive/
 cerid-archive/
-inbox/
+/inbox/
 .worktrees/
 backups/
 

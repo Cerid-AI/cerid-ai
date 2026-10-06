@@ -137,11 +137,16 @@ class MemoryEntityExtractionJob(BaseJob):
         if not text.strip():
             return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "empty_text"}
 
-        entities = await extract_entities_from_text(
-            text,
-            llm_caller=default_llm_caller,
-            max_chars=_MAX_CHARS,
-        )
+        from core.agents.entity_extraction import EntityExtractionError
+
+        try:
+            entities = await extract_entities_from_text(
+                text,
+                llm_caller=default_llm_caller,
+                max_chars=_MAX_CHARS,
+            )
+        except EntityExtractionError:
+            return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "extraction_failed"}
         await progress_cb(0.7)
 
         if not entities:

@@ -20,8 +20,9 @@ Access** for the Cerid desktop app.
    process start; without a restart Cerid will still see "Needs access".
 
 Once relaunched, open **Connectors → Apple Mail** and click **Enable**.
-The first scan walks every account and mailbox you have configured in
-Mail.app.
+Address discovery does not run on that open. Click **Find addresses** on
+the mail setup panel; that is the only control that scans Mail for
+addresses.
 
 ## What gets ingested
 
@@ -38,11 +39,12 @@ For each message:
 
 Each message becomes a single artifact tagged with `source: apple_mail`.
 
-> **Status:** the connector currently surfaces recent message **headers**
-> (subject / sender / date / mailbox) via the `ceridmail` helper's `scan`. Full
-> `.emlx` body extraction + query-side search land with the helper's body walk —
-> no reconfiguration is needed when it does; the same Full Disk Access grant
-> covers it.
+> **Status:** `ceridmail scan` reads headers and a bounded plain-text body
+> from the `.emlx` files Mail.app already wrote. That read does not rewrite
+> `.emlx`. Filing, flags, mark-read, archive, and reply drafts go through
+> Apple events and need a separate Automation grant for Mail. Cerid does
+> not launch Mail. The Full Disk Access grant covers the read. It does not
+> cover the Apple events.
 
 Recipient extraction (`To`, `Cc`, `Bcc`) is deferred to v1.1 — current
 ingestion focuses on the fields that drive retrieval quality (subject +
@@ -78,7 +80,20 @@ The connector reads from (read-only):
 
 `V10` is the current Mail.app store version on supported macOS releases;
 the connector falls back to older `Vn` directories if `V10` is absent.
-The connector never writes to these paths.
+The connector never writes to these paths. Filing does not write `.emlx`
+either. It sends Apple events to Mail.app, which requires **Automation**
+permission for Mail (System Settings → Privacy & Security → Automation),
+in addition to Full Disk Access.
+
+Flags: urgent red, actionable orange, personal blue, newsletter green,
+promo purple. Archive is Mail's Archive mailbox. With folder sorting on
+for the account, keep files into `Cerid/Urgent`, `Cerid/Action`,
+`Cerid/Personal`, `Cerid/Newsletter`, or `Cerid/Promo`. With it off, keep
+sets the flag and does not move. Junk and Trash are never destinations.
+
+If Mail is not running, `ceridmail` exits 75 (`mail_not_running`). Cerid
+queues the action and does not launch Mail. If Automation is denied, it
+exits 78 (`automation_denied`) and does not queue.
 
 ## How retrieval surfaces it
 
@@ -92,7 +107,14 @@ retrieved, plus the mailbox path it came from.
 **"Needs access" banner won't go away.**
 Grant Full Disk Access to Cerid, then **quit and relaunch the app**.
 Toggling the permission while Cerid is running does not take effect
-until restart.
+until restart. Full Disk Access is the read grant. Filing asks for a
+second grant, Automation for Mail. A denied Automation grant is
+`automation_denied` (exit 78) and the action is not queued.
+
+**Filing waits and Mail never opens.**
+Exit 75 (`mail_not_running`) means Mail was not running. Cerid queues
+the action and does not launch Mail. Open Mail yourself, then undo or
+apply again.
 
 **"0 messages ingested" after a successful scan.**
 Has Mail.app been opened on this Mac at least once and finished an

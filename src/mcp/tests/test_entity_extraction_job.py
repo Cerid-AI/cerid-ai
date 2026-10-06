@@ -212,6 +212,29 @@ class TestRunPipelineSkipLogging:
         ]
         assert len(skip_lines) == 1
 
+    async def test_extraction_failure_is_a_skip(self):
+        from core.agents.entity_extraction import EntityExtractionError
+
+        job = _make_job()
+        with ExitStack() as stack:
+            stack.enter_context(patch(
+                "app.processor.jobs.entity_extraction.EntityExtractionJob._fetch_domain",
+                return_value="general",
+            ))
+            stack.enter_context(patch(
+                "app.processor.jobs.entity_extraction.EntityExtractionJob._fetch_chunks",
+                return_value=(["c1"], ["some text"], [{}]),
+            ))
+            stack.enter_context(patch("app.deps.get_neo4j", return_value=object()))
+            stack.enter_context(patch("app.deps.get_chroma", return_value=object()))
+            stack.enter_context(patch(
+                "core.agents.entity_extraction.extract_entities_from_text",
+                new=AsyncMock(side_effect=EntityExtractionError("json parse failed")),
+            ))
+            result = await job.run(_noop_progress)
+
+        assert result.metadata.get("skipped") == "extraction_failed"
+
 
 # ---------------------------------------------------------------------------
 # run() — failure path

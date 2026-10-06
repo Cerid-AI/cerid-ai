@@ -26,6 +26,13 @@ python -m pytest scripts/tests/ -q
 # The edge sign-in service (stacks/sso): stdlib only, so the suite's venv runs it.
 python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
 
+# Hub collector. Stdlib plus pytest; the modules import siblings, so the
+# working directory is the package.
+(
+  cd stacks/gateway/hub/collector
+  python -m pytest -q -p no:cacheprovider
+)
+
 # The Studio MLX server (stacks/mlx-inference). Its own venv: mlx-lm pulls
 # transformers, which must not reshuffle the pins the suite above ran against.
 # MLX runs on Linux CPUs here; STRICT turns a dependency that failed to install

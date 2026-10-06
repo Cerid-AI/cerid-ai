@@ -52,6 +52,10 @@ def test_mcp_tools_registered():
     from app.tool_registry import TOOL_REGISTRY
     assert "pkb_inbox_triage" in TOOL_REGISTRY
     assert "pkb_inbox_filter" in TOOL_REGISTRY
+    assert "pkb_inbox_apply" in TOOL_REGISTRY
+    assert "pkb_inbox_undo" in TOOL_REGISTRY
+    assert "pkb_inbox_sender_pin" in TOOL_REGISTRY
+    assert "pkb_inbox_rule_upsert" in TOOL_REGISTRY
 
 
 def test_schedule_setting_exposed():
@@ -70,3 +74,23 @@ def test_scheduler_job_function_callable():
 
     from app.scheduler import _run_inbox_triage
     assert inspect.iscoroutinefunction(_run_inbox_triage)
+
+
+def test_inbox_core_modules_do_not_import_app():
+    """The decision core and the triage agent stay free of app/."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "core" / "agents"
+    offenders: list[str] = []
+    for path in sorted(root.glob("inbox_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            module = ""
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+            elif isinstance(node, ast.Import):
+                module = ".".join(alias.name for alias in node.names)
+            if module == "app" or module.startswith("app."):
+                offenders.append(f"{path.name}:{getattr(node, 'lineno', 0)}:{module}")
+    assert offenders == []

@@ -34,10 +34,14 @@ not inside the Cerid backend:
 - AuthN to Microsoft: MSAL device-code flow, owned entirely by the
   sibling container. The Cerid backend never sees Microsoft refresh
   tokens.
-- Tools called: `list-mail-messages` (`GET /me/messages`, scope
-  `Mail.Read`) and `get-calendar-view` (`GET /me/calendarView`, scope
-  `Calendars.Read`). Not `search-messages` / `list-calendar-events` —
-  the first does not exist and the second takes no date parameters.
+- Tools called for search: `list-mail-messages` (`GET /me/messages`) and
+  `get-calendar-view` (`GET /me/calendarView`, scope `Calendars.Read`).
+  Not `search-messages` / `list-calendar-events` — the first does not
+  exist and the second takes no date parameters. Mail scope is
+  `Mail.Read` until inbox actions are on, then `Mail.ReadWrite`.
+  `Mail.Send` is never requested. Filing uses the sibling's category
+  update and move tools; a reply draft uses its reply-draft tool. There
+  is no send and no delete on this path.
 
 Unlike the Google connector, **no OAuth client setup is required**. The
 ms-365-mcp-server image ships with a public MSAL client registration
@@ -99,12 +103,15 @@ differently:
 The command prints a short code and a URL. Open
 [microsoft.com/devicelogin](https://microsoft.com/devicelogin) in a
 browser, paste the code, complete Microsoft sign-in, and grant the
-requested Mail/Calendar read scopes.
+requested scopes. With inbox actions off the sibling asks for `Mail.Read`
+and `Calendars.Read`. With `CERID_INBOX_ACTIONS_ENABLED` on, mail is
+`Mail.ReadWrite`. `Mail.Send` is not in the grant.
 
 The resulting token is cached to `/data/token-cache.json` inside the
 container, backed by the `ms365-mcp-data` named volume, so the login
-survives container recreates and rebuilds. You do not need to repeat this
-step unless you revoke the grant from your Microsoft account settings.
+survives container recreates and rebuilds. There is one Graph token
+store. Repeat this step when you revoke the grant, and when you turn
+inbox actions on — the router does not start that re-login.
 
 ## Enable in Cerid
 
@@ -142,8 +149,38 @@ lightweight metadata may be cached for deduplication.
 - **Refresh tokens stay in `/data/token-cache.json`** (the
   `ms365-mcp-data` volume), never in the Cerid backend's memory or its KB
   stores.
-- **No background polling.** The connector only contacts Microsoft Graph
-  when a user query triggers it.
+- **Chat search is on demand.** A chat question contacts Microsoft Graph
+  only when retrieval asks. Inbox triage is the exception: when both
+  gates in `docs/PRO_INBOX_TRIAGE.md` are open, Cerid reads recent unread
+  mail on that cadence.
+
+## Inbox actions
+
+Off by default. Set `CERID_INBOX_ACTIONS_ENABLED=true` (or `1`) and
+**recreate** the sibling. A restart is not enough. With the flag on, the
+container drops `--read-only` and the allowed scopes become
+`Mail.ReadWrite` and `Calendars.Read` unless `Mail.ReadWrite` is already
+in `MS365_MCP_ALLOWED_SCOPES`. `Mail.Send` is not added.
+
+Filing sets the Outlook category, then moves. The actionable folder and
+category name is `Cerid/Action`. The other names are `Cerid/Urgent`,
+`Cerid/Personal`, `Cerid/Newsletter`, and `Cerid/Promo`. Junk and Deleted
+Items are not destinations.
+
+List results copy categories, and a well-known folder (`inbox`,
+`archive`, `drafts`, `sentitems`), onto the message when Graph includes
+them. A folder id that is a GUID is not copied. A correction is learned
+only when that metadata is present, and the unread triage fetch often
+will not see a message you already archived.
+
+Recreate the backend after the flag change so it reads the new
+environment. `docker compose restart` is not enough:
+
+```bash
+docker compose up -d --no-deps mcp-server
+```
+
+Re-consent with the §3 login after the sibling has been recreated.
 
 ## Troubleshooting
 
@@ -156,3 +193,4 @@ lightweight metadata may be cached for deduplication.
 | Graph answers 401 / `InvalidAuthenticationToken` | Not a bearer mismatch — the sibling does not check the bearer, it forwards it to Graph, so Cerid's static hex token is what Graph rejects when no device-code login has been completed. Run the §3 login. |
 | Queries return zero results with no error | The sibling reports an unknown tool or a dropped parameter as a normal result carrying `isError`, not an exception. Confirm the tool names are `list-mail-messages` / `get-calendar-view` and that `MS365_MCP_ALLOWED_SCOPES` is **whitespace**-separated — a comma-separated value is read as one scope that matches nothing, and every mail and calendar tool is filtered out. |
 | Login token disappears after `docker compose down -v` | The `-v` flag drops the `ms365-mcp-data` volume. Re-run the §3 login to re-issue the device code. |
+| Actions flag is set and Graph still answers 403 on a category or move | The sibling is still `--read-only`, or the token is still `Mail.Read`. Recreate the sibling, then repeat the §3 login. A restart keeps the old command. |

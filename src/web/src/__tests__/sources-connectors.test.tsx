@@ -28,6 +28,24 @@ vi.mock("@/lib/api/email", () => ({
   pollEmailNow: vi.fn(),
   deleteEmailSource: vi.fn(),
 }))
+vi.mock("@/lib/api/inbox", () => ({
+  fetchInboxSetup: vi.fn(async () => ({
+    actions_enabled: false,
+    background_model: "",
+    chat_model: "",
+    accounts: [],
+    proposals: [],
+    recent: [],
+    pins: [],
+  })),
+  addInboxAccount: vi.fn(),
+  updateInboxAccount: vi.fn(),
+  removeInboxAccount: vi.fn(),
+  applyInbox: vi.fn(),
+  undoInbox: vi.fn(),
+  skipInbox: vi.fn(),
+  discoverInbox: vi.fn(async () => ({ gmail: [], outlook: [], apple_mail: [], error: "" })),
+}))
 import { listIngestionSources, listSourceKinds } from "@/lib/api/sources"
 import { listConnectors } from "@/lib/api/connectors"
 import { fetchEmailStatus } from "@/lib/api/email"

@@ -3,15 +3,15 @@
 # tasks/2026-09-02-audit-findings.json). Backend twin of the ESLint rule
 # cerid/no-error-as-empty-response.
 #
-# Format: <path>:<lineno>  # <one-line reason>
+# Format: <path>:<function>  # <one-line reason>
 # Shrink-only — re-raising, or adding a degraded/status/reason sibling to the
 # returned payload, removes the line; a stale entry fails the gate.
 #
 # Regenerate (preserves reasons for still-live keys) with:
 #   python scripts/lint-degraded-is-not-empty.py --update
 
-src/mcp/app/processor/router.py:189  # G-E seed 2026-09-03 — processor_recent() returns [] when the queue read raises; 'no recent jobs' and 'Redis is down' are the same response.
-src/mcp/app/routers/agents.py:1148  # G-E seed 2026-09-03 — memory_recall_endpoint() returns MemoryRecallResponse(memories=[], total=0) on failure; MemoryRecallResponse has no degraded field to set.
-src/mcp/app/routers/briefs.py:198  # G-E seed 2026-09-03 — list_briefs_endpoint() returns [] on failure; the briefs pane renders its empty state instead of an error.
-src/mcp/app/routers/graph.py:3377  # G-E seed 2026-09-03 — get_structural_gaps() returns StructuralGapsResponse(gaps=[]) on failure; 'the graph has no gaps' is the reassuring reading of an outage.
-src/mcp/app/routers/plugin_registry.py:32  # G-E seed 2026-09-03 — list_community_plugins() returns {'plugins': [], 'total': 0} on failure; the registry reads as empty rather than unreachable.
+src/mcp/app/processor/router.py:processor_recent  # G-E seed 2026-09-03 — processor_recent() returns [] when the queue read raises; 'no recent jobs' and 'Redis is down' are the same response.
+src/mcp/app/routers/agents.py:memory_recall_endpoint  # G-E seed 2026-09-03 — memory_recall_endpoint() returns MemoryRecallResponse(memories=[], total=0) on failure; MemoryRecallResponse has no degraded field to set.
+src/mcp/app/routers/briefs.py:list_briefs_endpoint  # G-E seed 2026-09-03 — list_briefs_endpoint() returns [] on failure; the briefs pane renders its empty state instead of an error.
+src/mcp/app/routers/graph.py:get_structural_gaps  # G-E seed 2026-09-03 — get_structural_gaps() returns StructuralGapsResponse(gaps=[]) on failure; 'the graph has no gaps' is the reassuring reading of an outage.
+src/mcp/app/routers/plugin_registry.py:list_community_plugins  # G-E seed 2026-09-03 — list_community_plugins() returns {'plugins': [], 'total': 0} on failure; the registry reads as empty rather than unreachable.

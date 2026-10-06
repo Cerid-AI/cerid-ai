@@ -43,7 +43,7 @@ PIP_AUDIT_VERSION="2.10.0"
 
 # CVE-2026-45829      Pre-auth code injection in chromadb via trust_remote_code=true. Never set
 #                     anywhere (grep-verified); Chroma binds loopback. Re-eval 2026-11-30 (verified still firing 2026-08-31).
-# CVE-2026-45830      Chroma performs no authorization validation, so ANY authenticated user can
+# CVE-2026-45830      Chroma performs no authorization validation, so ANY authenticated user can. Re-eval 2026-11-30.
 # CVE-2026-45831      read/write/delete another tenant's collections; and SimpleRBACAuthorizationProvider
 #                     checks that a permission is held but never which tenant/database/collection it
 #                     applies to. Both presuppose a deployment with Chroma authn/authz turned on.

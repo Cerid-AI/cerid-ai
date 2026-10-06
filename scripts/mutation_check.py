@@ -206,10 +206,36 @@ def _pytest_cmd() -> list[str]:
     return [sys.executable, "-m", "pytest"]
 
 
+def selected_tests() -> list[str]:
+    """Tests that exist in this checkout.
+
+    The public mirror does not ship every internal test. Passing a missing
+    path makes pytest fail at collection, so the baseline is red and the
+    harness aborts before it injects anything. Say which paths were dropped.
+    """
+    present: list[str] = []
+    dropped: list[str] = []
+    for rel in TESTS:
+        if (REPO / rel).is_file():
+            present.append(rel)
+        else:
+            dropped.append(rel)
+    if dropped:
+        print("mutation-check dropped tests that are not in this tree:")
+        for rel in dropped:
+            print(f"  · {rel}")
+    if not present:
+        print("mutation-check: none of the selected tests exist in this tree")
+    return present
+
+
 def run_tests() -> bool:
     """True when the suite passes."""
+    tests = selected_tests()
+    if not tests:
+        return False
     proc = subprocess.run(
-        [*_pytest_cmd(), "-x", "-q", "-p", "no:randomly", *TESTS],
+        [*_pytest_cmd(), "-x", "-q", "-p", "no:randomly", *tests],
         cwd=REPO,
         env={
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),

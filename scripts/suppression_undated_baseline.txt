@@ -2,4 +2,3 @@
 # scripts/lint-suppression-expiry.py. This list may only SHRINK: give an
 # entry a re-eval date and delete it from here. Regenerating it to absorb
 # a NEW undated suppression defeats the gate.
-CVE-2026-45830

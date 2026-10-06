@@ -38,7 +38,7 @@ error boundary answer), or to keep returning the empty payload and say so:
 That second form is what makes the emptiness honest, and it is exactly what
 the sibling check accepts.
 
-Allowlist: ``scripts/degraded_is_not_empty_allowlist.txt`` (path:line, one
+Allowlist: ``scripts/degraded_is_not_empty_allowlist.txt`` (path:function, one
 reason each). Shrink-only.
 
 Usage:
@@ -82,7 +82,7 @@ class Violation(NamedTuple):
     detail: str
 
     def key(self) -> str:
-        return f"{self.file}:{self.lineno}"
+        return f"{self.file}:{self.handler}"
 
 
 def is_empty_shaped(node: ast.expr) -> bool:
@@ -229,7 +229,7 @@ _HEADER = """\
 # tasks/2026-09-02-audit-findings.json). Backend twin of the ESLint rule
 # cerid/no-error-as-empty-response.
 #
-# Format: <path>:<lineno>  # <one-line reason>
+# Format: <path>:<function>  # <one-line reason>
 # Shrink-only — re-raising, or adding a degraded/status/reason sibling to the
 # returned payload, removes the line; a stale entry fails the gate.
 #

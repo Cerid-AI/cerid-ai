@@ -99,3 +99,45 @@ async def test_sdk_search_returns_no_more_than_top_k(top_k):
     body = resp.json()
     assert body["total_results"] == top_k
     assert len(body["results"]) == top_k
+
+
+@pytest.mark.asyncio
+async def test_sdk_search_returns_503_when_the_pool_is_full():
+    """A full KB pool answers 503 instead of waiting forever."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.concurrency import PoolTimeout
+    from app.routers import sdk
+
+    class _Full:
+        async def __aenter__(self):
+            raise PoolTimeout("full")
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    class _Pool:
+        def __init__(self):
+            self.timeout = None
+
+        def acquire(self, timeout=None):
+            self.timeout = timeout
+            return _Full()
+
+    pool = _Pool()
+    app = FastAPI()
+    app.include_router(sdk.router)
+    with patch("app.routers.sdk.private_blocks", return_value=False), patch(
+        "app.concurrency.KB_POOL", pool
+    ), patch(
+        "core.agents.query_agent.agent_query_full",
+        AsyncMock(side_effect=AssertionError("retrieval ran")),
+    ):
+        resp = TestClient(app).post("/sdk/v1/search", json={"query": "python xml parser"})
+
+    assert pool.timeout == 2.0
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == (
+        "Retrieval is queued behind other knowledge queries. Retry in a moment."
+    )

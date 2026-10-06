@@ -71,9 +71,9 @@ TAXONOMY = {
         "sub_categories": ["recorded", "summary", "general"],
     },
     "inbox": {
-        "description": "AI-triaged inbox threads (urgent / actionable / personal / newsletter / promo)",
+        "description": "AI-triaged inbox threads (urgent / actionable / personal / newsletter / promo / spam)",
         "icon": "inbox",
-        "sub_categories": ["urgent", "actionable", "personal", "newsletter", "promo", "general"],
+        "sub_categories": ["urgent", "actionable", "personal", "newsletter", "promo", "spam", "general"],
     },
     "digests": {
         "description": "Cerid daily/weekly synthesis digests (Phase K)",

@@ -28,7 +28,7 @@ from app.tool_registry import register_tool
 logger = logging.getLogger("ai-companion.mcp_tools.inbox")
 
 
-_CATEGORY_ENUM = ["urgent", "actionable", "personal", "newsletter", "promo"]
+_CATEGORY_ENUM = ["urgent", "actionable", "personal", "newsletter", "promo", "spam"]
 
 
 @register_tool(
@@ -36,7 +36,7 @@ _CATEGORY_ENUM = ["urgent", "actionable", "personal", "newsletter", "promo"]
     description=(
         "Trigger an AI inbox triage pass over recent unread Gmail + "
         "Outlook messages. Each thread is categorized "
-        "(urgent / actionable / personal / newsletter / promo) with a "
+        "(urgent / actionable / personal / newsletter / promo / spam) with a "
         "one-sentence summary and a suggested action, then persisted "
         "to the KB in domain='inbox'. **Use when** the user asks for a "
         "fresh categorized inbox view (\"what came in today?\", "
@@ -211,6 +211,219 @@ async def pkb_inbox_filter(
             "since_days": since_days,
         },
     }
+
+
+@register_tool(
+    name="pkb_inbox_apply",
+    description=(
+        "Apply proposed inbox decisions. Dry-run is the default and "
+        "does not change the mailbox. **Use when** the operator has "
+        "approved rows in the review queue, or wants to see the plan "
+        "first. Pass dry_run false only for an approved apply. "
+        "**Returns** `{results, dry_run}`."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "decision_ids": {
+                "description": "Proposed decision ids. A list, or one comma-separated string.",
+            },
+            "dry_run": {
+                "type": "boolean",
+                "default": True,
+                "description": "Plan the calls and do not perform them.",
+            },
+        },
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "results": {"type": "array"},
+            "dry_run": {"type": "boolean"},
+            "status": {"type": "string"},
+        },
+    },
+    cost_class="low",
+)
+async def pkb_inbox_apply(
+    decision_ids: Any = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Apply or plan proposed decisions. The feature gate runs before the ledger opens."""
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled("inbox_triage"):
+        return {"ok": False, "status": "feature_gated", "results": [], "dry_run": dry_run}
+    from app.inbox.review import apply_ids, open_ledger
+
+    return await apply_ids(decision_ids, dry_run=dry_run, ledger=open_ledger())
+
+
+@register_tool(
+    name="pkb_inbox_undo",
+    description=(
+        "Undo one applied inbox decision. Dry-run is the default and "
+        "returns the plan without writing a new ledger row or touching "
+        "the mailbox. **Use when** the operator wants a filed message "
+        "returned to the mailbox it was in. **Returns** the apply "
+        "result for that undo."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "decision_id": {"type": "string", "description": "Applied decision to undo."},
+            "dry_run": {
+                "type": "boolean",
+                "default": True,
+                "description": "Plan the undo and do not perform it.",
+            },
+        },
+        "required": ["decision_id"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "ok": {"type": "boolean"},
+            "status": {"type": "string"},
+            "decision_id": {"type": "string"},
+        },
+    },
+    cost_class="low",
+)
+async def pkb_inbox_undo(decision_id: str = "", dry_run: bool = True) -> dict[str, Any]:
+    """Undo one applied decision. The feature gate runs before the ledger opens."""
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled("inbox_triage"):
+        return {"ok": False, "status": "feature_gated", "decision_id": decision_id, "dry_run": dry_run}
+    from app.inbox.review import open_ledger, undo_decision
+
+    return await undo_decision(decision_id, dry_run=dry_run, ledger=open_ledger())
+
+
+@register_tool(
+    name="pkb_inbox_sender_pin",
+    description=(
+        "Pin a sender to one inbox action and category. Later triage "
+        "passes skip the model for that sender. **Use when** the operator "
+        "wants a correction to stick immediately, without waiting for "
+        "three matching reversals. **Returns** `{ok, status, memory}`."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description": "gmail, outlook, or apple_mail."},
+            "sender": {"type": "string", "description": "The sender address."},
+            "action": {"type": "string", "description": "keep, archive, mark_read, or draft."},
+            "category": {
+                "type": "string",
+                "description": "urgent, actionable, personal, newsletter, promo, or spam.",
+            },
+        },
+        "required": ["source", "sender", "action", "category"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "ok": {"type": "boolean"},
+            "status": {"type": "string"},
+            "memory": {"type": "object"},
+            "reason": {"type": "string"},
+        },
+    },
+    cost_class="low",
+)
+async def pkb_inbox_sender_pin(
+    source: str = "",
+    sender: str = "",
+    action: str = "",
+    category: str = "",
+) -> dict[str, Any]:
+    """Pin one sender. The feature gate runs before the ledger opens."""
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled("inbox_triage"):
+        return {"ok": False, "status": "feature_gated"}
+    from app.inbox.learn import pin_sender
+
+    try:
+        row = pin_sender(source=source, sender=sender, action=action, category=category)
+    except ValueError as exc:
+        return {"ok": False, "status": "invalid", "reason": str(exc)}
+    return {"ok": True, "status": "pinned", "memory": row}
+
+
+@register_tool(
+    name="pkb_inbox_rule_upsert",
+    description=(
+        "Store an inbox rule. A matching rule skips the model on later "
+        "passes. An exact provider beats a wildcard, and more match "
+        "fields beat fewer. **Use when** the operator wants mail from a "
+        "sender, domain, subject prefix, or list id filed the same way "
+        "every time. **Returns** `{ok, status, rule}`."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "rule_id": {
+                "type": "string",
+                "description": "Existing rule id. Empty creates a rule.",
+            },
+            "source": {
+                "type": "string",
+                "default": "*",
+                "description": "gmail, outlook, apple_mail, or * for every provider.",
+            },
+            "condition": {
+                "description": "Object or JSON string. Keys: from, domain, subject_prefix, list_id.",
+            },
+            "action": {"type": "string", "description": "keep, archive, mark_read, or draft."},
+            "category": {
+                "type": "string",
+                "description": "urgent, actionable, personal, newsletter, promo, or spam.",
+            },
+            "enabled": {"type": "boolean", "default": True},
+        },
+        "required": ["condition", "action", "category"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "ok": {"type": "boolean"},
+            "status": {"type": "string"},
+            "rule": {"type": "object"},
+            "reason": {"type": "string"},
+        },
+    },
+    cost_class="low",
+)
+async def pkb_inbox_rule_upsert(
+    rule_id: str = "",
+    source: str = "*",
+    condition: Any = None,
+    action: str = "",
+    category: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Store one rule. The feature gate runs before the ledger opens."""
+    from config.features import is_feature_enabled
+
+    if not is_feature_enabled("inbox_triage"):
+        return {"ok": False, "status": "feature_gated"}
+    from app.inbox.learn import upsert_rule
+
+    try:
+        row = upsert_rule(
+            rule_id=rule_id,
+            source=source,
+            condition=condition,
+            action=action,
+            category=category,
+            enabled=enabled,
+        )
+    except ValueError as exc:
+        return {"ok": False, "status": "invalid", "reason": str(exc)}
+    return {"ok": True, "status": "stored", "rule": row}
 
 
 async def _list_inbox_artifacts(driver: Any, kwargs: dict[str, Any]) -> list[dict[str, Any]]:

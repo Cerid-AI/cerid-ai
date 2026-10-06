@@ -18,6 +18,7 @@ this router.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import time
 from typing import Any
@@ -40,22 +41,31 @@ router = APIRouter(prefix="/oauth", tags=["oauth"])
 _STATE_TTL_S = 600
 _STATE_PREFIX = "cerid:oauth:state:"
 
-# Google scopes for the Gmail + Calendar bundle.
-_GOOGLE_SCOPES = [
-    "openid",
-    "email",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar.readonly",
-]
+# Readonly consent. The actions flag adds the sibling drafts ceiling:
+# gmail.labels + gmail.modify + gmail.compose, and Mail.ReadWrite.
+# gmail.send and Mail.Send are not added. Re-login is required after the flag
+# is turned on; this router does not start that login.
+_GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly"
+_GMAIL_LABELS = "https://www.googleapis.com/auth/gmail.labels"
+_GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"
+_GMAIL_COMPOSE = "https://www.googleapis.com/auth/gmail.compose"
+_CALENDAR_READONLY = "https://www.googleapis.com/auth/calendar.readonly"
 
-# Microsoft scopes for the Outlook + Calendar bundle (MSAL / Graph).
-_MICROSOFT_SCOPES = [
-    "openid",
-    "email",
-    "offline_access",
-    "Mail.Read",
-    "Calendars.Read",
-]
+
+def _actions_enabled() -> bool:
+    return os.getenv("CERID_INBOX_ACTIONS_ENABLED", "false").strip().lower() in ("true", "1")
+
+
+def google_scopes() -> list[str]:
+    scopes = ["openid", "email", _GMAIL_READONLY, _CALENDAR_READONLY]
+    if _actions_enabled():
+        scopes.extend([_GMAIL_LABELS, _GMAIL_MODIFY, _GMAIL_COMPOSE])
+    return scopes
+
+
+def microsoft_scopes() -> list[str]:
+    mail = "Mail.ReadWrite" if _actions_enabled() else "Mail.Read"
+    return ["openid", "email", "offline_access", mail, "Calendars.Read"]
 
 
 class OAuthStartResponse(BaseModel):
@@ -146,7 +156,7 @@ async def google_oauth_start(request: Request):
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(_GOOGLE_SCOPES),
+        "scope": " ".join(google_scopes()),
         "access_type": "offline",
         "prompt": "consent",
         "state": state,
@@ -196,7 +206,7 @@ async def microsoft_oauth_start(request: Request):
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(_MICROSOFT_SCOPES),
+        "scope": " ".join(microsoft_scopes()),
         "response_mode": "query",
         "state": state,
     }

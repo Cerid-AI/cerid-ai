@@ -136,6 +136,12 @@ STAGE_PROFILES: dict[str, tuple[TaskType, Hardness]] = {
     # --- Classification ---
     "hallucination_topic": (TaskType.CLASSIFICATION, Hardness.TRIVIAL),
     "inbox_triage": (TaskType.CLASSIFICATION, Hardness.SIMPLE),
+    # Small local model, then the heavy local chat slot, then the frontier
+    # model. The provider resolver keeps the first two stages local unless
+    # the operator pins PROVIDER_STAGE_<NAME>.
+    "inbox_triage_review": (TaskType.CLASSIFICATION, Hardness.MODERATE),
+    "inbox_triage_escalate": (TaskType.CLASSIFICATION, Hardness.FRONTIER),
+    "inbox_triage_draft": (TaskType.GENERATION, Hardness.HARD),
     # --- Reranking ---
     "assembler_rerank": (TaskType.RERANKING, Hardness.SIMPLE),
     "rerank_llm": (TaskType.RERANKING, Hardness.SIMPLE),
@@ -166,6 +172,8 @@ INTERACTIVE_STAGES = frozenset({
     "memory_conflict_resolve",
     "query_decompose",
     "rerank_llm",
+    # The heavy local classification rung waits on the chat slot, not the 3B slot.
+    "inbox_triage_review",
 })
 
 MCP_STAGE_PREFIX = "mcp_"
@@ -192,6 +200,21 @@ BACKGROUND_STAGES = (
     - INTERACTIVE_STAGES
     - MCP_STAGES
 )
+
+
+# First-pass inbox classification. The provider resolver forces the local
+# backend unless PROVIDER_STAGE_<NAME> is set. Easy mail must not follow a
+# cloud-first profile onto a cloud model.
+LOCAL_FIRST_STAGES = frozenset({
+    "inbox_triage",
+    "inbox_triage_review",
+})
+
+# Called only after a local pass fails, and never under the local-only profile.
+CLOUD_ESCALATION_STAGES = frozenset({
+    "inbox_triage_escalate",
+    "inbox_triage_draft",
+})
 
 
 def is_background_stage(stage: str | None) -> bool:

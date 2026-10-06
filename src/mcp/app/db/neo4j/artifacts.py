@@ -839,11 +839,32 @@ def delete_artifacts_by_domain(driver, domain: str) -> dict[str, Any]:
         ).single()
         deleted = int(row["deleted"]) if row and row["deleted"] is not None else 0
         chunks = int(row["chunks"]) if row and row["chunks"] is not None else 0
+        identities: list[dict[str, Any]] = []
         if deleted:
+            identities = [
+                dict(record)
+                for record in session.run(
+                    "MATCH (a:Artifact {domain: $domain}) "
+                    "RETURN a.id AS id, a.chunk_ids AS chunk_ids, a.filename AS filename",
+                    domain=domain,
+                )
+            ]
             session.run(
                 "MATCH (a:Artifact {domain: $domain}) DETACH DELETE a",
                 domain=domain,
             )
+    from app.sync.tombstones import record_tombstone
+
+    for item in identities:
+        artifact_id = str(item.get("id") or "")
+        if not artifact_id:
+            continue
+        record_tombstone(
+            artifact_id,
+            _parse_chunk_ids(item.get("chunk_ids")),
+            domain=domain,
+            filename=item.get("filename") or "",
+        )
     logger.info("Deleted %d artifacts (%d chunks) from domain %s", deleted, chunks, domain)
     return {"deleted": deleted, "chunks": chunks}
 

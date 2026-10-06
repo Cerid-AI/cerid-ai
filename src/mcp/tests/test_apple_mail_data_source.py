@@ -122,3 +122,61 @@ class TestQuery:
     async def test_no_helper_path_returns_empty(self, unresolvable_swift_helper):
         unresolvable_swift_helper(apple_mail_ds)
         assert await AppleMailDataSource(helper_path=None).query("any") == []
+
+    @pytest.mark.asyncio
+    async def test_query_reads_since_and_skips_junk_and_trash(self, helper_path):
+        payload = json.dumps({
+            "ok": True,
+            "cursor": "2026-10-03T00:00:00Z",
+            "messages": [
+                {
+                    "id": "<keep@example.com>",
+                    "subject": "Hello",
+                    "from": "a@example.com",
+                    "date": "2026-10-03T12:00:00Z",
+                    "mailbox": "INBOX",
+                    "body": "See you then",
+                    "list_id": "<news.example.com>",
+                    "to": "me@example.com",
+                    "in_reply_to": "<prev@example.com>",
+                    "rfc_message_id": "<keep@example.com>",
+                },
+                {
+                    "id": "<junk@example.com>",
+                    "subject": "Pills",
+                    "from": "x@spam.test",
+                    "mailbox": "Junk",
+                    "body": "buy now",
+                },
+                {
+                    "id": "<trash@example.com>",
+                    "subject": "Old",
+                    "mailbox": "Trash",
+                    "body": "gone",
+                },
+                {
+                    "id": "<sorted@example.com>",
+                    "subject": "Filed",
+                    "from": "a@example.com",
+                    "date": "2026-10-03T12:00:00Z",
+                    "mailbox": "Cerid/Spam",
+                    "body": "already sorted",
+                },
+            ],
+        }).encode("utf-8")
+        spawn = _make_proc_mock(payload)
+        ds = AppleMailDataSource(helper_path=helper_path)
+        with patch("asyncio.create_subprocess_exec", spawn):
+            results = await ds.query("is:unread newer_than:1d")
+        assert spawn.await_args.args[1] == "since"
+        assert len(results) == 2
+        assert "See you then" in results[0].content
+        assert results[1].metadata["mailbox"] == "Cerid/Spam"
+        assert results[0].metadata["provider_message_id"] == "<keep@example.com>"
+        assert results[0].metadata["mailbox"] == "INBOX"
+        assert results[0].metadata["list_id"] == "<news.example.com>"
+        assert results[0].metadata["to"] == "me@example.com"
+        assert results[0].metadata["date"] == "2026-10-03T12:00:00Z"
+        assert results[0].metadata["in_reply_to"] == "<prev@example.com>"
+        assert results[0].metadata["rfc_message_id"] == "<keep@example.com>"
+        assert results[0].metadata["provider_message_id"] == "<keep@example.com>"

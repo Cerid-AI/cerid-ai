@@ -58,6 +58,15 @@ _MAIL_META_WORDS = frozenset({
 # never walks the whole mailbox.
 _GMAIL_RECENCY_FALLBACK = "in:inbox newer_than:30d"
 
+# Chat fan-out used to ask Gmail about every question. Mail words and a
+# few operators are the gate. "message" and "from" alone are not: they
+# show up in ordinary questions that are not about a mailbox.
+_MAIL_QUERY_RE = re.compile(
+    r"\b(?:e-?mails?|gmail|inbox|mailbox|mails?)\b"
+    r"|\b(?:from|subject|label|filename):",
+    re.IGNORECASE,
+)
+
 # Hydration budget, well inside the fan-out slice (3.0s for the first source,
 # less afterwards). Search costs ~0.65s of that, so 1.5s leaves headroom.
 _HYDRATE_BUDGET_S = float(os.getenv("GMAIL_HYDRATE_BUDGET_S", "1.5"))
@@ -108,6 +117,9 @@ class GmailDataSource(DataSource):
             # Report "not configured" instead of pretending an empty mailbox.
             and bool(_google_account())
         )
+
+    def is_relevant(self, raw_query: str, keywords: list[str]) -> bool:
+        return bool(_MAIL_QUERY_RE.search(raw_query or ""))
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
         """Dispatch one tool call to the sibling google-workspace-mcp.
@@ -231,6 +243,7 @@ class GmailDataSource(DataSource):
                 or f"https://mail.google.com/mail/u/0/#all/{m['id']}",
                 source_name="Gmail",
                 confidence=0.55,
+                metadata=_gmail_metadata(m),
             )
 
         out: list[DataSourceResult] = []
@@ -261,9 +274,73 @@ class GmailDataSource(DataSource):
                     or f"https://mail.google.com/mail/u/0/#all/{msg['id']}",
                     source_name="Gmail",
                     confidence=0.75,
+                    metadata=_gmail_metadata(msg, detail_dict),
                 ),
             )
         return out
+
+    async def apply(self, decision: dict, *, dry_run: bool = True, ledger: Any = None) -> dict:
+        """Apply one Gmail decision. Dry-run does not call the sibling."""
+        from app.inbox.executor import apply_decision
+        from core.mcp_clients.result_text import is_error_result, tool_text
+
+        account = _google_account()
+
+        class _Transport:
+            async def call_tool(self, provider: str, tool: str, arguments: dict) -> str:
+                raw = await self_source._call_mcp(tool, arguments)
+                if is_error_result(raw):
+                    raise RuntimeError(tool_text(raw)[:500] or tool)
+                return tool_text(raw)
+
+            async def apple(self, argv: list[str]) -> tuple[int, dict]:
+                raise RuntimeError("gmail has no apple helper")
+
+        self_source = self
+        prepared = dict(decision)
+        prepared.setdefault("provider", "gmail")
+        prepared.setdefault("configured_address", account)
+        if account and not str(prepared.get("account") or "").strip():
+            prepared["account"] = account
+            prepared.setdefault("account_known", True)
+        return await apply_decision(prepared, dry_run=dry_run, ledger=ledger, transport=_Transport())
+
+
+_SIGNAL_HEADERS = {
+    "list-id": "list_id",
+    "list-unsubscribe": "list_unsubscribe",
+    "authentication-results": "authentication_results",
+    "x-spam-flag": "spam_flag",
+    "x-spam-status": "spam_status",
+    "message-id": "rfc_message_id",
+    "to": "to",
+    "date": "date",
+    "in-reply-to": "in_reply_to",
+    "references": "references",
+}
+
+
+def _gmail_metadata(msg: dict[str, str], detail: dict[str, str] | None = None) -> dict[str, str]:
+    """Ids a later apply can use. A subject line is not an id."""
+    message_id = msg.get("id") or ""
+    thread_id = msg.get("thread_id") or message_id
+    metadata = {
+        "provider_message_id": message_id,
+        "provider_thread_id": thread_id,
+    }
+    account = _google_account()
+    if account:
+        metadata["account"] = account
+    if not detail:
+        return metadata
+    labels = (detail.get("labels") or detail.get("label") or "").strip()
+    if labels:
+        metadata["labels"] = labels
+    for source, dest in _SIGNAL_HEADERS.items():
+        value = (detail.get(source) or "").strip()
+        if value:
+            metadata[dest] = value
+    return metadata
 
 
 # `search_gmail_messages` answers in prose, one indented block per hit:
@@ -274,11 +351,12 @@ class GmailDataSource(DataSource):
 # id appearing in a subject line cannot be mistaken for a result.
 _MESSAGE_ID_RE = re.compile(r"^\s*\d+\.\s*Message ID:\s*(\S+)", re.MULTILINE)
 _WEB_LINK_RE = re.compile(r"^\s*Web Link:\s*(\S+)", re.MULTILINE)
+_THREAD_ID_RE = re.compile(r"^\s*Thread ID:\s*(\S+)", re.MULTILINE)
 
 # `get_gmail_message_content` answers with RFC822-ish headers, a `--- BODY ---`
 # separator, then the body.
 _BODY_SEPARATOR = "--- BODY ---"
-_HEADER_RE = re.compile(r"^(Subject|From|Date|To):\s*(.*)$", re.MULTILINE)
+_HEADER_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$")
 
 
 def parse_message_ids(raw: Any) -> list[dict[str, str]]:
@@ -286,8 +364,13 @@ def parse_message_ids(raw: Any) -> list[dict[str, str]]:
     text = tool_text(raw)
     ids = _MESSAGE_ID_RE.findall(text)
     links = _WEB_LINK_RE.findall(text)
+    threads = _THREAD_ID_RE.findall(text)
     return [
-        {"id": mid, "web_link": links[i] if i < len(links) else ""}
+        {
+            "id": mid,
+            "web_link": links[i] if i < len(links) else "",
+            "thread_id": threads[i] if i < len(threads) else "",
+        }
         for i, mid in enumerate(ids)
     ]
 
@@ -298,7 +381,18 @@ def parse_message_detail(raw: Any) -> dict[str, str]:
     if not text:
         return {}
     head, _, body = text.partition(_BODY_SEPARATOR)
-    detail = {k.lower(): v.strip() for k, v in _HEADER_RE.findall(head)}
+    detail: dict[str, str] = {}
+    current = ""
+    for line in head.splitlines():
+        if line.startswith((" ", "\t")) and current:
+            detail[current] = f"{detail[current]} {line.strip()}".strip()
+            continue
+        match = _HEADER_LINE.match(line.strip())
+        if not match:
+            current = ""
+            continue
+        current = match.group(1).lower()
+        detail[current] = match.group(2).strip()
     if body:
         detail["body"] = body.strip()
     return detail

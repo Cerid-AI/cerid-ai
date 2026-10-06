@@ -66,6 +66,20 @@ echo "::group::packages/extension (typecheck + build; playwright needs a browser
 )
 echo "::endgroup::"
 
+# Hub portal and desktop. Their suites sat red on main once and no job ran
+# them. `test` is already `vitest run`; `--run` keeps a future watch script
+# from hanging the job. No typecheck or build here: the web build is the
+# gateway image, and the desktop build is an Electron package.
+for pkg in stacks/gateway/hub/web stacks/gateway/hub/desktop; do
+  echo "::group::$pkg"
+  (
+    cd "$pkg"
+    npm ci --no-audit --no-fund
+    npm test -- --run
+  )
+  echo "::endgroup::"
+done
+
 # The widget ships TWO bundles and `build` above emits both, but the CDN one is
 # the artifact users embed and the one that silently broke. Assert it exists
 # rather than trusting the exit code of a two-target build.

@@ -15,6 +15,24 @@ import React from "react"
 vi.mock("@/lib/api/billing", () => ({
   fetchCapabilities: vi.fn(),
 }))
+vi.mock("@/lib/api/inbox", () => ({
+  fetchInboxSetup: vi.fn(async () => ({
+    actions_enabled: false,
+    background_model: "",
+    chat_model: "",
+    accounts: [],
+    proposals: [],
+    recent: [],
+    pins: [],
+  })),
+  addInboxAccount: vi.fn(),
+  updateInboxAccount: vi.fn(),
+  removeInboxAccount: vi.fn(),
+  applyInbox: vi.fn(),
+  undoInbox: vi.fn(),
+  skipInbox: vi.fn(),
+  discoverInbox: vi.fn(async () => ({ gmail: [], outlook: [], apple_mail: [], error: "" })),
+}))
 
 import { fetchCapabilities } from "@/lib/api/billing"
 const mockCapabilities = fetchCapabilities as ReturnType<typeof vi.fn>

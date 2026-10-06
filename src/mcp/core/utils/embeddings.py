@@ -528,7 +528,7 @@ class OnnxEmbeddingFunction:
             # through ONLY when the fallback leg runs the same model identity.
             if not _same_vector_space(qf_model, config.EMBEDDING_MODEL):
                 raise RuntimeError(
-                    f"Quenchforge embed failed ({exc}) and the fallback leg runs "
+                    f"Quenchforge embed failed ({type(exc).__name__}: {exc}) and the fallback leg runs "
                     f"{config.EMBEDDING_MODEL!r}, a different vector space from "
                     f"{qf_model!r}. Refusing to serve — same dimensionality is not "
                     f"the same space, and nothing namespaces the collection. "

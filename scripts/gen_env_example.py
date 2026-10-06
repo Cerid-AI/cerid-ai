@@ -214,6 +214,11 @@ VAR_COMMENTS: dict[str, tuple[str, ...]] = {
     "CERID_PORTAL_TITLE": (
         "Name shown on the sign-in page. Empty = Cerid.",
     ),
+    "CERID_INBOX_REVIEW_REDACT": (
+        "Comma-separated, case-insensitive substrings. scripts/inbox_review.py",
+        "leaves out any message whose From, To, or Subject contains one.",
+        "Empty = nothing is left out.",
+    ),
     "CERID_ENVIRONMENT_PROFILE": (
         "Environment profile: a named bundle of the knobs below, applied as",
         "DEFAULTS only where you have not set a value yourself (your pins win).",

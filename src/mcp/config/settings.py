@@ -1035,6 +1035,28 @@ SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty
 # Also gated by CERID_INBOX_TRIAGE_ENABLED so the operator opts in
 # explicitly. Set INBOX_TRIAGE_MAX_PER_SOURCE to cap LLM cost.
 SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
+
+
+def inbox_actions_enabled() -> bool:
+    """Live mailbox writes. Default off. Dry-run does not read this."""
+    return os.getenv("CERID_INBOX_ACTIONS_ENABLED", "false").strip().lower() in ("true", "1")
+
+
+# Import-time snapshot. Call inbox_actions_enabled() when the process may have
+# changed the variable, and keep the connector command on --read-only until
+# the same variable is true there. This never selects a send scope.
+CERID_INBOX_ACTIONS_ENABLED = inbox_actions_enabled()
+
+
+def inbox_review_redact() -> tuple[str, ...]:
+    """Substrings that keep a from, to, or subject out of the review printout.
+
+    CERID_INBOX_REVIEW_REDACT is comma-separated and case-insensitive. Empty
+    by default, so nothing is redacted. Read at call time: the review script
+    runs outside the API process and must see the operator's .env value.
+    """
+    raw = os.getenv("CERID_INBOX_REVIEW_REDACT", "")
+    return tuple(part.strip().casefold() for part in raw.split(",") if part.strip())
 # Phase K — daily digest cadence. Default 7 AM UTC; empty disables.
 # Also gated by CERID_DAILY_DIGEST_ENABLED so operator opts in.
 # Per-user timezone resolution tracked for Phase K.2 (currently

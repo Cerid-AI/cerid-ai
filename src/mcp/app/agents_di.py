@@ -18,11 +18,19 @@ from typing import Any
 
 
 def wire_inbox_triage_di() -> None:
-    """Inject the concrete DataSourceRegistry into the inbox-triage agent."""
+    """Inject the DataSourceRegistry and the RAG route hook.
+
+    The hook lives in app/ so core can ask which domain a payload may enter
+    without importing app.
+    """
     from app.data_sources import registry
-    from core.agents.inbox_triage import set_inbox_registry
+    from app.inbox.hooks import rag_route_hook
+    from app.inbox.learn import lookup_signals
+    from core.agents.inbox_triage import set_inbox_memory, set_inbox_rag_route, set_inbox_registry
 
     set_inbox_registry(registry)
+    set_inbox_rag_route(rag_route_hook)
+    set_inbox_memory(lookup_signals)
 
 
 class _DigestGraphAdapter:

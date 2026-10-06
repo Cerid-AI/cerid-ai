@@ -109,12 +109,16 @@ curl -s -X POST -H "X-API-Key: $K" localhost:8888/connectors/gmail/auth/start
 ```
 
 That calls the sibling's `start_google_auth` tool and returns the consent URL.
-Open it on the host, complete sign-in, and consent to the read scopes. The
-refresh token is written to the container's persistent volume and survives
-restarts. You do not need to repeat this unless you revoke access in your
-Google account settings — **or** unless the OAuth consent screen is still in
-"Testing", in which case Google expires the refresh token after 7 days. See
-`docs/RUNBOOK_PRO_CONNECTORS.md` §2.
+Open it on the host, complete sign-in, and consent to the scopes Cerid asks
+for. With inbox actions off, those are `openid`, `email`, `gmail.readonly`,
+and `calendar.readonly`. With `CERID_INBOX_ACTIONS_ENABLED` on, the same
+login also asks for `gmail.labels`, `gmail.modify`, and `gmail.compose`.
+It never asks for `gmail.send`. The refresh token is written to the
+container's persistent volume and survives restarts. Repeat this when you
+revoke access in your Google account settings, when you turn inbox actions
+on (the router does not start that re-login), or when the OAuth consent
+screen is still in "Testing" — Google expires that refresh token after 7
+days. See `docs/RUNBOOK_PRO_CONNECTORS.md` §2.
 
 ## Enable in Cerid
 
@@ -146,8 +150,47 @@ ids and lightweight metadata may be cached for deduplication.
   reachable from outside the host.
 - **Refresh tokens stay in the container volume,** never in the Cerid
   backend's memory or its KB stores.
-- **No background polling.** The connector only contacts Google when a
-  user query triggers it.
+- **Chat search is on demand.** A chat question contacts Google only when
+  retrieval asks. Inbox triage is the exception: when both gates in
+  `docs/PRO_INBOX_TRIAGE.md` are open, Cerid reads recent unread mail on
+  that cadence.
+
+## Inbox actions
+
+Off by default. Set `CERID_INBOX_ACTIONS_ENABLED=true` (or `1`) and
+**recreate** the sibling container. A restart keeps the command that was
+baked in at create time. `--single-user` stays. Do not set `--tool-tier`.
+
+The read command is:
+
+```bash
+uv run main.py --transport streamable-http --single-user --read-only --tools gmail calendar
+```
+
+With the flag on, `stacks/connectors/docker-compose.yml` switches the
+ceiling to:
+
+```bash
+uv run main.py --transport streamable-http --single-user --permissions gmail:drafts calendar:readonly
+```
+
+That ceiling is drafts and label edits. It is not `gmail:send`.
+Classification uses the connector's existing message fetch, a short
+excerpt. It does not request `format=full`. Label names are
+`Cerid/Urgent`, `Cerid/Action`, `Cerid/Personal`, `Cerid/Newsletter`, and
+`Cerid/Promo`. The content tool does not return labels, so a later pass
+learns a correction only when label names are already on the message
+metadata.
+
+A second Gmail address added under Sources → Connectors stays pending.
+Applies whose account differs from `USER_GOOGLE_EMAIL` are skipped.
+Removing an address stops later reads and applies for it and leaves
+existing knowledge-base cards in place. Undo of a decision already
+recorded for that address still runs.
+
+Re-consent after turning the flag on with the same
+`POST /connectors/gmail/auth/start` as §4, then recreate the container.
+`/oauth/start` is a 404.
 
 ## Troubleshooting
 
@@ -159,3 +202,4 @@ ids and lightweight metadata may be cached for deduplication.
 | `/oauth/start` returns 404 | Expected — that route never existed. Use the `auth/start` call in §4. |
 | `auth/start` says the sibling is unreachable | Container not running, or the `pro` profile was not passed. Re-run compose with `--profile pro`. |
 | 401 from MCP server in backend logs | Bearer token mismatch between the backend's env and the sibling's env. Confirm both containers were recreated after the last `.env` edit. |
+| Actions flag is set and apply still reports `disabled`, or labels are refused | The sibling is still on the read-only command, or consent never gained `gmail.compose`. Recreate the container (do not only restart it) and repeat §4. |

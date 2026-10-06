@@ -86,6 +86,7 @@ class TestParseMessageIds:
         msgs = parse_message_ids(SEARCH_REPLY)
         assert msgs[0]["web_link"].endswith("#all/msgid-alpha-001")
         assert all("Thread" not in m["web_link"] for m in msgs)
+        assert [m["thread_id"] for m in msgs] == ["msgid-beta-002", "msgid-beta-002"]
 
     def test_a_no_results_reply_yields_nothing(self):
         assert parse_message_ids("No messages found matching 'zzz'.") == []
@@ -122,3 +123,22 @@ class TestParseMessageDetail:
     def test_unparseable_input_is_empty_not_a_crash(self):
         assert parse_message_detail("") == {}
         assert parse_message_detail(None) == {}
+
+    def test_keeps_list_labels_and_folded_authentication_results(self):
+        raw = (
+            "Subject: Notes\n"
+            "From: News <news@example.com>\n"
+            "List-Id: <news.example.com>\n"
+            "List-Unsubscribe: <mailto:leave@example.com>\n"
+            "Labels: INBOX, CATEGORY_UPDATES\n"
+            "Authentication-Results: mx.example.com;\n"
+            " dmarc=fail header.from=example.com\n"
+            "\n--- BODY ---\n"
+            "This week\n"
+        )
+        detail = parse_message_detail(raw)
+        assert detail["list-id"] == "<news.example.com>"
+        assert detail["list-unsubscribe"] == "<mailto:leave@example.com>"
+        assert detail["labels"] == "INBOX, CATEGORY_UPDATES"
+        assert "dmarc=fail" in detail["authentication-results"]
+        assert detail["body"] == "This week"

@@ -16,6 +16,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 @pytest.fixture(autouse=True)
+def _isolate_tombstone_log(tmp_path, monkeypatch):
+    """Keep delete tests from appending to the operator's tombstone log."""
+    import config
+
+    monkeypatch.setattr(config, "TOMBSTONE_LOG_PATH", str(tmp_path / "tombstones.jsonl"))
+
+
+@pytest.fixture(autouse=True)
 def _declare_loopback_bind(monkeypatch):
     """A test process serves nothing on the network; say so.
 

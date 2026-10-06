@@ -144,9 +144,9 @@
 - `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (55 total)
+### MCP Tools (59 total)
 
-55 tools ship by default (60 with the optional trading module). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
+59 tools ship by default (64 with the optional trading module: 23 legacy `MCP_TOOLS` + 36 `@register_tool` + 5 trading). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata

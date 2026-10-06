@@ -692,3 +692,29 @@ class TestModelRevisionPinning:
             OnnxEmbeddingFunction(model_id="org/operator-choice")._load()
 
         assert "not revision-pinned" in caplog.text
+
+
+class TestQuenchforgeFailureMessage:
+    def test_a_timeout_names_its_type(self, monkeypatch):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        seen: dict[str, float] = {}
+
+        def _boom(*_args, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            raise TimeoutError()
+
+        monkeypatch.setenv("QUENCHFORGE_EMBED_MODEL", "nomic-embed-text-v1.5")
+        monkeypatch.setattr(
+            "utils.quenchforge_client.is_embeddings_provider_quenchforge",
+            lambda: True,
+        )
+        monkeypatch.setattr("utils.quenchforge_client.quenchforge_embed", lambda _texts: None)
+        monkeypatch.setattr("core.utils.async_bridge.run_async", _boom)
+        monkeypatch.setattr("core.utils.embeddings._same_vector_space", lambda *_a, **_k: False)
+
+        with pytest.raises(RuntimeError, match=r"TimeoutError") as raised:
+            OnnxEmbeddingFunction(model_id="org/placeholder")._maybe_embed_via_quenchforge(["hello"])
+
+        assert seen["timeout"] == 60.0
+        assert "Quenchforge embed failed ()" not in str(raised.value)

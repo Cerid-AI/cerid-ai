@@ -43,6 +43,7 @@ def _detail_reply(mid: str) -> str:
         f"From: sender-{mid}@example.com\n"
         f"Date: Mon, 10 Aug 2026 01:02:35 GMT\n"
         f"To: me@example.com\n"
+        f"List-Id: <notes.example.com>\n"
         f"\n--- BODY ---\n"
         f"Body of {mid}"
     )
@@ -89,6 +90,32 @@ class TestGmailDataSource:
         assert results[0].confidence == 0.75
         assert results[2].confidence == 0.55
         assert "m3" in results[2].title
+        assert results[0].metadata["provider_message_id"] == "m1"
+        assert results[0].metadata["provider_thread_id"] == "m1"
+        assert results[0].metadata["list_id"] == "<notes.example.com>"
+        assert results[2].metadata["provider_message_id"] == "m3"
+
+    def test_metadata_keeps_the_api_id_apart_from_the_rfc_id(self):
+        from plugins.gmail.data_source import _gmail_metadata
+
+        meta = _gmail_metadata(
+            {"id": "api-1", "thread_id": "thr-1"},
+            {
+                "message-id": "<rfc@example.com>",
+                "to": "me@example.com",
+                "date": "Tue, 1 Oct 2026 00:00:00 +0000",
+                "in-reply-to": "<prev@example.com>",
+                "references": "<prev@example.com>",
+            },
+        )
+        assert meta["provider_message_id"] == "api-1"
+        assert meta["rfc_message_id"] == "<rfc@example.com>"
+        assert meta["to"] == "me@example.com"
+        assert meta["date"] == "Tue, 1 Oct 2026 00:00:00 +0000"
+        assert meta["in_reply_to"] == "<prev@example.com>"
+        assert meta["references"] == "<prev@example.com>"
+        blank = _gmail_metadata({"id": "api-1"}, {"in-reply-to": "  "})
+        assert "in_reply_to" not in blank
 
     @pytest.mark.asyncio
     async def test_query_sends_page_size_not_max_results(self, monkeypatch):
@@ -263,3 +290,30 @@ class TestHydrationDegradesGracefully:
         # The failed one is skipped (a tested decision, unchanged); the others
         # still come back.
         assert out, "one unreadable message must not lose the rest"
+
+
+class TestGmailRelevance:
+    def test_mail_words_and_operators_are_relevant(self):
+        ds = GmailDataSource()
+        for query in (
+            "check my email",
+            "any e-mail from today",
+            "open gmail",
+            "what's in the inbox",
+            "mailbox status",
+            "from:alice@example.com",
+            "subject:invoice",
+            "label:trips",
+            "filename:receipt.pdf",
+        ):
+            assert ds.is_relevant(query, []) is True, query
+
+    def test_an_ordinary_question_is_not_a_mailbox_query(self):
+        ds = GmailDataSource()
+        for query in (
+            "what is the capital of France",
+            "message from the meeting",
+            "from the docs, how does auth work",
+            "",
+        ):
+            assert ds.is_relevant(query, ["email"]) is False, query
