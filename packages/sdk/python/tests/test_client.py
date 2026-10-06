@@ -158,6 +158,23 @@ class TestErrorMapping:
             _raise_for_status(resp)
         assert exc_info.value.status_code == 403
 
+    def test_error_code_is_surfaced(self) -> None:
+        """The server names the refusal in ``error_code`` (origin guard, SLO
+        budget); a client that reads only ``detail`` cannot branch on it."""
+        resp = _mock_response(
+            403, {"detail": "Cross-site request refused", "error_code": "CROSS_SITE_REQUEST_REFUSED"},
+        )
+        with pytest.raises(AuthenticationError) as exc_info:
+            _raise_for_status(resp)
+        assert exc_info.value.error_code == "CROSS_SITE_REQUEST_REFUSED"
+        assert "CROSS_SITE_REQUEST_REFUSED" in str(exc_info.value)
+
+    def test_error_code_is_none_when_absent(self) -> None:
+        resp = _mock_response(404, {"detail": "Not found"})
+        with pytest.raises(NotFoundError) as exc_info:
+            _raise_for_status(resp)
+        assert exc_info.value.error_code is None
+
     def test_404_raises_not_found_error(self) -> None:
         resp = _mock_response(404, {"detail": "Not found"})
         with pytest.raises(NotFoundError) as exc_info:

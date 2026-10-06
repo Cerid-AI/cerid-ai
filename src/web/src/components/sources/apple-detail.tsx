@@ -39,6 +39,7 @@ import { MCP_BASE } from "@/lib/api/common"
 import { useEntitlements } from "@/hooks/use-entitlements"
 import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import { useNavigation } from "@/contexts/navigation-context"
+import { MailSetup } from "./mail-setup"
 import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 // ---------------------------------------------------------------------------
@@ -990,6 +991,8 @@ function AppleDetailInner({ kind, onClose }: { kind: AppleBridgeKind; onClose: (
           </div>
         </Card>
       )}
+
+      {kind === "mail" && <MailSetup provider="apple_mail" />}
 
       {/* Reminders kind */}
       {kind === "reminders" && (

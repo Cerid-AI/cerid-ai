@@ -380,7 +380,7 @@ class TestExternalEscalationConfidenceThreading:
             "verification_answer": "Concrete verifier answer.",
         }
 
-    async def _run_semantic_gate(self, ext_return):
+    async def _run_semantic_gate(self, ext_return, nli=None):
         from unittest.mock import MagicMock
 
         from core.agents.hallucination.verification import verify_claim
@@ -403,7 +403,7 @@ class TestExternalEscalationConfidenceThreading:
 
         # NLI neutral with entailment below the 0.15 semantic-alignment floor
         # forces the high-similarity KB verdict to escalate externally.
-        neutral_nli = {
+        neutral_nli = nli or {
             "entailment": 0.05, "contradiction": 0.05,
             "neutral": 0.90, "label": "neutral",
         }
@@ -431,6 +431,20 @@ class TestExternalEscalationConfidenceThreading:
         assert result["similarity"] == 0.82
         # Escalation verdicts keep the full external payload for the audit UI.
         assert result["verification_answer"] == "Concrete verifier answer."
+
+    @pytest.mark.asyncio
+    async def test_kb_verdict_carries_the_entailment_it_was_gated_on(self):
+        """Entailment above the alignment floor but below the kb_nli threshold
+        yields the plain kb verdict. Memory promotion requires that score, so
+        the verdict must carry it rather than leave the promoter to guess."""
+        aligned_nli = {
+            "entailment": 0.41, "contradiction": 0.04,
+            "neutral": 0.55, "label": "neutral",
+        }
+        result = await self._run_semantic_gate(self._ext_verified(), nli=aligned_nli)
+        assert result["status"] == "verified"
+        assert result["verification_method"] == "kb"
+        assert result["nli_entailment"] == 0.41
 
     @pytest.mark.asyncio
     async def test_semantic_gate_escalation_sse_confidence_nonzero(self):

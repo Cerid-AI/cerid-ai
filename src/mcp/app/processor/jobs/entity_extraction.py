@@ -139,7 +139,11 @@ class EntityExtractionJob(BaseJob):
         from app.db.neo4j.entity import upsert_entities_for_artifact
         from app.deps import get_chroma, get_neo4j
         from config.taxonomy import collection_name
-        from core.agents.entity_extraction import default_llm_caller, extract_entities_from_text
+        from core.agents.entity_extraction import (
+            EntityExtractionError,
+            default_llm_caller,
+            extract_entities_from_text,
+        )
 
         driver = get_neo4j()
         chroma_client = get_chroma()
@@ -179,11 +183,18 @@ class EntityExtractionJob(BaseJob):
             return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "empty_text"}
 
         # --- 2. LLM extraction -----------------------------------------------
-        entities = await extract_entities_from_text(
-            blob,
-            llm_caller=default_llm_caller,
-            max_chars=_MAX_CHARS,
-        )
+        try:
+            entities = await extract_entities_from_text(
+                blob,
+                llm_caller=default_llm_caller,
+                max_chars=_MAX_CHARS,
+            )
+        except EntityExtractionError:
+            logger.info(
+                "entity_extraction.skipped artifact=%s reason=%s",
+                self._artifact_id, "extraction_failed",
+            )
+            return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "extraction_failed"}
         await progress_cb(0.7)
 
         if not entities:

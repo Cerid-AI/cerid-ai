@@ -16,8 +16,11 @@ the embedding function into every ``get_or_create_collection`` and
 import logging
 import os
 import threading
+from http import HTTPStatus
+from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
@@ -82,13 +85,13 @@ _QUERY_PREFIX_MAP: dict[str, str] = {
 # Pinned artifact revisions — HuggingFace commit SHAs, not branch names.
 # ``main`` moves, and these weights decide every vector in the index: a repo
 # owner retagging silently changes retrieval semantics on the next cold start.
-# EMBEDDING_MODEL_VERSION cannot notice, because it tracks a config string
-# rather than the artifact. The SHA below pins what the in-process ONNX leg
-# loads; bump it deliberately, and re-embed when you do. It says nothing about
-# an index built through Quenchforge (EMBEDDINGS_PROVIDER=quenchforge serves
-# QUENCHFORGE_EMBED_MODEL instead — a different, orthogonal vector space at the
-# same width). What verifies that queries and stored chunks share one space is
-# the boot-time probe in app/startup/invariants.py, not this pin.
+# The SHA below pins what the in-process ONNX leg loads and is what
+# ``serving_embedding_version`` stamps for that leg; bump it deliberately, and
+# re-embed when you do. It says nothing about an index built through the local
+# server (EMBEDDINGS_PROVIDER=quenchforge serves QUENCHFORGE_EMBED_MODEL
+# instead — a different, orthogonal vector space at the same width). What
+# verifies that queries and stored chunks share one space is the boot-time
+# probe in app/startup/invariants.py, not this pin.
 _PINNED_REVISIONS: dict[str, str] = {
     "Snowflake/snowflake-arctic-embed-m-v1.5":
         "e58a8f756156a1293d763f17e3aae643474e9b8a",  # pragma: allowlist secret
@@ -528,7 +531,7 @@ class OnnxEmbeddingFunction:
             # through ONLY when the fallback leg runs the same model identity.
             if not _same_vector_space(qf_model, config.EMBEDDING_MODEL):
                 raise RuntimeError(
-                    f"Quenchforge embed failed ({exc}) and the fallback leg runs "
+                    f"Quenchforge embed failed ({type(exc).__name__}: {exc}) and the fallback leg runs "
                     f"{config.EMBEDDING_MODEL!r}, a different vector space from "
                     f"{qf_model!r}. Refusing to serve — same dimensionality is not "
                     f"the same space, and nothing namespaces the collection. "
@@ -657,6 +660,36 @@ def _same_vector_space(a: str, b: str) -> bool:
     return bool(a) and bool(b) and _normalise_model_id(a) == _normalise_model_id(b)
 
 
+def _serving_identity() -> tuple[str, str, str]:
+    """``(leg, model, locator)`` — the inputs that decide which artifact serves.
+
+    ``leg`` is ``"server"`` when the local model server (EMBEDDINGS_PROVIDER=
+    quenchforge, whichever binary answers on that port) produces the vectors,
+    ``"store"`` when the ChromaDB server embeds with its own default model, and
+    ``"onnx"`` for the in-process ONNX pin and the sidecar, which load the
+    same model identity. ``locator`` is the server URL or the HF cache dir —
+    the place the artifact is read from. This tuple is the cache key for
+    :func:`serving_embedding_version`, so a change in any of the three is
+    what invalidates a remembered version.
+    """
+    try:
+        from utils.quenchforge_client import (
+            _get_quenchforge_url,
+            is_embeddings_provider_quenchforge,
+        )
+        if is_embeddings_provider_quenchforge():
+            qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
+            if qf_model:
+                return "server", qf_model, _get_quenchforge_url()
+    except Exception as exc:  # noqa: BLE001 — provenance probe is best-effort
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error("core.utils.embeddings.serving_model_probe", exc)
+    model = config.EMBEDDING_MODEL
+    if model == _SERVER_DEFAULT_MODEL:
+        return "store", model, ""
+    return "onnx", model, config.EMBEDDING_MODEL_CACHE_DIR or ""
+
+
 def serving_embedding_model() -> str:
     """The model identity that will actually produce vectors right now.
 
@@ -665,16 +698,114 @@ def serving_embedding_model() -> str:
     ``QUENCHFORGE_EMBED_MODEL`` is. Every provenance surface must read this
     rather than the local pin.
     """
+    return _serving_identity()[1]
+
+
+_UNKNOWN_ARTIFACT = "unknown"
+_VERSION_PROBE_TIMEOUT_S = 1.0
+_serving_version_cache: dict[tuple[str, str, str], str] = {}
+_serving_version_lock = threading.Lock()
+
+
+def _served_model_digest(base_url: str, model: str) -> str | None:
+    """The digest the Ollama-API server reports for *model* in ``/api/tags``."""
+    resp = httpx.get(f"{base_url}/api/tags", timeout=_VERSION_PROBE_TIMEOUT_S)
+    if resp.status_code != HTTPStatus.OK:
+        return None
+    for entry in resp.json().get("models", []):
+        name = str(entry.get("name", ""))
+        if name == model or name.split(":", 1)[0] == model:
+            digest = entry.get("digest")
+            return digest if isinstance(digest, str) and digest else None
+    return None
+
+
+def _server_artifact(base_url: str, model: str) -> str | None:
+    """What the local model server says it is: ``cerid-mlx-<rev>`` for the
+    MLX server, the model digest (else ``quenchforge-<version>``) for
+    Quenchforge, the reported version for anything else. ``None`` when the
+    server cannot be reached or reports nothing."""
+    from utils.local_model_server import identify_local_server
+
     try:
-        from utils.quenchforge_client import is_embeddings_provider_quenchforge
-        if is_embeddings_provider_quenchforge():
-            qf_model = os.environ.get("QUENCHFORGE_EMBED_MODEL", "")
-            if qf_model:
-                return qf_model
-    except Exception as exc:  # noqa: BLE001 — provenance probe is best-effort
+        name, version = identify_local_server(base_url)
+        if name == "Quenchforge":
+            digest = _served_model_digest(base_url, model)
+            if digest:
+                return digest
+            return f"quenchforge-{version}" if version else None
+        return version or None
+    except Exception as exc:  # noqa: BLE001 — a down server is "unknown", not a crash
         from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error("core.utils.embeddings.serving_model_probe", exc)
-    return config.EMBEDDING_MODEL
+        log_swallowed_error("core.utils.embeddings.serving_version_probe", exc)
+        return None
+
+
+def _onnx_artifact(model: str, cache_dir: str | None) -> str | None:
+    """The HF revision the in-process leg loads: the pin when there is one,
+    else the snapshot commit already in the local cache. Never downloads."""
+    pinned = _PINNED_REVISIONS.get(model)
+    if pinned:
+        return pinned
+    from huggingface_hub import try_to_load_from_cache
+
+    path = try_to_load_from_cache(model, config.EMBEDDING_ONNX_FILENAME, cache_dir=cache_dir)
+    if not isinstance(path, str):
+        return None
+    parts = Path(path).parts
+    if "snapshots" not in parts:
+        return None
+    return parts[parts.index("snapshots") + 1]
+
+
+def serving_embedding_version() -> str:
+    """The serving ARTIFACT behind every vector written right now.
+
+    Contract for the ``embedding_model_version`` chunk stamp (ruling D13-A):
+    it names what produced the vector precisely enough that a different
+    artifact gets a different value, so a re-embed can key on it. It is never
+    a config string — ``EMBEDDING_MODEL_VERSION`` defaulted to the ONNX model
+    name whatever leg served, which is how ~700 nomic-produced chunks on the
+    personal stack came to say Snowflake.
+
+    * local model server (``EMBEDDINGS_PROVIDER=quenchforge``) —
+      ``<served model>@<server artifact>``: the MLX server's ``/api/version``
+      (``cerid-mlx-<rev>``); for Quenchforge the model's digest from
+      ``/api/tags`` when exposed, else ``quenchforge-<version>``.
+    * in-process ONNX and the sidecar (same model identity) —
+      ``<model>@<HF revision>``: the pinned commit, else the cached snapshot's.
+    * store-side embedding (ChromaDB's default model) — the model id alone;
+      the store's artifact is opaque from here.
+
+    ``<model>@unknown`` means the artifact could not be read (server down,
+    model not yet downloaded); that answer is NOT cached, so the next call
+    probes again. Known answers are cached per process, keyed by the same
+    serving identity :func:`serving_embedding_model` resolves, so a provider,
+    model, or URL change invalidates on the next call.
+    """
+    leg, model, locator = _serving_identity()
+    if leg == "store":
+        return model
+    key = (leg, model, locator)
+    with _serving_version_lock:
+        cached = _serving_version_cache.get(key)
+    if cached is not None:
+        return cached
+    if leg == "server":
+        artifact = _server_artifact(locator, model)
+    else:
+        artifact = _onnx_artifact(model, locator or None)
+    if artifact is None:
+        return f"{model}@{_UNKNOWN_ARTIFACT}"
+    version = f"{model}@{artifact}"
+    with _serving_version_lock:
+        _serving_version_cache[key] = version
+    return version
+
+
+def _reset_serving_version_cache_for_testing() -> None:
+    with _serving_version_lock:
+        _serving_version_cache.clear()
 
 
 def embedding_stamp(domain: str) -> dict[str, str]:
@@ -685,13 +816,10 @@ def embedding_stamp(domain: str) -> dict[str, str]:
     — every chunk-write path (ingest, re-embed) merges this into its
     per-chunk metadata so a future embedding-model swap can identify which
     chunks were computed under which model without inferring it from
-    vector geometry. ``embedding_model`` is the model that will actually serve
-    (:func:`serving_embedding_model` — the Quenchforge model when the daemon is
-    the selected embedder, otherwise the local ONNX pin);
-    ``embedding_model_version`` resolves
-    through the per-domain override so a staged migration
-    (``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN``) stamps only the domain being
-    migrated.
+    vector geometry. ``embedding_model`` is the model that will actually
+    serve (:func:`serving_embedding_model`) and ``embedding_model_version``
+    the artifact serving it (:func:`serving_embedding_version`); both
+    describe what is about to happen, not what a config string claims.
 
     Chunks written before this stamp existed simply lack these two keys —
     that is treated as "unversioned legacy data" everywhere it's read, not
@@ -699,7 +827,7 @@ def embedding_stamp(domain: str) -> dict[str, str]:
     """
     return {
         "embedding_model": serving_embedding_model(),
-        "embedding_model_version": config.embedding_version_for_domain(domain),
+        "embedding_model_version": serving_embedding_version(),
     }
 
 

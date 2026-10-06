@@ -110,7 +110,9 @@ async def promote_verified_facts(
     1. verdict == "supported"
     2. confidence >= min_confidence (default: 0.8)
     3. claim type is not ignorance/evasion (these are meta-claims, not facts)
-    4. NLI entailment against KB source >= min_nli_entailment (default: 0.7)
+    4. the verdict carries an NLI entailment score against its evidence and
+       it is >= min_nli_entailment (default: 0.7); a claim without a score
+       (cross-model agreement, external verdicts) is never promoted
     5. the verdict names a source: a KB artifact or a URL
 
     Creates :Memory nodes with memory_type="empirical", source="verification",
@@ -119,7 +121,7 @@ async def promote_verified_facts(
     Returns:
         {"promoted": int, "skipped_low_confidence": int,
          "skipped_duplicate": int, "skipped_type": int,
-         "skipped_no_source": int, "errors": int}
+         "skipped_no_entailment": int, "skipped_no_source": int, "errors": int}
     """
     if min_confidence is None:
         min_confidence = getattr(config, "VERIFIED_MEMORY_MIN_CONFIDENCE", 0.8)
@@ -134,6 +136,7 @@ async def promote_verified_facts(
         "skipped_low_confidence": 0,
         "skipped_duplicate": 0,
         "skipped_type": 0,
+        "skipped_no_entailment": 0,
         "skipped_no_source": 0,
         "errors": 0,
     }
@@ -150,12 +153,10 @@ async def promote_verified_facts(
             # pipeline stamps. Reading only "type" made Filter 3 dead code.
             claim_type = claim_data.get("claim_type") or claim_data.get("type") or "factual"
             claim_text = claim_data.get("claim", "")
-            # Real KB-NLI entailment exists only on the kb_nli verification path;
-            # cross-model-verified claims carry no NLI score (None here). We do
-            # NOT fabricate one from confidence — Filter 4 below gates kb_nli
-            # claims on the genuine NLI score and cross-model claims on their
-            # confidence (cross-model agreement IS the signal), at the same
-            # numeric bar, so the gate is honest about which evidence it used.
+            # Real NLI entailment exists only where the claim was scored against
+            # KB evidence (the kb_nli and kb verdict paths); cross-model and
+            # external verdicts carry none (None here). It is never fabricated
+            # from confidence — Filter 4 below refuses to promote without it.
             _raw_nli = claim_data.get("nli_entailment")
             nli_entailment = float(_raw_nli) if _raw_nli is not None else None
 
@@ -174,13 +175,15 @@ async def promote_verified_facts(
                 counts["skipped_type"] += 1
                 continue
 
-            # Filter 4: entailment/agreement bar. kb_nli claims gate on the real
-            # NLI entailment score; cross-model claims (no NLI score) gate on
-            # confidence — the strength of the cross-model agreement — at the
-            # SAME bar. Cross-model "verified" at confidence 1.0 clears it, but
-            # via its actual signal, not a confidence-masquerading-as-NLI proxy.
-            gate_value = nli_entailment if nli_entailment is not None else confidence
-            if gate_value < min_nli_entailment:
+            # Filter 4: the entailment bar. Until 2026-10 a claim with no NLI
+            # score gated on confidence instead, so a second model agreeing at
+            # 1.0 cleared a bar meant for entailment against evidence and its
+            # sentences became empirical memories. Agreement is a verdict, not
+            # grounding: no score, no promotion.
+            if nli_entailment is None:
+                counts["skipped_no_entailment"] += 1
+                continue
+            if nli_entailment < min_nli_entailment:
                 counts["skipped_low_confidence"] += 1
                 continue
 

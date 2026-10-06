@@ -12,11 +12,23 @@ if TYPE_CHECKING:
 
 
 class CeridSDKError(Exception):
-    """Base exception for all Cerid SDK errors."""
+    """Base exception for all Cerid SDK errors.
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    Attributes:
+        status_code: The HTTP status, when the error came from a response.
+        error_code: The server's machine-readable ``error_code`` (for example
+            ``CROSS_SITE_REQUEST_REFUSED``), or ``None`` when the body has none.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        error_code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
 
 
 class AuthenticationError(CeridSDKError):
@@ -47,8 +59,9 @@ class RateLimitError(CeridSDKError):
         message: str,
         status_code: int = 429,
         retry_after: float | None = None,
+        error_code: str | None = None,
     ) -> None:
-        super().__init__(message, status_code)
+        super().__init__(message, status_code, error_code)
         self.retry_after = retry_after
 
 
@@ -80,26 +93,28 @@ def _raise_for_status(response: httpx.Response) -> None:
         body = {}
 
     detail = body.get("detail", response.text[:200])
-    message = f"[{status}] {detail}"
+    raw_code = body.get("error_code")
+    error_code = raw_code if isinstance(raw_code, str) and raw_code else None
+    message = f"[{status}] {detail}" + (f" ({error_code})" if error_code else "")
 
     if status == 403:
         reason = None
         if isinstance(detail, dict):
             reason = detail.get("retrieval_reason")
         if reason == "consumer_domain_restricted":
-            raise DomainRestrictedError(message, status)
-        raise AuthenticationError(message, status)
+            raise DomainRestrictedError(message, status, error_code)
+        raise AuthenticationError(message, status, error_code)
     if status == 401:
-        raise AuthenticationError(message, status)
+        raise AuthenticationError(message, status, error_code)
     if status == 404:
-        raise NotFoundError(message, status)
+        raise NotFoundError(message, status, error_code)
     if status == 422:
-        raise ValidationError(message, status)
+        raise ValidationError(message, status, error_code)
     if status == 429:
         retry_after_raw = response.headers.get("retry-after")
         retry_after = float(retry_after_raw) if retry_after_raw else None
-        raise RateLimitError(message, status, retry_after=retry_after)
+        raise RateLimitError(message, status, retry_after=retry_after, error_code=error_code)
     if status == 503:
-        raise ServiceUnavailableError(message, status)
+        raise ServiceUnavailableError(message, status, error_code)
 
-    raise CeridSDKError(message, status)
+    raise CeridSDKError(message, status, error_code)

@@ -402,9 +402,12 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     Lookup order (first match wins):
     1. ``PROVIDER_STAGE_<NORMALIZED_STAGE>`` env var. Stage names like
        ``"longmemeval/score"`` normalize to ``LONGMEMEVAL_SCORE``.
-    2. ``config.PIPELINE_PROVIDERS[stage]`` for well-known stages
+    2. Inbox stages in ``LOCAL_FIRST_STAGES`` use the host local backend,
+       even when the global provider is cloud. ``CLOUD_ESCALATION_STAGES``
+       use OpenRouter, except under the local-only profile.
+    3. ``config.PIPELINE_PROVIDERS[stage]`` for well-known stages
        (``claim_extraction``, ``query_decomposition``, …).
-    3. ``default_provider`` (the global ``INTERNAL_LLM_PROVIDER``).
+    4. ``default_provider`` (the global ``INTERNAL_LLM_PROVIDER``).
 
     Lets operators send heavy or latency-sensitive call sites to a
     different provider than the global default — e.g. route
@@ -423,8 +426,23 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
         if env_override:
             resolved = env_override
         else:
-            pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
-            resolved = pipeline_providers.get(stage, default_provider)
+            from config.stage_profiles import CLOUD_ESCALATION_STAGES, LOCAL_FIRST_STAGES
+
+            if stage in LOCAL_FIRST_STAGES or (
+                stage in CLOUD_ESCALATION_STAGES
+                and getattr(config, "CERID_ENVIRONMENT_PROFILE", "") == "local-only"
+            ):
+                from config.environment_profiles import degrade_target_provider
+
+                resolved = degrade_target_provider(
+                    default_provider,
+                    os.environ.get("HOST_RECOMMENDED_LOCAL_BACKEND"),
+                )
+            elif stage in CLOUD_ESCALATION_STAGES:
+                resolved = "openrouter"
+            else:
+                pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
+                resolved = pipeline_providers.get(stage, default_provider)
 
     if (
         _private_mode_level_probe is not None

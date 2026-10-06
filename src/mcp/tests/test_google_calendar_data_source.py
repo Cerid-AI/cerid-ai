@@ -234,3 +234,25 @@ class TestAdaptQuery:
         with patch.object(ds, "_call_mcp", mock_call):
             await ds.query("acme")
         assert mock_call.await_args.args[1]["query"] == "acme"
+
+
+class TestCalendarRelevance:
+    def test_calendar_words_are_relevant(self):
+        ds = GoogleCalendarDataSource()
+        for query in (
+            "what's on my calendar",
+            "next appointment",
+            "team meeting tomorrow",
+            "send the agenda",
+        ):
+            assert ds.is_relevant(query, []) is True, query
+
+    def test_schedule_and_event_are_not_enough(self):
+        ds = GoogleCalendarDataSource()
+        for query in (
+            "schedule a deploy",
+            "the event was cancelled",
+            "what is the capital of France",
+            "",
+        ):
+            assert ds.is_relevant(query, ["calendar"]) is False, query

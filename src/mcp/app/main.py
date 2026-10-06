@@ -52,6 +52,7 @@ from app.routers import (
     feedback,
     graph_tour,
     health,
+    inbox_setup,
     ingestion,
     kb_admin,
     knowledge_packs,
@@ -1457,6 +1458,7 @@ app.include_router(meetings.router)
 
 # Cloud connector OAuth + status surface (Phase F.2 cleanup).
 app.include_router(connectors.router)
+app.include_router(inbox_setup.router)
 
 # Source-management surface backing the F1/F2/F3 wizard flow.
 # Side-effect-imports the connector package so register_connector

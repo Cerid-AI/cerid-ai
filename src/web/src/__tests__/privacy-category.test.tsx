@@ -90,8 +90,8 @@ describe("PrivacyCategory — rendering", () => {
     render(<PrivacyCategory {...defaultProps} />, { wrapper })
     expect(screen.getByRole("button", { name: /L0.*Off/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /L1.*Skip saves/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /L2.*skip KB injection/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /L3.*no logging/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /L2.*skip the knowledge base/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /L3.*skip the audit line/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /L4.*ephemeral/i })).toBeInTheDocument()
   })
 

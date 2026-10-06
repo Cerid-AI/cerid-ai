@@ -186,7 +186,7 @@ async def pkb_extract_entities(
     if artifact_id:
         text = await _fetch_artifact_text(artifact_id)
 
-    from core.agents.entity_extraction import extract_entities_from_text
+    from core.agents.entity_extraction import EntityExtractionError, extract_entities_from_text
     from core.utils.internal_llm import call_internal_llm
 
     async def _caller(messages, *, json_mode=False, stage=None):
@@ -196,8 +196,18 @@ async def pkb_extract_entities(
             stage=stage or "mcp_extract_entities",
         )
 
-    entities = await extract_entities_from_text(text, llm_caller=_caller)
+    try:
+        entities = await extract_entities_from_text(text, llm_caller=_caller)
+    except EntityExtractionError as exc:
+        return {
+            "entities": [],
+            "count": 0,
+            "source_artifact_id": artifact_id,
+            "status": "extraction_failed",
+            "error": str(exc),
+        }
     return {
+        "status": "ok",
         "entities": [
             {
                 "name": e.name,

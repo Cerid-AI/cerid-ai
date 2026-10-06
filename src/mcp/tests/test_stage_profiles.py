@@ -170,6 +170,15 @@ def test_judging_stages_dont_route_to_grok_4_20_or_opus():
         )
 
 
+def test_inbox_escalation_is_the_frontier_tier():
+    """The last classification rung is the expert model, not another local one."""
+    assert hardness_for("inbox_triage") is Hardness.SIMPLE
+    assert hardness_for("inbox_triage_review") is Hardness.MODERATE
+    assert hardness_for("inbox_triage_escalate") is Hardness.FRONTIER
+    assert _resolve_stage_model("inbox_triage_escalate") == get_model("tiers", "expert")
+    assert "opus" in _resolve_stage_model("inbox_triage_escalate")
+
+
 def test_summarization_stages_land_in_cheap_tier():
     """Summary stages default to SIMPLE = cheap tier — cost-sensitive default."""
     summary_stages = [

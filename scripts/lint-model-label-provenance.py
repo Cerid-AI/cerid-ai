@@ -41,7 +41,7 @@ bound from the client response, a parameter, ``result.model``,
 ``getattr(config, "X")`` with no literal default. The fix is always the
 same: thread the value the call actually used back into the payload.
 
-Allowlist: ``scripts/model_label_provenance_allowlist.txt`` (path:line, one
+Allowlist: ``scripts/model_label_provenance_allowlist.txt`` (path:function:label, one
 reason each). Shrink-only.
 
 Usage:
@@ -87,7 +87,7 @@ class Violation(NamedTuple):
     kind: str  # "literal" | "module-constant" | "getenv-default"
 
     def key(self) -> str:
-        return f"{self.file}:{self.lineno}"
+        return f"{self.file}:{self.handler}:{self.label}"
 
 
 def module_level_names(tree: ast.Module) -> set[str]:
@@ -213,7 +213,7 @@ _HEADER = """\
 # Enforced by scripts/lint-model-label-provenance.py --check (gate G-H,
 # tasks/2026-09-02-audit-findings.json).
 #
-# Format: <path>:<lineno>  # <one-line reason>
+# Format: <path>:<function>:<label>  # <one-line reason>
 # Shrink-only — threading the value the call actually used into the payload
 # removes the line; a stale entry fails the gate.
 #

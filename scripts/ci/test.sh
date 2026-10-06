@@ -12,6 +12,9 @@
 set -euo pipefail
 
 pip install -r src/mcp/requirements.txt
+# requirements-dev.txt carries the test-only writers (reportlab builds PDF fixtures);
+# without it the PDF tests cannot even be collected here.
+pip install -r src/mcp/requirements-dev.txt
 pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
 
 (
@@ -25,6 +28,17 @@ python -m pytest scripts/tests/ -q
 
 # The edge sign-in service (stacks/sso): stdlib only, so the suite's venv runs it.
 python -m pytest stacks/sso/test_sso.py -q -p no:cacheprovider
+
+# Hub collector. Stdlib plus pytest; the modules import siblings, so the
+# working directory is the package.
+if [ -d stacks/gateway/hub/collector ]; then
+  (
+    cd stacks/gateway/hub/collector
+    python -m pytest -q -p no:cacheprovider
+  )
+else
+  echo "stacks/gateway/hub absent (internal-only mirror); collector tests skipped"
+fi
 
 # The Studio MLX server (stacks/mlx-inference). Its own venv: mlx-lm pulls
 # transformers, which must not reshuffle the pins the suite above ran against.

@@ -40,6 +40,7 @@ from config.environment_profiles import (
 from config.stage_profiles import (
     BACKGROUND_STAGES,
     INTERACTIVE_STAGES,
+    LOCAL_FIRST_STAGES,
     STAGE_PROFILES,
     Hardness,
     hardness_for,
@@ -273,13 +274,14 @@ def _accepts_cheap(stage: str) -> bool:
 
 def test_cloud_first_routes_interactive_and_background_to_the_cheap_tier():
     defaults = profile_defaults("cloud-first", "A")
-    for stage in _interactive_routable() | set(BACKGROUND_STAGES):
+    for stage in (_interactive_routable() | set(BACKGROUND_STAGES)) - set(LOCAL_FIRST_STAGES):
         norm = normalize_stage(stage)
         assert defaults[f"PROVIDER_STAGE_{norm}"] == "openrouter"
         if _accepts_cheap(stage):
             assert defaults[f"PROVIDER_STAGE_{norm}_MODEL"] == _cheap()
         else:
             assert f"PROVIDER_STAGE_{norm}_MODEL" not in defaults
+    assert _stage_keys(LOCAL_FIRST_STAGES).isdisjoint(defaults)
     assert defaults["INTERNAL_LLM_MAX_CONCURRENCY"] == "2"
     assert defaults["VERIFY_CLAIM_MAX_CONCURRENT"] == "3"
     assert defaults["WIKI_REFRESH_LIVE_MAX_PER_HOUR"] == "12"
@@ -288,7 +290,7 @@ def test_cloud_first_routes_interactive_and_background_to_the_cheap_tier():
 
 def test_hybrid_routes_only_interactive_to_the_cheap_tier():
     defaults = profile_defaults("hybrid", "A")
-    for stage in _interactive_routable():
+    for stage in _interactive_routable() - set(LOCAL_FIRST_STAGES):
         norm = normalize_stage(stage)
         assert defaults[f"PROVIDER_STAGE_{norm}"] == "openrouter"
         if _accepts_cheap(stage):
@@ -299,6 +301,7 @@ def test_hybrid_routes_only_interactive_to_the_cheap_tier():
     # operator's INTERNAL_LLM_PROVIDER decides and the background model slot
     # applies.
     assert _stage_keys(BACKGROUND_STAGES).isdisjoint(defaults)
+    assert _stage_keys(LOCAL_FIRST_STAGES).isdisjoint(defaults)
     assert defaults["INTERNAL_LLM_MAX_CONCURRENCY"] == "2"
     assert defaults["VERIFY_CLAIM_MAX_CONCURRENT"] == "3"
     assert defaults["WIKI_REFRESH_LIVE_MAX_PER_HOUR"] == "12"

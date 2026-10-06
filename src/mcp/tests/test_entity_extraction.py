@@ -17,6 +17,7 @@ import pytest
 
 from core.agents.entity_extraction import (
     Entity,
+    EntityExtractionError,
     canonical_id,
     extract_entities_from_text,
     is_codec_alias_shaped,
@@ -148,17 +149,19 @@ class TestExtractEntities:
         assert len(captured) == 1
         assert captured[0].count("x") <= 8000 + 100  # +slack for prompt scaffold
 
-    async def test_llm_failure_returns_empty(self):
+    async def test_llm_failure_raises(self):
         async def caller(messages):  # noqa: ARG001
             raise RuntimeError("upstream LLM down")
 
-        assert await extract_entities_from_text("test", llm_caller=caller) == []
+        with pytest.raises(EntityExtractionError, match="^llm call failed$"):
+            await extract_entities_from_text("test", llm_caller=caller)
 
-    async def test_invalid_json_returns_empty(self):
+    async def test_invalid_json_raises(self):
         async def caller(messages):  # noqa: ARG001
             return "not json at all { incomplete"
 
-        assert await extract_entities_from_text("test", llm_caller=caller) == []
+        with pytest.raises(EntityExtractionError, match="^json parse failed$"):
+            await extract_entities_from_text("test", llm_caller=caller)
 
     async def test_non_dict_response_returns_empty(self):
         caller = _llm_caller_returning({"wrong_shape": True})  # type: ignore[arg-type]
@@ -650,16 +653,14 @@ class TestMalformedJsonRetry:
         ]
         assert retry_lines == ["entity_extraction.json_retry attempted=True succeeded=True"]
 
-    async def test_both_malformed_returns_empty_and_warns(self, caplog):
+    async def test_both_malformed_raises_and_warns(self, caplog):
         async def caller(messages):  # noqa: ARG001
             return "not json at all { incomplete"
 
         with caplog.at_level("DEBUG", logger="ai-companion.entity_extraction"):
-            result = await extract_entities_from_text(
-                "test", llm_caller=caller,
-            )
+            with pytest.raises(EntityExtractionError, match="^json parse failed$"):
+                await extract_entities_from_text("test", llm_caller=caller)
 
-        assert result == []
         messages = [r.getMessage() for r in caplog.records]
         assert "entity_extraction.json_retry attempted=True succeeded=False" in messages
         assert any(m.startswith("entity_extraction.json_parse_failed") for m in messages)

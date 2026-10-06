@@ -551,6 +551,14 @@ def _parse_llm_json_strict(raw: str) -> Any:
     return parsed
 
 
+class EntityExtractionError(RuntimeError):
+    """The model reply could not be read.
+
+    An empty list means the text named nothing. This means the call failed
+    or the reply was still not the entity schema after one retry.
+    """
+
+
 async def extract_entities_from_text(
     text: str,
     *,
@@ -579,9 +587,9 @@ async def extract_entities_from_text(
     messages = _build_messages(cleaned)
     try:
         raw = await llm_caller(messages)
-    except Exception as exc:  # noqa: BLE001 — observability boundary; fall through to []
+    except Exception as exc:  # noqa: BLE001 — observability boundary; not an empty list
         logger.exception("entity_extraction.llm_call_failed: %s", exc)
-        return []
+        raise EntityExtractionError("llm call failed") from exc
 
     try:
         parsed = _parse_llm_json_strict(raw)
@@ -589,10 +597,10 @@ async def extract_entities_from_text(
         retry_messages = [*messages, {"role": "user", "content": _JSON_RETRY_INSTRUCTION}]
         try:
             retry_raw = await llm_caller(retry_messages)
-        except Exception as retry_call_exc:  # noqa: BLE001 — observability boundary; fall through to []
+        except Exception as retry_call_exc:  # noqa: BLE001 — observability boundary; not an empty list
             logger.exception("entity_extraction.llm_call_failed: %s", retry_call_exc)
             logger.info("entity_extraction.json_retry attempted=True succeeded=False")
-            return []
+            raise EntityExtractionError("llm call failed on retry") from retry_call_exc
         try:
             parsed = _parse_llm_json_strict(retry_raw)
         except Exception as retry_parse_exc:
@@ -600,11 +608,10 @@ async def extract_entities_from_text(
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('core.agents.entity_extraction', retry_parse_exc)
             logger.warning(
-                "entity_extraction.json_parse_failed (returning [] for this chunk); "
-                "first 200 chars: %r",
+                "entity_extraction.json_parse_failed; first 200 chars: %r",
                 retry_raw[:200] if retry_raw else "",
             )
-            return []
+            raise EntityExtractionError("json parse failed") from retry_parse_exc
         logger.info("entity_extraction.json_retry attempted=True succeeded=True")
 
     supported = _drop_unsupported(

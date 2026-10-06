@@ -58,6 +58,7 @@ from typing import Any
 from config.stage_profiles import (
     BACKGROUND_STAGES,
     INTERACTIVE_STAGES,
+    LOCAL_FIRST_STAGES,
     MCP_STAGES,
     Hardness,
     hardness_for,
@@ -213,10 +214,16 @@ def profile_defaults(
         return {}
 
     defaults: dict[str, str] = {}
+    # Inbox classification stays on the local slots unless an operator pins
+    # PROVIDER_STAGE_<NAME>. The profile's cloud list must not win that race.
     if effective_profile in _CLOUD_PROFILES:
-        defaults.update(_cloud_stage_defaults(_ROUTABLE_INTERACTIVE_STAGES))
+        defaults.update(_cloud_stage_defaults(
+            set(_ROUTABLE_INTERACTIVE_STAGES) - set(LOCAL_FIRST_STAGES),
+        ))
     if effective_profile == CLOUD_FIRST:
-        defaults.update(_cloud_stage_defaults(BACKGROUND_STAGES))
+        defaults.update(_cloud_stage_defaults(
+            set(BACKGROUND_STAGES) - set(LOCAL_FIRST_STAGES),
+        ))
 
     if effective_profile in _LOCAL_BACKED_PROFILES:
         defaults["INTERNAL_LLM_PROVIDER"] = _local_provider(recommended_local_backend)

@@ -23,10 +23,23 @@ from typing import Any
 
 import sentry_sdk
 
-from deps import get_redis
 from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.cache")
+
+
+def get_redis():
+    """The process Redis, resolved when the cache is used.
+
+    Importing ``deps.get_redis`` at module load bound this file to that
+    function object. A test that patched ``deps.get_redis`` still read and
+    wrote the original client, so one file's keys were still there for the
+    next. Tests that patch this name replace the whole function.
+    """
+    from deps import get_redis as _bound
+
+    return _bound()
+
 
 CACHE_PREFIX = "qcache:"
 DEFAULT_TTL = 300  # 5 minutes

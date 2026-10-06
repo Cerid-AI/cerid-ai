@@ -196,7 +196,7 @@ NODE_TYPE_CATALOG: dict[str, dict[str, str | None]] = {
     },
     "condition": {
         "label": "Condition",
-        "description": "Evaluates a comparison expression against the data flowing in. Edges leaving it run their target when the expression is true; an edge whose condition is \"false\" runs its target when the expression is false instead. Nodes reachable only through the branch not taken are skipped.",
+        "description": "Evaluates a comparison expression against the data flowing in. Edges leaving it run their target when the expression is true; an edge whose condition is \"false\" runs its target when the expression is false instead. Nodes reachable only through the branch not taken are skipped. An expression that cannot be evaluated counts as false and the run records the reason as condition_error on that step.",
         "inputs": "Upstream node outputs merged with the workflow input.",
         "outputs": "A passed flag plus the unchanged upstream data.",
         "config_schema_summary": "expression — a comparison of one field against a value, e.g. confidence > 0.5 (operators: == != > < >= <=).",
@@ -464,38 +464,43 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
     return {"error": f"Unknown agent: {name}", "input": input_data}
 
 
+class ConditionError(ValueError):
+    """A condition expression could not be evaluated against the run data."""
+
+
 async def _evaluate_condition(expression: str, input_data: dict[str, Any]) -> bool:
     """Evaluate a simple condition expression against input data.
 
     Supported: ``results_count > 0``, ``confidence >= 0.8``, ``status == 'ok'``
+
+    Raises ``ConditionError`` when the expression cannot be parsed or the
+    operands cannot be compared; the caller treats that as "did not pass"
+    rather than silently taking the true branch.
     """
+    import re
+    m = re.match(r"(\w+)\s*(==|!=|>=|<=|>|<)\s*(.+)", expression.strip())
+    if not m:
+        raise ConditionError(f"cannot parse condition expression {expression!r}")
+    key, op, raw_val = m.group(1), m.group(2), m.group(3).strip().strip("'\"")
+
+    actual = input_data.get(key)
+    if actual is None:
+        return False
+
+    # Coerce to number if possible
     try:
-        # Simple key-op-value parsing
-        import re
-        m = re.match(r"(\w+)\s*(==|!=|>=|<=|>|<)\s*(.+)", expression.strip())
-        if not m:
-            return True
-        key, op, raw_val = m.group(1), m.group(2), m.group(3).strip().strip("'\"")
+        val = float(raw_val)
+        actual = float(actual)
+    except (ValueError, TypeError):
+        val = raw_val  # type: ignore[assignment]
 
-        actual = input_data.get(key)
-        if actual is None:
-            return False
-
-        # Coerce to number if possible
-        try:
-            val = float(raw_val)
-            actual = float(actual)
-        except (ValueError, TypeError):
-            val = raw_val  # type: ignore[assignment]
-
-        ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
-               ">": lambda a, b: a > b, "<": lambda a, b: a < b,
-               ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b}
-        return ops[op](actual, val)
-    except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('app.routers.workflows', exc)
-        return True
+    ops = {"==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+           ">": lambda a, b: a > b, "<": lambda a, b: a < b,
+           ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b}
+    try:
+        return bool(ops[op](actual, val))
+    except TypeError as exc:
+        raise ConditionError(f"cannot compare {key} ({type(actual).__name__}) {op} {raw_val!r}: {exc}") from exc
 
 
 async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> WorkflowRun:
@@ -551,9 +556,18 @@ async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> Wo
 
             elif node.type == NodeType.CONDITION:
                 expr = node.config.get("expression", "true")
-                passed = await _evaluate_condition(expr, upstream_data)
+                condition_error: str | None = None
+                try:
+                    passed = await _evaluate_condition(expr, upstream_data)
+                except ConditionError as exc:
+                    # Fail closed: an unevaluable condition did not pass.
+                    passed = False
+                    condition_error = str(exc)
+                    _logger.warning("Workflow %s condition %s: %s", workflow.id, nid, exc)
                 node_outputs[nid] = {"passed": passed, **upstream_data}
                 results[nid] = {"node": node.name, "type": "condition", "passed": passed}
+                if condition_error is not None:
+                    results[nid]["condition_error"] = condition_error
                 # An edge labelled "false" is the else branch; every other edge,
                 # labelled "true" or not, carries data only when the condition passed.
                 for edge in adj.get(nid, []):

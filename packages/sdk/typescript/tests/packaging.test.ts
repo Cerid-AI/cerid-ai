@@ -24,8 +24,18 @@ describe("package.json exports map", () => {
   });
 
   it("declares the minimum Node it supports", () => {
-    // The package is ESM-only (no `require` condition) and relies on global
-    // fetch, so "any Node" is not true. Say which.
+    // The package relies on global fetch, so "any Node" is not true. Say which.
     expect(pkg.engines?.node).toBeTruthy();
+  });
+
+  it("resolves under require and default as well as import", () => {
+    // A CommonJS consumer (cerid-finance's worker, via tsx) fails at import
+    // with ERR_PACKAGE_PATH_NOT_EXPORTED when these conditions are absent.
+    // Both point at the ESM bundle: tsx loads that file once the condition
+    // exists. A separate CJS emit is not what that consumer checks.
+    const root = pkg.exports["."];
+    expect(root.require).toBe("./dist/index.js");
+    expect(root.default).toBe("./dist/index.js");
+    expect(root.import).toBe("./dist/index.js");
   });
 });

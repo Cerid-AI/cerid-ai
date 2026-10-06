@@ -253,14 +253,28 @@ def _ingested_text(file_path: str) -> str:
     return _parse_file(file_path).get("text", "")
 
 
+def _content_hashes(file_path: str) -> list[str]:
+    """The hash ``ingest_file`` computes for this file today, then the one an
+    earlier release computed for a PDF, DOCX, XLSX or ``.eml`` (its decoded
+    bytes), so an artifact ingested under either definition links."""
+    hashes = [hashlib.sha256(_ingested_text(file_path).encode("utf-8")).hexdigest()]
+    if config.ENABLE_LAYOUT_AWARE_PARSING:
+        from core.ingest.dispatch import legacy_hash_text
+
+        legacy_text = legacy_hash_text(file_path)
+        if legacy_text is not None:
+            hashes.append(hashlib.sha256(legacy_text.encode("utf-8")).hexdigest())
+    return hashes
+
+
 def _link_file(file_path: str, folder_id: str) -> bool:
     """Stamp the artifact ingested from ``file_path``. False when none matches."""
-    content_hash = hashlib.sha256(_ingested_text(file_path).encode("utf-8")).hexdigest()
     with get_neo4j().session() as session:
         record = session.run(
-            "MATCH (a:Artifact {content_hash: $hash})-[:BELONGS_TO]->(d:Domain) "
+            "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
+            "WHERE a.content_hash IN $hashes "
             "RETURN a.id AS id, d.name AS domain",
-            hash=content_hash,
+            hashes=_content_hashes(file_path),
         ).single(strict=False)
     if not record:
         return False

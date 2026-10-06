@@ -187,7 +187,7 @@ class TestIngestionPipeline:
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_ingest_history_recorded(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
+    def test_ingest_logs_a_cache_event(self, mock_chroma_fn, mock_neo4j_fn, mock_redis_fn, mock_cache):
         client, collection, driver, session = _ingest_mocks()
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver

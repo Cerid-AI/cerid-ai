@@ -564,7 +564,7 @@ class _Neo4j:
 
     def run(self, cypher: str, **params: Any):
         if "content_hash" in cypher:
-            rows = [a for a in self.artifacts if a["content_hash"] == params["hash"]]
+            rows = [a for a in self.artifacts if a["content_hash"] in params["hashes"]]
         else:
             rows = [a for a in self.artifacts if a["filename"] in params["names"]]
         return _Rows(rows)

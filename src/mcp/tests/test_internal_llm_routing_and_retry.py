@@ -65,6 +65,25 @@ class TestResolveStageProvider:
             == "openrouter"
         )
 
+    def test_inbox_triage_stays_local_when_the_default_is_cloud(self, monkeypatch):
+        monkeypatch.delenv("PROVIDER_STAGE_INBOX_TRIAGE", raising=False)
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "cloud-first", raising=False)
+        assert mod._resolve_stage_provider("inbox_triage", "openrouter") in (
+            "ollama",
+            "quenchforge",
+        )
+
+    def test_inbox_stage_pin_still_wins(self, monkeypatch):
+        monkeypatch.setenv("PROVIDER_STAGE_INBOX_TRIAGE", "openrouter")
+        assert mod._resolve_stage_provider("inbox_triage", "ollama") == "openrouter"
+
+    def test_inbox_escalation_uses_cloud_unless_local_only(self, monkeypatch):
+        monkeypatch.delenv("PROVIDER_STAGE_INBOX_TRIAGE_ESCALATE", raising=False)
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "hybrid", raising=False)
+        assert mod._resolve_stage_provider("inbox_triage_escalate", "ollama") == "openrouter"
+        monkeypatch.setattr(mod.config, "CERID_ENVIRONMENT_PROFILE", "local-only", raising=False)
+        assert mod._resolve_stage_provider("inbox_triage_escalate", "ollama") == "ollama"
+
     def test_unknown_stage_falls_back_to_default(self, monkeypatch):
         monkeypatch.setattr(
             mod.config, "PIPELINE_PROVIDERS", {}, raising=False,

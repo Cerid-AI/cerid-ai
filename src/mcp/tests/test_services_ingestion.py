@@ -314,7 +314,7 @@ class TestIngestChromaDB:
         """Phase 4.4 — every chunk written at ingest carries embedding_model
         + embedding_model_version metadata, sourced from the active config
         (not a caller-supplied override)."""
-        import config as cfg
+        from core.utils.embeddings import serving_embedding_model, serving_embedding_version
 
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -344,8 +344,8 @@ class TestIngestChromaDB:
         metadatas = collection.upsert.call_args.kwargs["metadatas"]
         assert metadatas, "expected at least one chunk metadata dict"
         for meta in metadatas:
-            assert meta["embedding_model"] == cfg.EMBEDDING_MODEL
-            assert meta["embedding_model_version"] == cfg.embedding_version_for_domain("coding")
+            assert meta["embedding_model"] == serving_embedding_model()
+            assert meta["embedding_model_version"] == serving_embedding_version()
             assert meta["embedding_model_version"] != "attacker-supplied"
 
 

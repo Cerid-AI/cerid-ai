@@ -5,11 +5,14 @@
 
 Routes a file by extension to the appropriate
 :mod:`core.ingest.parsers` module, runs it through the chunker
-registry, and returns the result alongside the canonical raw text
-(used by the upstream service for content_hash, AI categorization,
-and Neo4j artifact metadata). When no Phase 2b parser claims the
-extension the dispatcher returns ``(None, None)`` so the caller can
-fall through to the legacy flat-text parser.
+registry, and returns the result alongside the canonical text (used by
+the upstream service for content_hash, AI categorization, and Neo4j
+artifact metadata). For a plain-text format the canonical text is the
+file itself; for a binary or MIME container it is the parser's
+extracted text, since the decoded bytes of a PDF, a zip-backed Office
+file or a base64-bearing email are not its content. When no Phase 2b
+parser claims the extension the dispatcher returns ``None`` so the
+caller can fall through to the legacy flat-text parser.
 
 Adding a new format in a future sub-phase is one entry in
 :data:`_DISPATCH` plus the parser file — the chunker strategy
@@ -79,6 +82,12 @@ _DISPATCH: dict[str, Callable[[Path], list[ParsedElement]]] = {
 }
 
 
+# Formats whose bytes are a container, not text. Their canonical text is the
+# parser's extracted text, and :func:`legacy_hash_text` gives the text an
+# earlier release hashed for them.
+_EXTRACTED_TEXT_EXTENSIONS = frozenset({".eml", ".pdf", ".xlsx", ".docx"})
+
+
 def is_supported(ext: str) -> bool:
     """Return True when the (lower-cased) extension has a Phase 2b parser."""
     return ext.lower() in _DISPATCH
@@ -89,14 +98,29 @@ def supported_extensions() -> list[str]:
     return list(_DISPATCH)
 
 
+def legacy_hash_text(file_path: str | Path) -> str | None:
+    """The text an earlier release hashed for a file whose canonical text is
+    now the parser's: the bytes decoded as UTF-8 with replacement. ``None``
+    for a plain-text format, whose canonical text never changed.
+
+    Callers hash this alongside the canonical text so an artifact ingested
+    under the old definition still dedups against a re-ingest of its file.
+    """
+    p = Path(file_path)
+    if p.suffix.lower() not in _EXTRACTED_TEXT_EXTENSIONS:
+        return None
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
 def layout_aware_parse(file_path: str | Path) -> tuple[str, list[dict[str, Any]]] | None:
     """Parse ``file_path`` via the layout-aware pipeline.
 
     Returns:
-        ``(raw_text, chunks)`` on a successful parse where ``chunks`` is the
+        ``(text, chunks)`` on a successful parse where ``chunks`` is the
         already-dispatched list of ``{text, metadata}`` dicts ready for the
-        ChromaDB / BM25 write path. ``raw_text`` is the file's literal
-        content (used by the caller for content_hash + AI categorization).
+        ChromaDB / BM25 write path. ``text`` is the canonical text the caller
+        hashes and categorizes: the file's content for a plain-text format,
+        the parser's elements joined for a binary or MIME one.
 
         Returns ``None`` when the extension isn't claimed by any Phase 2b
         parser — the caller should fall through to the legacy
@@ -136,9 +160,12 @@ def layout_aware_parse(file_path: str | Path) -> tuple[str, list[dict[str, Any]]
     if not chunks:
         return None
 
-    raw_text = p.read_text(encoding="utf-8", errors="replace")
+    if p.suffix.lower() in _EXTRACTED_TEXT_EXTENSIONS:
+        text = "\n\n".join(e["text"] for e in elements if e.get("text"))
+    else:
+        text = p.read_text(encoding="utf-8", errors="replace")
     logger.info(
         "layout_aware_parse file=%s ext=%s elements=%d chunks=%d",
         p.name, p.suffix.lower(), len(elements), len(chunks),
     )
-    return raw_text, chunks
+    return text, chunks

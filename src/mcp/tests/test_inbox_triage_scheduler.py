@@ -62,10 +62,13 @@ async def test_runs_when_both_gates_open(monkeypatch):
         patch("config.features.is_feature_enabled", return_value=True),
         patch("core.agents.inbox_triage.triage_inboxes",
               new_callable=AsyncMock, return_value=fake_result) as mock_triage,
+        patch("app.inbox.review.record_and_apply",
+              new_callable=AsyncMock, return_value={"proposed": 0, "applied": 0}) as mock_file,
     ):
         await _run_inbox_triage()
 
     mock_triage.assert_awaited_once()
+    mock_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -85,6 +88,24 @@ async def test_handles_agent_failure_silently(monkeypatch, caplog):
         await _run_inbox_triage()
     # And we should have logged the error
     assert any("inbox triage failed" in r.message.lower() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_filing_log_tolerates_a_partial_result(monkeypatch):
+    """A filing dict without counts must not raise while the log line is built."""
+    from app.scheduler import _run_inbox_triage
+    from core.agents.inbox_triage import TriageResult
+
+    monkeypatch.setenv("CERID_INBOX_TRIAGE_ENABLED", "true")
+    fake_result = TriageResult(threads=[], by_category={}, sources_queried=["gmail"])
+    with (
+        patch("config.features.is_feature_enabled", return_value=True),
+        patch("core.agents.inbox_triage.triage_inboxes",
+              new_callable=AsyncMock, return_value=fake_result),
+        patch("app.inbox.review.record_and_apply",
+              new_callable=AsyncMock, return_value={}),
+    ):
+        await _run_inbox_triage()
 
 
 def test_schedule_setting_exposed():

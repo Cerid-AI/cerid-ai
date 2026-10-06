@@ -116,8 +116,10 @@ def test_agent_query_warm_under_300ms(benchmark):
 def test_chat_stream_ttft_under_2s(benchmark):
     """R5-1 STRICT: /chat/stream Time-To-First-Token under 2 s p95.
 
-    TTFT = time from request send to first SSE ``data:`` chunk arrival.
+    TTFT = time from request send to the first generated token. The
+    ``cerid_meta`` frame that precedes it is not a token.
     """
+    from tests.helpers.chat_ttft import sse_data_is_generated_token
 
     def _ttft_once() -> float:
         payload = {
@@ -135,9 +137,9 @@ def test_chat_stream_ttft_under_2s(benchmark):
                 headers={"X-Client-ID": "slo-harness", "Content-Type": "application/json"},
             ) as response:
                 for line in response.iter_lines():
-                    if line.startswith("data:"):
+                    if sse_data_is_generated_token(line):
                         return time.perf_counter() - start
-        raise RuntimeError("No data chunk received")
+        raise RuntimeError("No generated token received")
 
     benchmark.pedantic(_ttft_once, rounds=3, iterations=1, warmup_rounds=0)
     assert benchmark.stats.stats.max < 2.0, (

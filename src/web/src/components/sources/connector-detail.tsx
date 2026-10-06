@@ -36,6 +36,7 @@ import type { ConnectorStatusExt } from "./source-rows"
 import { useEntitlements } from "@/hooks/use-entitlements"
 import { EntitlementsUnavailableNote } from "@/components/shared/entitlements-error-notice"
 import { useNavigation } from "@/contexts/navigation-context"
+import { MailSetup } from "./mail-setup"
 import { ProUpgradeOverlay } from "./pro-upgrade-overlay"
 
 // ---------------------------------------------------------------------------
@@ -318,6 +319,9 @@ function ConnectorDetailInner({
 
             {authFlow && <AuthFlowPanel flow={authFlow} />}
           </Section>
+        )}
+        {(connector.slug === "gmail" || connector.slug === "outlook") && (
+          <MailSetup provider={connector.slug === "outlook" ? "outlook" : "gmail"} />
         )}
       </div>
 

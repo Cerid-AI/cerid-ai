@@ -57,12 +57,18 @@ services:
     #
     # --single-user has no env equivalent (MCP_SINGLE_USER_MODE is set BY this
     # flag, not read as input), which is why the override exists at all.
-    # --read-only is the REAL scope restriction: it requests read-only scopes
-    # and disables write tools. The previous WORKSPACE_MCP_ALLOWED_SCOPES was
-    # read by nothing — grep the image, there are zero references — so the
-    # "read-only by default" this file used to claim was never enforced.
+    # v1.21.0 already has the organize and draft tools. --read-only strips
+    # them. Do not drop --single-user and do not set --tool-tier: batch label
+    # edits sit in the complete tier and a narrower tier hides them.
+    # CERID_INBOX_ACTIONS_ENABLED switches the ceiling to gmail:drafts.
+    # Anything else, including unset, stays on the read-only command.
+    # --permissions is mutually exclusive with --read-only and --tools.
     command:
-      - "uv run main.py --transport streamable-http --single-user --read-only --tools gmail calendar"
+      - |
+        if [ "$CERID_INBOX_ACTIONS_ENABLED" = "true" ] || [ "$CERID_INBOX_ACTIONS_ENABLED" = "1" ]; then
+          exec uv run main.py --transport streamable-http --single-user --permissions gmail:drafts calendar:readonly
+        fi
+        exec uv run main.py --transport streamable-http --single-user --read-only --tools gmail calendar
     # Container and host port MUST match. The OAuth redirect_uri is built as
     # WORKSPACE_MCP_BASE_URI:WORKSPACE_MCP_PORT (auth/oauth_config.py) — i.e.
     # from the LISTEN port, with no notion of a published one. With the old
@@ -92,6 +98,10 @@ services:
       # takes it as a parameter and defaults to this; without it Cerid's
       # /connectors/gmail/auth/start has no account to start a consent for.
       - USER_GOOGLE_EMAIL=${USER_GOOGLE_EMAIL:-}
+      # Default false. True selects the drafts command above. The Python
+      # executor reads the same variable and still refuses a live apply when
+      # it is unset.
+      - CERID_INBOX_ACTIONS_ENABLED=${CERID_INBOX_ACTIONS_ENABLED:-false}
       # NOTE: this server has no client-auth mechanism — there is no
       # WORKSPACE_MCP_AUTH_TOKEN in the image. The bearer Cerid sends is
       # ignored here, and the service's protection is that it is bound to
@@ -143,19 +153,24 @@ services:
       # `Missing: yaml@2.9.0 from lock file`, exit 1, every time. v0.137.0 uses
       # node:24 in both stages, which removes the split.
       context: https://github.com/softeria/ms-365-mcp-server.git#v0.137.0
-    # ENTRYPOINT is ["node","dist/index.js"], so these ARE argv (unlike the
-    # Google sibling, whose entrypoint is a shell).
-    #   --enable-auth-tools: login/logout tools are OFF by default in HTTP
-    #     mode, and they are how the device-code flow is driven.
-    #   --read-only: real, enforced; the scope allowlist below is a second
-    #     belt but this is the switch that disables write operations.
+    # The image ENTRYPOINT is ["node","dist/index.js"], so a flag list is
+    # argv. The actions flag has to choose those flags before node starts,
+    # which is why this service uses a shell. v0.137.0 already has
+    # move-mail-message, update-mail-message, and create-reply-draft.
+    # --read-only is what disables them. Unset or any value other than
+    # true/1 keeps that flag. Re-login is required once Mail.ReadWrite is
+    # requested; this file does not perform it.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "--http=3000"
-      - "--enable-auth-tools"
-      - "--read-only"
-      # Loopback-bound, so the bearer check is redundant with the access control this
-      # stack already relies on. All callers share the cached MSAL identity.
-      - "--trust-proxy-auth"
+      - |
+        if [ "$CERID_INBOX_ACTIONS_ENABLED" = "true" ] || [ "$CERID_INBOX_ACTIONS_ENABLED" = "1" ]; then
+          case " ${MS365_MCP_ALLOWED_SCOPES:-} " in
+            *" Mail.ReadWrite "*) ;;
+            *) export MS365_MCP_ALLOWED_SCOPES="Mail.ReadWrite Calendars.Read" ;;
+          esac
+          exec node dist/index.js --http=3000 --enable-auth-tools --trust-proxy-auth
+        fi
+        exec node dist/index.js --http=3000 --enable-auth-tools --read-only --trust-proxy-auth
     ports:
       # Loopback HARD-CODED — see the google-workspace-mcp note. This one
       # runs --trust-proxy-auth, so there is no token check at all behind it.
@@ -173,6 +188,7 @@ services:
       # utility tools. Graph then answered 403 on verify-login. Eleven tools
       # were listed either way, which is what made it look like it was working.
       - MS365_MCP_ALLOWED_SCOPES=${MS365_MCP_SCOPES:-Mail.Read Calendars.Read}
+      - CERID_INBOX_ACTIONS_ENABLED=${CERID_INBOX_ACTIONS_ENABLED:-false}
       # MSAL authority. Unset means "common", which as of June 2026 fails
       # SILENT REFRESH for personal Microsoft accounts — the first login works
       # and every renewal after it does not. Personal accounts need

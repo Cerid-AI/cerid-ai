@@ -79,6 +79,19 @@ services:
       # the on-disk dataset hot pages.
       - NEO4J_server_memory_heap_max__size=4G
       - NEO4J_server_memory_pagecache_size=2G
+      # Transaction-log retention. The default (2 days 2G per database) held
+      # 2.5 GB of logs against a 461 MB store on 2026-10-05, most of it
+      # written in one afternoon, so the size bound is the one that governs.
+      # Community edition has no incremental backup to replay these into:
+      # the nightly backups are a logical export (cerid-backup.sh) and a
+      # paused-container copy of this directory (backup-kb.sh), and crash
+      # recovery needs only the logs since the last checkpoint, which no
+      # policy prunes. 2 days still spans a missed nightly run at idle write
+      # rates; 1G caps the directory at about twice the store. Neo4j prunes
+      # after each checkpoint (periodic, 15 min), so the surplus goes at the
+      # first checkpoint after a restart. Keep identical to
+      # stacks/infrastructure/docker-compose.yml (same store files).
+      - NEO4J_db_tx__log_rotation_retention__policy=2 days 1G
     networks:
       - llm-network
     restart: unless-stopped
@@ -234,6 +247,10 @@ services:
       # measure them; neo4j:community has no procedure that reports store
       # size without APOC Extended.
       - ./stacks/infrastructure/data/neo4j:/neo4j-data:ro
+      # Same for Chroma: the client has no size call, so /system/storage can
+      # only walk the persist directory (the chromadb service's /data).
+      # CHROMA_PERSIST_DIR below points the walk here.
+      - ./stacks/infrastructure/data/chroma:/chroma-data:ro
     env_file:
       - .env
     environment:
@@ -250,6 +267,7 @@ services:
       # docs/LAN_REMOTE_ACCESS.md promised "API key is mandatory".
       - CERID_BIND_ADDR=${CERID_BIND_ADDR:-127.0.0.1}
       - CHROMA_URL=http://ai-companion-chroma:8000
+      - CHROMA_PERSIST_DIR=/chroma-data
       - NEO4J_URI=bolt://ai-companion-neo4j:7687
       - NEO4J_USER=neo4j
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@ai-companion-redis:6379

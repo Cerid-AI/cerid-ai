@@ -9,10 +9,9 @@ batches, writes to a versioned target collection
 (``<domain>__<target_version>``), and is resumable: chunks already
 present in the target are skipped on re-run.
 
-Phase 4.4: for the narrower case of "the active ``EMBEDDING_MODEL`` /
-``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN`` already changed, catch up chunks
-still stamped with the old version" — no dual-collection stage, no
-operator shell session — use the managed processor job instead:
+Phase 4.4: for the narrower case of "the serving embedder already changed,
+catch up chunks still stamped with the old artifact" — no dual-collection
+stage, no operator shell session — use the managed processor job instead:
 ``POST /admin/kb/reembed`` (``app/processor/jobs/reembed_chunks.py``).
 This script remains the documented path for a full A/B migration (stage
 a new model in a separate collection, validate against the eval
@@ -30,8 +29,9 @@ Usage (run inside Docker MCP container):
 Drop ``--dry-run`` (or pass ``--execute``) to perform the writes.
 
 The script intentionally does NOT swap the live collection. After
-validating against the eval harness, the operator flips
-``EMBEDDING_MODEL_VERSIONS_PER_DOMAIN`` in settings to cut over.
+validating against the eval harness, the operator renames the target
+collection into place (Pattern B in ``docs/EMBEDDING_MIGRATIONS.md``) and
+points the serving embedder at the new model.
 """
 
 from __future__ import annotations
@@ -246,9 +246,9 @@ def reembed(
         return 6
 
     logger.info(
-        "Cardinality match. Validate with the eval harness, then flip "
-        "EMBEDDING_MODEL_VERSIONS_PER_DOMAIN[%r] = %r in settings to cut over.",
-        domain, target_version,
+        "Cardinality match. Validate with the eval harness, then rename "
+        "%s into place and point the serving embedder at the new model.",
+        target_name,
     )
     return 0
 

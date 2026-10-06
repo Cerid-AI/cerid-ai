@@ -123,3 +123,128 @@ class FakeChromaBackend:
                     del self._ids[j]
                     del self._embs[j]
                     del self._meta[j]
+
+
+class FakeChromaCollection:
+    """In-memory double for a chromadb 1.5.9 ``Collection`` as the paging jobs
+    use it (``get`` by ``limit``/``offset``/``include``, ``update``, ``upsert``).
+
+    Faithful behaviours:
+
+    * ``get(include=["embeddings"])`` hands back numpy arrays, not lists.
+    * ``update(ids=, documents=)`` with no ``embeddings=`` recomputes the vector
+      through the collection's bound embedding function — the contract the
+      managed re-embed job relies on; ``update(ids=, metadatas=)`` alone touches
+      only metadata.
+    * ``get`` always returns ``ids``; the other keys follow ``include``.
+    """
+
+    def __init__(self, name: str, embedding_function: Any | None = None) -> None:
+        self.name = name
+        self._ef = embedding_function
+        self._ids: list[str] = []
+        self._docs: list[str | None] = []
+        self._embs: list[Any] = []
+        self._meta: list[dict[str, Any]] = []
+
+    def _embed(self, documents: list[str]) -> list[Any]:
+        if self._ef is None:
+            raise ValueError("collection has no embedding function and no embeddings were given")
+        return [np.asarray(v, dtype=float) for v in self._ef(documents)]
+
+    def count(self) -> int:
+        return len(self._ids)
+
+    def upsert(
+        self,
+        *,
+        ids: list[str],
+        documents: list[str] | None = None,
+        embeddings: list[list[float]] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        if embeddings is None:
+            embeddings = self._embed(list(documents or []))
+        for i, cid in enumerate(ids):
+            emb = np.asarray(embeddings[i], dtype=float)
+            doc = documents[i] if documents else None
+            meta = dict((metadatas or [{}] * len(ids))[i])
+            if cid in self._ids:
+                j = self._ids.index(cid)
+                self._docs[j], self._embs[j], self._meta[j] = doc, emb, meta
+                continue
+            self._ids.append(cid)
+            self._docs.append(doc)
+            self._embs.append(emb)
+            self._meta.append(meta)
+
+    def get(
+        self,
+        ids: list[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        include: list[str] | None = None,
+    ) -> dict[str, Any]:
+        include = list(include) if include is not None else ["documents", "metadatas"]
+        if ids is not None:
+            rows = [self._ids.index(i) for i in ids if i in self._ids]
+        else:
+            rows = list(range(len(self._ids)))[offset:]
+            if limit is not None:
+                rows = rows[:limit]
+        out: dict[str, Any] = {"ids": [self._ids[j] for j in rows]}
+        if "documents" in include:
+            out["documents"] = [self._docs[j] for j in rows]
+        if "metadatas" in include:
+            out["metadatas"] = [dict(self._meta[j]) for j in rows]
+        if "embeddings" in include:
+            out["embeddings"] = [np.array(self._embs[j]) for j in rows]
+        return out
+
+    def update(
+        self,
+        *,
+        ids: list[str],
+        documents: list[str] | None = None,
+        embeddings: list[list[float]] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        if documents is not None and embeddings is None:
+            embeddings = self._embed(documents)
+        for i, cid in enumerate(ids):
+            j = self._ids.index(cid)
+            if documents is not None:
+                self._docs[j] = documents[i]
+            if embeddings is not None:
+                self._embs[j] = np.asarray(embeddings[i], dtype=float)
+            if metadatas is not None:
+                self._meta[j] = dict(metadatas[i])
+
+    def embedding_of(self, cid: str) -> Any:
+        """Test accessor: the stored vector for one id."""
+        return np.array(self._embs[self._ids.index(cid)])
+
+    def metadata_of(self, cid: str) -> dict[str, Any]:
+        """Test accessor: the stored metadata for one id."""
+        return dict(self._meta[self._ids.index(cid)])
+
+
+class FakeChromaClient:
+    """Client double over named :class:`FakeChromaCollection` instances.
+
+    ``get_collection`` is keyword-only, like ``app.deps._EmbeddingAwareClient``
+    (a positional name raised there and left a boot probe silently inert), and
+    a missing name raises as chromadb 1.x does.
+    """
+
+    def __init__(self, collections: list[FakeChromaCollection]) -> None:
+        self._cols = {c.name: c for c in collections}
+
+    def list_collections(self) -> list[FakeChromaCollection]:
+        return list(self._cols.values())
+
+    def get_collection(self, **kwargs: Any) -> FakeChromaCollection:
+        name = kwargs["name"]
+        if name not in self._cols:
+            raise ValueError(f"Collection {name} does not exist.")
+        return self._cols[name]

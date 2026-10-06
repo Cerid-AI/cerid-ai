@@ -108,6 +108,27 @@ def test_pytest_cmd_falls_back_to_the_running_interpreter(harness) -> None:
     assert Path(cmd[0]).exists()
 
 
+def test_a_missing_test_is_dropped_and_an_empty_selection_is_red(harness, monkeypatch, capsys) -> None:
+    mod, _ = harness
+    monkeypatch.setattr(mod, "TESTS", ["src/mcp/tests/test_middleware_auth.py"])
+    assert mod.selected_tests() == []
+    assert mod.run_tests() is False
+    out = capsys.readouterr().out
+    assert "test_middleware_auth.py" in out
+    assert "none of the selected tests exist" in out
+
+
+def test_selected_tests_keeps_a_file_that_exists(harness, monkeypatch, capsys) -> None:
+    mod, _ = harness
+    rel = "src/mcp/tests/test_present.py"
+    path = mod.REPO / rel
+    path.parent.mkdir(parents=True)
+    path.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "TESTS", [rel, "src/mcp/tests/test_absent.py"])
+    assert mod.selected_tests() == [rel]
+    assert "test_absent.py" in capsys.readouterr().out
+
+
 def test_pytest_cmd_prefers_the_repo_venv(harness) -> None:
     mod, _ = harness
     venv_pytest = mod.REPO / ".venv" / "bin" / "pytest"

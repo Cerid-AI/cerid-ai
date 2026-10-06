@@ -122,8 +122,8 @@ interface UseChatSendOptions {
   retrieve?: (content: string) => Promise<Awaited<ReturnType<typeof queryKB>>>
   clearInjected: () => void
 
-  /** Private Mode level (0=off, 1=no logging, 2=also bypass KB injection,
-   *  3=also no memory). At level >= 2 the send path injects NO KB documents or
+  /** Private Mode level (0=off, 1=skip saves, 2=skip KB, 3=skip audit,
+   *  4=full ephemeral; docs/PRIVATE_MODE.md). At level >= 2 the send path injects NO KB documents or
    *  memories, so the model sees only what the user types. Enforced here — the
    *  single payload-assembly boundary — because the context is assembled
    *  client-side and a backend gate cannot un-inject it. */

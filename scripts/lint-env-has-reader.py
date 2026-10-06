@@ -53,10 +53,11 @@ look used by construction), tests, and .env.example itself (the surface
 being gated, not a reader of it). One narrow exception: a name whose only
 external-file reference is inside a function BODY of settings.py/features.py
 itself still counts, but only if that function is itself called from outside
-those two files — the wrapper-accessor shape (`embedding_version_for_domain`
-reading the module-level `EMBEDDING_MODEL_VERSION` as its fallback default,
-called externally from `core/utils/embeddings.py`, `app/routers/kb_admin.py`,
-`app/processor/jobs/reembed_chunks.py`) is real production wiring, and
+those two files — the wrapper-accessor shape (an accessor defined in
+settings.py that reads a module-level constant as its fallback default and is
+called from production code; `embedding_version_for_domain` over
+`EMBEDDING_MODEL_VERSION` was the live instance until 2026-10-05) is real
+production wiring, and
 without this carve-out every constant behind an accessor function would look
 orphaned purely because the accessor's own body lives in an excluded file.
 See `_wrapper_transitive_readers`.
@@ -249,10 +250,10 @@ def _extract_python_identifiers(text: str) -> set[str]:
 def _wrapper_transitive_readers(path: Path, reader_index: set[str]) -> set[str]:
     """Names referenced only inside a function body of settings.py/features.py
     still count as read if that function itself has an external caller —
-    the wrapper-accessor shape (`embedding_version_for_domain` reading the
-    module-level `EMBEDDING_MODEL_VERSION` as its `.get(domain, ...)`
-    fallback, called externally from `core/utils/embeddings.py`,
-    `app/routers/kb_admin.py`, `app/processor/jobs/reembed_chunks.py`) is
+    the wrapper-accessor shape (an accessor in settings.py reading a
+    module-level constant as its `.get(domain, ...)` fallback, called from
+    production code — `embedding_version_for_domain` over
+    `EMBEDDING_MODEL_VERSION` was the live instance until 2026-10-05) is
     real production wiring. Without this, any accessor-function pattern
     defined in the declaring files would make every constant it wraps look
     orphaned, purely because the accessor's own body lives inside a file
@@ -315,21 +316,10 @@ ALLOWLIST: dict[str, str] = {
     # --- AF-079: dead v1 quality-weight trio (QUALITY_WEIGHT_SUMMARY/_KEYWORDS/
     # _COMPLETENESS) was deleted from settings.py outright rather than
     # allowlisted — the symbols no longer exist, so no entry is needed.
-    # NOTE: EMBEDDING_MODEL_VERSION (settings.py:1054) is deliberately NOT
-    # listed here. An earlier pass of this allowlist misattributed AF-080
-    # (which is about the sibling dict EMBEDDING_MODEL_VERSIONS_PER_DOMAIN,
-    # already out of scope via the container-literal exclusion — it has no
-    # os.getenv route at all) to this scalar, and fabricated a nonexistent
-    # `get_embedding_model_version()` function with a false "zero callers"
-    # claim. The real accessor is `embedding_version_for_domain`
-    # (settings.py:1068), which has genuine non-test callers at
-    # core/utils/embeddings.py:609, app/routers/kb_admin.py:625, and
-    # app/processor/jobs/reembed_chunks.py:150, and reads
-    # EMBEDDING_MODEL_VERSION as its `.get(domain, ...)` fallback default —
-    # a real, wired read. `_wrapper_transitive_readers` resolves this
-    # correctly (the accessor function has an external caller, so its body's
-    # reference to EMBEDDING_MODEL_VERSION counts), so no allowlist entry is
-    # needed or warranted.
+    # --- EMBEDDING_MODEL_VERSION: deleted from settings.py 2026-10-05 (ruling
+    # D13-A) — the chunk stamp is the serving artifact from
+    # core/utils/embeddings.py::serving_embedding_version, not a config label.
+    # The symbol no longer exists, so no entry is needed.
     # --- 2026-08-11-reachability-audit.md findings (no numeric ids in that doc; cited by title) ---
     "ALERT_CHECK_INTERVAL_S": "reachability-audit 'the whole alerting config block is dead' — no scheduler/task reads any of the four ALERT_* knobs",
     "ALERT_MAX_PER_METRIC": "reachability-audit 'the whole alerting config block is dead', same finding as ALERT_CHECK_INTERVAL_S",

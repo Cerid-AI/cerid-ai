@@ -4,6 +4,16 @@ Versioned independently of the Cerid AI product. `SDK_PROTOCOL_VERSION`
 tracks the `/sdk/v1/` wire contract; the package version tracks this
 client's release cadence.
 
+## [0.2.2] — Unreleased — protocol 1.3.0
+
+### Added
+
+- Every `CeridSDKError` carries `errorCode`: the server's machine-readable
+  name for the refusal (for example `CROSS_SITE_REQUEST_REFUSED` from the
+  origin guard), read from the response body's `error_code` field. It is
+  `null` when the body has none. The message also carries it, as
+  `<detail> (<error_code>)`, so a logged error names its cause.
+
 ## [0.2.1] — Unreleased — protocol 1.3.0
 
 ### Changed

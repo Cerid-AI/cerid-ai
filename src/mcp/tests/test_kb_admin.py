@@ -559,6 +559,36 @@ class TestReembedEndpoint:
 
         assert res.status_code == 500
 
+    def test_restamp_dry_run_is_forwarded_to_the_job_record(self, client: TestClient):
+        """The worker rebuilds the job from the record payload, so the mode
+        flags must travel in it — and the dedupe key must see them, so a dry
+        run does not collapse into a pending real run."""
+        mock_cls = self._mock_queue("job-restamp")
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            res = client.post(
+                "/admin/kb/reembed",
+                json={"domain": "coding", "restamp_only": True, "dry_run": True},
+            )
+
+        assert res.status_code == 200
+        record = mock_cls.return_value.enqueue_if_absent.call_args.args[0]
+        assert record.job_type == "reembed_chunks"
+        assert record.payload == {
+            "domain": "coding", "force": False, "restamp_only": True, "dry_run": True,
+        }
+        assert "restamp" in res.json()["message"]
+        assert "dry run" in res.json()["message"]
+
+    def test_default_payload_is_a_real_reembed(self, client: TestClient):
+        mock_cls = self._mock_queue("job-plain")
+        with patch("app.db.redis.processor_queue.RedisJobQueue", mock_cls):
+            client.post("/admin/kb/reembed", json={"domain": "coding"})
+
+        record = mock_cls.return_value.enqueue_if_absent.call_args.args[0]
+        assert record.payload == {
+            "domain": "coding", "force": False, "restamp_only": False, "dry_run": False,
+        }
+
 
 class TestEmbeddingVersionsEndpoint:
     """GET /admin/kb/embedding-versions — per-domain version distribution.
@@ -572,7 +602,7 @@ class TestEmbeddingVersionsEndpoint:
     def test_mixed_corpus_detected(self, client: TestClient):
         with patch(
             "app.routers.kb_admin._domain_version_distribution",
-            return_value={"total": 3, "versions": {"v1": 2, "v2": 1}},
+            return_value={"total": 3, "versions": {"v1": 2, "v2": 1}, "models": {"m": 3}},
         ):
             res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
 
@@ -583,21 +613,55 @@ class TestEmbeddingVersionsEndpoint:
         assert dist["mixed"] is True
 
     def test_single_version_not_mixed(self, client: TestClient):
-        import config as cfg
+        from core.utils.embeddings import serving_embedding_model, serving_embedding_version
 
-        current = cfg.embedding_version_for_domain("coding")
+        current = serving_embedding_version()
         with patch(
             "app.routers.kb_admin._domain_version_distribution",
-            return_value={"total": 5, "versions": {current: 5}},
+            return_value={
+                "total": 5, "versions": {current: 5}, "models": {serving_embedding_model(): 5},
+            },
         ):
             res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
 
-        assert res.json()["domains"]["coding"]["mixed"] is False
+        dist = res.json()["domains"]["coding"]
+        assert dist["mixed"] is False
+        assert dist["current_version"] == current
+        assert dist["current_model"] == serving_embedding_model()
+        assert dist["models"] == {serving_embedding_model(): 5}
+
+    def test_distribution_counts_both_stamp_fields(self):
+        """The histogram is the operator's view of the mislabel: ~700 chunks
+        say Snowflake while every vector came from nomic. Count the model
+        field too, so the restamp dry run has a number to be checked against."""
+        import config as cfg
+        from app.routers.kb_admin import _domain_version_distribution
+        from tests.helpers.fake_chroma import FakeChromaClient, FakeChromaCollection
+
+        coll = FakeChromaCollection(cfg.collection_name("coding"))
+        coll.upsert(
+            ids=["a", "b", "c"],
+            documents=["a", "b", "c"],
+            embeddings=[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            metadatas=[
+                {"embedding_model": "Snowflake/x", "embedding_model_version": "Snowflake/x"},
+                {"embedding_model": "Snowflake/x", "embedding_model_version": "Snowflake/x"},
+                {},
+            ],
+        )
+
+        dist = _domain_version_distribution(FakeChromaClient([coll]), "coding")
+
+        assert dist == {
+            "total": 3,
+            "versions": {"Snowflake/x": 2, "unstamped": 1},
+            "models": {"Snowflake/x": 2, "unstamped": 1},
+        }
 
     def test_empty_collection_not_mixed(self, client: TestClient):
         with patch(
             "app.routers.kb_admin._domain_version_distribution",
-            return_value={"total": 0, "versions": {}},
+            return_value={"total": 0, "versions": {}, "models": {}},
         ):
             res = client.get("/admin/kb/embedding-versions", params={"domain": "coding"})
 
@@ -610,7 +674,7 @@ class TestEmbeddingVersionsEndpoint:
 
         with patch(
             "app.routers.kb_admin._domain_version_distribution",
-            return_value={"total": 0, "versions": {}},
+            return_value={"total": 0, "versions": {}, "models": {}},
         ):
             res = client.get("/admin/kb/embedding-versions")
 

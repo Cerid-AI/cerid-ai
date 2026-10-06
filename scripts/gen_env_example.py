@@ -168,6 +168,31 @@ def extract_env_vars(sources: "list[tuple[str, str]] | str") -> list[tuple[str, 
     return sorted(seen.items())
 
 
+# Read through a registry rather than a literal: utils/pro_automations.py
+# does ``os.getenv(spec["env_enabled"])``, so the walk above sees the call
+# and not the name. The SCHEDULE_* cron for each automation was generated
+# while the switch that lets it fire was not. Keep in sync with
+# utils.pro_automations.AUTOMATIONS; scripts/tests/test_gen_env_example_indirect_reads.py
+# checks that every registered switch is here. A Redis override set from
+# Settings > Automations (PUT /settings/pro-automations/{name}) wins over
+# the env value.
+INDIRECT_READ_VARS: list[tuple[str, str]] = [
+    ("CERID_DAILY_DIGEST_ENABLED", "false"),
+    ("CERID_INBOX_TRIAGE_ENABLED", "false"),
+]
+
+
+def collect_env_vars(sources: "list[tuple[str, str]]") -> list[tuple[str, str | None]]:
+    """The AST-discovered entries plus the registry-read switches, sorted.
+
+    A literal read found by the walk wins over the entry here, so the list
+    above can never shadow a default that settings.py comes to declare.
+    """
+    merged: dict[str, str | None] = dict(INDIRECT_READ_VARS)
+    merged.update(extract_env_vars(sources))
+    return sorted(merged.items())
+
+
 # Compose-interpolation vars: consumed by docker-compose.yml port/bind
 # stanzas, never read by settings.py, so the AST walk cannot discover
 # them. Registered explicitly (V1 Task 4.3 — INSTALL.md points operators
@@ -213,6 +238,11 @@ VAR_COMMENTS: dict[str, tuple[str, ...]] = {
     ),
     "CERID_PORTAL_TITLE": (
         "Name shown on the sign-in page. Empty = Cerid.",
+    ),
+    "CERID_INBOX_REVIEW_REDACT": (
+        "Comma-separated, case-insensitive substrings. scripts/inbox_review.py",
+        "leaves out any message whose From, To, or Subject contains one.",
+        "Empty = nothing is left out.",
     ),
     "CERID_ENVIRONMENT_PROFILE": (
         "Environment profile: a named bundle of the knobs below, applied as",
@@ -273,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     sources = [(str(p), p.read_text(encoding="utf-8")) for p in _iter_sources()]
-    entries = extract_env_vars(sources)
+    entries = collect_env_vars(sources)
     expected = render_env_example(entries)
 
     if args.check:

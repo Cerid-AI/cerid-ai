@@ -130,6 +130,17 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	.venv/bin/pytest scripts/tests/ -q -p no:cacheprovider
 	@echo "[ci-local] sign-in service tests (stacks/sso)"
 	.venv/bin/pytest stacks/sso/test_sso.py -q -p no:cacheprovider
+	@echo "[ci-local] hub collector"
+	@if [ -d stacks/gateway/hub/collector ]; then \
+	  cd stacks/gateway/hub/collector && ../../../../.venv/bin/python -m pytest -q -p no:cacheprovider; \
+	else \
+	  echo "  (stacks/gateway/hub absent — internal-only mirror, skipped)"; \
+	fi
+	@echo "[ci-local] synthetic e1 probes (no live stack)"
+	PYTHONPATH=src/mcp .venv/bin/pytest \
+	  src/mcp/tests/integration/test_e1_transport_policy_matrix.py \
+	  src/mcp/tests/integration/test_e1_consumer_isolation_closeout.py \
+	  -q -p no:cacheprovider
 	@echo "[ci-local] MLX server tests (stacks/mlx-inference; cases needing MLX or openai-harmony skip here, CI runs them)"
 	@if [ -d stacks/mlx-inference ]; then \
 	  .venv/bin/pytest stacks/mlx-inference/tests/ -q -p no:cacheprovider; \

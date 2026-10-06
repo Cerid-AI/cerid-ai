@@ -30,6 +30,14 @@ logger = logging.getLogger("ai-companion.data_sources.google_calendar")
 # inherited adapt_query joins keywords and `get_events` filters the window by
 # them, so "what's on my calendar tomorrow?" searched events for the literal
 # word "calendar" and matched nothing. The time window is the real filter here.
+# "event" and "schedule" match ordinary questions that are not about a
+# calendar. The words below are the ones this source's own query rewrite
+# already treats as the ask.
+_CAL_QUERY_RE = re.compile(
+    r"\b(?:calendars?|appointments?|meetings?|agendas?)\b",
+    re.IGNORECASE,
+)
+
 _CAL_META_WORDS = frozenset({
     "calendar", "event", "events", "meeting", "meetings", "appointment",
     "appointments", "schedule", "scheduled", "agenda", "today", "tomorrow",
@@ -76,6 +84,9 @@ class GoogleCalendarDataSource(DataSource):
             # validation error, which reads downstream as "no events".
             and bool(_google_account())
         )
+
+    def is_relevant(self, raw_query: str, keywords: list[str]) -> bool:
+        return bool(_CAL_QUERY_RE.search(raw_query or ""))
 
     async def _call_mcp(self, tool_name: str, args: dict[str, Any]) -> Any:
         # Inject the account on every call rather than at each call site —

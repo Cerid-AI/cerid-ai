@@ -327,12 +327,17 @@ async def _run_inbox_triage() -> None:
             max_results_per_source=int(os.getenv("INBOX_TRIAGE_MAX_PER_SOURCE", "30")),
             persist=True,
         )
+        from app.inbox.review import record_and_apply
+        filing = await record_and_apply(result)
         duration = time.time() - start
         msg = (
             f"{len(result.threads)} threads, "
             f"by_category={result.by_category}, "
             f"sources={result.sources_queried}, "
-            f"skipped={len(result.skipped)}"
+            f"skipped={len(result.skipped)}, "
+            f"proposed={filing.get('proposed', 0)}, "
+            f"applied={filing.get('applied', 0)}, "
+            f"learned={filing.get('learned', 0)}"
         )
         _log_execution("inbox_triage", "success", duration, msg)
         logger.info("Scheduled inbox triage completed: %s", msg)
@@ -1333,8 +1338,9 @@ async def _run_knowledge_stats_snapshot() -> None:
         from app.deps import get_neo4j
 
         driver = get_neo4j()
-        snapshot = fetch_current_stats(driver)
-        write_stats_snapshot(driver, snapshot)
+        # Synchronous driver calls; keep them off the scheduler's event loop.
+        snapshot = await asyncio.to_thread(fetch_current_stats, driver)
+        await asyncio.to_thread(write_stats_snapshot, driver, snapshot)
         duration = time.time() - start
         artifacts = snapshot.get("nodes", {}).get("artifacts", 0)
         _log_execution(

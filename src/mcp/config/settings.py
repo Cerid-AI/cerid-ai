@@ -32,6 +32,10 @@ CERID_API_KEY = os.getenv("CERID_API_KEY", "")
 # Caddy "/api/mcp" proxy needs no change; set this only for cross-origin browser
 # access. "*" disables credentialed CORS.
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8888")
+# Public host[:port] (optionally with scheme) clients reach this server on.
+# URLs handed out for external callers — the webhook receiver share URL — are
+# built from it, never from the request's Host header.
+MCP_EXTERNAL_HOST = os.getenv("MCP_EXTERNAL_HOST", "localhost:8888")
 
 # ---------------------------------------------------------------------------
 # PDF Parsing (memory-safe chunked extraction)
@@ -1035,6 +1039,28 @@ SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty
 # Also gated by CERID_INBOX_TRIAGE_ENABLED so the operator opts in
 # explicitly. Set INBOX_TRIAGE_MAX_PER_SOURCE to cap LLM cost.
 SCHEDULE_INBOX_TRIAGE = os.getenv("SCHEDULE_INBOX_TRIAGE", "*/15 * * * *")
+
+
+def inbox_actions_enabled() -> bool:
+    """Live mailbox writes. Default off. Dry-run does not read this."""
+    return os.getenv("CERID_INBOX_ACTIONS_ENABLED", "false").strip().lower() in ("true", "1")
+
+
+# Import-time snapshot. Call inbox_actions_enabled() when the process may have
+# changed the variable, and keep the connector command on --read-only until
+# the same variable is true there. This never selects a send scope.
+CERID_INBOX_ACTIONS_ENABLED = inbox_actions_enabled()
+
+
+def inbox_review_redact() -> tuple[str, ...]:
+    """Substrings that keep a from, to, or subject out of the review printout.
+
+    CERID_INBOX_REVIEW_REDACT is comma-separated and case-insensitive. Empty
+    by default, so nothing is redacted. Read at call time: the review script
+    runs outside the API process and must see the operator's .env value.
+    """
+    raw = os.getenv("CERID_INBOX_REVIEW_REDACT", "")
+    return tuple(part.strip().casefold() for part in raw.split(",") if part.strip())
 # Phase K — daily digest cadence. Default 7 AM UTC; empty disables.
 # Also gated by CERID_DAILY_DIGEST_ENABLED so operator opts in.
 # Per-user timezone resolution tracked for Phase K.2 (currently
@@ -1118,33 +1144,11 @@ ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
 # (see ``app.routers.sdk._memory_async_enabled``).
 MEMORY_QUEUE_MODE = os.getenv("MEMORY_QUEUE_MODE", "sync").lower()
 
-# Embedding model version stamp — written to chunk metadata at ingest time
-# so downstream re-embed migrations (Phase 5c) can identify which chunks
-# need re-encoding when the embedding model changes. Defaults to the
-# EMBEDDING_MODEL string for backward compat with existing un-stamped data.
-EMBEDDING_MODEL_VERSION = os.getenv("EMBEDDING_MODEL_VERSION", EMBEDDING_MODEL)
-
-# Per-domain embedding-model version overrides (Workstream E Phase 5c).
-# Empty by default — the global EMBEDDING_MODEL_VERSION applies. This is a
-# source-level dict, not an env var — there is no EMBEDDING_MODEL_VERSIONS_
-# PER_DOMAIN environment variable to set. During a dual-collection
-# migration, the operator edits this literal directly for the target
-# domain, runs scripts/reembed_collection.py to dual-write, then keeps the
-# override post-cutover (requires a code change + redeploy) so query
-# routing reads from the versioned collection. See
-# docs/EMBEDDING_MIGRATIONS.md for the full playbook.
-EMBEDDING_MODEL_VERSIONS_PER_DOMAIN: dict[str, str] = {}
-
-
-def embedding_version_for_domain(domain: str) -> str:
-    """Return the embedding-model version label for a given KB domain.
-
-    Falls back to the global EMBEDDING_MODEL_VERSION when no per-domain
-    override is set. Used by the chunk-write path to stamp metadata and
-    by the query-routing path (Phase 5c cutover) to pick the correct
-    versioned ChromaDB collection.
-    """
-    return EMBEDDING_MODEL_VERSIONS_PER_DOMAIN.get(domain, EMBEDDING_MODEL_VERSION)
+# The per-chunk ``embedding_model_version`` stamp is NOT a setting: it is the
+# serving artifact, resolved at write time by
+# core/utils/embeddings.py::serving_embedding_version (ruling D13-A). The
+# former EMBEDDING_MODEL_VERSION label defaulted to the ONNX model name
+# whatever leg served, which mislabeled every chunk the local server embedded.
 
 # Managed re-embed job (Phase 4.4 — ReembedChunksJob, the processor-job
 # promotion of scripts/reembed_collection.py's in-place re-embed logic).
@@ -1407,13 +1411,10 @@ REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
 # Private Mode (Ephemeral Sessions)
-#   Canonical level ladder — MUST match the live enforcement in
-#   app/services/private_mode.py and the toolbar (chat-toolbar.tsx). CR-041
-#   reconciled an earlier divergent L3/L4 documentation here.
-#   Level 1: skip history saves + memory extraction + verification-report persist
-#   Level 2: also skip KB/memory context injection (model isolated)
-#   Level 3: also skip audit logging
-#   Level 4: full ephemeral (session-wipe on close)
+#   The level contract is docs/PRIVATE_MODE.md (source:
+#   src/web/src/lib/private-mode-levels.json; held to PrivateModeRequest by
+#   tests/test_private_mode_contract.py). 0=off, 1=skip saves, 2=skip KB,
+#   3=skip audit, 4=full ephemeral; no level blocks LLM egress.
 # These knobs declare the BOOT posture; the live level is the Redis key
 # cerid:private_mode:global, seeded from these at startup by
 # app.services.private_mode.seed_private_mode_from_env (CR-011) and mutable at
@@ -1768,11 +1769,6 @@ MS365_MCP_URL = os.getenv("MS365_MCP_URL", "http://cerid-ms365-mcp:3000/mcp")
 # flow + refresh-token rotation; Cerid backend never touches them.
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
-
-# Microsoft / Outlook OAuth. ``MICROSOFT_OAUTH_TENANT`` is ``common``
-# for personal MSA accounts or a specific tenant GUID for org-only flows.
-MICROSOFT_OAUTH_CLIENT_ID = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
-MICROSOFT_OAUTH_TENANT = os.getenv("MICROSOFT_OAUTH_TENANT", "common")
 
 # ---------------------------------------------------------------------------
 # Background Processor — mode contract (docs/BACKGROUND_JOBS.md §9)

@@ -221,6 +221,74 @@ class TestToResults:
         out = _to_results([{}])
         assert out[0].title == "(no subject)"
         assert "(unknown)" in out[0].content
+        assert out[0].metadata == {}
+
+    def test_conversation_id_is_kept_for_triage(self):
+        out = _to_results([{
+            "id": "AAMk",
+            "conversationId": "conv-1",
+            "internetMessageId": "<m@example.com>",
+            "subject": "Hi",
+            "from": {"emailAddress": {"address": "a@b.c"}},
+            "bodyPreview": "hello",
+        }])
+        assert out[0].metadata["provider_message_id"] == "AAMk"
+        assert out[0].metadata["provider_thread_id"] == "conv-1"
+        assert out[0].metadata["message_id"] == "<m@example.com>"
+        assert out[0].metadata["rfc_message_id"] == "<m@example.com>"
+
+    def test_categories_land_when_the_message_has_them(self):
+        out = _to_results([{
+            "id": "AAMk",
+            "subject": "Hi",
+            "categories": ["Cerid/Action", "Blue category"],
+            "parentFolderId": "Inbox",
+        }])
+        assert out[0].source_name == "Outlook"
+        assert out[0].metadata["categories"] == "Cerid/Action,Blue category"
+        assert out[0].metadata["folder"] == "inbox"
+
+    def test_internet_headers_are_copied_for_filtering(self):
+        out = _to_results([{
+            "id": "AAMk",
+            "subject": "Digest",
+            "internetMessageHeaders": [
+                {"name": "List-Id", "value": "<news.example.com>"},
+                {"name": "Authentication-Results", "value": "mx; dmarc=fail"},
+                {"name": "X-Spam-Flag", "value": "No"},
+            ],
+        }])
+        assert out[0].metadata["list_id"] == "<news.example.com>"
+        assert out[0].metadata["authentication_results"] == "mx; dmarc=fail"
+        assert out[0].metadata["spam_flag"] == "No"
+
+    def test_reply_recipient_and_date_are_copied(self):
+        out = _to_results([{
+            "id": "AAMk",
+            "internetMessageId": "<m@example.com>",
+            "subject": "Re: Hi",
+            "receivedDateTime": "2026-10-01T00:00:00Z",
+            "toRecipients": [{"emailAddress": {"address": "me@example.com"}}],
+            "internetMessageHeaders": [
+                {"name": "In-Reply-To", "value": "<prev@example.com>"},
+                {"name": "References", "value": "<prev@example.com>"},
+            ],
+        }])
+        assert out[0].metadata["provider_message_id"] == "AAMk"
+        assert out[0].metadata["rfc_message_id"] == "<m@example.com>"
+        assert out[0].metadata["in_reply_to"] == "<prev@example.com>"
+        assert out[0].metadata["references"] == "<prev@example.com>"
+        assert out[0].metadata["to"] == "me@example.com"
+        assert out[0].metadata["date"] == "2026-10-01T00:00:00Z"
+
+    def test_a_folder_guid_is_not_a_well_known_folder(self):
+        out = _to_results([{
+            "id": "AAMk",
+            "parentFolderId": "AAMkAG-guid",
+            "categories": [],
+        }])
+        assert "folder" not in out[0].metadata
+        assert "categories" not in out[0].metadata
 
 
 class TestIsConfiguredIsEvidenceBased:

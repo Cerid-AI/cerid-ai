@@ -88,6 +88,23 @@ export async function createSource(body: CreateSourceRequest): Promise<SourceRec
   return r.json()
 }
 
+export interface WebhookUrlPayload {
+  url: string
+  require_hmac: boolean
+  curl_example: string
+}
+
+/**
+ * The receiver URL with the webhook token in cleartext. POST, not GET: the
+ * server answers only POST so the token never lands in a cache, a prefetch,
+ * or browser history, and the response is Cache-Control: no-store.
+ */
+export async function fetchWebhookUrl(sourceId: string): Promise<WebhookUrlPayload> {
+  const r = await fetch(mcpUrl(`/sources/${sourceId}/webhook-url`).toString(), { method: "POST", headers: mcpHeaders() })
+  if (!r.ok) throw new Error(`webhook-url fetch failed: ${r.status}`)
+  return r.json()
+}
+
 export async function testSource(sourceId: string): Promise<HealthProbeResult> {
   const r = await fetch(mcpUrl(`/sources/${sourceId}/test`).toString(), { method: "POST", headers: mcpHeaders() })
   if (!r.ok) throw new Error(`testSource failed: ${r.status}`)

@@ -193,16 +193,21 @@ def _extract_topic_from_heading(response_text: str, user_query: str | None) -> s
                         "explain ", "how does ", "who is ", "who was ",
                         "what was ", "what were "):
             if q.lower().startswith(prefix):
-                return q[len(prefix):].strip()
-        # Fallback: use the full query as topic hint
-        return q[:80]
+                topic = q[len(prefix):].strip()
+                return topic or None
+        # A question that matches none of those prefixes is not a topic.
+        # Fall through to a heading. Substituting the question itself makes
+        # the claim a restatement of what the user asked.
 
-    # No user query — try first heading
+    # No prefix matched, or there was no query — try the first heading.
     heading_match = re.search(r"^#{1,3}\s+(.+)", response_text, re.MULTILINE)
     if heading_match:
         return heading_match.group(1).strip()[:80]
 
-    # Last resort: first significant line
+    if user_query:
+        return None
+
+    # Last resort when nothing named a topic: first significant line
     for line in response_text.split("\n"):
         stripped = line.strip().lstrip("#").strip()
         if len(stripped) > 15 and not stripped.startswith("```"):

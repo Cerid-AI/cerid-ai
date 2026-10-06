@@ -17,19 +17,7 @@ import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, Check, Copy, Lock, RefreshCw, Webhook } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { mcpUrl, mcpHeaders } from "@/lib/api/common"
-
-interface WebhookUrlPayload {
-  url: string
-  require_hmac: boolean
-  curl_example: string
-}
-
-async function fetchWebhookUrl(sourceId: string): Promise<WebhookUrlPayload> {
-  const r = await fetch(mcpUrl(`/sources/${sourceId}/webhook-url`).toString(), { headers: mcpHeaders() })
-  if (!r.ok) throw new Error(`webhook-url fetch failed: ${r.status}`)
-  return r.json()
-}
+import { fetchWebhookUrl, type WebhookUrlPayload } from "@/lib/api/sources"
 
 interface WebhookShareCardProps {
   sourceId: string

@@ -97,6 +97,26 @@ class OutlookDataSource(DataSource):
             return []
         return _to_results(parse_messages(raw))
 
+    async def apply(self, decision: dict, *, dry_run: bool = True, ledger: Any = None) -> dict:
+        """Apply one Outlook decision. Dry-run does not call the sibling."""
+        from app.inbox.executor import apply_decision
+        from core.mcp_clients.result_text import is_error_result, tool_text
+
+        class _Transport:
+            async def call_tool(self, provider: str, tool: str, arguments: dict) -> str:
+                raw = await self_source._call_mcp(tool, arguments)
+                if is_error_result(raw):
+                    raise RuntimeError(tool_text(raw)[:500] or tool)
+                return tool_text(raw)
+
+            async def apple(self, argv: list[str]) -> tuple[int, dict]:
+                raise RuntimeError("outlook has no apple helper")
+
+        self_source = self
+        prepared = dict(decision)
+        prepared.setdefault("provider", "outlook")
+        return await apply_decision(prepared, dry_run=dry_run, ledger=ledger, transport=_Transport())
+
 
 def parse_messages(raw: Any) -> list[dict[str, Any]]:
     """Graph message dicts from an ms365 tool result.
@@ -127,6 +147,23 @@ def parse_messages(raw: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _outlook_addresses(raw: object) -> str:
+    """Comma-joined recipient addresses already present on the Graph row."""
+    if not isinstance(raw, list):
+        return ""
+    addresses: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        email_address = item.get("emailAddress")
+        if not isinstance(email_address, dict):
+            continue
+        address = str(email_address.get("address") or "").strip()
+        if address:
+            addresses.append(address)
+    return ", ".join(addresses)
+
+
 def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
     out: list[DataSourceResult] = []
     for m in messages:
@@ -145,6 +182,55 @@ def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
             else m.get("body")
         ) or m.get("bodyPreview") or ""
         url = m.get("webLink") or "https://outlook.live.com/mail/0/"
+        message_id = str(m.get("id") or "")
+        thread_id = str(m.get("conversationId") or "") or message_id
+        metadata: dict[str, str] = {}
+        if message_id:
+            metadata["provider_message_id"] = message_id
+        if thread_id:
+            metadata["provider_thread_id"] = thread_id
+        internet_id = str(m.get("internetMessageId") or "")
+        if internet_id:
+            metadata["message_id"] = internet_id
+            metadata["rfc_message_id"] = internet_id
+        categories = m.get("categories")
+        if isinstance(categories, list) and categories:
+            metadata["categories"] = ",".join(str(item) for item in categories if str(item).strip())
+        elif isinstance(categories, str) and categories.strip():
+            metadata["categories"] = categories.strip()
+        raw_headers = m.get("internetMessageHeaders")
+        if isinstance(raw_headers, list):
+            header_map = {
+                "list-id": "list_id",
+                "list-unsubscribe": "list_unsubscribe",
+                "authentication-results": "authentication_results",
+                "x-spam-flag": "spam_flag",
+                "x-spam-status": "spam_status",
+                "message-id": "rfc_message_id",
+                "to": "to",
+                "date": "date",
+                "in-reply-to": "in_reply_to",
+                "references": "references",
+            }
+            for item in raw_headers:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip().casefold()
+                value = str(item.get("value") or "").strip()
+                dest = header_map.get(name)
+                if dest and value and dest not in metadata:
+                    metadata[dest] = value
+        if "to" not in metadata:
+            addressed = _outlook_addresses(m.get("toRecipients"))
+            if addressed:
+                metadata["to"] = addressed
+        if "date" not in metadata:
+            received = str(m.get("receivedDateTime") or "").strip()
+            if received:
+                metadata["date"] = received
+        folder = str(m.get("parentFolderId") or "").strip()
+        if folder.casefold() in {"inbox", "archive", "drafts", "sentitems"}:
+            metadata["folder"] = folder.casefold()
         out.append(
             DataSourceResult(
                 title=subject,
@@ -152,6 +238,7 @@ def _to_results(messages: list[dict[str, Any]]) -> list[DataSourceResult]:
                 source_url=url,
                 source_name="Outlook",
                 confidence=0.7,
+                metadata=metadata,
             ),
         )
     return out

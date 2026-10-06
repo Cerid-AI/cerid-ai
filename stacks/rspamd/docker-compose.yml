@@ -1,0 +1,36 @@
+# Loopback rspamd for inbox classification. Not part of the Cerid stack:
+# the root compose file does not include this one, and this service does not
+# join llm-network. Homebrew has no rspamd formula. From the repo root:
+#
+#   docker compose -f stacks/rspamd/docker-compose.yml up -d
+#
+# Publishes the scanner only, on 127.0.0.1:11333. The controller and the
+# milter proxy are disabled. local.d turns off modules that query other hosts.
+# The inbox client also sends Settings: groups_disabled on each /checkv2.
+
+x-logging: &rspamd-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  rspamd:
+    image: rspamd/rspamd:4.2.1-0
+    container_name: cerid-rspamd
+    logging: *rspamd-logging
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11333:11333"
+    volumes:
+      - ./local.d:/etc/rspamd/local.d:ro
+      - rspamd-data:/var/lib/rspamd
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/11333'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+volumes:
+  rspamd-data:

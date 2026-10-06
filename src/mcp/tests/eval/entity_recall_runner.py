@@ -29,10 +29,11 @@ UNANNOTATED: dict[str, str] = {
         "either model recalls stably"
     ),
     "eval-fixture-coding-deploy-pipeline.md": (
-        "3B silently returns [] — a chunk's JSON response comes back malformed "
-        "(JSONDecodeError: Expecting value: line 49 column 17) and the parse "
-        "failure is swallowed; tracked as a product defect in tasks/todo.md, "
-        "not pruned as an unstable annotation"
+        "3B returns malformed JSON for one chunk (JSONDecodeError: Expecting "
+        "value: line 49 column 17); since 9d0ea37a the extractor raises "
+        "EntityExtractionError instead of returning [], so an annotation here "
+        "would score as FAILED on every run until the model defect in "
+        "tasks/todo.md is fixed"
     ),
 }
 
@@ -67,12 +68,21 @@ def score(names: set[str], spec: dict) -> tuple[float, list[str]]:
     return hits / len(spec["expected"]), forbidden
 
 
-async def run_one(annot: pathlib.Path) -> tuple[str, float, list[str], set[str]]:
-    from core.agents.entity_extraction import default_llm_caller, extract_entities_from_text
+async def run_one(annot: pathlib.Path) -> tuple[str, float | None, list[str], set[str]]:
+    from core.agents.entity_extraction import (
+        EntityExtractionError,
+        default_llm_caller,
+        extract_entities_from_text,
+    )
 
     spec = json.loads(annot.read_text())
     text = (FIXTURES / spec["fixture"]).read_text()[:MAX_CHARS]
-    entities = await extract_entities_from_text(text, llm_caller=default_llm_caller)
+
+    try:
+        entities = await extract_entities_from_text(text, llm_caller=default_llm_caller)
+    except EntityExtractionError as exc:
+        print(f"extraction[{spec['fixture']}] = FAILED ({exc})", flush=True)
+        return spec["fixture"], None, ["extraction_failed"], set()
     names = {e.name.lower() for e in entities}
     recall, forbidden = score(names, spec)
     return spec["fixture"], recall, forbidden, names
@@ -82,6 +92,9 @@ async def main() -> int:
     ok = True
     for annot in annotation_files():
         fixture, recall, forbidden, names = await run_one(annot)
+        if recall is None:
+            ok = False
+            continue
         passed = recall >= RECALL_FLOOR and not forbidden
         ok = ok and passed
         print(

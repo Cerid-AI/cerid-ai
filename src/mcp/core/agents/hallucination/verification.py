@@ -2699,6 +2699,9 @@ async def verify_claim(
                 "claim": claim,
                 "status": "verified",
                 "similarity": round(similarity, 3),
+                # The score the alignment gate above ran on; memory promotion
+                # requires it and must not fall back to similarity.
+                "nli_entailment": round(_nli["entailment"], 3),
                 "source_artifact_id": top_result.get("artifact_id", ""),
                 "source_filename": top_result.get("filename", ""),
                 "source_domain": top_result.get("domain", ""),

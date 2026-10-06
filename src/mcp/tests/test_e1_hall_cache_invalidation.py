@@ -62,6 +62,7 @@ def test_conversation_delete_clears_hall_cache(monkeypatch):
 
     monkeypatch.setattr(us, "_sync_dir", lambda: "/tmp/sync")
     monkeypatch.setattr(us, "delete_conversation", lambda sd, cid: None)
+    monkeypatch.setattr(us, "remove_conversation_transcripts", lambda cid: [])
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
 
     result = us.remove_conversation("cid-3")

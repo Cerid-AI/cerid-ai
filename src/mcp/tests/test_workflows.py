@@ -16,6 +16,7 @@ from app.routers.workflows import (
     AVAILABLE_AGENTS,
     NODE_TYPE_CATALOG,
     WORKFLOW_TEMPLATES,
+    ConditionError,
     NodeType,
     RunStatus,
     Workflow,
@@ -225,10 +226,13 @@ class TestConditionEvaluation:
             _evaluate_condition("missing > 0", {})
         )
 
-    def test_invalid_expression_returns_true(self):
-        assert asyncio.run(
-            _evaluate_condition("nonsense!!!", {})
-        )
+    def test_invalid_expression_raises(self):
+        with pytest.raises(ConditionError, match="nonsense"):
+            asyncio.run(_evaluate_condition("nonsense!!!", {}))
+
+    def test_uncomparable_value_raises(self):
+        with pytest.raises(ConditionError):
+            asyncio.run(_evaluate_condition("payload > 1", {"payload": {"a": 1}}))
 
     def test_gte(self):
         assert asyncio.run(
@@ -539,6 +543,36 @@ class TestWorkflowExecution:
 
         assert executed == ["query", "self_rag"]
         assert run.results["t"]["status"] == "completed"
+
+    @pytest.mark.parametrize("label,executed_expected", [("true", ["query"]), (None, ["query"]), ("false", ["query", "self_rag"])])
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_unevaluable_condition_takes_only_the_false_edge(self, mock_agent, mock_redis_fn, label, executed_expected):
+        """An expression that cannot be evaluated is 'did not pass': the true
+        branch is skipped, the else branch runs, and the step records why."""
+        mock_redis_fn.return_value = _mock_redis()
+        mock_agent.return_value = {"confidence": 0.9}
+        nodes = [
+            _node("query", "q"),
+            _node("check", "c", NodeType.CONDITION, expression="nonsense!!!"),
+            _node("self_rag", "t"),
+        ]
+        edges = [_edge("q", "c"), _edge("c", "t", condition=label)]
+
+        loop = asyncio.new_event_loop()
+        run = loop.run_until_complete(execute_workflow(_workflow(nodes, edges), {"query": "test"}))
+        loop.close()
+
+        assert run.status == RunStatus.COMPLETED
+        assert run.results["c"]["passed"] is False
+        assert "nonsense" in run.results["c"]["condition_error"]
+        assert [call.args[0] for call in mock_agent.call_args_list] == executed_expected
+
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
+    def test_evaluable_condition_records_no_error(self, mock_agent, mock_redis_fn):
+        run, _ = self._run_branch(mock_agent, mock_redis_fn, 0.9, None)
+        assert "condition_error" not in run.results["c"]
 
     @staticmethod
     def _branching_workflow():

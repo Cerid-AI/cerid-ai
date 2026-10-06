@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-08-09 (v1.0.1 — 55 MCP tools, 60 with the optional trading module, registered via the `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; `_warnings` envelope; `/health.invariants.mcp` rollups.)
+> **Last refresh:** 2026-08-09 (v1.0.1 — tool count remeasured 2026-10-04: 59 MCP tools, 64 with the optional trading module, registered via the `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; `_warnings` envelope; `/health.invariants.mcp` rollups.)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 
@@ -78,7 +78,7 @@ cerid-ai-internal/
 │   │   ├── main.py          # FastAPI entry + lifespan
 │   │   ├── tools.py         # Legacy MCP tool dispatcher; most tools register via
 │   │   │                    # @register_tool in tool_registry.py + mcp_tools/
-│   │   │                    # (55 tools; 60 with the optional trading module)
+│   │   │                    # (59 tools; 64 with the optional trading module)
 │   │   └── internal_modules.py  # /health.invariants.internal_modules flags
 │   ├── config/              # settings.py, taxonomy.py, features.py, providers.py
 │   ├── routers/             # billing.py ONLY (internal-only; whole dir stripped from public)
@@ -199,6 +199,26 @@ effect on the next request without restart.  The four `QUENCHFORGE_*`
 env vars (URL + three model names) are the operator's surface; the
 `docs/AMD_GPU_MODEL_RECOMMENDATIONS.md` matrix picks GGUFs by VRAM
 tier.
+
+**Embedding provenance stamp.** Every chunk written to ChromaDB carries
+`embedding_model` and `embedding_model_version`, merged in by
+`core/utils/embeddings.py::embedding_stamp` at both chunk-write paths
+(`app/services/ingestion.py`) and by the managed re-embed job. Both
+fields describe the leg that is about to produce the vector, never a
+config string: `embedding_model` is `serving_embedding_model()` (the
+served model when the local server embeds, else the ONNX pin) and
+`embedding_model_version` is `serving_embedding_version()` — the serving
+*artifact*, `<model>@<artifact>`: the local server's own version
+(`cerid-mlx-<rev>` from `/api/version`; for Quenchforge the model digest
+from `/api/tags`, else `quenchforge-<version>`), the HF revision the
+in-process ONNX leg loads, or the bare model id when ChromaDB embeds
+server-side. `<model>@unknown` means the artifact could not be read and
+is never cached. A different artifact therefore gets a different value,
+which is what lets `POST /admin/kb/reembed` key its selection on the
+stamp; `GET /admin/kb/embedding-versions` shows the distribution. The
+stamp is a claim, not proof — the boot-time vector-space probe
+(`app/startup/invariants.py::probe_vector_space`) is what verifies that
+stored vectors and the serving embedder share one space.
 
 Three workloads stay CPU on Intel Mac + AMD even with Quenchforge
 configured:

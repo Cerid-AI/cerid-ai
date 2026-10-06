@@ -178,9 +178,14 @@ async def _process_one(
     if not blob.strip():
         return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "empty_text"}
 
-    entities = await extract_entities_from_text(
-        blob, llm_caller=default_llm_caller, max_chars=max_chars,
-    )
+    from core.agents.entity_extraction import EntityExtractionError
+
+    try:
+        entities = await extract_entities_from_text(
+            blob, llm_caller=default_llm_caller, max_chars=max_chars,
+        )
+    except EntityExtractionError:
+        return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "extraction_failed"}
     if not entities:
         return {"entities_upserted": 0, "edges_upserted": 0, "skipped": "no_entities"}
 

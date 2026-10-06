@@ -15,11 +15,12 @@
 # `git push --no-verify` — silently skips the supply-chain guard too, trading a
 # security check for a transport problem.
 #
-# This runs the SAME validation the hook runs (`pre-push --validate-only`, one
-# definition, two callers, so the two can never drift apart), records the
-# commit that passed, and only then pushes. The hook sees the record and
-# returns in seconds, so nothing sits idle. The guard still runs in the hook,
-# every time, and is never covered by the record.
+# This runs the validation FIRST — the hook's own set (`pre-push
+# --validate-only`) for any branch, the FULL `make prepush` for a direct push
+# to main (see WHICH SET RUNS below) — records the commit that passed, and only
+# then pushes. The hook sees the record and returns in seconds, so nothing sits
+# idle. The guard still runs in the hook, every time, and is never covered by
+# the record.
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -79,9 +80,48 @@ echo "── safe-push: validating $(printf '%.12s' "$SHA") before opening any c
 # stale record must never be left behind for the hook to trust.
 rm -f "$STAMP"
 
-if ! bash "$HOOK" --validate-only; then
-  echo "── safe-push: ✗ validation failed — nothing pushed, no record written ──"
-  exit 1
+# WHICH SET RUNS (ruling D1-A, 2026-10-05)
+#
+# A push to any branch other than main runs what the hook runs — ci-local +
+# drift-check — because a PR still has to meet the full remote CI before it can
+# merge. A direct push to main has no such second gate, so `make push` must not
+# be able to land there what CI would reject: it runs the FULL `make prepush`
+# (security, sdk-contract, lock, license and frontend as well), and the record
+# is written only when that passes. The target is the ref the push UPDATES, not
+# the checked-out branch, read the way git reads it: no refspec means the
+# current branch, `src:dst` means dst, `--all`/`--mirror` include main.
+_push_updates_main() {
+  local arg remote="" refs="" ref
+  for arg in "$@"; do
+    case "$arg" in
+      --all|--mirror) return 0 ;;
+      -*) ;;
+      *) if [ -z "$remote" ]; then remote="$arg"; else refs="$refs $arg"; fi ;;
+    esac
+  done
+  [ -n "$refs" ] || refs="$(git rev-parse --abbrev-ref HEAD)"
+  # shellcheck disable=SC2086  # refs are space-separated on purpose
+  for ref in $refs; do
+    ref="${ref#+}"; ref="${ref##*:}"; ref="${ref#refs/heads/}"
+    [ "$ref" = "HEAD" ] && ref="$(git rev-parse --abbrev-ref HEAD)"
+    [ "$ref" = "main" ] && return 0
+  done
+  return 1
+}
+
+if _push_updates_main "$@"; then
+  echo "── safe-push: target is main — running the FULL prepush (make prepush) ──"
+  # Same as the hook: CERID_API_KEY is unset so no test can reach a live stack.
+  if ! (unset CERID_API_KEY; make prepush); then
+    echo "── safe-push: ✗ prepush failed — nothing pushed, no record written ──"
+    exit 1
+  fi
+else
+  echo "── safe-push: target is not main — running ci-local + drift-check (pre-push --validate-only) ──"
+  if ! bash "$HOOK" --validate-only; then
+    echo "── safe-push: ✗ validation failed — nothing pushed, no record written ──"
+    exit 1
+  fi
 fi
 
 echo "$SHA" > "$STAMP"

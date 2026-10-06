@@ -449,6 +449,7 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
   echo ""
 
   mkdir -p "${SCRIPT_DIR}/eval/reports"
+  EVAL_EXIT=0
   # Entity-extraction recall runs inside the MCP container: it needs the
   # production extractor and the configured local model, which the slim
   # pytest container cannot import.
@@ -479,7 +480,10 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
         --reruns 1 --reruns-delay 5 \
         --junitxml=reports/eval.xml 2>&1
     "
-  EVAL_EXIT=$?
+  PYTEST_EXIT=$?
+  # Both halves count: assigning $? to EVAL_EXIT here would overwrite the recall
+  # result, and a recall failure beside a green pytest run would pass the tier.
+  [[ $PYTEST_EXIT -ne 0 ]] && EVAL_EXIT=1
 
   report_section "Evaluation & Efficacy Suite"
   if [[ -f "${SCRIPT_DIR}/eval/reports/eval.xml" ]]; then

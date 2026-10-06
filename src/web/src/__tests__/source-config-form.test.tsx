@@ -295,3 +295,26 @@ describe("SourceConfigForm — axe-clean", () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Webhook — new sources require HMAC unless the user opts out
+// ---------------------------------------------------------------------------
+
+describe("KindSpecificFields — webhook HMAC default", () => {
+  it("shows the signature requirement on by default when adding a source", () => {
+    render(<KindSpecificFields kind="webhook" providers={[]} config={{}} onConfig={() => {}} />)
+    expect(screen.getByRole("checkbox", { name: /require hmac/i })).toBeChecked()
+  })
+
+  it("keeps an existing source's stored value when editing", () => {
+    render(<KindSpecificFields kind="webhook" providers={[]} config={{}} onConfig={() => {}} editMode />)
+    expect(screen.getByRole("checkbox", { name: /require hmac/i })).not.toBeChecked()
+  })
+
+  it("sends an explicit opt-out when the user unticks it", () => {
+    const onConfig = vi.fn()
+    render(<KindSpecificFields kind="webhook" providers={[]} config={{}} onConfig={onConfig} />)
+    fireEvent.click(screen.getByRole("checkbox", { name: /require hmac/i }))
+    expect(onConfig).toHaveBeenCalledWith({ require_hmac: false })
+  })
+})

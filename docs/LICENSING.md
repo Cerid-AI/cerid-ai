@@ -9,7 +9,7 @@ the source licenses that govern each directory see
 
 | Tier | Price | What it is |
 |------|-------|-----------|
-| **Core** | Free | The whole self-hosted product: all four knowledge surfaces, 12 agents, 55 MCP tools, local + web sources, the local LLM pipeline, and both SDKs. No account, no telemetry, no seat limit, no expiry. |
+| **Core** | Free | The whole self-hosted product: all four knowledge surfaces, 12 agents, 59 MCP tools, local + web sources, the local LLM pipeline, and both SDKs. No account, no telemetry, no seat limit, no expiry. |
 | **Pro** | $15/mo · $144/yr | Adds everything that reaches outside your own disk — cloud and Apple connectors, Meeting Capture, custom Smart RAG, advanced analytics, daily digest, inbox triage, metamorphic verification. |
 | **Vault** | Contact | Enterprise: multi-user with tenant isolation, SSO/SAML, audit logging, SLA and deployment support. <vault@cerid.ai> |
 

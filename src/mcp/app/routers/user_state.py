@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
+from app.services.content_lifecycle import remove_conversation_transcripts
 from app.services.private_mode import private_blocks
 from app.sync.user_state import (
     delete_conversation,
@@ -142,7 +143,17 @@ def remove_conversation(conv_id: str):
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=412, detail="Sync directory not configured")
-    delete_conversation(sd, _checked_conv_id(conv_id))
+    conv_id = _checked_conv_id(conv_id)
+    # The ingested chat turns go first: if a store is down this raises before
+    # the sync file is unlinked, so the client keeps its delete tombstone and
+    # retries instead of leaving the transcript retrievable behind a 200.
+    removals = remove_conversation_transcripts(conv_id)
+    if removals:
+        logger.info(
+            "conversation %s: removed %d transcript artifact(s)",
+            conv_id, sum(1 for r in removals if r.found),
+        )
+    delete_conversation(sd, conv_id)
     # E1 CR-012: also drop the durable hall:{cid} verification report so a deleted
     # conversation does not leave its verbatim claims + source snippets cached in
     # Redis for the 7-day TTL. Best-effort — the conversation delete already

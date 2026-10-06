@@ -984,7 +984,7 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
     of /query. It now resolves the identical RequestContext, honours the
     Private-Mode L2 "skip KB" gate, and queues behind KB_POOL like its siblings.
     """
-    from app.concurrency import KB_POOL
+    from app.concurrency import KB_POOL, PoolTimeout
     from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
     from app.services.request_policy import build_request_context
     from core.agents.query_agent import agent_query_full
@@ -993,20 +993,26 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
         return {"results": [], "total_results": 0, "confidence": 0.0}
 
     ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
-    async with KB_POOL.acquire():
-        result = await agent_query_full(
-            query=req.query,
-            domains=[req.domain],
-            top_k=req.top_k,
-            exclude_packs=req.exclude_packs,
-            external_augmentation=False,
-            allowed_domains=ctx.allowed_domains_list(),
-            strict_domains=ctx.strict_domains,
-            chroma_client=get_chroma(),
-            redis_client=get_redis(),
-            neo4j_driver=get_neo4j(),
-            graph_store=get_graph_store(),
-        )
+    try:
+        async with KB_POOL.acquire(timeout=2.0):
+            result = await agent_query_full(
+                query=req.query,
+                domains=[req.domain],
+                top_k=req.top_k,
+                exclude_packs=req.exclude_packs,
+                external_augmentation=False,
+                allowed_domains=ctx.allowed_domains_list(),
+                strict_domains=ctx.strict_domains,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                graph_store=get_graph_store(),
+            )
+    except PoolTimeout as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Retrieval is queued behind other knowledge queries. Retry in a moment.",
+        ) from exc
     _reject_restricted(result)
     sources = result.get("sources", [])
     return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}

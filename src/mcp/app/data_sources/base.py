@@ -19,12 +19,23 @@ __all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry"]
 class DataSourceResult:
     """A single result from an external data source."""
 
-    def __init__(self, title: str, content: str, source_url: str = "", source_name: str = "", confidence: float = 0.8):
+    def __init__(
+        self,
+        title: str,
+        content: str,
+        source_url: str = "",
+        source_name: str = "",
+        confidence: float = 0.8,
+        metadata: dict[str, Any] | None = None,
+    ):
         self.title = title
         self.content = content
         self.source_url = source_url
         self.source_name = source_name
         self.confidence = confidence
+        # Provider ids for inbox triage. Absent from to_dict so existing
+        # result payloads keep their shape; callers read the attribute.
+        self.metadata = dict(metadata or {})
 
     def to_dict(self) -> dict[str, Any]:
         return {"title": self.title, "content": self.content, "source_url": self.source_url, "source_name": self.source_name, "confidence": self.confidence}

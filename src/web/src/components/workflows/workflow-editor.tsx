@@ -598,9 +598,16 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                       : selectedNode.type === "condition"
                         ? selectedRunResult.passed
                           ? "passed"
-                          : "did not pass"
+                          : selectedRunResult.condition_error
+                            ? "could not evaluate"
+                            : "did not pass"
                         : String(selectedRunResult.status ?? "unknown")}
                   </Badge>
+                  {typeof selectedRunResult.condition_error === "string" && (
+                    <p className="text-label-xs text-destructive font-mono break-all">
+                      {selectedRunResult.condition_error}
+                    </p>
+                  )}
                   {selectedRunResult.output !== undefined && (
                     <pre className="text-label-xs text-muted-foreground font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto rounded bg-muted/40 border p-1.5">
                       {JSON.stringify(selectedRunResult.output, null, 1)?.slice(0, 600)}
