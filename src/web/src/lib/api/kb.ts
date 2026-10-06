@@ -468,7 +468,7 @@ export async function fetchAudit(
 
 export async function uploadFile(
   file: File,
-  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string; skipQuality?: boolean; skipMetadata?: boolean } = {},
+  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string; skipQuality?: boolean; skipMetadata?: boolean; quick?: boolean } = {},
 ): Promise<UploadResult> {
   const formData = new FormData()
   formData.append("file", file)
@@ -479,6 +479,9 @@ export async function uploadFile(
   if (opts.categorizeMode) params.set("categorize_mode", opts.categorizeMode)
   if (opts.skipQuality) params.set("skip_quality", "true")
   if (opts.skipMetadata) params.set("skip_metadata", "true")
+  // Quick capture: the server persists and answers at once; categorisation
+  // and the display title land later from a processor job.
+  if (opts.quick) params.set("quick", "true")
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout for large files

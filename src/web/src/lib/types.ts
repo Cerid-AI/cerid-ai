@@ -1097,6 +1097,8 @@ export interface UploadResult {
   chunks: number
   categorize_mode: string
   metadata?: Record<string, string>
+  /** Quick mode only: whether the enrichment job was queued after the persist. */
+  enrichment?: "queued" | "unavailable"
 }
 
 export interface SynopsisEstimate {

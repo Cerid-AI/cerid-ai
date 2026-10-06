@@ -76,6 +76,8 @@ OUTLOOK_TOOLS = frozenset({
     "create-mail-child-folder",
 })
 APPLE_COMMANDS = frozenset({"flag", "read", "move", "draft", "find"})
+# Graph well-known folder names. Anything else is a Cerid mailbox path.
+OUTLOOK_WELL_KNOWN = frozenset({"inbox", "archive", "drafts", "sentitems"})
 PROVIDER_TOOLS = {
     "gmail": GMAIL_TOOLS,
     "outlook": OUTLOOK_TOOLS,
@@ -106,7 +108,9 @@ _FINANCIAL_MARKERS = (
     "statement is ready",
 )
 _URGENT_MARKERS = ("urgent", "asap", "emergency", "right away", "deadline today", "critical")
-_PROMO_MARKERS = ("unsubscribe", "% off", "%off", "promo code", "sale")
+_PROMO_MARKERS = ("unsubscribe", "% off", "%off", "promo code")
+# A sale is read from the subject only. A body that mentions one is not a promo by itself.
+_SUBJECT_PROMO_MARKERS = ("sale",)
 # Deceptive or unsolicited mail. Checked before urgent and promo so a
 # phishing subject that says "urgent" does not stay in the inbox.
 _SPAM_MARKERS = (
@@ -202,6 +206,11 @@ def heuristic_category(text: str, *, include_urgent: bool = True) -> tuple[str, 
     if first_marker(text, _NEWSLETTER_MARKERS):
         return "newsletter", 0.86
     return "actionable", 0.4
+
+
+def promo_marker(text: str, subject: str = "") -> str:
+    """The promo word that matched: a body marker, else the subject-only sale marker."""
+    return first_marker(text, _PROMO_MARKERS) or first_marker(subject, _SUBJECT_PROMO_MARKERS)
 
 
 def financial_marker(text: str) -> str:
@@ -471,6 +480,56 @@ def operator_outcome(decision: dict, observation: dict) -> tuple[str, str] | Non
     if action == str(decision.get("action") or "") and category == str(decision.get("category") or ""):
         return None
     return action, category
+
+
+def proposed_outcome(decision: dict, observation: dict) -> tuple[str, str] | None:
+    """The user's own move against a proposal nothing has applied.
+
+    There is no applied mark to compare with, so only a visible act counts:
+    a Cerid label, category, or flag the user set by hand becomes the
+    category, and a message no longer in the inbox is ``archive``. A message
+    still in the inbox with no mark is not a move, whatever the proposal
+    said. An unknown location is unknown. The same action and category as
+    the proposal is not a correction.
+    """
+    if not isinstance(decision, dict) or not isinstance(observation, dict):
+        return None
+    provider = str(decision.get("provider") or decision.get("source") or "")
+    marks = _visible_marks(provider, observation)
+    if marks is not None and len(marks) > 1:
+        return None
+    located = _in_inbox(provider, observation, _names(observation, "labels") if provider == "gmail" else None)
+    if located is None:
+        return None
+    if marks:
+        category = marks[0]
+    elif located is False:
+        category = str(decision.get("category") or "")
+    else:
+        return None
+    action = "keep" if located else "archive"
+    if category not in CATEGORIES:
+        return None
+    if action == str(decision.get("action") or "") and category == str(decision.get("category") or ""):
+        return None
+    return action, category
+
+
+def _visible_marks(provider: str, observation: dict) -> list[str] | None:
+    """Cerid categories the mailbox shows. None when the provider's mark is not in the observation."""
+    if provider == "gmail":
+        names = _names(observation, "labels")
+        return None if names is None else _cerid_categories(names)
+    if provider == "outlook":
+        names = _names(observation, "categories")
+        return None if names is None else _cerid_categories(names)
+    if provider == "apple_mail":
+        if "flag" not in observation:
+            return None
+        flag = str(observation.get("flag") or "").strip()
+        category = _FLAG_CATEGORY.get(flag.casefold()) if flag else None
+        return [category] if category else []
+    return None
 
 
 def _names(observation: dict, key: str) -> list[str] | None:

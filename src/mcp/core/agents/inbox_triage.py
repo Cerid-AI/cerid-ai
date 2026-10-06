@@ -33,7 +33,9 @@ import json
 import logging
 import re
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
+from email.utils import parseaddr
 from http import HTTPStatus
 from typing import Any, Protocol
 
@@ -104,13 +106,39 @@ def set_inbox_memory(lookup: Any) -> None:
     _memory = lookup
 
 
+_accounts: Any = None
+
+
+def set_inbox_accounts(lookup: Any) -> None:
+    """Wire app.inbox.review.included_addresses. Unwired triage does not gate on accounts."""
+    global _accounts
+    _accounts = lookup
+
+
+def get_inbox_accounts() -> Any:
+    return _accounts
+
+
 _rspamd_scan: Any = None
 
 
 def set_inbox_rspamd(scan: Any) -> None:
-    """Inject a scan coroutine. None uses the loopback client when configured."""
+    """Inject a scan coroutine. None uses the stack client when configured."""
     global _rspamd_scan
     _rspamd_scan = scan
+
+
+@dataclass
+class _ScanFailures:
+    """Failed scans in one triage pass: logged once, with the count."""
+
+    count: int = 0
+    last: BaseException | None = None
+
+
+# Set by triage_inboxes for the pass; the gathered thread tasks share it.
+# None outside a pass (a direct _categorize_thread caller) logs per failure.
+_scan_failures: ContextVar[_ScanFailures | None] = ContextVar("inbox_scan_failures", default=None)
 
 
 # Annotated-against app types; concrete classes arrive via the injected registry.
@@ -123,6 +151,9 @@ DataSourceResult = Any
 CATEGORIES = ("urgent", "actionable", "personal", "newsletter", "promo", "spam")
 
 _TRIAGE_SOURCES = ("gmail", "outlook", "apple_mail")
+
+# The financial card's record_type; the consumer registry names the same string.
+FINANCIAL_CARD_RECORD_TYPE = "mail_financial_card"
 
 _ACTION_PHRASE = {
     "keep": "review",
@@ -225,22 +256,92 @@ def _build_thread_excerpt(messages: list[dict[str, Any]]) -> str:
 
 
 def _profile() -> str:
-    import config
+    """The profile in force, not the configured string: a cloud profile
+    without a key or under Private Mode has already degraded to local-only."""
+    from core.utils.internal_llm import effective_environment_profile
 
-    return getattr(config, "CERID_ENVIRONMENT_PROFILE", "") or "hybrid"
+    return effective_environment_profile() or "hybrid"
 
 
 # ── DataSource fetch ──────────────────────────────────────────────────
 
+_GMAIL_EXCLUDED = ("-in:spam", "-in:trash")
+
+
+def _source_query(source_name: str, query: str) -> str:
+    """Gmail names the Spam and Trash exclusion itself instead of trusting the sibling's default."""
+    if source_name != "gmail":
+        return query
+    words = query.split()
+    missing = [token for token in _GMAIL_EXCLUDED if token not in words]
+    return " ".join([*words, *missing])
+
+
 async def _fetch_recent(source: DataSource, query: str, max_results: int) -> list[DataSourceResult]:
     """Pull recent results from a DataSource. Defensive — returns empty
     on any failure rather than propagating (one bad source can't break
-    the whole triage)."""
+    the whole triage).
+
+    A source with ``triage_query`` owns its triage scope (Outlook reads the
+    Inbox, unread, last day). The others take the Gmail-syntax query.
+    """
     try:
-        return await source.query(query, max_results=max_results)
+        fetch = getattr(source, "triage_query", None)
+        if callable(fetch):
+            return await fetch(query, max_results=max_results)
+        return await source.query(_source_query(source.name, query), max_results=max_results)
     except Exception as exc:  # noqa: BLE001
         log_swallowed_error(f"inbox_triage.fetch.{source.name}", exc)
         return []
+
+
+def _included_accounts(source_name: str) -> list[str] | None:
+    """Addresses triage may read for a provider. None means no account lookup is wired."""
+    if _accounts is None:
+        return None
+    try:
+        found = _accounts(source_name)
+    except Exception as exc:  # noqa: BLE001
+        log_swallowed_error(f"inbox_triage.accounts.{source_name}", exc)
+        return []
+    return [str(item).casefold().strip() for item in (found or [])]
+
+
+def _thread_account(messages: list[DataSourceResult]) -> str:
+    for message in messages:
+        meta = getattr(message, "metadata", None) or {}
+        if isinstance(meta, dict) and str(meta.get("account") or "").strip():
+            return str(meta["account"]).strip()
+    return ""
+
+
+def _account_included(messages: list[DataSourceResult], included: list[str] | None) -> bool:
+    """A thread that names an address is read only when that address is added and included.
+
+    A thread with no address falls to the proposal step, which fills in the
+    provider's sole included address or proposes nothing.
+    """
+    if included is None:
+        return True
+    account = _thread_account(messages)
+    return not account or account.casefold() in included
+
+
+async def _source_configured(source: DataSource) -> bool:
+    """A source with a probe answers from the sibling; the rest from their flag."""
+    probe = getattr(source, "probe_configured", None)
+    if callable(probe):
+        return bool(await probe())
+    return bool(source.is_configured())
+
+
+def _unconfigured_reason(source: DataSource) -> str:
+    """Why a source is skipped. Apple Mail inside the container is runs_on_desktop, not missing setup."""
+    state_fn = getattr(source, "configured_state", None)
+    state = state_fn() if callable(state_fn) else None
+    if isinstance(state, str) and state and state != "configured":
+        return state
+    return "not_configured"
 
 
 # ── thread grouping ───────────────────────────────────────────────────
@@ -278,13 +379,34 @@ def _address_in(text: str) -> str:
     return found.group(0).casefold() if found else ""
 
 
-def _sender_address(message: DataSourceResult) -> str:
-    found = _address_in(str(getattr(message, "source_name", "") or ""))
+def _from_address(value: str) -> str:
+    """The address a From value names, read by the RFC 5322 parser.
+
+    ``"ops@example.com" <stranger@evil.example>`` is from the stranger. Reading
+    the first address-shaped token would hand the display name the sender's
+    identity, and with it any pin remembered for that sender; a home-grown
+    bracket rule would disagree with the mail system's own parser on quoted
+    and commented names. ``parseaddr`` is that parser.
+    """
+    _name, addr = parseaddr(value or "")
+    found = _address_in(addr)
     if found:
         return found
-    match = _FROM_RE.search(str(getattr(message, "content", "") or ""))
+    if "<" in (value or ""):
+        return ""
+    return _address_in(value)
+
+
+def _sender_address(message: DataSourceResult) -> str:
+    found = _from_address(str(getattr(message, "source_name", "") or ""))
+    if found:
+        return found
+    # Sources that give no address in source_name compose the content as
+    # "From: ...\nSubject: ...\n\nbody". Only a From line at the very start is
+    # the header; a "From:" line further down is body text anyone can write.
+    match = _FROM_RE.match(str(getattr(message, "content", "") or ""))
     if match:
-        return _address_in(match.group(1))
+        return _from_address(match.group(1))
     return ""
 
 
@@ -305,7 +427,7 @@ def _apply_fields(thread: TriagedThread, messages: list[DataSourceResult]) -> No
         if not account:
             account = str(meta.get("account") or "").strip()
         if not mailbox:
-            mailbox = str(meta.get("mailbox") or "").strip()
+            mailbox = str(meta.get("mailbox") or meta.get("folder") or "").strip()
         for key in _OBSERVATION_KEYS:
             if key not in meta:
                 continue
@@ -394,8 +516,9 @@ async def _attach_draft(
 ) -> dict[str, Any]:
     """Local reply first. Cloud only after the checklist fails, and never local-only.
 
-    A passing local draft is kept. A failing one is dropped. Skip-band
-    callers must not reach this function.
+    A passing local draft is kept. A failing one is dropped. A skip-band
+    caller (a pin or a rule whose action is draft) arrives here too: the
+    pin decided the category, the reply is still written.
     """
     if parsed.get("action") != "draft":
         return parsed
@@ -499,6 +622,46 @@ def _header_bag(messages: list[DataSourceResult]) -> dict[str, str]:
     return bag
 
 
+def _pin_contradicted(
+    remembered: dict[str, Any], verdict: Any, sender_auth: str, *, scan_missing: bool = False,
+) -> str:
+    """Why a pin must not be honoured for this thread, or an empty string.
+
+    A pin is keyed on the From address, which anyone can write. So the pin
+    is honoured only when the structural signals agree with it: a spam
+    verdict that sticks (phrase, provider header or rspamd) or a DMARC
+    failure means the mail may not be from the remembered sender at all,
+    and the thread goes through classification like any stranger's.
+
+    ``sender_auth`` is the Authentication-Results of the message the sender
+    was read from, not the thread's first non-empty one: the gate judges
+    the message that carries the identity. Any ``dmarc=fail`` in it counts,
+    even beside a ``dmarc=pass`` — a forged copy of the header can add a
+    pass, it cannot remove the provider's fail.
+
+    ``scan_missing`` is a scan that was configured and did not answer. A pin
+    without the scan it is conditioned on is not honoured either: the
+    daemon being down must not become the easiest way past the gate.
+    """
+    if not _pinned(remembered):
+        return ""
+    if verdict.category == "spam" and verdict.sticks:
+        return str(verdict.reason or "spam")
+    if "dmarc=fail" in (sender_auth or "").casefold():
+        return "dmarc:fail"
+    if scan_missing:
+        return "rspamd:unavailable"
+    return ""
+
+
+def _scan_expected() -> bool:
+    if _rspamd_scan is not None:
+        return True
+    from core.agents.inbox_rspamd import rspamd_url
+
+    return bool(rspamd_url())
+
+
 def _pinned(remembered: dict[str, Any]) -> bool:
     if (
         remembered.get("memory_action") in MODEL_ACTIONS
@@ -534,7 +697,12 @@ async def _scan_rspamd(
     try:
         found = await asyncio.wait_for(scan(raw), timeout=SCAN_TIMEOUT_S)
     except Exception as exc:  # noqa: BLE001
-        log_swallowed_error("inbox_triage.rspamd", exc)
+        failures = _scan_failures.get()
+        if failures is None:
+            log_swallowed_error("inbox_triage.rspamd", exc)
+        else:
+            failures.count += 1
+            failures.last = exc
         return None
     return found if isinstance(found, dict) else None
 
@@ -565,8 +733,9 @@ async def _categorize_thread(
 ) -> dict[str, Any]:
     """Climb while the rung in hand is short of the tier confidence.
 
-    A pin, a rule, or a sticking verdict skips the model. Otherwise the
-    small local stage runs. A failed small call, including a reply that
+    A pin, a rule, or a sticking verdict skips classification; a pinned
+    draft still runs the draft stage. Otherwise the small local stage
+    runs. A failed small call, including a reply that
     names no category, is tried once more on that same stage before the
     climb. A second miss gets one category-only repair on that stage and
     skips the heavy rung. A short but valid answer still climbs to the
@@ -583,11 +752,16 @@ async def _categorize_thread(
     recipient = ""
     sent_at = ""
     headers = _header_bag(messages)
+    sender_auth = ""
     for message in messages:
-        if not sender:
-            sender = _sender_address(message)
         meta = getattr(message, "metadata", None) or {}
         if not isinstance(meta, dict):
+            meta = {}
+        if not sender:
+            sender = _sender_address(message)
+            if sender:
+                sender_auth = str(meta.get("authentication_results") or "")
+        if not meta:
             continue
         if not list_id and str(meta.get("list_id") or "").strip():
             list_id = str(meta["list_id"]).strip()
@@ -598,7 +772,7 @@ async def _categorize_thread(
         if not sent_at and str(meta.get("date") or "").strip():
             sent_at = str(meta["date"]).strip()
     remembered = _memory_signals(source, sender, subject, list_id)
-    rspamd_payload = None if _pinned(remembered) else await _scan_rspamd(
+    rspamd_payload = await _scan_rspamd(
         sender=sender,
         subject=subject,
         message_id=rfc_message_id,
@@ -607,6 +781,12 @@ async def _categorize_thread(
         date=sent_at,
     )
     verdict = filter_verdict(excerpt, subject=subject, headers=headers, rspamd=rspamd_payload)
+    pin_ignored = _pin_contradicted(
+        remembered, verdict, sender_auth,
+        scan_missing=rspamd_payload is None and _scan_expected(),
+    )
+    if pin_ignored:
+        remembered = {}
     shown = excerpt + signal_note(headers, rspamd_payload)
     route = route_thread(
         ThreadSignals(
@@ -627,12 +807,20 @@ async def _categorize_thread(
         skipped = _skipped(route, thread_id, subject)
         if route.rationale == "deterministic" and verdict.reason:
             skipped["classification_reason"] = verdict.reason
+        if pin_ignored:
+            skipped["pin_ignored"] = pin_ignored
+        # A pin or a rule skips classification. A draft is a second model
+        # call, so a pinned draft still gets its reply or stays needs_review.
+        if skipped["action"] == "draft":
+            return await _attach_draft(skipped, excerpt, route_band="skip")
         return skipped
 
     async def _finish(parsed: dict[str, Any], *, band: str) -> dict[str, Any]:
         adjusted = apply_verdict(parsed, verdict, excerpt)
         if verdict.reason:
             adjusted["classification_reason"] = verdict.reason
+        if pin_ignored:
+            adjusted["pin_ignored"] = pin_ignored
         return await _attach_draft(adjusted, excerpt, route_band=band)
 
     async def _read_rung(stage: str) -> tuple[bool, dict[str, Any] | None, bool]:
@@ -890,20 +1078,15 @@ def _posts_for(thread: TriagedThread, excerpt: str) -> list[dict[str, Any]]:
         return []
     base = f"inbox_triage:{thread.source}:{thread.thread_id}"
     if thread.utility == "financial":
+        # One row, in the mail domain, typed so cerid-finance's record-typed
+        # grant (CONSUMER_REGISTRY) can read it and nothing else from inbox.
         return [
             {
-                "domain": "finance",
+                "domain": "inbox",
                 "decision": {"utility": "financial", "payload_kind": "card"},
                 "content": _financial_card(thread, excerpt),
                 "source_id": f"{base}:card",
-                "metadata": _string_meta(thread, "mail_financial_card"),
-            },
-            {
-                "domain": "inbox",
-                "decision": {"utility": "correspondence", "payload_kind": "excerpt"},
-                "content": f"{thread.subject[:200]} — finance card",
-                "source_id": base,
-                "metadata": _string_meta(thread, "mail_finance_pointer"),
+                "metadata": _string_meta(thread, FINANCIAL_CARD_RECORD_TYPE),
             },
         ]
     body = excerpt.strip()[:800]
@@ -968,7 +1151,7 @@ async def _persist_to_kb(thread: TriagedThread, mcp_base_url: str, excerpt: str)
         if routed.domain != item["domain"]:
             continue
         artifact_id = await _post_ingest(mcp_base_url, item, routed.domain)
-        if item["domain"] == "finance":
+        if item["metadata"]["record_type"] == FINANCIAL_CARD_RECORD_TYPE:
             thread.finance_artifact_id = artifact_id
         elif thread.artifact_id is None:
             thread.artifact_id = artifact_id
@@ -989,9 +1172,10 @@ async def triage_inboxes(
         max_results_per_source: cap per Gmail/Outlook/Apple fetch (LLM cost
             scales with this).
         query: source-specific filter string. Default fetches recent
-            unread (Gmail honors it natively; Outlook tolerates as-is;
-            Apple Mail reads ``since`` for the last day unless ``query``
-            itself is an ISO-8601 cursor).
+            unread (Gmail honors it natively, with Spam and Trash excluded
+            explicitly; Outlook ignores it and reads the Inbox, unread,
+            last day; Apple Mail reads ``since`` for the last day unless
+            ``query`` itself is an ISO-8601 cursor).
         mcp_base_url: where to POST /ingest/structured (defaults to the
             local MCP base via config).
         persist: when False, skip the KB write-back (useful for dry-run
@@ -1019,8 +1203,13 @@ async def triage_inboxes(
         if src is None:
             result.skipped.append({"source": source_name, "reason": "not_registered"})
             continue
-        if not src.is_configured():
-            result.skipped.append({"source": source_name, "reason": "not_configured"})
+        if not await _source_configured(src):
+            result.skipped.append({"source": source_name, "reason": _unconfigured_reason(src)})
+            continue
+        included = _included_accounts(source_name)
+        if included is not None and not included:
+            # Removing the last address stops the read, not only the apply.
+            result.skipped.append({"source": source_name, "reason": "no_included_account"})
             continue
         candidates.append(src)
 
@@ -1040,11 +1229,39 @@ async def triage_inboxes(
 
     # Per-source thread grouping + LLM categorization
     by_category: dict[str, int] = defaultdict(int)
+    failures = _ScanFailures()
+    token = _scan_failures.set(failures)
+    try:
+        await _categorize_sources(candidates, fetches, result, by_category, persist, mcp_base_url)
+    finally:
+        _scan_failures.reset(token)
+        if failures.count and failures.last is not None:
+            log_swallowed_error(
+                "inbox_triage.rspamd", failures.last, context={"failed_scans": failures.count},
+            )
+
+    result.by_category = dict(by_category)
+    return result
+
+
+async def _categorize_sources(
+    candidates: list[DataSource],
+    fetches: list[list[DataSourceResult]],
+    result: TriageResult,
+    by_category: dict[str, int],
+    persist: bool,
+    mcp_base_url: str | None,
+) -> None:
     for source, results in zip(candidates, fetches, strict=True):
         result.sources_queried.append(source.name)
         if not results:
             continue
-        threads = _group_by_thread(results, source.name)
+        grouped = _group_by_thread(results, source.name)
+        included = _included_accounts(source.name)
+        threads = {key: msgs for key, msgs in grouped.items() if _account_included(msgs, included)}
+        if len(threads) < len(grouped):
+            # A removed or excluded address is skipped before any model call or KB write.
+            result.skipped.append({"source": source.name, "reason": "account_not_included"})
         # Categorize threads in parallel — bounded by max_results_per_source
         triage_tasks = [
             _categorize_thread(thread_id, msgs, source=source.name)
@@ -1084,6 +1301,3 @@ async def triage_inboxes(
                 await _persist_to_kb(thread, mcp_base_url, excerpt)
             by_category[thread.category] += 1
             result.threads.append(thread)
-
-    result.by_category = dict(by_category)
-    return result

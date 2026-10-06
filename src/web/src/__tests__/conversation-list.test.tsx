@@ -176,3 +176,31 @@ describe("ConversationList", () => {
     expect(trigger).not.toBeNull()
   })
 })
+
+// Round 5 item 5.3 (D20-A) — rename is discoverable from the row's actions,
+// not only by double-clicking the title.
+describe("ConversationList rename action", () => {
+  it("opens the same inline editor the double-click uses and focuses it", async () => {
+    const user = userEvent.setup()
+    const onRename = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <ConversationList conversations={mockConversations} activeId={null} onSelect={onSelect} onDelete={vi.fn()} {...defaultProps} onRename={onRename} />,
+    )
+    await user.click(screen.getAllByLabelText("Rename conversation")[0])
+    const editor = screen.getByDisplayValue("First conversation")
+    expect(editor).toHaveFocus()
+    expect(onSelect).not.toHaveBeenCalled()
+
+    await user.clear(editor)
+    await user.type(editor, "Renamed{Enter}")
+    expect(onRename).toHaveBeenCalledWith("c1", "Renamed")
+  })
+
+  it("is absent when the list has no rename handler", () => {
+    render(
+      <ConversationList conversations={mockConversations} activeId={null} onSelect={vi.fn()} onDelete={vi.fn()} {...defaultProps} />,
+    )
+    expect(screen.queryByLabelText("Rename conversation")).toBeNull()
+  })
+})

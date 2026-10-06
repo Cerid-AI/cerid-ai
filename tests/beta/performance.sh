@@ -1,10 +1,13 @@
 #!/bin/bash
 # Cerid AI Beta — Performance Tests
-# Curl-based latency benchmarks against localhost:8888 (MCP) and localhost:3000 (GUI).
+# Curl-based latency benchmarks against the MCP and GUI of the stack
+# BETA_TARGET names (lib/target.sh).
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/target.sh
+source "${SCRIPT_DIR}/lib/target.sh" || exit 2
 
 # Resolve the MCP API key before assert.sh snapshots it. /health and the /api
 # routes require X-API-Key once the server binds off loopback (LAN mode), and a
@@ -20,8 +23,8 @@ source "${SCRIPT_DIR}/lib/assert.sh"
 export RESULTS_FILE="${SCRIPT_DIR}/reports/performance.results"
 > "$RESULTS_FILE"
 
-MCP_BASE="http://localhost:8888"
-GUI_BASE="http://localhost:3000"
+MCP_BASE="$BETA_MCP_URL"
+GUI_BASE="$BETA_GUI_URL"
 FAILED=0
 
 # Forward the MCP API key (exported by run.sh from .env) on authenticated /api

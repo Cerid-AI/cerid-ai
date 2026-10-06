@@ -6,7 +6,7 @@
 The MCP tools and the Sources page call these functions. Neither one
 owns a second copy of apply or undo. Dry-run is the default. Automatic
 filing runs only for categories the account has turned on, and it stops
-after APPLY_CAP successes.
+after APPLY_CAP decisions a pass, successful or not.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from core.agents.inbox_actions import CATEGORIES, LABEL_NAME, PROVIDER_TOOLS
 APPLY_CAP = 50
 _MAILBOX_ACTIONS = frozenset({"keep", "archive", "mark_read", "draft"})
 _AUTO_ACTIONS = frozenset({"keep", "archive", "mark_read"})
-_INGESTED_UTILITIES = frozenset({"correspondence", "financial"})
 _WELL_KNOWN_OUTLOOK = frozenset({"inbox", "archive", "drafts", "sentitems"})
 
 
@@ -119,6 +118,10 @@ def _sorted_keep(row: dict, account: dict | None) -> bool:
     return bool(account and account.get("folder_sort"))
 
 
+def _moved(row: dict, account: dict | None) -> bool:
+    return str(row.get("action") or "") == "archive" or _sorted_keep(row, account)
+
+
 def _labels_for_undo(row: dict, account: dict | None) -> list[str]:
     receipt = _loads(row.get("receipt_json"))
     stored = receipt.get("current_labels")
@@ -126,12 +129,11 @@ def _labels_for_undo(row: dict, account: dict | None) -> list[str]:
         return [str(item) for item in stored]
     label = LABEL_NAME.get(str(row.get("category") or ""), "")
     action = str(row.get("action") or "")
-    moved = action == "archive" or _sorted_keep(row, account)
-    if moved and label:
-        return [label]
-    if action == "keep" and label:
-        return ["INBOX", label]
-    return ["INBOX"]
+    labels = [label] if label and action in ("keep", "archive") else []
+    # INBOX is a Gmail label. Outlook keeps its folder apart from categories.
+    if str(row.get("source") or "") == "gmail" and not _moved(row, account):
+        labels.insert(0, "INBOX")
+    return labels
 
 
 def decision_from_row(row: dict, account: dict | None) -> dict:
@@ -179,8 +181,18 @@ def decision_from_row(row: dict, account: dict | None) -> dict:
 def undo_from_row(row: dict, account: dict | None) -> dict:
     decision = decision_from_row(row, account)
     decision["action"] = "undo"
+    decision["undone_action"] = str(row.get("action") or "")
     decision["current_labels"] = _labels_for_undo(row, account)
-    if not str(decision.get("mailbox_before") or "").strip():
+    receipt = _loads(row.get("receipt_json"))
+    moved_ids = receipt.get("message_ids")
+    if isinstance(moved_ids, list) and moved_ids:
+        # A Graph move gave the message a new id; the old one is gone.
+        decision["message_ids"] = [str(item) for item in moved_ids]
+    before = str(decision.get("mailbox_before") or "").strip()
+    if decision["provider"] == "outlook":
+        # Empty tells the planner the message never left its folder.
+        decision["mailbox_before"] = (before or "inbox") if _moved(row, account) else ""
+    elif not before:
         decision["mailbox_before"] = "INBOX"
     return decision
 
@@ -233,13 +245,6 @@ def add_account(
 
 
 def change_account(ledger: InboxLedger, provider: str, address: str, **fields: object) -> dict | None:
-    if "utilities" in fields:
-        utilities = fields["utilities"]
-        if (
-            not isinstance(utilities, list)
-            or any(item not in _INGESTED_UTILITIES for item in utilities)
-        ):
-            raise ValueError("utility none is not ingested")
     if "auto_apply" in fields:
         categories = fields["auto_apply"]
         if not isinstance(categories, list) or any(item not in CATEGORIES for item in categories):
@@ -340,16 +345,17 @@ async def undo_decision(
     transport: Any = None,
     actions_enabled: bool | None = None,
 ) -> dict:
-    """Undo one applied row. A dry-run does not add a queue row."""
+    """Undo one applied row. A dry-run, or the flag off, does not add a queue row."""
     row = ledger.get_decision(decision_id)
     if row is None or row.get("status") != "applied":
         return {"ok": False, "status": "skipped", "reason": "not applied", "decision_id": decision_id}
     account = ledger.get_account(str(row.get("source") or ""), str(row.get("account_address") or ""))
     undo = undo_from_row(row, account)
-    if dry_run:
+    enabled = inbox_actions_enabled() if actions_enabled is None else actions_enabled
+    if dry_run or not enabled:
         outcome = await apply_decision(
             undo,
-            dry_run=True,
+            dry_run=dry_run,
             ledger=ledger,
             transport=transport,
             actions_enabled=actions_enabled,
@@ -401,17 +407,19 @@ async def auto_apply_pass(
     cap: int = APPLY_CAP,
     actions_enabled: bool | None = None,
 ) -> dict:
-    """File the oldest eligible proposals. Ineligible rows do not use the cap."""
+    """File the oldest eligible proposals. Every attempt uses the cap; ineligible rows do not."""
     enabled = inbox_actions_enabled() if actions_enabled is None else actions_enabled
     if not enabled:
-        return {"applied": 0, "reason": "actions flag is off"}
+        return {"applied": 0, "attempted": 0, "reason": "actions flag is off"}
     applied = 0
+    attempted = 0
     for row in ledger.list_decisions(status="proposed", newest_first=False, limit=10_000):
-        if applied >= cap:
+        if attempted >= cap:
             break
         account = ledger.get_account(str(row.get("source") or ""), str(row.get("account_address") or ""))
         if not _eligible(row, account):
             continue
+        attempted += 1
         outcome = await _apply_proposed(
             ledger,
             row,
@@ -421,7 +429,16 @@ async def auto_apply_pass(
         )
         if outcome.get("status") == "applied":
             applied += 1
-    return {"applied": applied}
+    return {"applied": applied, "attempted": attempted}
+
+
+def included_addresses(source: str) -> list[str]:
+    """Addresses added and included for a provider, casefolded. Opens the ledger only when called."""
+    return [
+        str(row["address"]).casefold()
+        for row in open_ledger().list_accounts()
+        if row["provider"] == source and row.get("included") and not row.get("removed")
+    ]
 
 
 def _sole_account(ledger: InboxLedger, source: str) -> str:
@@ -454,7 +471,9 @@ def propose_triage(ledger: InboxLedger, threads: list) -> int:
         if inbox_id:
             artifacts.append({"id": str(inbox_id), "domain": "inbox"})
         if finance_id:
-            artifacts.append({"id": str(finance_id), "domain": "finance"})
+            artifacts.append({"id": str(finance_id), "domain": "inbox"})
+        observation = getattr(thread, "observation", None) or {}
+        categories = str(observation.get("categories") or "") if source == "outlook" else ""
         ledger.propose(
             source=source,
             provider_thread_id=str(thread.thread_id),
@@ -471,6 +490,7 @@ def propose_triage(ledger: InboxLedger, threads: list) -> int:
             draft_body=str(getattr(thread, "draft_body", "") or ""),
             subject=str(getattr(thread, "subject", "") or ""),
             classification_reason=str(getattr(thread, "classification_reason", "") or ""),
+            current_labels=[part.strip() for part in categories.split(",") if part.strip()],
         )
         proposed += 1
     return proposed
@@ -524,6 +544,8 @@ async def scan_apple_addresses() -> dict:
         code, payload = await AppleMailDataSource().invoke(["scan"])
     except Exception as exc:  # noqa: BLE001 — discovery is optional and must not take down the page
         return {"addresses": [], "error": str(exc)}
+    if isinstance(payload, dict) and payload.get("error") == "runs_on_desktop":
+        return {"addresses": [], "error": "runs_on_desktop"}
     if code != 0 or not isinstance(payload, dict):
         return {"addresses": [], "error": "scan failed"}
     raw = payload.get("addresses") or []
@@ -531,6 +553,22 @@ async def scan_apple_addresses() -> dict:
         return {"addresses": [], "error": "scan failed"}
     addresses = [str(item) for item in raw if isinstance(item, str) and "@" in item]
     return {"addresses": addresses, "error": ""}
+
+
+def source_state(provider: str) -> str:
+    """configured, not_configured, not_registered, or a finer state the source names (runs_on_desktop)."""
+    if not provider:
+        return ""
+    from app.data_sources import registry
+
+    source = registry.get(provider)
+    if source is None:
+        return "not_registered"
+    state_fn = getattr(source, "configured_state", None)
+    state = state_fn() if callable(state_fn) else None
+    if isinstance(state, str) and state:
+        return state
+    return "configured" if source.is_configured() else "not_configured"
 
 
 def setup_view(ledger: InboxLedger, provider: str = "") -> dict:
@@ -552,6 +590,7 @@ def setup_view(ledger: InboxLedger, provider: str = "") -> dict:
     chat = settings.INTERNAL_LLM_MODEL or settings.INTERNAL_LLM_MODEL_DEFAULT
     return {
         "actions_enabled": inbox_actions_enabled(),
+        "source_state": source_state(provider),
         "background_model": settings.INTERNAL_LLM_MODEL_BACKGROUND,
         "chat_model": chat,
         "accounts": accounts,

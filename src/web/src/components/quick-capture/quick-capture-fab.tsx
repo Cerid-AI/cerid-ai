@@ -18,8 +18,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Plus, X, Upload, Link as LinkIcon, FileText, Loader2 } from "lucide-react"
 import { uploadFile, ingestUrl } from "@/lib/api/kb"
 import { withViewTransition } from "@/lib/view-transitions"
+import { useAgentActivityStream } from "@/hooks/use-agent-activity-stream"
 
 type CaptureMode = "url" | "note" | "upload"
+
+/** How long a saved note waits for its title before the modal closes anyway.
+ *  The note is already persisted; only the display title is outstanding. */
+const TITLE_WAIT_MS = 30_000
 
 export function QuickCaptureFab() {
   const [open, setOpen] = useState(false)
@@ -28,7 +33,50 @@ export function QuickCaptureFab() {
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  // A quick-captured note whose enrichment job has not landed yet. The
+  // activity stream is open only while this is set; the job's event carries
+  // the final title and domain, so there is no polling.
+  const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const { entries: activity } = useAgentActivityStream({
+    enabled: pendingArtifactId !== null,
+    maxEntries: 50,
+  })
+
+  useEffect(() => {
+    if (!pendingArtifactId) return
+    const landed = activity.find(
+      (e) => e.agent === "quick_capture" && e.metadata?.artifact_id === pendingArtifactId,
+    )
+    if (!landed) return
+    const title = typeof landed.metadata?.title === "string" ? landed.metadata.title : ""
+    const domain = typeof landed.metadata?.domain === "string" ? landed.metadata.domain : ""
+    const enriched = landed.metadata?.enriched !== false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional setState driven by external state (streaming / fetch / subscription); behavior validated in tests
+    setStatus(
+      title
+        ? `${enriched ? "Filed as" : "Saved as"} “${title}”${domain ? ` in ${domain}` : ""}`
+        : "Note saved",
+    )
+    setPendingArtifactId(null)
+    window.setTimeout(() => {
+      setOpen(false)
+      setStatus(null)
+    }, 1500)
+  }, [activity, pendingArtifactId])
+
+  // The note is safe either way; do not hold the modal open on a job that
+  // never reports (processor paused, stream unavailable).
+  useEffect(() => {
+    if (!pendingArtifactId) return
+    const timer = window.setTimeout(() => {
+      setPendingArtifactId(null)
+      setOpen(false)
+      setStatus(null)
+    }, TITLE_WAIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [pendingArtifactId])
 
   // Global Cmd-Shift-N / Ctrl-Shift-N
   useEffect(() => {
@@ -85,13 +133,19 @@ export function QuickCaptureFab() {
         `note-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.md`,
         { type: "text/markdown" },
       )
-      await uploadFile(file)
+      // Quick mode: the server acknowledges on persist and enriches in a
+      // processor job; the final title arrives on the activity stream above.
+      const saved = await uploadFile(file, { quick: true })
       setStatus("Note saved")
       setNote("")
-      window.setTimeout(() => {
-        setOpen(false)
-        setStatus(null)
-      }, 1000)
+      if (saved.enrichment === "queued" && saved.artifact_id) {
+        setPendingArtifactId(saved.artifact_id)
+      } else {
+        window.setTimeout(() => {
+          setOpen(false)
+          setStatus(null)
+        }, 1000)
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Save failed")
     } finally {

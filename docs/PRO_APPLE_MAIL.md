@@ -8,6 +8,11 @@ ask questions across your mail without going through a cloud API. The
 connector talks to the on-disk store Mail.app already maintains — no IMAP
 credentials, no OAuth flow, no provider-specific setup.
 
+Apple Mail runs only through the desktop app. The MCP container is not
+macOS and never runs the Mail bridge: there, `GET /inbox/setup` reports
+`source_state: runs_on_desktop`, triage skips the source with that reason,
+and the setup page says so. That state is not missing configuration.
+
 ## One-time setup
 
 Reading the Mail envelope index and `.emlx` files requires **Full Disk
@@ -86,10 +91,17 @@ permission for Mail (System Settings → Privacy & Security → Automation),
 in addition to Full Disk Access.
 
 Flags: urgent red, actionable orange, personal blue, newsletter green,
-promo purple. Archive is Mail's Archive mailbox. With folder sorting on
-for the account, keep files into `Cerid/Urgent`, `Cerid/Action`,
-`Cerid/Personal`, `Cerid/Newsletter`, or `Cerid/Promo`. With it off, keep
-sets the flag and does not move. Junk and Trash are never destinations.
+promo purple, spam gray. The bridge sets Mail's 0-based `flag index`
+(red is 0, gray is 6). Archive is Mail's Archive mailbox. With folder
+sorting on for the account, keep files into `Cerid/Urgent`,
+`Cerid/Action`, `Cerid/Personal`, `Cerid/Newsletter`, `Cerid/Promo`, or
+`Cerid/Spam`; a missing mailbox is created. With it off, keep sets the
+flag and does not move. Junk and Trash are never destinations.
+
+Each `since` row carries `flag`: the colour Mail shows, or `""` when the
+message is not flagged, read from the `.emlx` trailer. A cleared flag with
+the message back in the inbox is learned as `keep` / `actionable`; a flag
+set by hand is learned as that colour's category.
 
 If Mail is not running, `ceridmail` exits 75 (`mail_not_running`). Cerid
 queues the action and does not launch Mail. If Automation is denied, it

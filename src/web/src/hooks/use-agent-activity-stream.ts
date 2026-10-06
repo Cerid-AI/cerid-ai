@@ -9,6 +9,8 @@ export interface ActivityEntry {
   message: string
   level: string
   timestamp: number
+  /** Decoded by the server from the event's JSON ``metadata`` field. */
+  metadata?: Record<string, unknown>
 }
 
 export type AgentActivityStatus =

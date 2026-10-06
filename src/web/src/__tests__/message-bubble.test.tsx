@@ -235,3 +235,17 @@ describe("MessageBubble", () => {
     expect(screen.queryByText("Contents")).not.toBeInTheDocument()
   })
 })
+
+// Round 5 item 5.3 (D20-A) — a regenerate action on the last assistant message.
+describe("MessageBubble regenerate", () => {
+  it("renders the regenerate action only when the parent offers it, and calls it", async () => {
+    const { rerender } = render(<MessageBubble message={makeMsg({ content: "An answer" })} />)
+    expect(screen.queryByRole("button", { name: /regenerate response/i })).toBeNull()
+
+    let calls = 0
+    rerender(<MessageBubble message={makeMsg({ content: "An answer" })} onRegenerate={() => { calls += 1 }} />)
+    const button = screen.getByRole("button", { name: /regenerate response/i })
+    button.click()
+    await waitFor(() => expect(calls).toBe(1))
+  })
+})

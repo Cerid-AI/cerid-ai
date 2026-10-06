@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
 import ReactMarkdown from "react-markdown"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown, RefreshCw, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
@@ -457,9 +457,11 @@ interface MessageBubbleProps {
   onArtifactClick?: (artifactId: string) => void
   /** Re-run verification for this message. Only provided for the last assistant message. */
   onReVerify?: () => void
+  /** Re-send the user turn this message answers and replace it (D20-A). Only provided for the last assistant message. */
+  onRegenerate?: () => void
 }
 
-export function MessageBubble({ message, conversationId, verificationStatus, verificationClaims, inlineMarkups, isStreaming, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
+export function MessageBubble({ message, conversationId, verificationStatus, verificationClaims, inlineMarkups, isStreaming, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify, onRegenerate }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -712,6 +714,24 @@ export function MessageBubble({ message, conversationId, verificationStatus, ver
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Re-verify facts in this response</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {onRegenerate && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      aria-label="Regenerate response"
+                      onClick={onRegenerate}
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Ask again and replace this response</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}

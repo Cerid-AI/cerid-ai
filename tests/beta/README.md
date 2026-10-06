@@ -4,6 +4,31 @@
 functional, integration, performance, security, browser E2E, eval — see
 the usage comment at the top of `run.sh`).
 
+## Which stack: `BETA_TARGET`
+
+Every tier reads the stack it tests from `lib/target.sh` (shell) or
+`lib/target.py` (the conftests) — nothing else in this tree keeps a port, a
+docker network or a container name.
+
+| `BETA_TARGET` | Stack | MCP / GUI (host) | Network | Containers |
+|---|---|---|---|---|
+| `live` (default) | personal, `scripts/start-cerid.sh` | `http://localhost:8888` / `http://localhost:3000` | `llm-network` | `ai-companion-mcp`, … |
+| `isolated` | sandbox overlay, `scripts/start-sandbox.sh` | `http://localhost:8898` / `http://localhost:3010` | `cerid-sandbox-llm-network` | `ai-companion-mcp-sandbox`, … |
+
+Host ports honour the same `CERID_PORT_*` overrides the compose file and the
+start scripts read; the in-network URL the docker tiers use
+(`BETA_MCP_BASE`, `http://ai-companion-mcp:8888`) is the same on every stack
+because each overlay aliases its MCP container on its own bridge.
+
+```bash
+./tests/beta/run.sh --smoke                       # the live stack
+BETA_TARGET=isolated ./tests/beta/run.sh --smoke  # the sandbox stack
+```
+
+`scripts/tests/test_beta_target.py` holds the two resolvers to the same values
+and fails on any literal port or container name that appears elsewhere under
+`tests/beta`.
+
 ## Desktop smoke (packaged app)
 
 `--desktop` is a separate, opt-in tier: a first-run smoke of the

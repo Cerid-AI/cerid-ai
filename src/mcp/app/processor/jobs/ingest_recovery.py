@@ -33,10 +33,10 @@ _MODEL = "none"
 class IngestRecoveryJob(BaseJob):
     """Scan Chroma for stale pending chunks and roll them forward or purge.
 
-    This job should run frequently (default: every 60 s via apscheduler
-    cron) to keep the window between a Neo4j failure and orphan cleanup
-    short.  Because it runs at ``LOW`` priority it will not compete with
-    user-triggered or latency-sensitive jobs.
+    Scheduled every ``INGEST_RECOVERY_INTERVAL_S`` seconds by the apscheduler
+    interval job in ``app/scheduler.py``. A pass that finds nothing to repair
+    reads Chroma and writes nowhere. Because it runs at ``LOW`` priority it
+    will not compete with user-triggered or latency-sensitive jobs.
 
     Parameters
     ----------

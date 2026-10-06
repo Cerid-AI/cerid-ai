@@ -8,7 +8,7 @@
 ## MCP Server API (src/mcp/main.py)
 
 **Core endpoints:**
-- `GET /health` — Full health check with circuit breaker states (cached 10s). `invariants.collections_empty` is scoped to built-in domains; `invariants.custom_collections` lists client-created collections so operators can see external-client activity without false empty-collection alerts. `invariants.embedding_vector_space` reports the boot-time check that queries and stored documents share one embedding space (a few stored chunks per collection are re-embedded with the serving embedder and must reproduce their stored vectors): `{status: ok|mismatch|unverified|pending, collections_checked, mismatched: [{collection, median_self_similarity}]}`. A `mismatch` sets the overall `status` to `degraded` at HTTP 200 — never 503, since a restart cannot change which model built the index. Requires `X-API-Key` when the stack is bound off-loopback.
+- `GET /health` — Full health check with circuit breaker states (cached 10s). `invariants.collections_empty` is scoped to built-in domains; `invariants.custom_collections` lists client-created collections so operators can see external-client activity without false empty-collection alerts. `invariants.embedding_vector_space` reports the check that queries and stored documents share one embedding space, run at boot and again on every `INVARIANTS_REFRESH_S` tick (12 stored chunks per collection, taken at evenly spaced offsets, are re-embedded with the serving embedder and must reproduce their stored vectors): `{status: ok|mismatch|unverified|pending, checked_at, collections_checked, sampled, out_of_space, max_fraction, mismatched: [...], collections: [{collection, sampled, out_of_space, fraction, median_self_similarity}]}`. A collection is `mismatched` when its median self-similarity is under 0.9 or more than 10% of its sample is out of space. A `mismatch` sets the overall `status` to `degraded` at HTTP 200 — never 503, since a restart cannot change which model built the index. Requires `X-API-Key` when the stack is bound off-loopback.
 - `GET /health/live` — Liveness probe (always 200 unless process crashed)
 - `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
 - `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
@@ -611,6 +611,23 @@ make deps-check
 - `POST /automations/{id}/disable` — Disable automation
 - `POST /automations/{id}/run` — Manual run
 - `GET /automations/{id}/history` — Run history
+
+### Inbox Triage (Pro)
+Sources → Connectors and the `pkb_inbox_apply` / `pkb_inbox_undo` tools share these routes. Every one answers 403 `feature_gated` until the `inbox_triage` Pro flag is on. Behaviour, gates, and filing rules: [PRO_INBOX_TRIAGE.md](PRO_INBOX_TRIAGE.md).
+- `GET /inbox/setup?provider=` — Accounts, open proposals, the last 20 applied decisions, sender pins, and `actions_enabled`
+- `POST /inbox/accounts` — Add an address `{provider, address, display_name}`; `provider` is `gmail`, `outlook`, or `apple_mail`
+- `PATCH /inbox/accounts` — Change `display_name`, `included`, `folder_sort`, or `auto_apply` (a list of categories) for `{provider, address}`
+- `POST /inbox/accounts/remove` — Stop reads and applies for an address; the row stays, marked removed
+- `POST /inbox/apply` — File proposed decisions `{decision_ids, dry_run}`; `dry_run` defaults true and at most 50 ids are applied per call
+- `POST /inbox/undo` — Reverse one applied decision `{decision_id, dry_run}`
+- `POST /inbox/skip` — Leave a proposal unapplied `{decision_id}`
+- `GET /inbox/discovered?discover=` — Addresses the connectors know; `discover=true` also scans Apple Mail
+
+Operating notes:
+- `CERID_INBOX_TRIAGE_ENABLED` and `SCHEDULE_INBOX_TRIAGE` are the env defaults. The Redis keys `cerid:automations:inbox_triage:enabled` and `cerid:automations:inbox_triage:schedule`, written by `PUT /settings/pro-automations/inbox_triage`, win over them when set.
+- `CERID_INBOX_ACTIONS_ENABLED` gates every mailbox write. With it on, the Google sibling runs with `--permissions gmail:drafts calendar:readonly` and the ms365 sibling drops `--read-only` and asks for `Mail.ReadWrite`; both are recreated, not restarted, and re-consented. No send scope is ever requested.
+- The ledger is `DATA_DIR/inbox.sqlite` (SQLite, WAL journal): accounts, decisions, sender memory, rules, the Apple outbox, and sync cursors. It is not the knowledge base.
+- Apply creates what is missing: the Gmail label, the Outlook `Cerid` folder and its `<Category>` child, and the Apple `Cerid/<Category>` mailbox.
 
 ### A2A Protocol
 - `GET /.well-known/agent.json` — Agent Card

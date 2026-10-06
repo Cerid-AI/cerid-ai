@@ -32,6 +32,13 @@ from plugins.outlook.data_source import OutlookDataSource, _to_results, parse_me
 from plugins.outlook_calendar.data_source import OutlookCalendarDataSource, parse_events
 
 
+@pytest.fixture(autouse=True)
+def _forget_outlook_probe():
+    OutlookDataSource.forget_probe()
+    yield
+    OutlookDataSource.forget_probe()
+
+
 def _result(payload: object, *, is_error: bool = False) -> SimpleNamespace:
     """A CallToolResult as the transport really delivers it: JSON as text."""
     text = payload if isinstance(payload, str) else json.dumps(payload)
@@ -291,6 +298,46 @@ class TestToResults:
         assert "categories" not in out[0].metadata
 
 
+class TestTriageFetch:
+    """Triage reads the Inbox, unread, last day. It is not the KQL chat search."""
+
+    @pytest.mark.asyncio
+    async def test_triage_reads_the_inbox_unread_in_the_last_day(self):
+        ds = OutlookDataSource()
+        call = AsyncMock(return_value=_result(GRAPH_MESSAGES))
+        before = datetime.now(timezone.utc)
+        with patch.object(ds, "_call_mcp", call):
+            results = await ds.triage_query("is:unread newer_than:1d", max_results=7)
+        tool, sent = call.await_args.args
+        assert tool == "list-mail-folder-messages"
+        assert sent["mailFolderId"] == "inbox"
+        assert "$search" not in sent
+        assert sent["$top"] == 7
+        assert "isRead eq false" in sent["$filter"]
+        stamp = sent["$filter"].split("receivedDateTime ge ", 1)[1].split()[0]
+        since = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        age = before - since
+        assert 23.9 * 3600 <= age.total_seconds() <= 24.1 * 3600
+        selected = set(sent["$select"].split(","))
+        assert {"internetMessageHeaders", "isRead", "categories", "parentFolderId", "conversationId"} <= selected
+        assert results[0].metadata["folder"] == "inbox"
+
+    @pytest.mark.asyncio
+    async def test_triage_never_names_junk_or_deleted_items(self):
+        ds = OutlookDataSource()
+        call = AsyncMock(return_value=_result(GRAPH_MESSAGES))
+        with patch.object(ds, "_call_mcp", call):
+            await ds.triage_query("", max_results=3)
+        blob = json.dumps(call.await_args.args).casefold()
+        assert "junkemail" not in blob and "deleteditems" not in blob
+
+    @pytest.mark.asyncio
+    async def test_a_triage_transport_failure_returns_empty(self):
+        ds = OutlookDataSource()
+        with patch.object(ds, "_call_mcp", AsyncMock(side_effect=RuntimeError("down"))):
+            assert await ds.triage_query("", max_results=3) == []
+
+
 class TestIsConfiguredIsEvidenceBased:
     """`is_configured` returned `bool(CERID_CONNECTORS_BEARER)` — a value the
     ms365 sibling never reads as client auth. It forwards the client's bearer
@@ -331,3 +378,41 @@ class TestIsConfiguredIsEvidenceBased:
         with patch("core.mcp_clients.client_pool.get_pool",
                    side_effect=RuntimeError("no pool")):
             assert OutlookDataSource().is_configured() is False
+
+    @pytest.mark.asyncio
+    async def test_a_probe_survives_a_restart_until_its_ttl(self, monkeypatch):
+        from plugins.outlook import data_source as module
+
+        clock = {"now": 1000.0}
+        monkeypatch.setattr(module.time, "monotonic", lambda: clock["now"])
+        ds = OutlookDataSource()
+        call = AsyncMock(return_value=_result({"value": [{"id": "f1"}]}))
+        with (
+            patch("core.mcp_clients.client_pool.get_pool", return_value=self._pool(ever_succeeded=False)),
+            patch.object(ds, "_call_mcp", call),
+        ):
+            assert ds.is_configured() is False
+            assert await ds.probe_configured() is True
+            assert ds.is_configured() is True
+            assert OutlookDataSource().is_configured() is True
+            assert await ds.probe_configured() is True
+            assert call.await_count == 1
+            clock["now"] += module._PROBE_TTL_SECONDS + 1
+            assert ds.is_configured() is False
+            assert await ds.probe_configured() is True
+            assert call.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_failed_probe_is_not_configured_and_yields_to_the_pool(self):
+        ds = OutlookDataSource()
+        with (
+            patch("core.mcp_clients.client_pool.get_pool", return_value=self._pool(ever_succeeded=False)),
+            patch.object(ds, "_call_mcp", AsyncMock(side_effect=RuntimeError("down"))) as call,
+        ):
+            assert await ds.probe_configured() is False
+            assert await ds.probe_configured() is False
+            assert call.await_count == 1
+            assert ds.is_configured() is False
+        with patch("core.mcp_clients.client_pool.get_pool", return_value=self._pool(ever_succeeded=True)):
+            assert ds.is_configured() is True
+            assert await ds.probe_configured() is True

@@ -129,8 +129,22 @@ def _neo4j_store_mb(session: Any) -> tuple[float | None, str | None]:
     return round(size_bytes / (1024 * 1024), 2), None
 
 
+def _neo4j_tx_log_mb() -> tuple[float | None, str | None]:
+    """Neo4j's transaction-log size in MB, or None with the reason.
+
+    Retention, not corpus — apoc's totalStoreSize leaves it out and so does
+    ``total_mb`` — but it is where write churn shows: a job that rewrites
+    unchanged nodes grows this while the store stands still.
+    """
+    data_dir = os.getenv("NEO4J_DATA_DIR", "/neo4j-data")
+    tx_dir = os.path.join(data_dir, "transactions")
+    if not os.path.isdir(tx_dir):
+        return None, f"transactions directory {tx_dir} is not mounted in this container"
+    return _dir_size_mb(tx_dir), None
+
+
 def _neo4j_metrics(get_neo4j_fn: Callable[[], Any]) -> dict:
-    """Neo4j: node count, relationship count, store size."""
+    """Neo4j: node count, relationship count, store size, transaction-log size."""
     driver = get_neo4j_fn()
     if driver is None:
         return {
@@ -142,9 +156,14 @@ def _neo4j_metrics(get_neo4j_fn: Callable[[], Any]) -> dict:
             nodes = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
             rels = session.run("MATCH ()-[r]-() RETURN count(r) AS c").single()["c"]
             disk_mb, reason = _neo4j_store_mb(session)
-        result: dict[str, Any] = {"disk_mb": disk_mb, "nodes": nodes, "relationships": rels}
+        tx_log_mb, tx_reason = _neo4j_tx_log_mb()
+        result: dict[str, Any] = {
+            "disk_mb": disk_mb, "tx_log_mb": tx_log_mb, "nodes": nodes, "relationships": rels,
+        }
         if disk_mb is None:
             result["disk_mb_reason"] = reason
+        if tx_log_mb is None:
+            result["tx_log_mb_reason"] = tx_reason
         return result
     except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Neo4j metrics unavailable: %s", e)

@@ -65,6 +65,14 @@ async def apply_decision(
     provider = str(decision.get("provider") or decision.get("source") or "")
     enabled = inbox_actions_enabled() if actions_enabled is None else actions_enabled
 
+    if not dry_run and not enabled:
+        # The flag is the first check on a live apply: the plan is reported
+        # and neither the ledger nor the mailbox is touched.
+        preview = await apply_decision(
+            decision, dry_run=True, ledger=ledger, transport=transport, actions_enabled=enabled,
+        )
+        return _result(False, "disabled", calls=preview["calls"], reason="actions flag is off")
+
     if _pending_account(decision):
         return _result(False, "skipped", reason="pending_account")
 
@@ -98,8 +106,6 @@ async def apply_decision(
         return _result(True, "noop", calls=planned)
     if dry_run:
         return _result(True, "dry_run", calls=planned)
-    if not enabled:
-        return _result(False, "disabled", calls=planned, reason="actions flag is off")
 
     active = transport if transport is not None else _default_transport()
     try:
@@ -117,7 +123,14 @@ async def apply_decision(
     if status == "queued":
         return _result(True, "queued", calls=performed, reason=reason)
     _store_cursor(ledger, decision)
-    _record(ledger, decision, "applied", {"calls": performed})
+    receipt: dict[str, Any] = {"calls": performed}
+    if plan.labels_after is not None:
+        receipt["current_labels"] = list(plan.labels_after)
+    if provider == "outlook":
+        moved = _outlook_ids_after(performed)
+        if moved:
+            receipt["message_ids"] = moved
+    _record(ledger, decision, "applied", receipt)
     return _result(True, "applied", calls=performed)
 
 
@@ -275,6 +288,24 @@ async def _perform_outlook(plan: ApplyPlan, transport: InboxTransport) -> list[d
     return performed
 
 
+def _outlook_ids_after(performed: list[dict]) -> list[str]:
+    """Message ids after the moves. A Graph move answers with a new id.
+
+    Empty when nothing moved, or when a move did not echo an id: a partial
+    list would make an undo skip the messages it could not name.
+    """
+    ids: list[str] = []
+    for call in performed:
+        if call.get("tool") != "move-mail-message":
+            continue
+        rows = _graph_rows(str(call.get("result") or ""))
+        after = str(rows[0].get("id") or "") if rows else ""
+        if not after:
+            return []
+        ids.append(after)
+    return ids
+
+
 async def _resolve_outlook_destination(
     arguments: dict,
     transport: InboxTransport,
@@ -337,7 +368,9 @@ async def _perform_apple(
     commands = [list(call.arguments["argv"]) for call in plan.calls]
     message_id = commands[0][1] if commands else ""
     mailbox = str(decision.get("mailbox_before") or decision.get("mailbox") or "")
-    if any(command[0] == "move" for command in commands) and not mailbox:
+    # Every apply records where the message was, so a later undo can put it
+    # back without guessing at INBOX.
+    if commands and not mailbox:
         code, payload = await transport.apple(["find", message_id])
         if code == APPLE_EXIT_NOT_RUNNING:
             _queue(ledger, decision, commands)

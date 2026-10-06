@@ -1,11 +1,12 @@
 {
   "fixture": "eval-fixture-notes-book-summary.md",
   "expected": [
-    "The Long Signal",
-    "March 10, 2025"
+    "2025-03-10",
+    "March 10, 2025",
+    "The Long Signal"
   ],
   "forbidden": [
     "2025",
-    "# book notes — \"the long signal\""
+    "# book notes \u2014 \"the long signal\""
   ]
 }

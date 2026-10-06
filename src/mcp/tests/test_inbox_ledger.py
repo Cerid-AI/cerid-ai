@@ -16,7 +16,7 @@ def test_account_roundtrip_defaults_folder_sort_off(tmp_path: Path):
     assert account is not None
     assert account["folder_sort"] is False
     assert account["included"] is True
-    assert account["utilities"] == ["correspondence", "financial"]
+    assert "utilities" not in account
     assert account["auto_apply"] == []
     assert account["consent"] == "readonly"
     assert account["removed"] is False
@@ -77,5 +77,6 @@ def test_migrate_adds_account_columns_on_an_existing_file(tmp_path: Path):
     account = ledger.get_account("gmail", "a@example.com")
     assert account is not None
     assert account["removed"] is False
+    assert "utilities" not in account
     assert account["last_read"] == ""
     assert account["included"] is True

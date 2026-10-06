@@ -141,6 +141,27 @@ def _extract_router_tags(tree: ast.AST) -> list[str]:
     return tags
 
 
+def _extract_router_prefix(tree: ast.AST) -> str:
+    """Pull out prefix= from the APIRouter(...) call, if present.
+
+    Without it a router mounted at ``/inbox`` was listed as ``/setup``,
+    a path no client can call.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            (isinstance(func, ast.Name) and func.id == "APIRouter")
+            or (isinstance(func, ast.Attribute) and func.attr == "APIRouter")
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "prefix" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                return kw.value.value
+    return ""
+
+
 def _scan_file(path: Path, repo_root: Path) -> list[dict[str, str]]:
     """Return a list of route dicts for every @router decorator in ``path``."""
     try:
@@ -148,6 +169,7 @@ def _scan_file(path: Path, repo_root: Path) -> list[dict[str, str]]:
     except (SyntaxError, UnicodeDecodeError):
         return []
     tags = _extract_router_tags(tree)
+    prefix = _extract_router_prefix(tree)
     tag_str = ",".join(tags) if tags else ""
     try:
         rel = path.relative_to(repo_root)
@@ -174,7 +196,7 @@ def _scan_file(path: Path, repo_root: Path) -> list[dict[str, str]]:
             method, route_path = result
             routes.append({
                 "method": method,
-                "path": route_path or "",
+                "path": prefix + (route_path or ""),
                 "handler": node.name,
                 "module": str(rel),
                 "tags": tag_str,

@@ -41,6 +41,10 @@ class RequestContext:
     client_id: str = "gui"
     allowed_domains: tuple[str, ...] | None = None
     strict_domains: bool = False
+    # Per-domain record_type allow (the registry's ``record_types``): in a
+    # listed domain the consumer reads only rows of those types. Tuples so the
+    # context stays hashable; ``domain_record_types_dict`` is the call shape.
+    domain_record_types: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     private_level: int = 0
     skip_cache: bool = False
     metadata_filter: dict | None = None
@@ -54,3 +58,8 @@ class RequestContext:
 
     def allowed_domains_list(self) -> list[str] | None:
         return list(self.allowed_domains) if self.allowed_domains is not None else None
+
+    def domain_record_types_dict(self) -> dict[str, list[str]] | None:
+        if self.domain_record_types is None:
+            return None
+        return {domain: list(types) for domain, types in self.domain_record_types}

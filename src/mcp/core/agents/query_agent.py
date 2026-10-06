@@ -502,6 +502,45 @@ def _enrich_query(
 _CERID_STATE_EXCLUDE_PENDING: dict[str, Any] = {"cerid_state": {"$ne": "pending"}}
 
 
+def _with_record_types(where: dict | None, record_types: list[str] | None) -> dict | None:
+    """Fuse a consumer's record_type allow for one domain into its ``where``.
+
+    One type is an equality; several are ``$in``. A caller filter is kept and
+    AND-fused, so the grant can only narrow what the caller asked for.
+    """
+    if not record_types:
+        return where
+    clause: dict[str, Any] = {
+        "record_type": record_types[0] if len(record_types) == 1 else {"$in": list(record_types)},
+    }
+    if not where:
+        return clause
+    if "$and" in where:
+        return {"$and": [*where["$and"], clause]}
+    return {"$and": [where, clause]}
+
+
+def _metadata_matches(meta: dict[str, Any], where: dict | None) -> bool:
+    """Evaluate a Chroma ``where`` (equality, ``$in``/``$nin``/``$ne``, ``$and``)
+    against one chunk's metadata, for hits that bypassed Chroma (BM25-only)."""
+    if not where:
+        return True
+    if "$and" in where:
+        return all(_metadata_matches(meta, clause) for clause in where["$and"])
+    for key, expected in where.items():
+        actual = meta.get(key)
+        if isinstance(expected, dict):
+            if "$in" in expected and actual not in expected["$in"]:
+                return False
+            if "$nin" in expected and actual in expected["$nin"]:
+                return False
+            if "$ne" in expected and actual == expected["$ne"]:
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
 def _exclude_pending(where: dict | None) -> dict | None:
     """Fuse the pending-exclusion clause into a Chroma ``where`` dict.
 
@@ -623,6 +662,7 @@ async def multi_domain_query(
     top_k: int = 10,
     chroma_client: Any | None = None,
     metadata_filter: dict | None = None,
+    domain_record_types: dict[str, list[str]] | None = None,
     skipped_empty_out: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results.
@@ -630,6 +670,10 @@ async def multi_domain_query(
     ``skipped_empty_out``, when given, collects the names of requested
     domains whose collection exists but currently holds zero documents —
     the caller surfaces this as informational (``domains_skipped_empty``).
+
+    ``domain_record_types`` is the consumer's per-domain ``record_type`` allow
+    (``CONSUMER_REGISTRY[...]["record_types"]``): in a listed domain only rows
+    of those types are retrieved, by the ``where`` clause and on the BM25 side.
     """
     if domains is None:
         domains = owner_domains()
@@ -691,8 +735,11 @@ async def multi_domain_query(
             # so it can detect cross-tenant escape attempts (a caller-supplied
             # `tenant_id: <other>` nested inside `$and` would be invisible).
             # Layer the pending-exclude on AFTER tenant scoping.
+            domain_filter = _with_record_types(
+                metadata_filter, (domain_record_types or {}).get(domain),
+            )
             _where = exclude_folders(
-                _exclude_pending(with_tenant_scope(metadata_filter)), folders_off,
+                _exclude_pending(with_tenant_scope(domain_filter)), folders_off,
             )
             # RAG C2.6 — when parent-child retrieval is on, keep parent chunks
             # out of the ranking. The post-ranking pass below swaps each child's
@@ -888,10 +935,8 @@ async def multi_domain_query(
                                         continue
                                 if chunk_excluded(meta, folders_off):
                                     continue
-                                # Enforce metadata_filter on BM25-only results too
-                                if metadata_filter and not all(
-                                    meta.get(k) == v for k, v in metadata_filter.items()
-                                ):
+                                # Enforce the metadata scope on BM25-only results too
+                                if domain_filter and not _metadata_matches(meta, domain_filter):
                                     continue
                                 # In RRF / tri_rrf mode the bm25/sparse-only
                                 # chunk's fused score already accounts for its
@@ -2212,6 +2257,7 @@ async def agent_query(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    domain_record_types: dict[str, list[str]] | None = None,
     exclude_packs: bool = False,
     budget_seconds: float | None = None,
     memory_enabled: bool = True,
@@ -2254,6 +2300,7 @@ async def agent_query(
                 graph_store=graph_store,
                 skip_cache=skip_cache,
                 metadata_filter=metadata_filter,
+                domain_record_types=domain_record_types,
                 exclude_packs=exclude_packs,
                 memory_enabled=memory_enabled,
             ),
@@ -2299,6 +2346,7 @@ async def agent_query_full(
     model: str | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    domain_record_types: dict[str, list[str]] | None = None,
     exclude_packs: bool = False,
     kb_enabled: bool = True,
     external_augmentation: bool = True,
@@ -2351,6 +2399,7 @@ async def agent_query_full(
             model=model,
             skip_cache=skip_cache,
             metadata_filter=metadata_filter,
+            domain_record_types=domain_record_types,
             exclude_packs=exclude_packs,
             budget_seconds=budget_seconds,
             memory_enabled=memory_enabled,
@@ -2788,6 +2837,7 @@ async def _agent_query_impl(
     graph_store: GraphStore | None = None,
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
+    domain_record_types: dict[str, list[str]] | None = None,
     exclude_packs: bool = False,
     memory_enabled: bool = True,
 ) -> dict[str, Any]:
@@ -2831,7 +2881,7 @@ async def _agent_query_impl(
         # which is only set inside this block.
         if (
             ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache
-            and metadata_filter is None and not exclude_packs
+            and metadata_filter is None and domain_record_types is None and not exclude_packs
         ):
             try:
                 from core.retrieval.semantic_cache import cache_lookup
@@ -2990,6 +3040,7 @@ async def _agent_query_impl(
                             query=sq, domains=effective_domains,
                             top_k=effective_top_k, chroma_client=chroma_client,
                             metadata_filter=metadata_filter,
+                            domain_record_types=domain_record_types,
                             skipped_empty_out=domains_skipped_empty,
                         )
 
@@ -3004,6 +3055,7 @@ async def _agent_query_impl(
                     top_k=effective_top_k,
                     chroma_client=chroma_client,
                     metadata_filter=metadata_filter,
+                    domain_record_types=domain_record_types,
                     skipped_empty_out=domains_skipped_empty,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
@@ -3062,6 +3114,7 @@ async def _agent_query_impl(
                 # domain bleed too, or a file-scoped answer admits out-of-file
                 # chunks from adjacent domains.
                 metadata_filter=metadata_filter,
+                domain_record_types=domain_record_types,
             )
             for r in cross_results:
                 r["relevance"] = round(

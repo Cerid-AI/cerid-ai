@@ -318,6 +318,14 @@ def test_local_only_routes_nothing_to_cloud():
     assert defaults["COMMUNITY_SUMMARY_WALL_CLOCK_S"] == "240"
 
 
+def test_local_only_turns_cloud_egress_off():
+    # A local failure under local-only is an error, not a cloud retry with the
+    # same payload. The cloud profiles keep the shipped default.
+    assert profile_defaults("local-only", "A")["ALLOW_CLOUD_EGRESS_WHEN_LOCAL"] == "false"
+    assert "ALLOW_CLOUD_EGRESS_WHEN_LOCAL" not in profile_defaults("hybrid", "A")
+    assert "ALLOW_CLOUD_EGRESS_WHEN_LOCAL" not in profile_defaults("cloud-first", "A")
+
+
 def test_local_only_keeps_two_permits_on_class_b():
     assert profile_defaults("local-only", "B")["INTERNAL_LLM_MAX_CONCURRENCY"] == "2"
     assert profile_defaults("local-only", "A")["INTERNAL_LLM_MAX_CONCURRENCY"] == "1"
@@ -416,6 +424,7 @@ print("CERID_PROBE" + json.dumps({
     "provider": os.environ.get("INTERNAL_LLM_PROVIDER", ""),
     "memory_extract_provider": os.environ.get("PROVIDER_STAGE_MEMORY_EXTRACT", ""),
     "wiki_summary_provider": os.environ.get("PROVIDER_STAGE_WIKI_SUMMARY", ""),
+    "allow_cloud_egress": config.ALLOW_CLOUD_EGRESS_WHEN_LOCAL,
     "resolved": {s: _resolved(s) for s in (
         "wiki_summary", "entity_extraction", "faithfulness/score", "brief",
     )},
@@ -453,6 +462,21 @@ def test_hybrid_profile_is_applied_at_settings_load():
     assert result["max_concurrency"] == 2
     assert result["memory_extract_provider"] == "openrouter"
     assert result["wiki_summary_provider"] == ""  # background stays local
+
+
+def test_local_only_reports_cloud_egress_off_at_settings_load():
+    result = _import_settings_with({"CERID_ENVIRONMENT_PROFILE": "local-only"})
+    assert result["allow_cloud_egress"] is False
+    pinned = _import_settings_with({
+        "CERID_ENVIRONMENT_PROFILE": "local-only",
+        "ALLOW_CLOUD_EGRESS_WHEN_LOCAL": "true",
+    })
+    assert pinned["allow_cloud_egress"] is True
+    hybrid = _import_settings_with({
+        "CERID_ENVIRONMENT_PROFILE": "hybrid",
+        "OPENROUTER_API_KEY": "sk-test",  # pragma: allowlist secret
+    })
+    assert hybrid["allow_cloud_egress"] is True
 
 
 def test_operator_pins_beat_the_profile():

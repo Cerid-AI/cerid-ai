@@ -190,3 +190,49 @@ class TestPlannedFeaturesHonestyGate:
 
         for flag in PLANNED_FEATURES:
             assert is_feature_enabled(flag) is False, flag
+
+
+# ---------------------------------------------------------------------------
+# Tests: sso_saml reflects the deployment mode
+# ---------------------------------------------------------------------------
+
+class TestSsoSamlReflectsMultiUserMode:
+    """app/routers/saml.py is mounted only under CERID_MULTI_USER=true, so the
+    capability must say so: an Enterprise install in single-user mode does not
+    serve SSO and must not advertise it (ruled 2026-10-05, D16-A)."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_tier(self, monkeypatch):
+        import config.features as features
+
+        original = features.FEATURE_TIER
+        yield
+        monkeypatch.undo()
+        features.set_tier(original)
+
+    def test_enterprise_without_multi_user_does_not_advertise_sso(self, monkeypatch):
+        import config.features as features
+
+        monkeypatch.setattr(features, "CERID_MULTI_USER", False)
+        features.set_tier("enterprise")
+
+        assert features.FEATURE_FLAGS["sso_saml"] is False
+        assert features.get_feature_status()["features"]["sso_saml"]["enabled"] is False
+
+    def test_enterprise_with_multi_user_advertises_sso(self, monkeypatch):
+        import config.features as features
+
+        monkeypatch.setattr(features, "CERID_MULTI_USER", True)
+        features.set_tier("enterprise")
+
+        assert features.FEATURE_FLAGS["sso_saml"] is True
+        status = features.get_feature_status()["features"]["sso_saml"]
+        assert status == {"enabled": True, "tier_required": "enterprise"}
+
+    def test_multi_user_below_enterprise_stays_locked(self, monkeypatch):
+        import config.features as features
+
+        monkeypatch.setattr(features, "CERID_MULTI_USER", True)
+        features.set_tier("pro")
+
+        assert features.FEATURE_FLAGS["sso_saml"] is False

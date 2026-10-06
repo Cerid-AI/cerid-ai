@@ -92,8 +92,9 @@ test("E-16 Stratigraph mounts, hovers a stratum, switches lens and filters", asy
   await expect(
     page.getByRole("application", { name: /Stratigraph of [\d,]+ mentions/ }),
   ).toBeVisible({ timeout: 20_000 })
-  // Restore the default for whoever runs the suite next.
-  await page.getByTestId("timeline-period-30d").click({ force: true })
+  // Restore the default (180d, stratigraph/timeline-config.ts; the period
+  // persists in localStorage) for whoever runs the suite next.
+  await page.getByTestId("timeline-period-180d").click({ force: true })
   await expect(
     page.getByRole("application", { name: /Stratigraph of [\d,]+ mentions/ }),
   ).toBeVisible({ timeout: 20_000 })

@@ -34,8 +34,8 @@ _CATEGORY_ENUM = ["urgent", "actionable", "personal", "newsletter", "promo", "sp
 @register_tool(
     name="pkb_inbox_triage",
     description=(
-        "Trigger an AI inbox triage pass over recent unread Gmail + "
-        "Outlook messages. Each thread is categorized "
+        "Trigger an AI inbox triage pass over recent unread Gmail, "
+        "Outlook, and Apple Mail messages. Each thread is categorized "
         "(urgent / actionable / personal / newsletter / promo / spam) with a "
         "one-sentence summary and a suggested action, then persisted "
         "to the KB in domain='inbox'. **Use when** the user asks for a "
@@ -59,7 +59,7 @@ _CATEGORY_ENUM = ["urgent", "actionable", "personal", "newsletter", "promo", "sp
             "max_results_per_source": {
                 "type": "integer",
                 "default": 30,
-                "description": "Cap per Gmail/Outlook fetch. LLM cost scales linearly.",
+                "description": "Cap per source fetch. LLM cost scales linearly.",
             },
             "persist": {
                 "type": "boolean",
@@ -101,8 +101,10 @@ async def pkb_inbox_triage(
         "Query previously-triaged inbox threads by category, source, "
         "or recency. Read-only (no LLM call). Pulls from KB artifacts "
         "in domain='inbox' that were written by pkb_inbox_triage. "
-        "**Use when** the user asks \"what's urgent\", \"newsletters "
-        "from this week\", \"actionable Outlook threads\". **Returns** "
+        "**Use when** the user asks \"what's urgent\", \"personal mail "
+        "this week\", \"actionable Outlook threads\". Only threads whose "
+        "utility wrote a card are here: newsletter, promo, and spam "
+        "threads are ledger-only unless financial. **Returns** "
         "`{threads: [{thread_id, subject, category, summary, "
         "suggested_action, source, artifact_id}], total, "
         "filter_applied}`. Pro-tier."
@@ -117,7 +119,7 @@ async def pkb_inbox_triage(
             },
             "source": {
                 "type": "string",
-                "enum": ["gmail", "outlook", ""],
+                "enum": ["gmail", "outlook", "apple_mail", ""],
                 "default": "",
                 "description": "Optional origin filter.",
             },

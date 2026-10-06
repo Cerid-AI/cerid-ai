@@ -276,59 +276,34 @@ def group_orphans_by_artifact(
     return groups
 
 
-async def recover_artifact(orphans: list[OrphanRecord]) -> RecoveryAction:
-    """Roll-forward ALL orphaned pending chunks of ONE artifact in a single
-    Neo4j write (AF-003).
+def _graph_holds_chunks(driver: Any, artifact_id: str, chunk_ids: list[str]) -> bool:
+    """Does the Artifact node already carry exactly these chunks?
 
-    Every record must share the same ``artifact_id`` (hence domain +
-    collection). Rebuilding the node with the real ``chunk_count = len(orphans)``
-    and the full ``chunk_ids`` list — rather than once-per-chunk with
-    ``chunk_count=1`` — is why multi-chunk artifacts no longer collapse to a
-    single visible chunk after recovery.
-
-    Strategy mirrors the per-chunk path: bump the recovery-attempt counter on
-    every chunk, attempt one ``graph.create_artifact``, flip every chunk to
-    ``committed`` on success, and on retry-exhaustion dead-letter + purge every
-    chunk. Idempotent — a re-run MERGEs the same node (``ON MATCH SET`` repairs
-    ``chunk_count``/``chunk_ids``).
+    A yes makes the pass read-only for this artifact. A failed read answers
+    no, so the repair write below still runs.
     """
-    if not orphans:
-        return RecoveryAction.DEFERRED
-
-    chroma = get_chroma()
-    driver = get_neo4j()
-    lead = orphans[0]
-    chunk_ids = [o.chunk_id for o in orphans]
-    new_attempt_count = max(o.retry_count for o in orphans) + 1
-
     try:
-        collection = await asyncio.to_thread(
-            chroma.get_collection, name=lead.collection_name
-        )
+        node = graph.get_artifact(driver, artifact_id)
     except Exception as e:  # noqa: BLE001 — observability boundary
         log_swallowed_error(
-            "app.services.ingest_recovery.get_collection_for_recover",
+            "app.services.ingest_recovery.read_before_repair",
             e,
-            context={"artifact_id": lead.artifact_id},
+            context={"artifact_id": artifact_id},
         )
-        return RecoveryAction.DEFERRED
-
-    # --- 1. Bump attempt counter on every chunk --------------------------
+        return False
+    if node is None:
+        return False
     try:
-        await asyncio.to_thread(
-            collection.update,
-            ids=chunk_ids,
-            metadatas=[{"cerid_recovery_attempts": new_attempt_count} for _ in chunk_ids],
-        )
-    except Exception as e:  # noqa: BLE001 — observability boundary
-        log_swallowed_error(
-            "app.services.ingest_recovery.update_attempt_count",
-            e,
-            context={"artifact_id": lead.artifact_id},
-        )
-        # Non-fatal: proceed with recovery attempt anyway.
+        existing = json.loads(node.get("chunk_ids") or "[]")
+    except (ValueError, TypeError):
+        return False
+    return node.get("chunk_count") == len(chunk_ids) and sorted(existing) == sorted(chunk_ids)
 
-    # --- 2. One Neo4j commit for the whole artifact ----------------------
+
+async def _write_artifact(
+    driver: Any, lead: OrphanRecord, chunk_ids: list[str], attempt_count: int,
+) -> bool:
+    """One ``create_artifact`` for the whole artifact; True when the node is in the graph."""
     meta = lead.metadata  # artifact-level fields are identical across chunks
     neo4j_ok = False
     try:
@@ -369,10 +344,76 @@ async def recover_artifact(orphans: list[OrphanRecord]) -> RecoveryAction:
                 "ingest_recovery.neo4j_failed artifact=%s chunks=%d attempt=%d/%d: %s",
                 lead.artifact_id,
                 len(chunk_ids),
-                new_attempt_count,
+                attempt_count,
                 _MAX_RECOVERY_ATTEMPTS,
                 e,
             )
+    return neo4j_ok
+
+
+async def recover_artifact(orphans: list[OrphanRecord]) -> RecoveryAction:
+    """Roll-forward ALL orphaned pending chunks of ONE artifact in a single
+    Neo4j write (AF-003).
+
+    Every record must share the same ``artifact_id`` (hence domain +
+    collection). Rebuilding the node with the real ``chunk_count = len(orphans)``
+    and the full ``chunk_ids`` list — rather than once-per-chunk with
+    ``chunk_count=1`` — is why multi-chunk artifacts no longer collapse to a
+    single visible chunk after recovery.
+
+    Strategy mirrors the per-chunk path: bump the recovery-attempt counter on
+    every chunk, attempt one ``graph.create_artifact``, flip every chunk to
+    ``committed`` on success, and on retry-exhaustion dead-letter + purge every
+    chunk. The graph is read before it is written: when the node already
+    carries exactly these chunks (the Neo4j half of the ingest landed and only
+    the Chroma flip was lost) the pass flips the chunks and issues no Neo4j
+    write. Otherwise ``create_artifact``'s MERGE creates or repairs the node.
+    """
+    if not orphans:
+        return RecoveryAction.DEFERRED
+
+    chroma = get_chroma()
+    driver = get_neo4j()
+    lead = orphans[0]
+    chunk_ids = [o.chunk_id for o in orphans]
+    new_attempt_count = max(o.retry_count for o in orphans) + 1
+
+    try:
+        collection = await asyncio.to_thread(
+            chroma.get_collection, name=lead.collection_name
+        )
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingest_recovery.get_collection_for_recover",
+            e,
+            context={"artifact_id": lead.artifact_id},
+        )
+        return RecoveryAction.DEFERRED
+
+    # --- 1. Bump attempt counter on every chunk --------------------------
+    try:
+        await asyncio.to_thread(
+            collection.update,
+            ids=chunk_ids,
+            metadatas=[{"cerid_recovery_attempts": new_attempt_count} for _ in chunk_ids],
+        )
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingest_recovery.update_attempt_count",
+            e,
+            context={"artifact_id": lead.artifact_id},
+        )
+        # Non-fatal: proceed with recovery attempt anyway.
+
+    # --- 2. One Neo4j commit for the whole artifact ----------------------
+    if await asyncio.to_thread(_graph_holds_chunks, driver, lead.artifact_id, chunk_ids):
+        logger.info(
+            "ingest_recovery.already_in_graph artifact=%s chunks=%d — flipping without a write",
+            lead.artifact_id, len(chunk_ids),
+        )
+        neo4j_ok = True
+    else:
+        neo4j_ok = await _write_artifact(driver, lead, chunk_ids, new_attempt_count)
 
     # --- 3. On success: flip every chunk to committed --------------------
     if neo4j_ok:

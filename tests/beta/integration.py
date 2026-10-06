@@ -1,6 +1,7 @@
 """
 Integration tests for Cerid AI beta test harness.
-Runs inside Docker on llm-network against ai-companion-mcp.
+Runs inside Docker on the target stack's network against its MCP container
+(tests/beta/lib/target.sh).
 """
 
 import os
@@ -11,8 +12,9 @@ import httpx
 import pytest
 
 from lib.kb_cleanup import KbCleanup
+from lib.target import resolve_target
 
-BASE_URL = "http://ai-companion-mcp:8888"
+BASE_URL = resolve_target().mcp_base
 TIMEOUT = 60
 
 

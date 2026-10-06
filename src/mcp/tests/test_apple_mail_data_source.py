@@ -64,6 +64,24 @@ class TestConfiguration:
         with patch("platform.system", return_value="Darwin"):
             assert AppleMailDataSource(helper_path=helper_path).is_configured() is True
 
+    def test_off_darwin_the_state_is_runs_on_desktop_not_missing_configuration(self, helper_path):
+        with patch("platform.system", return_value="Linux"):
+            assert AppleMailDataSource(helper_path=helper_path).configured_state() == "runs_on_desktop"
+            assert AppleMailDataSource(helper_path=None).configured_state() == "runs_on_desktop"
+        with patch("platform.system", return_value="Darwin"):
+            assert AppleMailDataSource(helper_path=helper_path).configured_state() == "configured"
+            assert AppleMailDataSource(helper_path=None).configured_state() == "not_configured"
+
+    @pytest.mark.asyncio
+    async def test_invoke_off_darwin_says_the_bridge_runs_on_the_desktop(self, helper_path):
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("asyncio.create_subprocess_exec", side_effect=AssertionError("no helper runs here")),
+        ):
+            code, payload = await AppleMailDataSource(helper_path=helper_path).invoke(["scan"])
+        assert code == 74
+        assert payload == {"ok": False, "error": "runs_on_desktop"}
+
     def test_env_var_override_takes_precedence(self, helper_path, monkeypatch):
         from plugins.apple_mail import data_source as mod
         monkeypatch.setenv("CERID_HELPER_CERIDMAIL", helper_path)
@@ -140,6 +158,7 @@ class TestQuery:
                     "to": "me@example.com",
                     "in_reply_to": "<prev@example.com>",
                     "rfc_message_id": "<keep@example.com>",
+                    "flag": "",
                 },
                 {
                     "id": "<junk@example.com>",
@@ -161,6 +180,14 @@ class TestQuery:
                     "date": "2026-10-03T12:00:00Z",
                     "mailbox": "Cerid/Spam",
                     "body": "already sorted",
+                    "flag": "gray",
+                },
+                {
+                    "id": "<unknown@example.com>",
+                    "subject": "No flag key",
+                    "from": "a@example.com",
+                    "mailbox": "INBOX",
+                    "body": "flag state unknown",
                 },
             ],
         }).encode("utf-8")
@@ -169,9 +196,13 @@ class TestQuery:
         with patch("asyncio.create_subprocess_exec", spawn):
             results = await ds.query("is:unread newer_than:1d")
         assert spawn.await_args.args[1] == "since"
-        assert len(results) == 2
+        assert len(results) == 3
         assert "See you then" in results[0].content
         assert results[1].metadata["mailbox"] == "Cerid/Spam"
+        # A cleared flag is an observation; a missing key is unknown.
+        assert results[0].metadata["flag"] == ""
+        assert results[1].metadata["flag"] == "gray"
+        assert "flag" not in results[2].metadata
         assert results[0].metadata["provider_message_id"] == "<keep@example.com>"
         assert results[0].metadata["mailbox"] == "INBOX"
         assert results[0].metadata["list_id"] == "<news.example.com>"

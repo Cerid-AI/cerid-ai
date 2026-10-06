@@ -7,7 +7,7 @@
 from the default run, so this contract lives here.
 """
 
-from tests.helpers.chat_ttft import sse_data_is_generated_token
+from tests.helpers.chat_ttft import served_local_chat_model, sse_data_is_generated_token
 
 
 def test_a_routing_frame_is_not_a_token():
@@ -41,3 +41,22 @@ def test_delta_content_is_a_token():
 def test_message_content_is_a_token():
     line = 'data: {"choices": [{"message": {"role": "assistant", "content": "hi"}}]}'
     assert sse_data_is_generated_token(line) is True
+
+
+# The local TTFT case takes its model from GET /providers/routing, the snapshot
+# that lists what the local server actually serves, and skips when it serves
+# nothing — a name guessed from config would measure a 404 or a cloud fallback.
+
+
+def test_the_first_served_local_chat_model_is_the_benchmark_model():
+    routing = {"ollama_available": True, "ollama_models": ["gemma-4-26b-a4b", "qwen3.5-4b-instruct"]}
+    assert served_local_chat_model(routing) == "gemma-4-26b-a4b"
+
+
+def test_an_unavailable_local_server_serves_no_model():
+    assert served_local_chat_model({"ollama_available": False, "ollama_models": ["gemma-4-26b-a4b"]}) is None
+
+
+def test_an_empty_catalog_serves_no_model():
+    assert served_local_chat_model({"ollama_available": True, "ollama_models": []}) is None
+    assert served_local_chat_model({}) is None

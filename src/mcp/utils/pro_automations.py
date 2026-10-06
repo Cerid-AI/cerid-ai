@@ -36,7 +36,7 @@ AUTOMATIONS: dict[str, dict[str, Any]] = {
         "env_schedule": "SCHEDULE_INBOX_TRIAGE",
         "default_schedule": "*/15 * * * *",
         "display_name": "Inbox Triage",
-        "description": "AI categorize Gmail + Outlook threads "
+        "description": "AI categorize Gmail, Outlook, and Apple Mail threads "
                        "(urgent / actionable / personal / newsletter / promo / spam)",
         "cadence_presets": [
             {"label": "Off", "cron": ""},

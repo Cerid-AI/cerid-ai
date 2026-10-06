@@ -216,6 +216,11 @@ CLOUD_ESCALATION_STAGES = frozenset({
     "inbox_triage_draft",
 })
 
+# Every stage that carries mail. A local failure on one of these is the
+# stage's outcome: internal_llm does not re-send the body to OpenRouter
+# unless CERID_INBOX_CLOUD_FALLBACK=true.
+INBOX_STAGES = LOCAL_FIRST_STAGES | CLOUD_ESCALATION_STAGES
+
 
 def is_background_stage(stage: str | None) -> bool:
     """True when *stage* belongs to the background (enrichment) set.

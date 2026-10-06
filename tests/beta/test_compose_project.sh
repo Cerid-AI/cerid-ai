@@ -33,6 +33,10 @@ EXPECTED_PROJECT="$(basename "$(cd "$(git -C "$REPO_ROOT" rev-parse --git-common
 cd "$WORKTREE_DIR" || exit 1
 
 export RESULTS_FILE
+# s01_check names its containers through the target (lib/target.sh), which
+# smoke.sh sources before assert.sh; same order here.
+# shellcheck source=lib/target.sh
+source "${WORKTREE_DIR}/tests/beta/lib/target.sh"
 # shellcheck source=lib/assert.sh
 source "${WORKTREE_DIR}/tests/beta/lib/assert.sh"
 

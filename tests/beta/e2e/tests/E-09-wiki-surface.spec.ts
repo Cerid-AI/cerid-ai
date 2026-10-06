@@ -14,9 +14,13 @@ import { test, expect } from "@playwright/test"
  * Covers: K-program K4 (wiki log + index) + K-program K1 (entity
  * pages list).
  */
+// The registered e2e consumer (CONSUMER_REGISTRY["e2e-harness"]). The wiki
+// routes do not read consumer scope, so the header is a label here, not a gate.
+const E2E_HEADERS = { "X-Client-ID": "e2e-harness" }
+
 test("E-09 wiki REST surface", async ({ request }) => {
   const indexResponse = await request.get("/api/mcp/wiki/index", {
-    headers: { "X-Client-ID": "e2e-wiki" },
+    headers: E2E_HEADERS,
   })
   expect(indexResponse.ok()).toBe(true)
   const indexBody = await indexResponse.json()
@@ -27,7 +31,7 @@ test("E-09 wiki REST surface", async ({ request }) => {
   expect(Array.isArray(items)).toBe(true)
 
   const logResponse = await request.get("/api/mcp/wiki/log", {
-    headers: { "X-Client-ID": "e2e-wiki" },
+    headers: E2E_HEADERS,
   })
   expect(logResponse.ok()).toBe(true)
   const logBody = await logResponse.json()
@@ -35,7 +39,7 @@ test("E-09 wiki REST surface", async ({ request }) => {
 
   // List entity pages (paginated).
   const entitiesResponse = await request.get("/api/mcp/wiki/entities", {
-    headers: { "X-Client-ID": "e2e-wiki" },
+    headers: E2E_HEADERS,
   })
   expect(entitiesResponse.ok()).toBe(true)
 })

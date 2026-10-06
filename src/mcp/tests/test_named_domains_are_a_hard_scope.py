@@ -286,7 +286,8 @@ async def test_a_consumer_strict_by_registration_is_unchanged(
     await _ask("cerid-finance", domains=domains)
 
     assert passed["strict_domains"] is True
-    assert passed["allowed_domains"] == ["finance"]
+    assert passed["allowed_domains"] == ["finance", "inbox"]
+    assert passed["domain_record_types"] == {"inbox": ["mail_financial_card"]}
     assert passed["domains"] == domains
     # #471: memory goes off for a strict scope with named domains, the web stays.
     assert passed["memory_enabled"] is (domains is None)

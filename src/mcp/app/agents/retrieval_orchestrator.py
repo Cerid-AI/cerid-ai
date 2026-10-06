@@ -91,6 +91,7 @@ async def guarded_orchestrated_query(
         context_sources=context_sources,
         allowed_domains=request_context.allowed_domains_list(),
         strict_domains=request_context.strict_domains,
+        domain_record_types=request_context.domain_record_types_dict(),
         skip_cache=request_context.skip_cache,
         metadata_filter=request_context.metadata_filter,
         budget_seconds=request_context.budget_seconds,

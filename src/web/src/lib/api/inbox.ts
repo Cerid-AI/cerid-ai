@@ -15,7 +15,6 @@ export interface InboxAccount {
   included: boolean
   folder_sort: boolean
   auto_apply: string[]
-  utilities: string[]
   consent: string
   removed: boolean
   last_read: string
@@ -54,6 +53,8 @@ export interface SenderPin {
 
 export interface InboxSetup {
   actions_enabled: boolean
+  /** configured, not_configured, not_registered, or runs_on_desktop (Apple Mail seen from the server). */
+  source_state?: string
   background_model: string
   chat_model: string
   accounts: InboxAccount[]
@@ -108,7 +109,6 @@ export async function updateInboxAccount(body: {
   included?: boolean
   folder_sort?: boolean
   auto_apply?: string[]
-  utilities?: string[]
 }): Promise<InboxAccount> {
   const response = await read("/inbox/accounts", { method: "PATCH", body: JSON.stringify(body) })
   return response.json()

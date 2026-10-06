@@ -356,6 +356,7 @@ _THREAD_ID_RE = re.compile(r"^\s*Thread ID:\s*(\S+)", re.MULTILINE)
 # `get_gmail_message_content` answers with RFC822-ish headers, a `--- BODY ---`
 # separator, then the body.
 _BODY_SEPARATOR = "--- BODY ---"
+_ACCUMULATED_HEADERS = frozenset({"authentication-results"})
 _HEADER_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$")
 
 
@@ -392,6 +393,16 @@ def parse_message_detail(raw: Any) -> dict[str, str]:
             current = ""
             continue
         current = match.group(1).lower()
+        if current in detail:
+            if current in _ACCUMULATED_HEADERS:
+                # Every copy is kept: a sender can add an Authentication-Results
+                # saying pass, but cannot remove the provider's saying fail,
+                # and the gate reads any fail.
+                detail[current] = f"{detail[current]} ; {match.group(2).strip()}".strip()
+                continue
+            # Any other repeated header keeps its first value.
+            current = ""
+            continue
         detail[current] = match.group(2).strip()
     if body:
         detail["body"] = body.strip()

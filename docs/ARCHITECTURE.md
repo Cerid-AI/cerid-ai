@@ -216,8 +216,9 @@ server-side. `<model>@unknown` means the artifact could not be read and
 is never cached. A different artifact therefore gets a different value,
 which is what lets `POST /admin/kb/reembed` key its selection on the
 stamp; `GET /admin/kb/embedding-versions` shows the distribution. The
-stamp is a claim, not proof — the boot-time vector-space probe
-(`app/startup/invariants.py::probe_vector_space`) is what verifies that
+stamp is a claim, not proof — the vector-space probe
+(`app/startup/invariants.py::probe_vector_space`, run at boot and on
+every invariants refresh) is what verifies that
 stored vectors and the serving embedder share one space.
 
 Three workloads stay CPU on Intel Mac + AMD even with Quenchforge

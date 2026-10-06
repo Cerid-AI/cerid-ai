@@ -15,16 +15,17 @@ from typing import Any
 
 from core.agents.inbox_actions import (
     _NEWSLETTER_MARKERS,
-    _PROMO_MARKERS,
     _SPAM_MARKERS,
     _URGENT_MARKERS,
     CATEGORY_ACTION,
     first_marker,
     heuristic_category,
+    promo_marker,
     utility_for,
 )
 
 STRUCTURAL_CONFIDENCE = 0.9
+PHRASE_CONFIDENCE = 0.9
 LIST_CONFIDENCE = 0.86
 REVIEW_CONFIDENCE = 0.55
 SOCIAL_CONFIDENCE = 0.75
@@ -71,10 +72,12 @@ def _list_mail(headers: Mapping[str, str]) -> bool:
 
 
 def dmarc_failed(headers: Mapping[str, str]) -> bool:
-    """DMARC fail with no passing result. SPF fail alone is not this."""
+    """Any DMARC fail in the Authentication-Results. SPF fail alone is not this.
+
+    The sources keep every copy of the header, and a sender can add a copy
+    that says pass; a pass therefore never cancels a fail.
+    """
     auth = headers.get("authentication_results", "").casefold()
-    if not auth or "dmarc=pass" in auth:
-        return False
     return "dmarc=fail" in auth
 
 
@@ -115,12 +118,15 @@ def filter_verdict(
 ) -> FilterVerdict:
     """Combine phrase, provider, and rspamd signals. The first match wins.
 
-    Urgent markers are read from the subject. Spam, promo, newsletter, and
-    bills still see the body. A phrase promo or newsletter sticks. A reply
-    is only a personal hint.
+    Urgent markers and the sale marker are read from the subject. Spam,
+    the other promo markers, newsletter, and bills still see the body. A
+    phrase promo or newsletter sticks. A reply is only a personal hint.
     """
     bag = {str(key): str(value) for key, value in (headers or {}).items()}
     category, confidence = heuristic_category(text, include_urgent=False)
+    promo = promo_marker(text, subject)
+    if promo and category in ("actionable", "newsletter"):
+        category, confidence = "promo", PHRASE_CONFIDENCE
     urgent_subject = _subject_urgent(subject)
     if category == "spam":
         return FilterVerdict("spam", confidence, True, f"phrase:{first_marker(text, _SPAM_MARKERS)}")
@@ -137,13 +143,13 @@ def filter_verdict(
         return FilterVerdict("promo", STRUCTURAL_CONFIDENCE, True, "gmail:promotions")
     if _list_mail(bag) and not urgent_subject:
         if category == "promo":
-            return FilterVerdict("promo", confidence, True, f"phrase:{first_marker(text, _PROMO_MARKERS)}")
+            return FilterVerdict("promo", confidence, True, f"phrase:{promo}")
         reason = "list-id" if bag.get("list_id", "").strip() else "list-unsubscribe"
         return FilterVerdict("newsletter", LIST_CONFIDENCE, True, reason)
     if labels & _NEWS_LABELS and not urgent_subject and category != "promo":
         return FilterVerdict("newsletter", LIST_CONFIDENCE, True, "gmail:updates")
     if category == "promo":
-        return FilterVerdict("promo", confidence, True, f"phrase:{first_marker(text, _PROMO_MARKERS)}")
+        return FilterVerdict("promo", confidence, True, f"phrase:{promo}")
     if category == "newsletter":
         return FilterVerdict(
             "newsletter", confidence, True, f"phrase:{first_marker(text, _NEWSLETTER_MARKERS)}",

@@ -16,13 +16,15 @@ from typing import Any
 import httpx
 import pytest
 
-MCP_BASE = os.getenv("BETA_MCP_BASE", "http://ai-companion-mcp:8888")
+from lib.target import resolve_target
+
+MCP_BASE = resolve_target().mcp_base
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(scope="session")
 async def aclient():
-    """Async HTTP client for the MCP service on llm-network."""
+    """Async HTTP client for the MCP service on the target's docker network."""
     headers: dict = {"X-Client-ID": "gui", "Content-Type": "application/json"}
     api_key = os.getenv("CERID_API_KEY")
     if api_key:

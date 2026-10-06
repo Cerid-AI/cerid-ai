@@ -11,7 +11,9 @@ gated to a dedicated CI job that boots the stack first.
 Budgets tracked:
   - /agent/query cold (simple query, single domain, top_k=3): p95 < 3 s
   - /agent/query warm (identical query in cache):            max < 0.3 s
-  - /chat/stream TTFT:                                       p95 < 2 s
+  - /chat/stream TTFT (cloud model):                         p95 < 2 s
+  - /chat/stream TTFT (served local model, from
+    GET /providers/routing; skipped when none is served):    p95 < 2 s
 
 Tier system:
   - STRICT (Tier A): user-visible SLOs — test fails immediately if exceeded.
@@ -112,38 +114,70 @@ def test_agent_query_warm_under_300ms(benchmark):
     )
 
 
-@pytest.mark.benchmark(group="chat_stream_ttft", min_rounds=3, disable_gc=True)
-def test_chat_stream_ttft_under_2s(benchmark):
-    """R5-1 STRICT: /chat/stream Time-To-First-Token under 2 s p95.
+_TTFT_BUDGET_S = 2.0
 
-    TTFT = time from request send to the first generated token. The
-    ``cerid_meta`` frame that precedes it is not a token.
+
+def _chat_stream_ttft(model: str) -> float:
+    """Seconds from request send to the first generated token of ``model``.
+
+    The ``cerid_meta`` frame that precedes the first token is not a token.
     """
     from tests.helpers.chat_ttft import sse_data_is_generated_token
 
-    def _ttft_once() -> float:
-        payload = {
-            "model": "openai/gpt-4o-mini",
-            "messages": [{"role": "user", "content": "say hi"}],
-            "stream": True,
-            "max_tokens": 10,
-        }
-        start = time.perf_counter()
-        with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=10.0) as client:
-            with client.stream(
-                "POST",
-                "/chat/stream",
-                json=payload,
-                headers={"X-Client-ID": "slo-harness", "Content-Type": "application/json"},
-            ) as response:
-                for line in response.iter_lines():
-                    if sse_data_is_generated_token(line):
-                        return time.perf_counter() - start
-        raise RuntimeError("No generated token received")
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "say hi"}],
+        "stream": True,
+        "max_tokens": 10,
+    }
+    start = time.perf_counter()
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=10.0) as client:
+        with client.stream(
+            "POST",
+            "/chat/stream",
+            json=payload,
+            headers={"X-Client-ID": "slo-harness", "Content-Type": "application/json"},
+        ) as response:
+            for line in response.iter_lines():
+                if sse_data_is_generated_token(line):
+                    return time.perf_counter() - start
+    raise RuntimeError(f"No generated token received from {model}")
 
-    benchmark.pedantic(_ttft_once, rounds=3, iterations=1, warmup_rounds=0)
-    assert benchmark.stats.stats.max < 2.0, (
-        f"chat/stream TTFT exceeded 2s SLO: max={benchmark.stats.stats.max:.2f}s"
+
+@pytest.mark.benchmark(group="chat_stream_ttft", min_rounds=3, disable_gc=True)
+def test_chat_stream_ttft_under_2s(benchmark):
+    """R5-1 STRICT: /chat/stream Time-To-First-Token under 2 s p95 (cloud model)."""
+    benchmark.pedantic(lambda: _chat_stream_ttft("openai/gpt-4o-mini"), rounds=3, iterations=1, warmup_rounds=0)
+    assert benchmark.stats.stats.max < _TTFT_BUDGET_S, (
+        f"chat/stream TTFT exceeded {_TTFT_BUDGET_S:g}s SLO: max={benchmark.stats.stats.max:.2f}s"
+    )
+
+
+@pytest.mark.benchmark(group="chat_stream_ttft_local", min_rounds=3, disable_gc=True)
+def test_chat_stream_ttft_local_under_2s(benchmark):
+    """R5-1 STRICT: /chat/stream TTFT under 2 s p95 on the served local model.
+
+    The model comes from GET /providers/routing, the snapshot of what the
+    local server serves right now; a stack that serves no local chat model
+    skips with that reason rather than measuring a 404 or a cloud fallback.
+    Same floor as the cloud case.
+    """
+    from tests.helpers.chat_ttft import served_local_chat_model
+
+    with httpx.Client(headers=_auth_headers(), base_url=MCP_URL, timeout=10.0) as client:
+        response = client.get("/providers/routing", headers={"X-Client-ID": "slo-harness"})
+        response.raise_for_status()
+        routing = response.json()
+    model = served_local_chat_model(routing)
+    if model is None:
+        pytest.skip(
+            "no local chat model served: "
+            f"ollama_available={routing.get('ollama_available')!r} ollama_models={routing.get('ollama_models')!r}"
+        )
+
+    benchmark.pedantic(lambda: _chat_stream_ttft(model), rounds=3, iterations=1, warmup_rounds=0)
+    assert benchmark.stats.stats.max < _TTFT_BUDGET_S, (
+        f"chat/stream TTFT ({model}) exceeded {_TTFT_BUDGET_S:g}s SLO: max={benchmark.stats.stats.max:.2f}s"
     )
 
 

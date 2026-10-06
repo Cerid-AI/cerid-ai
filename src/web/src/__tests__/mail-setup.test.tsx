@@ -119,7 +119,6 @@ describe("MailSetup", () => {
         included: true,
         folder_sort: false,
         auto_apply: [],
-        utilities: ["correspondence", "financial"],
         consent: "pending",
         removed: false,
         last_read: "",
@@ -155,7 +154,6 @@ describe("MailSetup", () => {
         included: true,
         folder_sort: false,
         auto_apply: [],
-        utilities: ["correspondence"],
         consent: "readonly",
         removed: false,
         last_read: "",
@@ -171,6 +169,28 @@ describe("MailSetup", () => {
       address: "a@example.com",
       included: false,
     })
+  })
+
+  it("has no per-account utility toggles", async () => {
+    mockSetup.mockResolvedValue(emptySetup({
+      accounts: [{
+        provider: "outlook",
+        address: "a@example.com",
+        display_name: "Work",
+        included: true,
+        folder_sort: false,
+        auto_apply: [],
+        consent: "readonly",
+        removed: false,
+        last_read: "",
+        last_apply: "",
+        last_rejection: "",
+      }],
+    }))
+    render(<MailSetup provider="outlook" />, { wrapper: wrap() })
+    await screen.findByRole("switch", { name: "Include a@example.com" })
+    expect(screen.queryByRole("switch", { name: "Correspondence for a@example.com" })).toBeNull()
+    expect(screen.queryByRole("switch", { name: "Financial cards for a@example.com" })).toBeNull()
   })
 
   it("approves with dry_run false and can undo", async () => {
@@ -262,6 +282,23 @@ describe("MailSetup", () => {
     expect(screen.getByText(/recreate the Gmail and Outlook connector containers/)).toBeInTheDocument()
   })
 
+  it("says Apple Mail runs through the desktop app instead of missing configuration", async () => {
+    mockSetup.mockResolvedValue(emptySetup({ source_state: "runs_on_desktop" }))
+    render(<MailSetup provider="apple_mail" />, { wrapper: wrap() })
+    expect(await screen.findByTestId("runs-on-desktop")).toHaveTextContent(
+      "Apple Mail runs through the desktop app",
+    )
+    expect(screen.queryByRole("button", { name: "Find addresses" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps address discovery on the desktop build", async () => {
+    mockSetup.mockResolvedValue(emptySetup({ source_state: "configured" }))
+    render(<MailSetup provider="apple_mail" />, { wrapper: wrap() })
+    expect(await screen.findByRole("button", { name: "Find addresses" })).toBeInTheDocument()
+    expect(screen.queryByTestId("runs-on-desktop")).not.toBeInTheDocument()
+  })
+
   it("does not show an upgrade pitch while entitlements are loading", () => {
     ent.loading = true
     render(<MailSetup provider="gmail" />, { wrapper: wrap() })
@@ -287,7 +324,6 @@ describe("MailSetup", () => {
         included: true,
         folder_sort: false,
         auto_apply: [],
-        utilities: ["correspondence", "financial"],
         consent: "readonly",
         removed: false,
         last_read: "",

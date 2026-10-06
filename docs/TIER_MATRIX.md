@@ -90,6 +90,8 @@
 | Priority support | — | — | ✓ | `priority_support` |
 | SSO / SAML | — | — | ✓ | `sso_saml` |
 
+> `sso_saml` is enabled only with `CERID_MULTI_USER=true`: the SAML router is mounted only in multi-user mode, and the capability reports `enabled: false` on a single-user Enterprise install (`docs/ENTERPRISE_SSO_SAML.md`).
+
 ### Other Community Features
 
 | Feature | Core | Pro | Enterprise | Gate |

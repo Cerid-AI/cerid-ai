@@ -9,11 +9,24 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { NavigationProvider } from "@/contexts/navigation-context"
 import { QuickCaptureFab } from "@/components/quick-capture/quick-capture-fab"
-import { ingestUrl } from "@/lib/api/kb"
+import { ingestUrl, uploadFile } from "@/lib/api/kb"
 
 vi.mock("@/lib/api/kb", () => ({
-  uploadFile: vi.fn(async () => ({ artifact_id: "test", filename: "test.md" })),
+  uploadFile: vi.fn(async () => ({ artifact_id: "test", filename: "test.md", enrichment: "queued" })),
   ingestUrl: vi.fn(async () => ({ status: "ok", artifact_id: "test-url" })),
+}))
+
+// The FAB listens on the agent activity stream only while a capture is
+// waiting for its title. The test owns the entries and the enabled flag.
+const stream = vi.hoisted(() => ({
+  entries: [] as Array<Record<string, unknown>>,
+  enabled: [] as boolean[],
+}))
+vi.mock("@/hooks/use-agent-activity-stream", () => ({
+  useAgentActivityStream: (opts?: { enabled?: boolean }) => {
+    stream.enabled.push(opts?.enabled !== false)
+    return { entries: stream.entries, status: "open", error: null, retryCount: 0, reset: () => {} }
+  },
 }))
 
 function renderFab() {
@@ -29,6 +42,8 @@ function renderFab() {
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/")
+  stream.entries = []
+  stream.enabled = []
 })
 
 describe("QuickCaptureFab", () => {
@@ -111,5 +126,45 @@ describe("QuickCaptureFab", () => {
       expect(screen.getByText("URL is not fetchable: timed out")).toBeInTheDocument(),
     )
     expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  // Round 5 item 5.1 — the note is acknowledged on persist (quick mode) and
+  // the final title arrives later over the activity stream, not by polling.
+  it("Note mode: saves in quick mode and acknowledges on the 2xx before any title lands", async () => {
+    renderFab()
+    fireEvent.click(screen.getByRole("button", { name: /quick capture/i }))
+    fireEvent.change(screen.getByLabelText(/note content/i), { target: { value: "Buy a new drill" } })
+    fireEvent.click(screen.getByRole("button", { name: /save note/i }))
+    await waitFor(() => expect(screen.getByText("Note saved")).toBeInTheDocument())
+    expect(vi.mocked(uploadFile).mock.calls[0][1]).toMatchObject({ quick: true })
+    // Still open, waiting for the title; the stream was switched on by the save.
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(stream.enabled.at(-1)).toBe(true)
+  })
+
+  it("Note mode: shows the final title when the enrichment job lands on the stream", async () => {
+    const view = renderFab()
+    fireEvent.click(screen.getByRole("button", { name: /quick capture/i }))
+    fireEvent.change(screen.getByLabelText(/note content/i), { target: { value: "Buy a new drill" } })
+    fireEvent.click(screen.getByRole("button", { name: /save note/i }))
+    await waitFor(() => expect(screen.getByText("Note saved")).toBeInTheDocument())
+
+    stream.entries = [
+      { agent: "wiki_refresh", message: "unrelated", level: "info", timestamp: 1, metadata: { artifact_id: "other" } },
+      {
+        agent: "quick_capture", message: "Filed", level: "info", timestamp: 2,
+        metadata: { artifact_id: "test", title: "Buy a new drill", domain: "projects", enriched: true },
+      },
+    ]
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <NavigationProvider activePane="chat" onPaneChange={() => {}}>
+          <QuickCaptureFab />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() =>
+      expect(screen.getByText("Filed as “Buy a new drill” in projects")).toBeInTheDocument(),
+    )
   })
 })

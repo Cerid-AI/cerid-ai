@@ -13,6 +13,11 @@ import { test, expect } from "@playwright/test"
  *
  * Covers: extraction → cross-model verify → persisted handshake.
  */
+// The request itself may run for up to 60s and the server's stream budget is
+// STREAMING_TOTAL_TIMEOUT (90s); the config's 30s test timeout cut the request
+// off while it was legitimately in flight.
+test.setTimeout(120_000)
+
 test("E-07 verify-stream auto-persist handshake", async ({ request }) => {
   const response = await request.post("/api/mcp/agent/verify-stream", {
     headers: { "Content-Type": "application/json" },

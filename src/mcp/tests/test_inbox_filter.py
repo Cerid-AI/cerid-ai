@@ -100,6 +100,13 @@ class TestFilterVerdict:
         assert verdict.category == "urgent" and verdict.sticks is False
         assert verdict.confidence < 0.8
 
+    def test_a_fail_beside_a_pass_is_still_a_fail(self):
+        from core.agents.inbox_filter import dmarc_failed
+
+        assert dmarc_failed({"authentication_results": "mx.evil.example; dmarc=pass ; mx.google.com; dmarc=fail"})
+        assert not dmarc_failed({"authentication_results": "mx.google.com; dmarc=pass"})
+        assert not dmarc_failed({})
+
     def test_a_passing_dmarc_is_not_a_fail(self):
         verdict = filter_verdict(
             "host critical",
@@ -132,16 +139,26 @@ class TestFilterVerdict:
         assert verdict.sticks is True
         assert verdict.reason == "phrase:you've won"
 
-    def test_a_sale_without_a_list_header_sticks(self):
-        verdict = filter_verdict("a sale this week", subject="Hello")
+    def test_a_sale_in_the_subject_sticks_without_a_list_header(self):
+        verdict = filter_verdict("come by the shop", subject="Sale this week")
         parsed = apply_verdict(
             {"category": "actionable", "action": "keep", "utility": "correspondence", "confidence": 0.4},
             verdict,
-            "a sale this week",
+            "come by the shop",
         )
         assert verdict.sticks is True
         assert parsed["category"] == "promo"
         assert parsed["action"] == "archive"
+        assert verdict.reason == "phrase:sale"
+
+    def test_a_sale_in_the_body_alone_is_not_promo(self):
+        verdict = filter_verdict("Subject: Hello\n\na sale this week", subject="Hello")
+        assert verdict.category == "actionable"
+        assert verdict.sticks is False
+
+    def test_a_sale_subject_beats_a_digest_body(self):
+        verdict = filter_verdict("the weekly digest", subject="Sale")
+        assert verdict.category == "promo"
         assert verdict.reason == "phrase:sale"
 
     def test_a_digest_without_a_list_header_sticks(self):
@@ -292,29 +309,209 @@ class TestCategorize:
         assert result["category"] == "spam"
         assert result["action"] == "archive"
 
-    async def test_a_pin_is_not_scanned_or_overridden(self):
-        async def scan(_raw: bytes) -> dict[str, object]:
-            raise AssertionError("pinned mail is not scanned")
+    @staticmethod
+    def _pin(source: str, sender: str, subject: str, list_id: str = "") -> dict[str, object]:
+        del source, sender, subject, list_id
+        return {
+            "memory_action": "keep",
+            "memory_category": "personal",
+            "memory_confidence": 0.9,
+        }
 
-        def lookup(source: str, sender: str, subject: str, list_id: str = "") -> dict[str, object]:
-            del source, sender, subject, list_id
-            return {
-                "memory_action": "keep",
-                "memory_category": "personal",
-                "memory_confidence": 0.9,
-            }
+    async def test_a_pin_holds_when_the_scan_is_clean(self):
+        scanned: list[bytes] = []
+
+        async def scan(raw: bytes) -> dict[str, object]:
+            scanned.append(raw)
+            return {"action": "no action", "score": 0.4, "required_score": 15, "is_skipped": False}
 
         set_inbox_rspamd(scan)
-        set_inbox_memory(lookup)
+        set_inbox_memory(self._pin)
         try:
             result = await _categorize_thread("thr-1", [_msg("host critical", "disk full")])
         finally:
             set_inbox_rspamd(None)
             set_inbox_memory(None)
+        assert scanned, "a pinned sender is still scanned: the From address is the attacker's to write"
         assert result["category"] == "personal"
         assert result["action"] == "keep"
         assert result["band"] == "skip"
-        assert "classification_reason" not in result
+        assert "pin_ignored" not in result
+
+    async def test_a_spam_verdict_overrides_a_pin(self):
+        async def scan(_raw: bytes) -> dict[str, object]:
+            return _reject()
+
+        set_inbox_rspamd(scan)
+        set_inbox_memory(self._pin)
+        try:
+            result = await _categorize_thread("thr-1", [_msg("host critical", "disk full")])
+        finally:
+            set_inbox_rspamd(None)
+            set_inbox_memory(None)
+        assert result["category"] == "spam"
+        assert result["action"] == "archive"
+        assert result["pin_ignored"] == "rspamd:reject"
+
+    async def test_a_dmarc_failure_sends_a_pinned_sender_through_classification(self):
+        async def scan(_raw: bytes) -> dict[str, object]:
+            return {"action": "no action", "score": 0.4, "required_score": 15, "is_skipped": False}
+
+        set_inbox_rspamd(scan)
+        set_inbox_memory(self._pin)
+        try:
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"promo","summary":"a sale","suggested_action":"archive","action":"archive"}',
+            ) as model:
+                result = await _categorize_thread(
+                    "thr-1",
+                    [_msg("your account", "verify now", authentication_results="dmarc=fail (p=reject)")],
+                )
+        finally:
+            set_inbox_rspamd(None)
+            set_inbox_memory(None)
+        assert model.await_count >= 1, "the pin did not skip classification"
+        assert result["band"] != "skip"
+        assert result["pin_ignored"] == "dmarc:fail"
+        assert result["action"] != "keep"
+
+    async def test_a_display_name_cannot_borrow_a_pinned_address(self):
+        seen: list[str] = []
+
+        def lookup(source: str, sender: str, subject: str, list_id: str = "") -> dict[str, object]:
+            del source, subject, list_id
+            seen.append(sender)
+            return {}
+
+        set_inbox_memory(lookup)
+        try:
+            message = DataSourceResult(
+                title="hello",
+                content='From: "ops@example.com <ops@example.com>" <stranger@evil.example>\nSubject: hello\n\nhi',
+                source_url="mailto:stranger@evil.example",
+                source_name="Gmail",
+                confidence=0.8,
+                metadata={"provider_thread_id": "thr-1", "provider_message_id": "msg-1"},
+            )
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"personal","summary":"hi","suggested_action":"review","action":"keep"}',
+            ):
+                await _categorize_thread("thr-1", [message])
+        finally:
+            set_inbox_memory(None)
+        assert seen == ["stranger@evil.example"]
+
+    async def test_a_dmarc_fail_beside_a_pass_still_sets_the_pin_aside(self):
+        set_inbox_memory(self._pin)
+        try:
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"promo","summary":"a sale","suggested_action":"archive","action":"archive"}',
+            ):
+                result = await _categorize_thread(
+                    "thr-1",
+                    [_msg("your account", "verify now", authentication_results="dmarc=pass; dmarc=fail (p=reject)")],
+                )
+        finally:
+            set_inbox_memory(None)
+        assert result["pin_ignored"] == "dmarc:fail"
+
+    async def test_the_gate_reads_the_sender_message_not_a_later_one(self):
+        set_inbox_memory(self._pin)
+        try:
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"promo","summary":"a sale","suggested_action":"archive","action":"archive"}',
+            ):
+                # The first message names no sender and passed DMARC; the
+                # second carries the pinned address and failed it. The gate
+                # must read the second, not the thread's first non-empty header.
+                anonymous = DataSourceResult(
+                    title="your account",
+                    content="Subject: your account\n\nverify now",
+                    source_url="",
+                    source_name="Gmail",
+                    confidence=0.8,
+                    metadata={
+                        "provider_thread_id": "thr-1",
+                        "provider_message_id": "msg-0",
+                        "authentication_results": "dmarc=pass",
+                    },
+                )
+                result = await _categorize_thread(
+                    "thr-1",
+                    [
+                        anonymous,
+                        _msg("re: your account", "verify now", provider_message_id="msg-2", authentication_results="dmarc=fail (p=reject)"),
+                    ],
+                )
+        finally:
+            set_inbox_memory(None)
+        assert result["pin_ignored"] == "dmarc:fail"
+
+    async def test_a_from_line_in_the_body_is_not_the_sender(self):
+        seen: list[str] = []
+
+        def lookup(source: str, sender: str, subject: str, list_id: str = "") -> dict[str, object]:
+            del source, subject, list_id
+            seen.append(sender)
+            return {}
+
+        set_inbox_memory(lookup)
+        try:
+            message = DataSourceResult(
+                title="hello",
+                content="Subject: hello\n\nForwarded:\nFrom: ops@example.com\nhi",
+                source_url="",
+                source_name="Gmail",
+                confidence=0.8,
+                metadata={"provider_thread_id": "thr-1", "provider_message_id": "msg-1"},
+            )
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"personal","summary":"hi","suggested_action":"review","action":"keep"}',
+            ):
+                await _categorize_thread("thr-1", [message])
+        finally:
+            set_inbox_memory(None)
+        assert seen == [] or seen == [""], seen
+
+    async def test_a_configured_scan_that_does_not_answer_sets_the_pin_aside(self):
+        async def scan(_raw: bytes) -> dict[str, object]:
+            raise OSError("connection refused")
+
+        set_inbox_rspamd(scan)
+        set_inbox_memory(self._pin)
+        try:
+            with patch(
+                "core.utils.internal_llm.call_internal_llm",
+                new_callable=AsyncMock,
+                return_value='{"category":"promo","summary":"a sale","suggested_action":"archive","action":"archive"}',
+            ):
+                result = await _categorize_thread("thr-1", [_msg("host critical", "disk full")])
+        finally:
+            set_inbox_rspamd(None)
+            set_inbox_memory(None)
+        assert result["pin_ignored"] == "rspamd:unavailable"
+        assert result["band"] != "skip"
+
+    async def test_a_pin_holds_with_no_scanner_configured(self, monkeypatch):
+        monkeypatch.delenv("CERID_RSPAMD_URL", raising=False)
+        set_inbox_rspamd(None)
+        set_inbox_memory(self._pin)
+        try:
+            result = await _categorize_thread("thr-1", [_msg("host critical", "disk full")])
+        finally:
+            set_inbox_memory(None)
+        assert result["band"] == "skip"
+        assert "pin_ignored" not in result
 
     async def test_a_list_id_overrides_an_actionable_model(self):
         set_inbox_rspamd(None)
@@ -353,7 +550,7 @@ class TestCategorize:
             new_callable=AsyncMock,
             side_effect=_boom,
         ):
-            result = await _categorize_thread("thr-1", [_msg("Hello", "a sale this week")])
+            result = await _categorize_thread("thr-1", [_msg("Sale this week", "come by the shop")])
         assert result["category"] == "promo"
         assert result["action"] == "archive"
         assert result["band"] == "skip"

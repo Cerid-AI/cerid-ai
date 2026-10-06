@@ -37,7 +37,11 @@ not inside the Cerid backend:
 - Tools called for search: `list-mail-messages` (`GET /me/messages`) and
   `get-calendar-view` (`GET /me/calendarView`, scope `Calendars.Read`).
   Not `search-messages` / `list-calendar-events` — the first does not
-  exist and the second takes no date parameters. Mail scope is
+  exist and the second takes no date parameters. Inbox triage does not
+  search: it calls `list-mail-folder-messages` on the Inbox with
+  `isRead eq false` and `receivedDateTime` in the last 24 hours, selecting
+  `internetMessageHeaders`, `isRead`, `categories`, and `parentFolderId`.
+  Junk Email and Deleted Items are never read. Mail scope is
   `Mail.Read` until inbox actions are on, then `Mail.ReadWrite`.
   `Mail.Send` is never requested. Filing uses the sibling's category
   update and move tools; a reply draft uses its reply-draft tool. There
@@ -164,12 +168,14 @@ in `MS365_MCP_ALLOWED_SCOPES`. `Mail.Send` is not added.
 
 Filing sets the Outlook category, then moves. The actionable folder and
 category name is `Cerid/Action`. The other names are `Cerid/Urgent`,
-`Cerid/Personal`, `Cerid/Newsletter`, and `Cerid/Promo`. Junk and Deleted
-Items are not destinations.
+`Cerid/Personal`, `Cerid/Newsletter`, `Cerid/Promo`, and `Cerid/Spam`. A
+missing folder is created on the first apply, `Cerid` first and then the
+child. Junk and Deleted Items are not destinations.
 
 List results copy categories, and a well-known folder (`inbox`,
 `archive`, `drafts`, `sentitems`), onto the message when Graph includes
-them. A folder id that is a GUID is not copied. A correction is learned
+them. A folder id that is a GUID is not copied; the triage fetch is
+scoped to the Inbox and stamps `inbox` itself. A correction is learned
 only when that metadata is present, and the unread triage fetch often
 will not see a message you already archived.
 

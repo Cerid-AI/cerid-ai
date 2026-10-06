@@ -41,3 +41,49 @@ def recall_at_k(ranked_ids: list[str], relevant: set[str], k: int) -> float:
         return 0.0
     hits = sum(1 for rid in ranked_ids[:k] if rid in relevant)
     return hits / len(relevant)
+
+
+def _distribution(scores: list[float]) -> dict:
+    """Mean with its spread and a flag for a number that carries no information.
+
+    An empty list is "not measured", never a mean of zero.
+    """
+    if not scores:
+        return {"mean": None, "min": None, "max": None, "spread": None, "stdev": None,
+                "non_discriminating": False, "n": 0}
+    lo, hi = min(scores), max(scores)
+    mean = sum(scores) / len(scores)
+    return {
+        "mean": mean,
+        "min": lo,
+        "max": hi,
+        "spread": hi - lo,
+        "stdev": math.sqrt(sum((s - mean) ** 2 for s in scores) / len(scores)),
+        "non_discriminating": len(scores) > 1 and lo == hi,
+    }
+
+
+def retrieval_summary(rankings: list[tuple[list[str], set[str]]], k: int = 5) -> dict:
+    """NDCG@k and MRR over ``(ranked_ids, relevant_ids)`` per query.
+
+    Returns ``{"ndcg": distribution, "mrr": distribution, "per_query": [...]}``
+    where each per-query row carries the two scores and ``answer_rank`` (1-based
+    position of the first relevant id, ``None`` when it was not returned) so a
+    miss can be read as "ranked fourth behind its distractors" rather than as a
+    bare number.
+    """
+    if not rankings:
+        raise ValueError("retrieval_summary needs at least one ranking")
+    per_query = []
+    for ranked, relevant in rankings:
+        rank = next((i + 1 for i, rid in enumerate(ranked) if rid in relevant), None)
+        per_query.append({
+            "ndcg": ndcg_at_k(ranked, relevant, k),
+            "mrr": mrr(ranked, relevant),
+            "answer_rank": rank,
+        })
+    return {
+        "ndcg": _distribution([q["ndcg"] for q in per_query]),
+        "mrr": _distribution([q["mrr"] for q in per_query]),
+        "per_query": per_query,
+    }

@@ -88,6 +88,9 @@ interface UseChatSendOptions {
 
   // Chat send primitive
   send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[], degradedReason?: string) => void
+  /** Abort the in-flight stream. A regenerate calls it before replacing the
+   *  last turn so the aborted stream cannot write into the new answer. */
+  stop?: () => void
 
   // Current model (owned by ChatPanel, shared with toolbar/dialog/correction)
   selectedModel: string
@@ -147,6 +150,8 @@ interface UseChatSendReturn {
   lastAutoInjectCount: number
   resetAutoInjectCount: () => void
   handleSend: (content: string, baseMessages?: ChatMessage[]) => Promise<void>
+  /** Re-send the last user turn and replace its answer (D20-A). */
+  handleRegenerate: () => Promise<void>
 }
 
 /**
@@ -539,10 +544,29 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
   const resetAutoInjectCount = useCallback(() => setLastAutoInjectCount(0), [])
 
+  // D20-A: regenerate the last answer. The last user turn is re-sent through
+  // handleSend — the same payload assembly as a normal send, so it gets the
+  // same retrieval (the panel's kbResults for that text stand in via
+  // kbResultsQuery), private-mode gating and routing. The conversation is
+  // truncated to before that turn first so the answer is replaced, not
+  // appended, and the in-flight stream is cancelled so its abort cannot
+  // land on the new message.
+  const handleRegenerate = useCallback(async () => {
+    const convoId = options.activeId
+    const msgs = options.activeMessages ?? []
+    const lastUserIdx = msgs.findLastIndex((m) => m.role === "user")
+    if (!convoId || lastUserIdx < 0 || !options.replaceMessages) return
+    const lastUser = msgs[lastUserIdx]
+    options.stop?.()
+    const before = msgs.slice(0, lastUserIdx)
+    options.replaceMessages(convoId, before)
+    await handleSend(lastUser.content, before)
+  }, [options, handleSend])
+
   // Reset session injection history when conversation changes
   useEffect(() => {
     injectedHistoryRef.current = new Set()
   }, [options.activeId])
 
-  return { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend }
+  return { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend, handleRegenerate }
 }

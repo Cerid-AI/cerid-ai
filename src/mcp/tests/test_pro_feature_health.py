@@ -373,14 +373,16 @@ class TestManifestTierMatchesItsFlags:
 # --- Conditionally-mounted implementations -----------------------------------
 
 
-def test_sso_saml_degrades_when_multi_user_is_off(plugin_state, monkeypatch):
+def test_sso_saml_is_not_advertised_when_multi_user_is_off(plugin_state, monkeypatch):
     """`in_process` is a claim about a router that is MOUNTED.
 
-    app/routers/saml.py is registered only under CERID_MULTI_USER, so on a
-    single-user Enterprise install the flag was entitled, declared
+    app/routers/saml.py is registered only under CERID_MULTI_USER. On a
+    single-user Enterprise install the flag used to be entitled, declared
     implemented, and served by nothing — the residual-bucket substitution, one
-    flag wide. Caught live: the gate reported "none degraded" on a stack whose
-    /openapi.json contained no /auth/saml path at all.
+    flag wide — and this test pinned it as `degraded`. Since 2026-10-05 (D16-A)
+    the flag itself is off in single-user mode, so the install no longer
+    advertises SSO and nothing entitled goes unserved: not degraded, not
+    entitled, and the reason still names the switch that would change it.
     """
     import config.features as features
 
@@ -389,9 +391,11 @@ def test_sso_saml_degrades_when_multi_user_is_off(plugin_state, monkeypatch):
     health = plugin_state(loaded={}, failed={})
     report = health._pro_feature_health()
 
-    assert report["features"]["sso_saml"]["loaded"] is False
-    assert "CERID_MULTI_USER" in report["features"]["sso_saml"]["blocked_reason"]
-    assert "sso_saml" in report["degraded"]
+    entry = report["features"]["sso_saml"]
+    assert entry["entitled"] is False
+    assert entry["loaded"] is False
+    assert "CERID_MULTI_USER" in entry["blocked_reason"]
+    assert "sso_saml" not in report["degraded"]
 
 
 def test_sso_saml_is_healthy_when_multi_user_is_on(plugin_state, monkeypatch):

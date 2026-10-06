@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.routers.sdk import router as sdk_router
 
-FINANCE = {"X-Client-ID": "cerid-finance"}  # registry: allowed_domains ["finance"]
+FINANCE = {"X-Client-ID": "cerid-finance"}  # registry: finance, plus a record-typed read of inbox
 
 
 @pytest.fixture
@@ -64,3 +64,12 @@ def test_an_unrestricted_file_ingest_still_auto_categorizes(client):
         resp = client.post("/sdk/v1/ingest/file", json={"file_path": "/tmp/x.txt"})
     assert resp.status_code == 200, resp.text
     assert spy.call_args.kwargs["domain"] == ""
+
+
+def test_a_record_typed_read_grant_is_not_a_write_grant(client):
+    """cerid-finance may read mail_financial_card rows in inbox. It writes nothing there."""
+    with patch("app.routers.sdk.ingest_content") as spy:
+        resp = client.post("/sdk/v1/ingest", json={"content": "hello", "domain": "inbox"}, headers=FINANCE)
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["retrieval_reason"] == "consumer_domain_restricted"
+    spy.assert_not_called()

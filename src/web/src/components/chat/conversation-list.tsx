@@ -372,6 +372,23 @@ export function ConversationList({
                 </div>
                 {!editMode && (
                   <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto [@media(pointer:coarse)]:opacity-60 [@media(pointer:coarse)]:pointer-events-auto">
+                    {onRename && (
+                      // D20-A: the same inline editor the title's double-click
+                      // opens, reachable from the row's actions.
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Rename conversation"
+                        className="h-7 w-7"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setRenamingId(convo.id)
+                          setRenameValue(convo.title)
+                        }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    )}
                     {showArchived ? (
                       <Button
                         variant="ghost"

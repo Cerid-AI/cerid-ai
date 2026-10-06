@@ -18,6 +18,7 @@ from core.agents.inbox_actions import (
     MODEL_ACTIONS,
     PROVIDER_TOOLS,
     operator_outcome,
+    proposed_outcome,
 )
 
 _RULE_CONFIDENCE = 0.95
@@ -129,23 +130,15 @@ def _receipt(raw: object) -> dict:
     return {}
 
 
-def reconcile_threads(ledger: InboxLedger, threads: list) -> int:
-    """Learn from this pass's mailbox view. The pin applies on the next pass."""
-    learned = 0
-    for thread in threads:
-        observation = getattr(thread, "observation", None) or {}
-        if not isinstance(observation, dict) or not observation:
-            continue
-        source = str(getattr(thread, "source", "") or "")
-        thread_id = str(getattr(thread, "thread_id", "") or "")
-        sender = str(getattr(thread, "sender", "") or "").casefold().strip()
-        if not source or not thread_id or not sender:
-            continue
-        row = ledger.latest_applied(source, thread_id)
-        if row is None:
-            continue
-        decision_id = str(row.get("id") or "")
-        before = ledger.get_sender(source, sender)
+def _observed_correction(ledger: InboxLedger, source: str, thread_id: str, observation: dict) -> tuple[tuple[str, str], str] | None:
+    """The correction this pass shows for a thread, and the key that stops it counting twice.
+
+    An applied row is compared with what was filed. With nothing applied,
+    the open proposal is compared with the user's own move; every pass
+    re-proposes the thread under a new id, so that key is the thread.
+    """
+    row = ledger.latest_applied(source, thread_id)
+    if row is not None:
         outcome = operator_outcome(
             {
                 "provider": source,
@@ -156,8 +149,44 @@ def reconcile_threads(ledger: InboxLedger, threads: list) -> int:
             },
             observation,
         )
-        if outcome is None:
+        return None if outcome is None else (outcome, str(row.get("id") or ""))
+    proposal = ledger.open_proposal(source, thread_id)
+    if proposal is None:
+        return None
+    outcome = proposed_outcome(
+        {
+            "provider": source,
+            "source": source,
+            "action": proposal.get("action"),
+            "category": proposal.get("category"),
+        },
+        observation,
+    )
+    return None if outcome is None else (outcome, f"proposed:{source}:{thread_id}")
+
+
+def reconcile_threads(ledger: InboxLedger, threads: list) -> int:
+    """Learn from this pass's mailbox view. The pin applies on the next pass.
+
+    A filed decision the user reversed is a correction. So is the user's own
+    move against a proposal nothing applied, which is how the ledger learns
+    while the actions flag is off.
+    """
+    learned = 0
+    for thread in threads:
+        observation = getattr(thread, "observation", None) or {}
+        if not isinstance(observation, dict) or not observation:
             continue
+        source = str(getattr(thread, "source", "") or "")
+        thread_id = str(getattr(thread, "thread_id", "") or "")
+        sender = str(getattr(thread, "sender", "") or "").casefold().strip()
+        if not source or not thread_id or not sender:
+            continue
+        observed = _observed_correction(ledger, source, thread_id, observation)
+        if observed is None:
+            continue
+        outcome, decision_id = observed
+        before = ledger.get_sender(source, sender)
         action, category = outcome
         after = ledger.note_correction(
             source=source,

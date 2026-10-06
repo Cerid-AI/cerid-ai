@@ -142,3 +142,20 @@ class TestParseMessageDetail:
         assert detail["labels"] == "INBOX, CATEGORY_UPDATES"
         assert "dmarc=fail" in detail["authentication-results"]
         assert detail["body"] == "This week"
+
+
+def test_a_repeated_header_keeps_the_first_value_and_every_authentication_result():
+    head = (
+        "From: ops@example.com\n"
+        "Authentication-Results: mx.google.com; dmarc=fail (p=reject) header.from=example.com\n"
+        "Subject: your account\n"
+        "Authentication-Results: mx.evil.example; dmarc=pass header.from=example.com\n"
+        " continuation of the forged copy\n"
+        "From: stranger@evil.example\n"
+    )
+    d = parse_message_detail(head)
+    assert d["from"] == "ops@example.com"
+    assert d["authentication-results"].startswith("mx.google.com; dmarc=fail")
+    # every copy is kept, so the provider's fail survives a later forged pass
+    assert "mx.evil.example; dmarc=pass" in d["authentication-results"]
+    assert "dmarc=fail" in d["authentication-results"]

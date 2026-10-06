@@ -45,4 +45,4 @@ def test_registered_consumers_keep_their_declared_scope():
     """The fix must tighten only the fallback — registered consumers, including
     the GUI, keep exactly the scope the registry declares for them."""
     assert CONSUMER_REGISTRY["gui"]["allowed_domains"] is None
-    assert CONSUMER_REGISTRY["cerid-finance"]["allowed_domains"] == ["finance"]
+    assert CONSUMER_REGISTRY["cerid-finance"]["allowed_domains"] == ["finance", "inbox"]

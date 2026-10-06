@@ -6,9 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
+import config
 from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 
 logger = logging.getLogger("ai-companion.data_sources")
@@ -96,11 +100,49 @@ class DataSource(ABC):
 class DataSourceRegistry:
     """Registry of all available data sources."""
 
+    # Per-source (unix time, result count) of recent queries; bounded so a
+    # busy source cannot grow it past what source_health() ever reads.
+    _OUTCOME_HISTORY = 200
+
     def __init__(self) -> None:
         self._sources: dict[str, DataSource] = {}
+        self._outcomes: dict[str, deque[tuple[float, int]]] = {}
 
     def register(self, source: DataSource) -> None:
         self._sources[source.name] = source
+
+    def _record_outcome(self, name: str, result_count: int) -> None:
+        history = self._outcomes.setdefault(name, deque(maxlen=self._OUTCOME_HISTORY))
+        history.append((time.time(), result_count))
+
+    def source_health(self, name: str) -> dict[str, Any]:
+        """Did this source answer anything lately?
+
+        ``degraded`` once the last ``DATA_SOURCE_DEAD_CALLS`` calls inside
+        ``DATA_SOURCE_DEAD_WINDOW_S`` all returned zero results; ``unknown``
+        until it has been asked at all. Sources swallow their own failures
+        and return ``[]``, so this is the only signal that separates a dead
+        source from one that is merely quiet.
+        """
+        cutoff = time.time() - config.DATA_SOURCE_DEAD_WINDOW_S
+        recent = [(ts, n) for ts, n in self._outcomes.get(name, ()) if ts >= cutoff]
+        zero = sum(1 for _, n in recent if n == 0)
+        answered = [ts for ts, n in recent if n > 0]
+        if not recent:
+            status = "unknown"
+        elif zero == len(recent) and zero >= config.DATA_SOURCE_DEAD_CALLS:
+            status = "degraded"
+        else:
+            status = "healthy"
+        return {
+            "status": status,
+            "calls_in_window": len(recent),
+            "zero_result_calls": zero,
+            "last_results_at": (
+                datetime.fromtimestamp(max(answered), tz=timezone.utc).isoformat()
+                if answered else None
+            ),
+        }
 
     def get(self, name: str) -> DataSource | None:
         """Look up a registered source by name. Returns None if absent.
@@ -203,12 +245,15 @@ class DataSourceRegistry:
                     lambda _q=adapted: asyncio.wait_for(source.query(_q), timeout=timeout),
                 )
                 logger.info("Data source %s returned %d results", source.name, len(results))
+                self._record_outcome(source.name, len(results))
                 return results
             except CircuitOpenError:
                 logger.warning("Data source %s circuit OPEN — skipping (breaker tripped)", source.name)
+                self._record_outcome(source.name, 0)
                 return []
             except asyncio.TimeoutError:
                 logger.warning("Data source %s timed out after %.1fs", source.name, timeout)
+                self._record_outcome(source.name, 0)
                 return []
 
         tasks = [_guarded_query(s) for s in sources]
@@ -241,6 +286,7 @@ class DataSourceRegistry:
                     merged.append(r.to_dict())
             else:
                 logger.warning("Data source %s query failed: %s", sources[i].name, result_or_exc)
+                self._record_outcome(sources[i].name, 0)
         if weights:
             logger.debug("query_all: applied Custom Smart RAG weights to %d sources", len(weights))
         logger.info("query_all: merged %d results from %d sources", len(merged), len(sources))
@@ -251,7 +297,8 @@ class DataSourceRegistry:
         return [
             {"name": s.name, "description": s.description, "enabled": s.enabled,
              "configured": s.is_configured(), "requires_api_key": s.requires_api_key,
-             "api_key_env_var": s.api_key_env_var, "domains": s.domains}
+             "api_key_env_var": s.api_key_env_var, "domains": s.domains,
+             "health": self.source_health(s.name)}
             for s in self._sources.values()
         ]
 

@@ -19,9 +19,17 @@ from app.startup.invariants import probe_vector_space
 class _Collection:
     def __init__(self, docs: list[str], embeddings: list[list[float]]) -> None:
         self._docs, self._embs = docs, embeddings
+        self.offsets_read: list[int] = []
 
-    def get(self, limit: int, include: list[str]) -> dict:
-        return {"documents": self._docs[:limit], "embeddings": self._embs[:limit]}
+    def count(self) -> int:
+        return len(self._docs)
+
+    def get(self, limit: int, include: list[str], offset: int = 0) -> dict:
+        self.offsets_read.append(offset)
+        return {
+            "documents": self._docs[offset:offset + limit],
+            "embeddings": self._embs[offset:offset + limit],
+        }
 
 
 class _Client:
@@ -94,6 +102,108 @@ def test_either_list_collections_shape_is_probed(names_only: bool) -> None:
     "<unknown>", skip them all, and report "unverified" forever."""
     client = _Client({"domain_finance": _Collection(list(STORED), list(STORED.values()))}, names_only)
     assert probe_vector_space(client, _other_model)["status"] == "mismatch"
+
+
+def _collection_with_minority(total: int, out_of_space_at: list[int]) -> tuple[_Collection, dict[str, list[float]]]:
+    """``total`` chunks whose leading rows are all in-space; the rows at
+    ``out_of_space_at`` were produced by the other model."""
+    stored: dict[str, list[float]] = {}
+    for i in range(total):
+        stored[f"chunk{i}"] = [1.0, 0.0, 0.0] if i not in out_of_space_at else [0.0, 1.0, 0.0]
+    return _Collection(list(stored), list(stored.values())), stored
+
+
+def _serving(texts: list[str]) -> list[list[float]]:
+    return [[1.0, 0.0, 0.0] for _ in texts]  # the serving model's view of every chunk
+
+
+def test_a_minority_behind_in_space_leaders_is_seen_and_reported() -> None:
+    """Measured on the Studio 2026-10-06: the first three chunks of ``coding``
+    were in-space while 26% of the collection was not, and the probe said ok.
+    A spread sample has to see a 25% minority and name it with its fraction."""
+    col, _ = _collection_with_minority(20, [i for i in range(3, 20) if i % 3 == 2])
+    out = probe_vector_space(_Client({"domain_coding": col}), _serving)
+    assert out["status"] == "mismatch"
+    (m,) = out["mismatched"]
+    assert m["collection"] == "domain_coding"
+    assert m["out_of_space"] >= 1
+    assert m["fraction"] > 0.1
+    assert m["sampled"] == 12
+    # The median is still in-space here: the fraction rule is what fires.
+    assert m["median_self_similarity"] >= 0.9
+
+
+def test_the_sample_is_spread_over_the_whole_collection() -> None:
+    col, _ = _collection_with_minority(120, [])
+    probe_vector_space(_Client({"domain_mail": col}), _serving)
+    assert len(col.offsets_read) == 12
+    assert min(col.offsets_read) == 0
+    assert max(col.offsets_read) >= 100
+    assert col.offsets_read == sorted(col.offsets_read)
+
+
+def test_a_collection_smaller_than_the_sample_is_probed_whole() -> None:
+    col, _ = _collection_with_minority(5, [4])
+    out = probe_vector_space(_Client({"domain_notes": col}), _serving)
+    assert col.offsets_read == [0]
+    (m,) = out["mismatched"]
+    assert m["sampled"] == 5
+    assert m["out_of_space"] == 1
+    assert m["fraction"] == 0.2
+
+
+def test_a_few_strays_under_the_fraction_floor_stay_ok() -> None:
+    col, _ = _collection_with_minority(120, [57])  # one stray in 120, sampled or not
+    out = probe_vector_space(_Client({"domain_mail": col}), _serving)
+    assert out["status"] == "ok"
+    assert out["max_fraction"] <= 0.1
+
+
+def test_totals_are_reported_across_collections() -> None:
+    bad, _ = _collection_with_minority(5, [0, 1, 2, 3, 4])
+    good, _ = _collection_with_minority(5, [])
+    out = probe_vector_space(_Client({"domain_coding": bad, "domain_notes": good}), _serving)
+    assert out["status"] == "mismatch"
+    assert out["collections_checked"] == 2
+    assert out["sampled"] == 10
+    assert out["out_of_space"] == 5
+    assert out["max_fraction"] == 1.0
+    assert {c["collection"] for c in out["collections"]} == {"domain_coding", "domain_notes"}
+
+
+class TestTheSnapshotCarriesWhenItWasTaken:
+    """``/health`` serves the last probe result; a reader has to be able to tell a
+    fresh one from a boot-time result the embedder was down for."""
+
+    @staticmethod
+    def _run(monkeypatch, embed):
+        import app.deps as deps
+        import app.startup.invariants as inv
+        import core.utils.embeddings as embeddings
+
+        col, _ = _collection_with_minority(4, [])
+        monkeypatch.setattr(deps, "get_chroma", lambda: _Client({"domain_finance": col}))
+        monkeypatch.setattr(embeddings, "get_embedding_function", lambda: embed)
+        monkeypatch.setattr(inv, "_vector_space_snapshot", {"status": "pending"})
+        return inv.run_startup_vector_space_check(), inv.get_vector_space_snapshot()
+
+    def test_checked_at_is_an_iso_utc_timestamp(self, monkeypatch) -> None:
+        from datetime import datetime, timezone
+
+        result, snap = self._run(monkeypatch, _serving)
+        assert result["status"] == "ok"
+        assert snap["checked_at"] == result["checked_at"]
+        parsed = datetime.fromisoformat(result["checked_at"])
+        assert parsed.tzinfo is not None
+        assert abs((datetime.now(tz=timezone.utc) - parsed).total_seconds()) < 60
+
+    def test_an_embedder_failure_is_dated_too(self, monkeypatch) -> None:
+        def hung(texts: list[str]) -> list[list[float]]:
+            raise TimeoutError("ReadTimeout")
+
+        result, _ = self._run(monkeypatch, hung)
+        assert result["status"] == "unverified"
+        assert "checked_at" in result
 
 
 class TestHealthReportsAMismatchWithoutRestartLooping:

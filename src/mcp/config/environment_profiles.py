@@ -229,6 +229,9 @@ def profile_defaults(
         defaults["INTERNAL_LLM_PROVIDER"] = _local_provider(recommended_local_backend)
 
     if effective_profile == LOCAL_ONLY:
+        # Everything local includes the failure path: internal_llm's
+        # local-to-OpenRouter fallback re-sends the payload off-box.
+        defaults["ALLOW_CLOUD_EGRESS_WHEN_LOCAL"] = "false"
         # One permit on class A: a second concurrent call on a 5-10 tok/s slot
         # buys nothing and pushes both past their budgets.
         defaults["INTERNAL_LLM_MAX_CONCURRENCY"] = "1" if hardware_class == "A" else "2"

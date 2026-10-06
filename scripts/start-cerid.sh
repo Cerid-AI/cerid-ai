@@ -812,7 +812,7 @@ fi
 REQUIRED_NAMES=$(docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" config --format json 2>/dev/null \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(s["container_name"] for s in d.get("services",{}).values() if s.get("container_name")))' 2>/dev/null || true)
 # Fallback to the canonical set if config derivation is unavailable.
-[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web cerid-sso"
+[ -z "$REQUIRED_NAMES" ] && REQUIRED_NAMES="ai-companion-neo4j ai-companion-chroma ai-companion-redis ai-companion-mcp cerid-web cerid-sso cerid-rspamd"
 if ! detect_conflicts "$OUR_PROJECT" "$CERID_ROOT" $REQUIRED_NAMES; then
     if [ -n "$FORCE_FLAG" ]; then
         echo "[conflict] --force set — proceeding anyway (compose up may still fail)."

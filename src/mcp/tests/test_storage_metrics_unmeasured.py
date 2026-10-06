@@ -233,3 +233,35 @@ def test_unmeasured_stores_do_not_change_the_backpressure_verdict():
 
     above = _report(redis=_redis(900 * _MB), neo4j=_neo4j(nodes=5, store_error=unreachable))
     assert above["status"] == "critical"
+
+
+def test_neo4j_transaction_log_size_is_reported_beside_the_store(monkeypatch, tmp_path):
+    """Round 5 item 3: tx-log churn (8 x ~270 MB in five idle hours on
+    2026-10-06) is invisible when only the store is measured."""
+    data = tmp_path / "neo4j-data"
+    (data / "databases" / "neo4j").mkdir(parents=True)
+    (data / "databases" / "neo4j" / "neostore.nodestore.db").write_bytes(b"\0" * (3 * _MB))
+    (data / "transactions" / "neo4j").mkdir(parents=True)
+    (data / "transactions" / "neo4j" / "neostore.transaction.db.0").write_bytes(b"\0" * (5 * _MB))
+    (data / "transactions" / "neo4j" / "neostore.transaction.db.1").write_bytes(b"\0" * (2 * _MB))
+    monkeypatch.setenv("NEO4J_DATA_DIR", str(data))
+
+    report = _report(neo4j=_neo4j(nodes=7, store_error=_procedure_not_found()))
+
+    assert report["neo4j"]["disk_mb"] == 3.0
+    assert report["neo4j"]["tx_log_mb"] == 7.0
+    assert "tx_log_mb_reason" not in report["neo4j"]
+    # Retention, not corpus: the total still counts the store alone.
+    assert report["total_mb"] == 3.0
+
+
+def test_neo4j_transaction_log_is_null_when_the_directory_is_not_mounted(monkeypatch, tmp_path):
+    data = tmp_path / "neo4j-data"
+    (data / "databases" / "neo4j").mkdir(parents=True)
+    (data / "databases" / "neo4j" / "neostore.nodestore.db").write_bytes(b"\0" * (3 * _MB))
+    monkeypatch.setenv("NEO4J_DATA_DIR", str(data))
+
+    report = _report(neo4j=_neo4j(nodes=7, store_error=_procedure_not_found()))
+
+    assert report["neo4j"]["tx_log_mb"] is None
+    assert "transactions" in report["neo4j"]["tx_log_mb_reason"]

@@ -1,11 +1,11 @@
 {
   "fixture": "eval-fixture-coding-db-index.md",
   "expected": [
+    "B-tree",
     "GIN index",
-    "events table",
-    "audit-search"
+    "JSONB"
   ],
   "forbidden": [
-    "# database index decision — events table"
+    "# database index decision \u2014 events table"
   ]
 }

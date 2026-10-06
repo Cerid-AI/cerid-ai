@@ -105,13 +105,18 @@ _TICK = {  # tier -> (Core, Pro, Enterprise)
 }
 
 # Section-level footnotes for gates whose enforcement point diverges from what
-# the tier column implies. No per-flag note mechanism exists yet (none of the
-# sections currently need one — the Apple Connectors — Pro footnote was
-# removed once AF-043 shipped the server-side gate: `/ingest/structured` now
-# checks `_CONNECTOR_FEATURE_BY_SOURCE_KIND` and returns 402 for an
-# unentitled tier, in addition to the existing client-side lock). Add an
-# entry here if a section needs one again.
-_SECTION_FOOTNOTES: dict[str, str] = {}
+# the tier column implies. No per-flag note mechanism exists (the Apple
+# Connectors — Pro footnote was removed once AF-043 shipped the server-side
+# gate: `/ingest/structured` now checks `_CONNECTOR_FEATURE_BY_SOURCE_KIND` and
+# returns 402 for an unentitled tier, in addition to the client-side lock).
+_SECTION_FOOTNOTES: dict[str, str] = {
+    "Enterprise": (
+        "`sso_saml` is enabled only with `CERID_MULTI_USER=true`: the SAML router "
+        "is mounted only in multi-user mode, and the capability reports "
+        "`enabled: false` on a single-user Enterprise install "
+        "(`docs/ENTERPRISE_SSO_SAML.md`)."
+    ),
+}
 
 
 _PLANNED: frozenset = frozenset()

@@ -377,6 +377,7 @@ def test_refresh_invariants_loop_runs_immediately_then_sleeps(monkeypatch) -> No
         return {"healthy_invariants": True}
 
     monkeypatch.setattr(inv, "refresh_invariants_snapshot", fake_refresh)
+    monkeypatch.setattr(inv, "run_startup_vector_space_check", lambda: {"status": "ok"})
     monkeypatch.setattr(inv, "get_neo4j", lambda: MagicMock())
     monkeypatch.setattr(inv, "get_chroma", lambda: MagicMock())
     monkeypatch.setattr(inv, "get_redis", lambda: MagicMock())
@@ -404,6 +405,7 @@ def test_refresh_invariants_loop_skips_refresh_in_lightweight_mode(monkeypatch) 
     monkeypatch.setattr(
         inv, "refresh_invariants_snapshot", lambda c, r, n: calls.append(1),
     )
+    monkeypatch.setattr(inv, "run_startup_vector_space_check", lambda: {"status": "ok"})
     monkeypatch.setattr(inv, "get_neo4j", lambda: None)
     monkeypatch.setattr(inv, "get_chroma", lambda: MagicMock())
     monkeypatch.setattr(inv, "get_redis", lambda: MagicMock())
@@ -416,6 +418,80 @@ def test_refresh_invariants_loop_skips_refresh_in_lightweight_mode(monkeypatch) 
     asyncio.run(inv.refresh_invariants_loop())
 
     assert calls == []
+
+
+def test_refresh_invariants_loop_reruns_the_vector_space_probe(monkeypatch) -> None:
+    """The boot probe alone left /health serving a stale verdict for the life of
+    the process (measured 2026-10-06: ``unverified`` from a hung embedder, and
+    ``ok`` over an index a full walk found 14% out of space). Every refresh
+    re-probes, in lightweight mode too — the vector space has nothing to do
+    with Neo4j."""
+    import asyncio
+
+    import app.startup.invariants as inv
+
+    probes: list[int] = []
+
+    monkeypatch.setattr(inv, "refresh_invariants_snapshot", lambda c, r, n: {"healthy_invariants": True})
+    monkeypatch.setattr(inv, "run_startup_vector_space_check", lambda: probes.append(1))
+    monkeypatch.setattr(inv, "get_neo4j", lambda: None)
+    monkeypatch.setattr(inv, "get_chroma", lambda: MagicMock())
+    monkeypatch.setattr(inv, "get_redis", lambda: MagicMock())
+
+    async def fake_sleep(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(inv.asyncio, "sleep", fake_sleep)
+
+    asyncio.run(inv.refresh_invariants_loop())
+
+    assert probes == [1]
+
+
+def test_refresh_heals_a_boot_time_unverified_vector_space(monkeypatch) -> None:
+    """The embedder was hung at boot; it recovered minutes later. The next
+    refresh replaces the boot verdict rather than leaving it until a restart."""
+    import asyncio
+
+    import app.deps as deps
+    import app.startup.invariants as inv
+    import core.utils.embeddings as embeddings
+
+    class _Col:
+        def count(self) -> int:
+            return 1
+
+        def get(self, limit: int, include: list[str], offset: int = 0) -> dict:
+            return {"documents": ["alpha"], "embeddings": [[1.0, 0.0]]}
+
+    class _Chroma:
+        def list_collections(self) -> list[str]:
+            return ["domain_finance"]
+
+        def get_collection(self, **kwargs: str) -> _Col:
+            return _Col()
+
+    monkeypatch.setattr(
+        inv, "_vector_space_snapshot",
+        {"status": "unverified", "reason": "Quenchforge embed failed (ReadTimeout)"},
+    )
+    monkeypatch.setattr(inv, "refresh_invariants_snapshot", lambda c, r, n: {"healthy_invariants": True})
+    monkeypatch.setattr(inv, "get_neo4j", lambda: MagicMock())
+    monkeypatch.setattr(inv, "get_chroma", lambda: MagicMock())
+    monkeypatch.setattr(inv, "get_redis", lambda: MagicMock())
+    monkeypatch.setattr(deps, "get_chroma", lambda: _Chroma())
+    monkeypatch.setattr(embeddings, "get_embedding_function", lambda: (lambda texts: [[1.0, 0.0] for _ in texts]))
+
+    async def fake_sleep(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(inv.asyncio, "sleep", fake_sleep)
+
+    asyncio.run(inv.refresh_invariants_loop())
+
+    snap = inv.get_vector_space_snapshot()
+    assert snap["status"] == "ok"
+    assert "checked_at" in snap
 
 
 def test_main_lifespan_wires_invariants_refresh_loop() -> None:
