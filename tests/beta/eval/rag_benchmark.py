@@ -53,10 +53,10 @@ REFERENCE = {
 }
 NDCG_5_THRESHOLD = 0.80
 MRR_THRESHOLD = 0.70
-# D28-A (2026-10-06, live mean 0.52/0.53, min 0.20): mean floor raised from 0.15; revisit after the grounding fix.
-FAITHFULNESS_THRESHOLD = 0.4
-# D28-A: any one scored answer below this fails the gate (the 0.20 answer used 2023 401(k) figures over the KB's 2025).
-FAITHFULNESS_ANSWER_THRESHOLD = 0.3
+# D30 (2026-10-07): set against grounded answers. Three live runs: mean 0.85 / 0.94 / 0.80, lowest answer 0.60 / 0.85 / 0.60.
+FAITHFULNESS_THRESHOLD = 0.7
+# D30: any one scored answer below this fails the gate, whatever the mean.
+FAITHFULNESS_ANSWER_THRESHOLD = 0.5
 RELEVANCY_THRESHOLD = 0.6
 
 
@@ -199,7 +199,7 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
     a run in which the judge scored nothing fails as UNMEASURABLE rather than
     as a quality miss. Otherwise faithfulness fails on a mean below
     ``FAITHFULNESS_THRESHOLD`` or on any one scored answer below
-    ``FAITHFULNESS_ANSWER_THRESHOLD`` (``assert_faithfulness_floors``, D28-A).
+    ``FAITHFULNESS_ANSWER_THRESHOLD`` (``assert_faithfulness_floors``, D30).
     """
     records: list[dict] = []
     faithfulness: list[JudgeResult] = []
