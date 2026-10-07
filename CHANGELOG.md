@@ -4,7 +4,11 @@ All notable changes to cerid-ai are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The pre-push gates check the real public mirror from any worktree.** `scripts/sync-repos.py` resolved the mirror as the checkout's sibling, so a worktree under `~/Develop/.worktrees/` found an empty `cerid-ai` directory, and the public-file-list gate walked no files and printed OK while the mirror carried three internal-only files. The resolver also looks beside the main checkout, and the gate treats a directory that is not a git checkout as absent and says so. The Apple Mail configured-state test no longer fails in a checkout where the Swift helpers are built, and the desktop release runbook pushes the tag with `scripts/safe-push.sh` from a clean worktree.
+
 ### Security
+- Dev-dependency advisories published 2026-10-06: `@modelcontextprotocol/sdk` 1.30.0 → 1.32.1 in the web app (via `shadcn`, CVE-2026-104850) and `source-map-js` 1.2.1 → 1.2.2 in the browser extension and the Hub portal (via `postcss`, CVE-2026-93749), lockfile-only. `sprintf-js` (CVE-2026-97058) and `braces` (CVE-2026-93687) have no patched release yet; neither ships in a production bundle.
 - `sharp` 0.35.4 → 0.35.5 in the web app (its `overrides` pin), for CVE-2026-96889 in its bundled librsvg; the production audit is clean again.
 
 ### Changed
