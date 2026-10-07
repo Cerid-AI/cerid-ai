@@ -39,6 +39,7 @@ from conftest import (
     seed_content,
     wait_for_indexed,
 )
+from grounding import grounded_turn
 from metrics import retrieval_summary
 
 SEED_CASES = load_jsonl("benchmark_seed.jsonl")
@@ -208,10 +209,14 @@ async def test_ragas_quality(aclient: httpx.AsyncClient, seeded_benchmark: list[
     for q in seeded_benchmark[:5]:
         # Get RAG context (budget-degraded envelopes retried — see _query_full_rag)
         rag_data = await _query_full_rag(aclient, {"query": q["query"], "top_k": 5})
-        contexts = [r["content"] for r in rag_data.get("sources", rag_data.get("results", []))]
+        sources = rag_data.get("sources", rag_data.get("results", []))
 
-        # Generate answer via chat
-        answer = await generate_chat_answer(aclient, q["query"])
+        # Answer the way the web client does: the injected chunks ride in a
+        # system message, and the judge reads exactly what the model was shown.
+        system, contexts = grounded_turn(sources)
+        if not contexts:
+            contexts = [r["content"] for r in sources]
+        answer = await generate_chat_answer(aclient, q["query"], system=system)
         assert answer, f"Empty answer for: {q['query']}"
 
         if is_abstention(answer):

@@ -190,11 +190,18 @@ async def _stream_verify_with_retry(
     return {"claims": claims, "summary": summary, "errors": errors}
 
 
-async def generate_chat_answer(client: httpx.AsyncClient, query: str, model: str = "auto") -> str:
-    """Call POST /chat/stream with SSE streaming, return full response text."""
+async def generate_chat_answer(
+    client: httpx.AsyncClient, query: str, model: str = "auto", system: str | None = None,
+) -> str:
+    """Call POST /chat/stream with SSE streaming, return full response text.
+
+    ``/chat/stream`` retrieves nothing: pass the grounded system message
+    (``grounding.grounded_turn``) to answer the way the web client does."""
+    messages = [{"role": "system", "content": system}] if system else []
+    messages.append({"role": "user", "content": query})
     body = {
         "model": model,
-        "messages": [{"role": "user", "content": query}],
+        "messages": messages,
         "stream": True,
     }
     text_parts: list[str] = []
