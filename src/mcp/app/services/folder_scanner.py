@@ -500,6 +500,7 @@ async def scan_folder(
                             sub_category=sub_cat,
                             client_source="folder_scanner",
                             extra_metadata=folder_meta or None,
+                            on_forgotten="skip",
                         )
                     except (OSError, ValueError) as _ingest_exc:
                         # AF-022: ingest_file failed (e.g. Path.resolve on a
@@ -548,6 +549,7 @@ async def scan_folder(
                             domain or "general",
                             fallback_meta,
                             pre_chunked=pre_chunked,
+                            on_forgotten="skip",
                         )
                         # AF-022: recurse into email attachments too, mirroring
                         # ingest_file's HAS_ATTACHMENT wiring (ingestion.py

@@ -372,7 +372,7 @@ async def poll_email() -> dict[str, Any]:
             if msg_data["attachments"]:
                 metadata["email_attachments"] = json.dumps(msg_data["attachments"])
 
-            ingest_content(content, domain="email", metadata=metadata)
+            ingest_content(content, domain="email", metadata=metadata, on_forgotten="skip")
             await _mark_uid_processed(uid)
             ingested += 1
 

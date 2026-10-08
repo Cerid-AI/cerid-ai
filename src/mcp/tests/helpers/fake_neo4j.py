@@ -19,6 +19,7 @@ deliberately covers only the shapes these lanes issue:
 * retention inline delete (``app/services/retention.py``) —
   ``MATCH ... WITH ... DETACH DELETE a RETURN chunk_ids_json, domain``
 * ``set_archived`` (Phase-1 hide lane) — ``MATCH ... SET a.archived=true, ...``
+* ``clear_archived`` (forget restore) — ``... WHERE a.archived_reason = $reason REMOVE ...``
 * active-learning join (``core/agents/query_agent.py``) —
   ``UNWIND $ids ... RETURN id, weight, flag, archived``
 * divergence sample (``app/startup/invariants.py``) —
@@ -149,12 +150,25 @@ class _FakeNeo4jDriver:
             ]
             return _FakeResult(rows)
 
+        # 3a. Forget restore (clear_archived): only an archive carrying the reason.
+        if "REMOVE a.archived," in q and "a.archived_reason = $reason" in q:
+            n = self.nodes.get(params.get("id"))
+            if n is None or n.get("archived_reason") != params.get("reason"):
+                return _FakeResult([])
+            for prop in ("archived", "archived_at", "archived_reason"):
+                n.pop(prop, None)
+            return _FakeResult([{"id": n["id"]}])
+
         # 3. Soft-delete / quarantine hide (Phase-1 set_archived).
         if "SET" in q and "archived" in q:
             aid = params.get("aid") or params.get("id")
             n = self.nodes.get(aid)
             if n is None:
                 return _FakeResult([])
+            if "coalesce(a.archived, false) = false" in q and n.get("archived"):
+                return _FakeResult([])  # only_if_visible: already archived
+            if "REMOVE a.archived_reason" in q:
+                n.pop("archived_reason", None)
             n["archived"] = True
             n["archived_at"] = params.get("archived_at")
             extra = params.get("extra")

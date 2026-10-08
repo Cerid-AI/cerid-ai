@@ -39,7 +39,8 @@ class _Recorder:
 
     def delete(self, url, headers=None, **kwargs):
         self.deletes.append((url, dict(headers or {})))
-        outcome = next((v for k, v in self.statuses.items() if url.endswith(k)), 200)
+        path = httpx.URL(url).path
+        outcome = next((v for k, v in self.statuses.items() if path.endswith(k)), 200)
         if isinstance(outcome, Exception):
             raise outcome
         return httpx.Response(outcome, request=httpx.Request("DELETE", url))
@@ -65,7 +66,7 @@ def test_deletes_each_kind_on_its_real_route_with_the_client_headers(pytester, m
     result.assert_outcomes(passed=1)
     assert [url for url, _ in recorder.deletes] == [
         f"{BASE}/admin/artifacts/art-1",
-        f"{BASE}/user-state/conversations/conv-1",
+        f"{BASE}/user-state/conversations/conv-1?permanent=true",
     ]
     for _, headers in recorder.deletes:
         assert headers.get("X-API-Key") == API_KEY

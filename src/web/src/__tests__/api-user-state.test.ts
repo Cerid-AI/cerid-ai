@@ -9,6 +9,7 @@ vi.stubEnv("VITE_CERID_API_KEY", "")
 const {
   fetchUserState, fetchSyncedConversations, syncConversation,
   syncConversationsBulk, deleteConversationSync, syncPreferences,
+  fetchForgottenConversations, ConversationGoneError,
 } = await import("@/lib/api")
 
 function mockFetch(body: unknown, status = 200) {
@@ -103,6 +104,51 @@ describe("syncConversation", () => {
     const conv = { id: "c1", title: "Test", messages: [], createdAt: 1000, updatedAt: 2000, model: "gpt-4" }
 
     await expect(syncConversation(conv as never)).rejects.toThrow()
+  })
+})
+
+describe("syncConversation on a forgotten conversation", () => {
+  it("throws ConversationGoneError carrying the id on 410", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "conversation forgotten" }, 410))
+    const conv = { id: "c-gone", title: "T", messages: [], createdAt: 1, updatedAt: 2, model: "m" }
+
+    const err = await syncConversation(conv as never).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ConversationGoneError)
+    expect((err as InstanceType<typeof ConversationGoneError>).id).toBe("c-gone")
+  })
+
+  it("does not treat other failures as gone", async () => {
+    vi.stubGlobal("fetch", mockFetch({ message: "boom" }, 500))
+    const conv = { id: "c1", title: "T", messages: [], createdAt: 1, updatedAt: 2, model: "m" }
+
+    const err = await syncConversation(conv as never).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ConversationGoneError)
+  })
+})
+
+describe("fetchForgottenConversations", () => {
+  it("GETs the feed without a cursor", async () => {
+    const feed = { items: [{ kind: "conversation", id: "c1", state: "trashed", at: "a", forget_id: "fg_1" }], cursor: "a" }
+    vi.stubGlobal("fetch", mockFetch(feed))
+
+    expect(await fetchForgottenConversations()).toEqual(feed)
+    expect(fetch).toHaveBeenCalledWith("http://test-mcp:8888/user-state/forgotten", expect.anything())
+  })
+
+  it("passes the cursor url-encoded", async () => {
+    vi.stubGlobal("fetch", mockFetch({ items: [], cursor: null }))
+
+    await fetchForgottenConversations("2026-10-07T10:00:00+00:00")
+    expect(fetch).toHaveBeenCalledWith(
+      "http://test-mcp:8888/user-state/forgotten?since=2026-10-07T10%3A00%3A00%2B00%3A00",
+      expect.anything(),
+    )
+  })
+
+  it("rejects on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", mockFetch({ message: "boom" }, 500))
+    await expect(fetchForgottenConversations()).rejects.toThrow()
   })
 })
 

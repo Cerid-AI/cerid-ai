@@ -663,6 +663,40 @@ async def _run_tombstone_purge() -> None:
         logger.error("Scheduled tombstone purge failed: %s", e)
 
 
+def _forget_maintenance() -> tuple[list[str], list[str]]:
+    """Each step runs even when an earlier one fails, so a bad tombstone log
+    cannot hold back the trash auto-empty or the remote forgets."""
+    from app.services.forget import engine
+    from app.sync import tombstones
+
+    steps = [
+        ("migrated", lambda: tombstones.migrate_tombstones_to_registry(sync_dir=config.SYNC_DIR)),
+        ("applied", engine.apply_remote),
+    ]
+    if config.FORGET_TRASH_DAYS > 0:
+        steps.append(("emptied", lambda: len(engine.empty_trash(older_than_days=config.FORGET_TRASH_DAYS))))
+    done: list[str] = []
+    errors: list[str] = []
+    for name, step in steps:
+        try:
+            done.append(f"{name} {step()}")
+        except Exception as e:
+            log_swallowed_error("app.scheduler", e, context={"step": name})
+            errors.append(f"{name}: {e}")
+    return done, errors
+
+
+async def _run_forget_maintenance() -> None:
+    """Migrate legacy tombstones, apply forgets recorded on other machines (and
+    retry hides that failed at trash time), and auto-empty the trash past
+    FORGET_TRASH_DAYS."""
+    start = time.time()
+    done, errors = await asyncio.to_thread(_forget_maintenance)
+    detail = "; ".join(done + errors)
+    _log_execution("forget_maintenance", "error" if errors else "success", time.time() - start, detail)
+    logger.info("Scheduled forget maintenance: %s", detail)
+
+
 def _load_watched_folder_records() -> list[dict[str, Any]]:
     """Snapshot the watched-folders Redis store. Returns [] when the store is
     empty or unreachable so the scheduled scan can fall back to the legacy
@@ -2458,6 +2492,20 @@ def start_scheduler() -> AsyncIOScheduler:
         name="Weekly tombstone purge",
         replace_existing=True,
     )
+
+    if config.SYNC_DIR:
+        # An interval, plus a run a minute after startup: a desktop asleep at any
+        # fixed hour would otherwise never apply remote forgets or empty its trash.
+        _scheduler.add_job(
+            _run_forget_maintenance,
+            "interval",
+            minutes=15,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+            id="forget_maintenance",
+            name="Forget maintenance (remote forgets, trash auto-empty)",
+            replace_existing=True,
+            max_instances=1,
+        )
 
     # Weekly auto-adoption of the latest in-family model per role from the
     # OpenRouter catalog. Gated by MODEL_AUTO_UPDATE_ENABLED (default on).

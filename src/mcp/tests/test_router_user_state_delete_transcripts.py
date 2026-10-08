@@ -1,12 +1,13 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""Deleting a conversation deletes the transcript artifacts it produced.
+"""Forgetting a conversation hides, then deletes, the transcript artifacts it produced.
 
 Every chat turn is ingested as its own artifact in the ``conversations``
 domain (``filename=chat_{cid[:8]}_{ts}``, ``conversation_id`` on each chunk).
-``DELETE /user-state/conversations/{id}`` used to unlink only the sync file,
-leaving those turns retrievable. It now goes through the content lifecycle:
+``DELETE /user-state/conversations/{id}`` goes through the forget engine: by
+default it moves the conversation to Trash, archiving its turns so retrieval
+skips them; ``?permanent=true`` purges them through the content lifecycle:
 Neo4j node, Chroma rows (parents included), HyPE questions, lexical postings
 and a tombstone, idempotent when the artifacts are already gone.
 
@@ -28,6 +29,7 @@ from app.routers.user_state import router
 from app.sync.user_state import list_conversation_ids
 from core.retrieval import bm25, sparse_index
 from tests.helpers.fake_neo4j import _FakeNeo4jDriver
+from tests.helpers.forget import isolate_forget
 from tests.test_artifact_row_removal import _seed, _seed_hype, _Store
 
 CONV = "conv-abcdef0123"
@@ -64,7 +66,8 @@ def neo4j() -> _FakeNeo4jDriver:
 
 
 @pytest.fixture
-def client(tmp_path: Path, store: _Store, neo4j: _FakeNeo4jDriver, lexical) -> TestClient:
+def client(tmp_path: Path, store: _Store, neo4j: _FakeNeo4jDriver, lexical, monkeypatch) -> TestClient:
+    isolate_forget(monkeypatch, tmp_path)
     app = FastAPI()
     app.include_router(router)
     redis = MagicMock()
@@ -103,17 +106,43 @@ def _rows(col: Any, aid: str) -> list[str]:
     return col.get(where={"artifact_id": aid})["ids"]
 
 
-def test_delete_removes_every_transcript_artifact_of_the_conversation(
+def _purge(client: TestClient):
+    return client.delete(f"/user-state/conversations/{CONV}", params={"permanent": "true"})
+
+
+def test_delete_moves_to_trash_and_archives_only_this_conversations_turns(
+    client: TestClient, store: _Store, neo4j: _FakeNeo4jDriver, tmp_path: Path,
+):
+    children = _seed_conversation(store, neo4j)
+    col, _hype = _collections(store)
+    client.post("/user-state/conversations", json={"id": CONV, "title": "Figures"})
+
+    resp = client.delete(f"/user-state/conversations/{CONV}")
+
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "trashed"
+    assert client.get("/user-state/conversations").json() == []
+    # Trash is restorable: nothing is erased yet, the turns are archived.
+    assert list_conversation_ids(str(tmp_path)) == [CONV]
+    for aid in (TURN_A, TURN_B):
+        assert neo4j.nodes[aid]["archived"] is True
+        assert neo4j.nodes[aid]["archived_reason"] == f"forget:{resp.json()['forget_id']}"
+        assert set(children[aid]) < set(_rows(col, aid))
+    for aid in (MEMORY, OTHER_TURN):
+        assert neo4j.nodes[aid]["archived"] is False
+
+
+def test_permanent_delete_removes_every_transcript_artifact_of_the_conversation(
     client: TestClient, store: _Store, neo4j: _FakeNeo4jDriver, lexical, tmp_path: Path,
 ):
     children = _seed_conversation(store, neo4j)
     col, hype = _collections(store)
     client.post("/user-state/conversations", json={"id": CONV, "title": "Figures"})
 
-    resp = client.delete(f"/user-state/conversations/{CONV}")
+    resp = _purge(client)
 
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": CONV}
+    assert resp.json()["deleted"] == CONV and resp.json()["state"] == "purged"
     assert list_conversation_ids(str(tmp_path)) == []
 
     for aid in (TURN_A, TURN_B):
@@ -142,20 +171,21 @@ def test_second_delete_is_not_an_error(
 ):
     _seed_conversation(store, neo4j)
     client.post("/user-state/conversations", json={"id": CONV, "title": "Figures"})
-    assert client.delete(f"/user-state/conversations/{CONV}").status_code == 200
+    assert _purge(client).status_code == 200
 
-    resp = client.delete(f"/user-state/conversations/{CONV}")
+    resp = _purge(client)
 
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": CONV}
+    assert resp.json()["state"] == "purged"
     assert TURN_A not in neo4j.nodes and TURN_B not in neo4j.nodes
     assert OTHER_TURN in neo4j.nodes
 
 
-def test_delete_of_a_conversation_that_was_never_ingested(client: TestClient, store: _Store):
+def test_delete_of_a_conversation_that_was_never_ingested(client: TestClient, store: _Store, tmp_path: Path):
     client.post("/user-state/conversations", json={"id": CONV, "title": "Never sent"})
 
-    resp = client.delete(f"/user-state/conversations/{CONV}")
+    resp = _purge(client)
 
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": CONV}
+    assert resp.json()["state"] == "purged"
+    assert list_conversation_ids(str(tmp_path)) == []

@@ -24,6 +24,9 @@ from app.sync._helpers import (
     _iter_jsonl,
     _v2_collections_base,
 )
+from core.forget import registry as forget_registry
+from core.utils.swallowed import log_swallowed_error
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
 
@@ -50,6 +53,46 @@ def record_tombstone(
     with open(log_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, default=str) + "\n")
     logger.info("Tombstone recorded for artifact %s", artifact_id[:8])
+
+    if not config.SYNC_DIR:
+        return
+    try:
+        forget_registry.get_registry().append([forget_registry.Entry(
+            forget_registry.new_forget_id(), forget_registry.Subject("artifact", artifact_id), "purged",
+            utcnow_iso(), config.MACHINE_ID, "content_lifecycle",
+        )])
+    except Exception as exc:  # noqa: BLE001 — the tombstone log above is still written
+        log_swallowed_error("app.sync.tombstones.registry", exc)
+
+
+def migrate_tombstones_to_registry(sync_dir: str | None = None) -> int:
+    """Record every legacy tombstone as a purged artifact in the forget registry.
+
+    Idempotent: artifacts already purged in the registry are skipped. Tombstones
+    expire after TOMBSTONE_TTL_DAYS; registry entries do not, so this closes the
+    window in which a long-offline machine could re-import a deleted artifact.
+    """
+    reg = forget_registry.get_registry()
+    sources = [config.TOMBSTONE_LOG_PATH]
+    sync_dir = sync_dir or _default_sync_dir()
+    if sync_dir:
+        sources.append(os.path.join(sync_dir, NEO4J_SUBDIR, TOMBSTONES_JSONL))
+    new: list[forget_registry.Entry] = []
+    seen: set[str] = set()
+    for source in sources:
+        for row in _iter_jsonl(source):
+            aid = str(row.get("artifact_id") or "")
+            if not aid or aid in seen or reg.state_of("artifact", aid) == "purged":
+                continue
+            seen.add(aid)
+            new.append(forget_registry.Entry(
+                forget_registry.new_forget_id(), forget_registry.Subject("artifact", aid), "purged",
+                str(row.get("deleted_at") or utcnow_iso()), str(row.get("machine_id") or config.MACHINE_ID),
+                "tombstone_migration",
+            ))
+    if new:
+        reg.append(new)
+    return len(new)
 
 
 def export_tombstones(sync_dir: str | None = None) -> dict[str, Any]:

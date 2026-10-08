@@ -8,6 +8,8 @@ vi.mock("@/lib/api", () => ({
   syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
+  fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
+  ConversationGoneError: class ConversationGoneError extends Error { id = "" },
 }))
 
 import { renderHook, act } from "@testing-library/react"

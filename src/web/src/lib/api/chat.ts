@@ -306,12 +306,43 @@ export async function fetchSyncedConversations(): Promise<Conversation[]> {
   return data.conversations ?? []
 }
 
+/** The server answered 410: this conversation was forgotten (trashed or
+ *  purged) and must be dropped locally, never pushed again. */
+export class ConversationGoneError extends Error {
+  id: string
+  constructor(id: string) {
+    super(`Conversation ${id} was forgotten on the server`)
+    this.name = "ConversationGoneError"
+    this.id = id
+  }
+}
+
+export interface ForgottenItem {
+  kind: "conversation"
+  id: string
+  state: "trashed" | "restored" | "purged" | "readded"
+  at: string
+  forget_id: string
+}
+
+/** Latest forget state per conversation changed after `since`, oldest first.
+ *  `cursor` is the value to pass as `since` next time. */
+export async function fetchForgottenConversations(
+  since?: string,
+): Promise<{ items: ForgottenItem[]; cursor: string | null }> {
+  const qs = since ? `?since=${encodeURIComponent(since)}` : ""
+  const res = await fetch(`${MCP_BASE}/user-state/forgotten${qs}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch forgotten conversations"))
+  return res.json()
+}
+
 export async function syncConversation(conversation: Conversation): Promise<void> {
   const res = await fetch(`${MCP_BASE}/user-state/conversations`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(conversation),
   })
+  if (res.status === 410) throw new ConversationGoneError(conversation.id)
   // Reject on a non-2xx like deleteConversationSync's check below — a swallowed
   // failure here is how a conversation the caller believes is synced silently
   // never reaches the server (E1 CR-092).

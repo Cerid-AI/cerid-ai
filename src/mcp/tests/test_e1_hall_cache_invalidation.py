@@ -11,13 +11,18 @@ deletion for its 7-day TTL. RED-then-GREEN.
 """
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 
 class _FakeRedis:
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
 
-    def delete(self, key):
-        return 1 if self.store.pop(key, None) is not None else 0
+    def delete(self, *keys):
+        return sum(1 for key in keys if self.store.pop(key, None) is not None)
+
+    def zrem(self, name, *members):
+        return 0
 
 
 def test_delete_hallucination_report_removes_key():
@@ -52,20 +57,51 @@ def test_session_wipe_clears_hall_cache():
     assert key not in fake.store
 
 
-def test_conversation_delete_clears_hall_cache(monkeypatch):
+def test_permanent_conversation_delete_clears_hall_cache(monkeypatch, tmp_path):
+    """A plain DELETE now moves the conversation to Trash (restorable), so the
+    report goes when the forget is purged: here, ``?permanent=true``."""
     import app.routers.user_state as us
     from core.agents.hallucination import REDIS_HALLUCINATION_PREFIX
+    from tests.helpers.forget import isolate_forget
 
     fake = _FakeRedis()
     key = f"{REDIS_HALLUCINATION_PREFIX}cid-3"
     fake.store[key] = '{"claims": ["secret"]}'
 
-    monkeypatch.setattr(us, "_sync_dir", lambda: "/tmp/sync")
-    monkeypatch.setattr(us, "delete_conversation", lambda sd, cid: None)
-    monkeypatch.setattr(us, "remove_conversation_transcripts", lambda cid: [])
+    isolate_forget(monkeypatch, tmp_path)
+    monkeypatch.setattr(us, "_sync_dir", lambda: str(tmp_path))
+    monkeypatch.setattr("app.services.content_lifecycle.remove_conversation_transcripts", lambda cid: [])
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
+    monkeypatch.setattr("app.deps.get_neo4j", lambda: MagicMock())
 
-    result = us.remove_conversation("cid-3")
+    result = us.remove_conversation("cid-3", permanent=True)
 
-    assert result == {"deleted": "cid-3"}
+    assert result["deleted"] == "cid-3" and result["state"] == "purged"
     assert key not in fake.store
+
+
+def test_trashed_conversation_hall_report_is_unreachable_until_restored(monkeypatch, tmp_path):
+    """A plain DELETE keeps hall:{cid} for a possible restore, but no read
+    returns it while the conversation is in the trash (CR-012 for the default
+    delete)."""
+    import fakeredis
+
+    import app.routers.user_state as us
+    from app.services.forget import engine
+    from core.agents.hallucination import REDIS_HALLUCINATION_PREFIX, get_hallucination_report
+    from tests.helpers.forget import isolate_forget
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    redis.set(f"{REDIS_HALLUCINATION_PREFIX}cid-9", '{"claims": ["secret claim"]}')
+    isolate_forget(monkeypatch, tmp_path)
+    monkeypatch.setattr(us, "_sync_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        "app.services.content_lifecycle.conversation_transcript_artifact_ids", lambda cid: [],
+    )
+
+    result = us.remove_conversation("cid-9")
+
+    assert result["state"] == "trashed"
+    assert get_hallucination_report(redis, "cid-9") is None
+    engine.restore(result["forget_id"])
+    assert get_hallucination_report(redis, "cid-9") == {"claims": ["secret claim"]}

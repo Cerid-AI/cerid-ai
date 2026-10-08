@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers.user_state import _sync_dir, router  # noqa: F401
+from tests.helpers.forget import isolate_forget
 
 
 def _private_mode_zero(*_args, **_kwargs):
@@ -36,7 +37,8 @@ def _mock_redis():
 
 
 @pytest.fixture()
-def sync_dir(tmp_path: Path) -> Path:
+def sync_dir(tmp_path: Path, monkeypatch) -> Path:
+    isolate_forget(monkeypatch, tmp_path)
     return tmp_path
 
 
@@ -108,14 +110,28 @@ def test_save_conversation_missing_id(client: TestClient):
 # -- DELETE conversation ------------------------------------------------------
 
 
-def test_delete_conversation(client: TestClient):
+def test_delete_moves_the_conversation_to_trash(client: TestClient, sync_dir: Path):
     client.post("/user-state/conversations", json={"id": "del1", "title": "Delete me"})
     resp = client.delete("/user-state/conversations/del1")
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": "del1"}
+    body = resp.json()
+    assert body["deleted"] == "del1" and body["state"] == "trashed" and body["forget_id"].startswith("fg_")
 
-    resp = client.get("/user-state/conversations/del1")
-    assert resp.status_code == 404
+    assert client.get("/user-state/conversations/del1").status_code == 404
+    assert client.get("/user-state/conversations").json() == []
+    # Trash keeps the file so the forget can be restored.
+    assert (sync_dir / "user" / "conversations" / "del1.json").exists()
+
+
+def test_permanent_delete_removes_the_sync_file(client: TestClient, sync_dir: Path):
+    client.post("/user-state/conversations", json={"id": "del2", "title": "Delete me"})
+    with patch("app.services.content_lifecycle.remove_conversation_transcripts", return_value=[]) as purge:
+        resp = client.delete("/user-state/conversations/del2", params={"permanent": "true"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "purged"
+    purge.assert_called_once_with("del2")
+    assert not (sync_dir / "user" / "conversations" / "del2.json").exists()
+    assert client.get("/user-state/conversations/del2").status_code == 404
 
 
 # -- POST bulk conversations --------------------------------------------------
@@ -129,7 +145,7 @@ def test_bulk_save_conversations(client: TestClient):
     ]
     resp = client.post("/user-state/conversations/bulk", json=body)
     assert resp.status_code == 200
-    assert resp.json() == {"saved": 3}
+    assert resp.json() == {"saved": 3, "gone": []}
 
     resp = client.get("/user-state/conversations")
     assert len(resp.json()) == 3

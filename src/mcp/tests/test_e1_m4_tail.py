@@ -31,13 +31,16 @@ def test_fallback_result_includes_claim() -> None:
     assert '"claim": claim_text' in src or "'claim': claim_text" in src
 
 
-def test_delete_conversation_gates_private_blocks() -> None:
-    """CR-061: DELETE /conversations must call private_blocks."""
+def test_delete_conversation_is_not_gated_by_private_mode() -> None:
+    """CR-061 reversed by the forget engine (spec 2026-10-07 section 3): forgetting
+    only reduces data, so DELETE is allowed at every level; saves stay gated."""
     src = (Path(__file__).resolve().parents[1] / "app/routers/user_state.py").read_text(
         encoding="utf-8",
     )
-    assert "private_blocks(1)" in src
-    assert "remove_conversation" in src
+    delete_src = src.split("def remove_conversation(")[1].split("@router")[0]
+    assert "private_blocks" not in delete_src
+    assert "forget_engine" in delete_src
+    assert "private_blocks(1)" in src.split("def save_conversation(")[1].split("@router")[0]
 
 
 def test_main_reprojects_local_urls() -> None:

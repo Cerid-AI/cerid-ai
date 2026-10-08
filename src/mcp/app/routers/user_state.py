@@ -12,10 +12,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
-from app.services.content_lifecycle import remove_conversation_transcripts
+from app.services.forget import engine as forget_engine
 from app.services.private_mode import private_blocks
 from app.sync.user_state import (
-    delete_conversation,
     list_conversation_ids,
     read_conversation,
     read_conversations,
@@ -25,11 +24,14 @@ from app.sync.user_state import (
     write_conversation,
     write_preferences_with_retry,
 )
+from core.forget.registry import Subject, get_registry
 
 
 # --- Response models (generated: single-return dict-literal routes) ---
 class RemoveConversationResponse(BaseModel):
     deleted: Any
+    forget_id: str | None = None
+    state: str | None = None
 
 
 class SavePreferencesResponse(BaseModel):
@@ -42,7 +44,20 @@ class SaveConversationResponse(BaseModel):
 
 class SaveConversationsBulkResponse(BaseModel):
     saved: Any
+    gone: list[str] = []
 
+
+class ForgottenItem(BaseModel):
+    kind: str
+    id: str
+    state: str
+    at: str
+    forget_id: str
+
+
+class ForgottenResponse(BaseModel):
+    items: list[ForgottenItem]
+    cursor: str | None = None
 
 
 router = APIRouter(prefix="/user-state", tags=["user-state"])
@@ -62,6 +77,10 @@ def _checked_conv_id(conv_id: str) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _forgotten(conv_id: str) -> bool:
+    return get_registry().is_forgotten("conversation", conv_id)
+
+
 @router.get("", response_model=dict[str, Any])
 def get_user_state_summary():
     """Return a summary of user state: settings, preferences, conversation IDs."""
@@ -74,7 +93,7 @@ def get_user_state_summary():
     return {
         "settings": settings,
         "preferences": preferences,
-        "conversation_ids": list_conversation_ids(sd),
+        "conversation_ids": [cid for cid in list_conversation_ids(sd) if not _forgotten(cid)],
     }
 
 
@@ -84,7 +103,7 @@ def list_conversations():
     sd = _sync_dir()
     if not sd:
         return []
-    return read_conversations(sd)
+    return [c for c in read_conversations(sd) if not _forgotten(str(c.get("id", "")))]
 
 
 @router.get("/conversations/{conv_id}")  # response-model-allowed: dynamic response (shape varies)
@@ -93,7 +112,10 @@ def get_conversation(conv_id: str):
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    data = read_conversation(sd, _checked_conv_id(conv_id))
+    conv_id = _checked_conv_id(conv_id)
+    if _forgotten(conv_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    data = read_conversation(sd, conv_id)
     if not data:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return data
@@ -108,6 +130,8 @@ def save_conversation(body: dict[str, Any]):
     if "id" not in body:
         raise HTTPException(status_code=400, detail="Conversation must have an 'id' field")
     _checked_conv_id(body["id"])
+    if _forgotten(body["id"]):
+        raise HTTPException(status_code=410, detail="conversation forgotten")
     if private_blocks(1):
         # response_model=SaveConversationResponse only declares `saved`, so
         # any extra key here would be silently stripped on the wire — the
@@ -128,44 +152,46 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
             raise HTTPException(status_code=400, detail="Each conversation must have an 'id' field")
         _checked_conv_id(conv["id"])
     if private_blocks(1):
-        return {"saved": []}
-    for conv in body:
+        return {"saved": [], "gone": []}
+    gone = [c["id"] for c in body if _forgotten(c["id"])]
+    skip = set(gone)
+    rest = [c for c in body if c["id"] not in skip]
+    for conv in rest:
         write_conversation(sd, conv)
-    return {"saved": len(body)}
+    return {"saved": len(rest), "gone": gone}
 
 
 @router.delete("/conversations/{conv_id}", response_model=RemoveConversationResponse)
-def remove_conversation(conv_id: str):
-    """Delete a conversation by ID."""
-    # E1 CR-061: private_blocks on DELETE — saves already gated; delete was asymmetric.
-    if private_blocks(1):
-        raise HTTPException(status_code=403, detail="Private mode blocks conversation deletes")
+def remove_conversation(conv_id: str, permanent: bool = False):
+    """Forget a conversation: Move to Trash by default, ``?permanent=true`` to purge now.
+
+    Allowed at every private-mode level: forgetting only reduces data.
+    """
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=412, detail="Sync directory not configured")
     conv_id = _checked_conv_id(conv_id)
-    # The ingested chat turns go first: if a store is down this raises before
-    # the sync file is unlinked, so the client keeps its delete tombstone and
-    # retries instead of leaving the transcript retrievable behind a 200.
-    removals = remove_conversation_transcripts(conv_id)
-    if removals:
-        logger.info(
-            "conversation %s: removed %d transcript artifact(s)",
-            conv_id, sum(1 for r in removals if r.found),
-        )
-    delete_conversation(sd, conv_id)
-    # E1 CR-012: also drop the durable hall:{cid} verification report so a deleted
-    # conversation does not leave its verbatim claims + source snippets cached in
-    # Redis for the 7-day TTL. Best-effort — the conversation delete already
-    # succeeded; a Redis outage must not fail the request.
+    subjects = [Subject("conversation", conv_id)]
     try:
-        from app.deps import get_redis
-        from core.agents.hallucination import delete_hallucination_report
-        delete_hallucination_report(get_redis(), conv_id)
-    except Exception as exc:  # noqa: BLE001 — best-effort cache purge
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error("user_state.remove_conversation.hall_cache", exc)
-    return {"deleted": conv_id}
+        if permanent:
+            receipt = forget_engine.forget_permanently(subjects, requested_by="conversation_delete")
+            done = all(a["status"] == "done" for a in receipt["adapters"].values())
+            return {"deleted": conv_id, "forget_id": receipt["forget_id"], "state": "purged" if done else "trashed_pending"}
+        forget_id = forget_engine.trash(subjects, requested_by="conversation_delete")
+    except forget_engine.ForgetUnavailable as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
+    return {"deleted": conv_id, "forget_id": forget_id, "state": "trashed"}
+
+
+@router.get("/forgotten", response_model=ForgottenResponse)
+def list_forgotten(since: str | None = None):
+    """Forgotten conversations, newest last; clients drop their local copies."""
+    rows = [e for e in get_registry().latest(since=since) if e.subject.kind == "conversation"]
+    items = [
+        {"kind": e.subject.kind, "id": e.subject.id, "state": e.state, "at": e.at, "forget_id": e.forget_id}
+        for e in rows
+    ]
+    return {"items": items, "cursor": rows[-1].at if rows else since}
 
 
 @router.patch("/preferences", response_model=SavePreferencesResponse)

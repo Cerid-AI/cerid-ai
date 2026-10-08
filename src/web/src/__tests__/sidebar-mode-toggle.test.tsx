@@ -14,6 +14,8 @@ import { getSettingsMode } from "@/lib/settings-mode"
 vi.mock("@/lib/api", () => ({
   fetchModelUpdatesFull: vi.fn().mockResolvedValue({ updates: [] }),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
+  fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
+  ConversationGoneError: class ConversationGoneError extends Error { id = "" },
   syncConversation: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
 }))

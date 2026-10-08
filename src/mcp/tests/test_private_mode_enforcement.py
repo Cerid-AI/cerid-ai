@@ -30,6 +30,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.services.private_mode import PRIVATE_MODE_KEY, get_private_mode_level
+from tests.helpers.forget import isolate_forget
 
 
 class _FakeRedis:
@@ -114,6 +115,7 @@ def user_state_client(fake_redis, monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake_redis)
     monkeypatch.setattr(user_state, "_sync_dir", lambda: str(tmp_path))
+    isolate_forget(monkeypatch, tmp_path)
 
     app = FastAPI()
     app.include_router(user_state.router)
@@ -152,7 +154,7 @@ class TestSaveConversationsBulkL1:
                 json=[{"id": "b1"}, {"id": "b2"}],
             )
         assert res.status_code == 200
-        assert res.json() == {"saved": []}
+        assert res.json() == {"saved": [], "gone": []}
         mock_write.assert_not_called()
 
     def test_l0_saves_normally(self, user_state_client, fake_redis):
@@ -162,7 +164,7 @@ class TestSaveConversationsBulkL1:
                 json=[{"id": "b1"}, {"id": "b2"}],
             )
         assert res.status_code == 200
-        assert res.json() == {"saved": 2}
+        assert res.json() == {"saved": 2, "gone": []}
         assert mock_write.call_count == 2
 
 
