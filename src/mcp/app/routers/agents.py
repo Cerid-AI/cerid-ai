@@ -813,7 +813,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
                         save_verification_report as _save,
                     )
                     summary = result.get("summary") or {}
-                    _save(
+                    report_id = _save(
                         get_neo4j(),
                         conversation_id=req.conversation_id,
                         claims=claims_payload,
@@ -828,7 +828,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
                         uncertain=int(summary.get("uncertain", 0)),
                         total=int(summary.get("total", len(claims_payload))),
                     )
-                    result["persisted"] = True
+                    result["persisted"] = report_id is not None
                 except Exception:
                     # Persistence failure must not break verification —
                     # the claims are already in the response. Surface
@@ -896,9 +896,10 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         feedback_value = "correct" if req.correct else "incorrect"
         report["claims"][req.claim_index]["user_feedback"] = feedback_value
 
-        # Write updated report back to Redis
+        # Write the updated report back only while the key still exists: a purge
+        # landing between the read above and this write must not re-create it.
         key = f"{REDIS_HALLUCINATION_PREFIX}{req.conversation_id}"
-        redis.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+        redis.set(key, json.dumps(report), ex=REDIS_HALLUCINATION_TTL, xx=True)
 
         # Log feedback for analytics
         model = report.get("model")
@@ -1408,7 +1409,7 @@ async def save_verification_report(req: SaveVerificationRequest):
             uncertain=req.uncertain,
             total=req.total,
         )
-        return {"status": "saved", "report_id": report_id}
+        return {"status": "saved" if report_id else "skipped", "report_id": report_id}
     except Exception as e:
         logger.error("Failed to save verification report: %s", e)
         raise HTTPException(status_code=500, detail="Internal error processing request")

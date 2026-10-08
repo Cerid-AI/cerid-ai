@@ -17,6 +17,8 @@ const applyModelUpdates = vi.fn()
 vi.mock("@/lib/api", () => ({
   fetchModelUpdatesFull: (...args: unknown[]) => fetchModelUpdatesFull(...args),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
+  fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
+  ConversationGoneError: class ConversationGoneError extends Error { id = "" },
   syncConversation: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
 }))

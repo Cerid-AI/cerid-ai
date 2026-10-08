@@ -793,6 +793,7 @@ def set_archived(
     *,
     archived_at: str | None = None,
     extra: dict[str, Any] | None = None,
+    only_if_visible: bool = False,
 ) -> bool:
     """Soft-delete: mark an artifact ``archived`` (reversible — chunks stay in
     the stores). Centralizes the ``a.archived = true`` write that callers
@@ -803,13 +804,23 @@ def set_archived(
     merges caller-specific properties (e.g. quarantine's ``purge_after`` /
     ``quarantine_reason``) onto the node in the same write. Returns ``True`` when
     the artifact existed and was flagged.
+
+    ``only_if_visible`` leaves an artifact that is already archived untouched, so
+    a reversible hide never takes over an archive made for another reason (and
+    undoing it can never un-archive that artifact). Any other archive drops an
+    earlier ``archived_reason``: once the artifact is archived for a second
+    reason, undoing the first must not un-archive it.
     """
+    guard = "WHERE coalesce(a.archived, false) = false " if only_if_visible else ""
+    takeover = "" if only_if_visible else "REMOVE a.archived_reason "
     with driver.session() as session:
         record = session.run(
             "MATCH (a:Artifact {id: $id}) "
-            "SET a.archived = true, "
+            + guard
+            + "SET a.archived = true, "
             "    a.archived_at = coalesce($archived_at, datetime()) "
-            "SET a += $extra "
+            + takeover
+            + "SET a += $extra "
             "RETURN a.id AS id",
             id=artifact_id,
             archived_at=archived_at,
@@ -819,6 +830,23 @@ def set_archived(
         return False
     logger.info("Archived artifact %s", artifact_id[:8])
     return True
+
+
+def clear_archived(driver, artifact_id: str, *, reason: str) -> bool:
+    """Undo a ``set_archived`` made with ``extra={"archived_reason": reason}``.
+
+    Only an archive carrying exactly this reason is cleared, so restoring a
+    forget can never un-quarantine an artifact hidden for another reason.
+    """
+    with driver.session() as session:
+        record = session.run(
+            "MATCH (a:Artifact {id: $id}) WHERE a.archived_reason = $reason "
+            "REMOVE a.archived, a.archived_at, a.archived_reason "
+            "RETURN a.id AS id",
+            id=artifact_id,
+            reason=reason,
+        ).single()
+    return record is not None
 
 
 def delete_artifacts_by_domain(driver, domain: str) -> dict[str, Any]:
@@ -961,8 +989,12 @@ def save_verification_report(
     uncertain: int = 0,
     total: int = 0,
     agreed: int | None = None,
-) -> str:
+) -> str | None:
     """Persist a verification report with complete provenance.
+
+    Returns the report id, or ``None`` when the conversation is forgotten: a
+    verify still running when the user deleted the conversation must not
+    re-create its report.
 
     ``agreed`` is the number of claims a second model agreed with and no source
     backs. A caller that does not send it stores no such property, which reads
@@ -984,6 +1016,10 @@ def save_verification_report(
     because only one of them was updated. The canonical model makes
     that class of drift impossible.
     """
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return None
+
     import uuid
 
     from core.agents.hallucination.models import ClaimVerification
@@ -1109,7 +1145,11 @@ def save_verification_report(
 
 
 def get_verification_report(driver, conversation_id: str) -> dict | None:
-    """Retrieve a saved verification report by conversation ID."""
+    """Retrieve a saved verification report by conversation ID; none for a
+    forgotten conversation (its report is kept while it is in the trash)."""
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return None
     with driver.session() as session:
         result = session.run(
             "MATCH (r:VerificationReport {conversation_id: $cid}) "

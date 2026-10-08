@@ -121,7 +121,8 @@ async def promote_verified_facts(
     Returns:
         {"promoted": int, "skipped_low_confidence": int,
          "skipped_duplicate": int, "skipped_type": int,
-         "skipped_no_entailment": int, "skipped_no_source": int, "errors": int}
+         "skipped_no_entailment": int, "skipped_no_source": int, "errors": int},
+        plus "skipped_forgotten" when the conversation is forgotten and nothing ran.
     """
     if min_confidence is None:
         min_confidence = getattr(config, "VERIFIED_MEMORY_MIN_CONFIDENCE", 0.8)
@@ -140,6 +141,11 @@ async def promote_verified_facts(
         "skipped_no_source": 0,
         "errors": 0,
     }
+
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", report_id):
+        counts["skipped_forgotten"] = len(claims)
+        return counts
 
     _SKIP_TYPES = {"ignorance", "evasion", "citation"}
 

@@ -9,12 +9,18 @@ import {
   syncConversation,
   deleteConversationSync,
   fetchSyncedConversations,
+  fetchForgottenConversations,
+  ConversationGoneError,
 } from "@/lib/api"
 
 const STORAGE_KEY = "cerid-conversations"
 // Delete tombstones: ids whose local delete hasn't been acked by the server.
 // Persisted so a failed/remote-replica delete can't resurrect on mount (CR-092).
 const TOMBSTONE_KEY = "cerid-conversation-tombstones"
+// Cursor into the server's forgotten feed (GET /user-state/forgotten?since=).
+// The server registry is the authority for every forget it has acknowledged;
+// the tombstones above are only an outbox for deletes it has not yet seen.
+const FORGOTTEN_CURSOR_KEY = "cerid-forgotten-cursor"
 const MAX_CONVERSATIONS = 50
 const LOCAL_DEBOUNCE_MS = 500
 const SERVER_DEBOUNCE_MS = 2000
@@ -199,6 +205,29 @@ export function useConversations() {
     }
   }, [])
 
+  // Drop conversations the server has forgotten (from the feed, or a 410 on a
+  // save). The server acked the forget, so any local tombstone is done too.
+  const dropLocal = useCallback((ids: Set<string>) => {
+    if (ids.size === 0) return
+    setConversations((prev) => {
+      const next = prev.filter((c) => !ids.has(c.id))
+      if (next.length === prev.length) return prev
+      flushLocalNow(next)
+      return next
+    })
+    setActiveId((currentId) => (currentId && ids.has(currentId) ? null : currentId))
+    for (const id of ids) clearTombstone(id)
+  }, [flushLocalNow, clearTombstone])
+
+  const pushConversation = useCallback((convo: Conversation) => {
+    syncConversation(convo)
+      .then(() => setSyncFailing(false))
+      .catch((err) => {
+        if (err instanceof ConversationGoneError) dropLocal(new Set([err.id]))
+        else setSyncFailing(true)  // mount merge re-pushes
+      })
+  }, [dropLocal])
+
   // Server channel — per-id debounced flush (a Map, not one shared slot), so a
   // second conversation syncing inside the window can't drop the first's
   // pending sync (CR-083). Private mode is resolved at flush time and applies
@@ -223,11 +252,9 @@ export function useConversations() {
         .then(() => { clearTombstone(id); setSyncFailing(false) })  // server acked → forget the tombstone
         .catch(() => setSyncFailing(true))       // keep tombstone; retried by the mount merge
     } else {
-      syncConversation(op.convo)
-        .then(() => setSyncFailing(false))
-        .catch(() => setSyncFailing(true))       // mount merge re-pushes
+      pushConversation(op.convo)
     }
-  }, [clearTombstone])
+  }, [clearTombstone, pushConversation])
 
   const enqueueServer = useCallback((id: string, op: ServerOp, immediate = false) => {
     serverPendingRef.current.set(id, op)  // latest op per id wins
@@ -560,13 +587,28 @@ export function useConversations() {
   // server actually acks the delete (flushServer's success path) — NOT when a
   // fetch merely omits the id, since an empty/partial response is ambiguous and
   // would drop a still-needed tombstone, resurrecting the conversation (CR-092).
+  // The server's forgotten feed is read first: those ids are dropped locally and
+  // neither re-added from a server row nor pushed back.
   const serverHydratedRef = useRef(false)
   useEffect(() => {
     if (serverHydratedRef.current) return
     serverHydratedRef.current = true
 
-    fetchSyncedConversations()
-      .then((serverConvos) => {
+    let since: string | undefined
+    try { since = localStorage.getItem(FORGOTTEN_CURSOR_KEY) ?? undefined } catch { since = undefined }
+    fetchForgottenConversations(since)
+      .catch(() => ({ items: [], cursor: since ?? null }))
+      .then((feed) => {
+        const forgotten = new Set(
+          feed.items.filter((i) => i.state === "trashed" || i.state === "purged").map((i) => i.id),
+        )
+        dropLocal(forgotten)
+        if (feed.cursor) {
+          try { localStorage.setItem(FORGOTTEN_CURSOR_KEY, feed.cursor) } catch { /* storage unavailable */ }
+        }
+        return fetchSyncedConversations().then((serverConvos) => ({ serverConvos, forgotten }))
+      })
+      .then(({ serverConvos, forgotten }) => {
         setConversations((local) => {
           const tombstones = tombstonesRef.current
           const byId = new Map(local.map((c) => [c.id, c] as const))
@@ -575,6 +617,7 @@ export function useConversations() {
 
           for (const sc of serverConvos) {
             serverIds.add(sc.id)
+            if (forgotten.has(sc.id)) continue
             if (tombstones.has(sc.id)) {
               // Deleted locally but the server still has it → re-attempt the
               // delete and do NOT resurrect the record.
@@ -595,16 +638,16 @@ export function useConversations() {
             } else if (localTs > serverTs && !existing.private && !isPrivateModeActive()) {
               // Local has newer changes the server never received (e.g.
               // previous syncConversation() failed). Push now.
-              syncConversation(existing).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
+              pushConversation(existing)
             }
           }
 
           // Push any local-only conversations the server is missing (never a
-          // tombstoned id — that would re-create what we just deleted).
+          // tombstoned or forgotten id — that would re-create what was deleted).
           if (!isPrivateModeActive()) {
             for (const c of local) {
-              if (!c.private && !serverIds.has(c.id) && !tombstones.has(c.id)) {
-                syncConversation(c).then(() => setSyncFailing(false)).catch(() => setSyncFailing(true))
+              if (!c.private && !serverIds.has(c.id) && !tombstones.has(c.id) && !forgotten.has(c.id)) {
+                pushConversation(c)
               }
             }
           }
@@ -618,7 +661,7 @@ export function useConversations() {
         })
       })
       .catch(() => { /* Server unavailable */ })
-  }, [enqueueServer])
+  }, [enqueueServer, dropLocal, pushConversation])
 
   return {
     conversations, visibleConversations, active, activeId, setActiveId,

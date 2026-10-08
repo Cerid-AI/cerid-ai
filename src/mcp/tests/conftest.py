@@ -24,6 +24,15 @@ def _isolate_tombstone_log(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_forget_registry(tmp_path, monkeypatch):
+    """The write barrier reads the forget registry on hot paths; without this,
+    any test reaching it would read (or append to) the operator's sync dir."""
+    from core.forget import registry
+
+    monkeypatch.setattr(registry, "_REGISTRY", registry.Registry(tmp_path / "forget", "test"))
+
+
+@pytest.fixture(autouse=True)
 def _declare_loopback_bind(monkeypatch):
     """A test process serves nothing on the network; say so.
 

@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 import config
+from app.services.content_lifecycle import CONVERSATIONS_DOMAIN, TRANSCRIPT_FILENAME_PREFIX
 from app.sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -43,9 +44,43 @@ from app.sync.conflicts import (
     write_conflict_log,
 )
 from app.sync.user_state import read_conversations, write_conversation
+from core.forget import registry as forget_registry
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
+
+
+def _is_forgotten_artifact(artifact_id: str) -> bool:
+    """Forgotten per the registry. Content added again after a forget records
+    ``readded`` against that forget, which makes it importable everywhere; the
+    decision never compares timestamps from two machines."""
+    return forget_registry.is_forgotten("artifact", artifact_id)
+
+
+def _is_forgotten_transcript(meta: dict[str, Any]) -> bool:
+    """A ``chat_*`` transcript row of a trashed or purged conversation.
+
+    A trash records only the conversation, so its transcript artifacts are not
+    forgotten by id; the conversation id on the row is what ties them to it.
+    """
+    cid = str(meta.get("conversation_id") or "")
+    return (
+        bool(cid)
+        and str(meta.get("filename") or "").startswith(TRANSCRIPT_FILENAME_PREFIX)
+        and forget_registry.is_forgotten("conversation", cid)
+    )
+
+
+def _forgotten_transcript_artifact_ids(sync_dir: str) -> set[str]:
+    """Transcript artifact ids of forgotten conversations, read from the Chroma
+    export: the conversation id is stamped on the rows, never on the node."""
+    path = Path(sync_dir) / CHROMA_SUBDIR / f"{config.collection_name(CONVERSATIONS_DOMAIN)}.jsonl"
+    found: set[str] = set()
+    for row in _iter_jsonl(str(path)):
+        meta = row.get("metadata") or {}
+        if meta.get("artifact_id") and _is_forgotten_transcript(meta):
+            found.add(str(meta["artifact_id"]))
+    return found
 
 
 def import_neo4j(
@@ -74,6 +109,7 @@ def import_neo4j(
     artifacts_updated = 0
     artifacts_skipped = 0
     artifacts_conflict = 0
+    artifacts_skipped_forgotten = 0
     relationships_merged = 0
 
     # --- Conflict Detection ---
@@ -128,6 +164,7 @@ def import_neo4j(
 
     # --- Artifacts ---
     artifacts_path = str(neo4j_dir / ARTIFACTS_JSONL)
+    forgotten_transcripts = _forgotten_transcript_artifact_ids(sync_dir)
     with driver.session() as session:
         for row in _iter_jsonl(artifacts_path):
             artifact_id = row.get("id")
@@ -137,6 +174,10 @@ def import_neo4j(
             # Skip artifacts flagged by conflict resolution (local_wins / manual_review)
             if artifact_id in skip_ids:
                 artifacts_conflict += 1
+                continue
+
+            if artifact_id in forgotten_transcripts or _is_forgotten_artifact(str(artifact_id)):
+                artifacts_skipped_forgotten += 1
                 continue
 
             try:
@@ -290,6 +331,7 @@ def import_neo4j(
         "artifacts_updated": artifacts_updated,
         "artifacts_skipped": artifacts_skipped,
         "artifacts_conflict": artifacts_conflict,
+        "artifacts_skipped_forgotten": artifacts_skipped_forgotten,
         "conflicts": [
             {"artifact_id": c.artifact_id, "resolution": c.resolution}
             for c in conflict_records
@@ -385,6 +427,14 @@ def import_chroma(
                     continue
 
                 if chunk_id in existing_ids:
+                    skipped += 1
+                    continue
+
+                meta = row.get("metadata") or {}
+                artifact_id = meta.get("artifact_id")
+                if (
+                    artifact_id and _is_forgotten_artifact(str(artifact_id))
+                ) or _is_forgotten_transcript(meta):
                     skipped += 1
                     continue
 
@@ -827,7 +877,11 @@ def import_conversations(sync_dir: str | None = None) -> dict[str, Any]:
 
     restored = 0
     skipped = 0
+    skipped_forgotten = 0
     for conv in conversations:
+        if forget_registry.is_forgotten("conversation", str(conv.get("id") or "")):
+            skipped_forgotten += 1
+            continue
         try:
             write_conversation(sync_dir, conv)
             restored += 1
@@ -838,9 +892,10 @@ def import_conversations(sync_dir: str | None = None) -> dict[str, Any]:
             skipped += 1
 
     logger.info(
-        "Conversation import complete: %d restored, %d skipped", restored, skipped
+        "Conversation import complete: %d restored, %d skipped, %d forgotten",
+        restored, skipped, skipped_forgotten,
     )
-    return {"conversations": restored, "skipped": skipped}
+    return {"conversations": restored, "skipped": skipped, "skipped_forgotten": skipped_forgotten}
 
 
 def import_all(

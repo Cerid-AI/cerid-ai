@@ -37,6 +37,12 @@ Administrative and security actions are.
 | `kb.clear_domain` | `POST /admin/kb/clear-domain/{domain}` |
 | `plugin.enable` | `POST /plugins/{name}/enable` |
 | `plugin.disable` | `POST /plugins/{name}/disable` |
+| `forget.trash` | the forget engine, when subjects are moved to the trash; target = forget id; detail = subject counts by kind |
+| `forget.restore` | the forget engine, when a trashed forget is restored; target = forget id; detail = subject counts by kind |
+| `forget.purge` | the forget engine, when a forget is erased; target = forget id; detail = subject counts by kind, how many were purged, and the adapters still pending |
+
+A forget record never carries the ids of what was forgotten or any of its
+content, only the forget id and counts.
 
 A rejected license key records the reason and **never the key**. The log is
 readable by anyone entitled to read it, so it must not become a place secrets

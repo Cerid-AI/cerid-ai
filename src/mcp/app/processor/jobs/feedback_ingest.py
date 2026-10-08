@@ -84,6 +84,13 @@ class FeedbackIngestJob(BaseJob):
         from core.utils.time import utcnow
 
         await progress_cb(0.0)
+        from core.forget import registry as forget_registry
+        if forget_registry.is_forgotten("conversation", self._conversation_id):
+            return JobResult(
+                job_id="", actual_tokens_in=0, actual_tokens_out=0,
+                metadata={"conversation_id": self._conversation_id, "skipped": "forgotten"},
+            )
+
         convo_prefix = self._conversation_id[:8] if self._conversation_id else "unknown"
         timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"chat_{convo_prefix}_{timestamp}"

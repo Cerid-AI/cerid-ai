@@ -253,6 +253,13 @@ async def _wait_for_memory(floor_mb: int, label: str) -> None:
 # Batch orchestration
 # ---------------------------------------------------------------------------
 
+def _may_persist_report(conversation_id: str) -> bool:
+    """False once the conversation is forgotten, so a verify stream still
+    running cannot re-create its hall: report after the delete."""
+    from core.forget import registry as forget_registry
+    return not forget_registry.is_forgotten("conversation", conversation_id)
+
+
 async def check_hallucinations(
     response_text: str,
     conversation_id: str,
@@ -438,8 +445,9 @@ async def check_hallucinations(
 
     if persist_report:
         try:
-            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+            if _may_persist_report(conversation_id):
+                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
         except Exception as e:
             log_swallowed_error('core.agents.hallucination.streaming', e)
             logger.warning("Failed to store hallucination report in Redis: %s", e)
@@ -1586,8 +1594,9 @@ async def verify_response_streaming(
     # overwrites with consistency_issue annotations (CR-113).
     if persist_report and not skip_durable:
         try:
-            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
+            if _may_persist_report(conversation_id):
+                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
         except Exception as e:
             log_swallowed_error(
                 "core.agents.hallucination.streaming.provisional_hall_persist", e,
@@ -1711,8 +1720,9 @@ async def verify_response_streaming(
     # two stores permanently disagreeing on consistency_issue.
     if persist_report and not skip_durable:
         try:
-            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
+            if _may_persist_report(conversation_id):
+                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
         except Exception as e:
             log_swallowed_error("core.agents.hallucination.streaming.persist_streaming_report", e)
 
@@ -1739,17 +1749,18 @@ async def verify_response_streaming(
         try:
             # E1 CR-019: durable_* is the merged N-claim report on a single-claim
             # retry, else the fresh run — matching the Redis hall:{cid} write above.
-            save_report_fn(
-                conversation_id=conversation_id,
-                claims=durable_claims,
-                overall_score=durable_overall,
-                verified=durable_counts["verified"],
-                agreed=durable_counts["agreed"],
-                unverified=durable_counts["unverified"],
-                uncertain=durable_counts["uncertain"],
-                total=durable_counts["total"],
-            )
-            persisted = True
+            if _may_persist_report(conversation_id):
+                save_report_fn(
+                    conversation_id=conversation_id,
+                    claims=durable_claims,
+                    overall_score=durable_overall,
+                    verified=durable_counts["verified"],
+                    agreed=durable_counts["agreed"],
+                    unverified=durable_counts["unverified"],
+                    uncertain=durable_counts["uncertain"],
+                    total=durable_counts["total"],
+                )
+                persisted = True
         except Exception as exc:
             log_swallowed_error(
                 "core.agents.hallucination.streaming.auto_persist",

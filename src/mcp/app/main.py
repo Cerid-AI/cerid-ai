@@ -50,6 +50,7 @@ from app.routers import (
     digests,
     external_apis,
     feedback,
+    forget,
     graph_tour,
     health,
     inbox_setup,
@@ -730,6 +731,7 @@ async def lifespan(app: FastAPI):
         ) -> str | None:
             res = await asyncio.to_thread(
                 _ingest_content, content=content, domain=domain, metadata=metadata or {},
+                on_forgotten="skip",
             )
             return res.get("artifact_id") if isinstance(res, dict) else None
 
@@ -1386,6 +1388,7 @@ _api_routers = [
     kb_admin.router,
     knowledge_packs.router,
     user_state.router,
+    forget.router,
     plugins.router,
     scanner.router,
     workflows.router,

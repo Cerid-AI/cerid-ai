@@ -94,7 +94,7 @@ async function fetchConversationIds() {
 }
 
 async function deleteConversation(id) {
-  const res = await fetch(`${MCP_BASE}/user-state/conversations/${id}`, {
+  const res = await fetch(`${MCP_BASE}/user-state/conversations/${id}?permanent=true`, {
     method: "DELETE",
     headers: apiHeaders(),
   })

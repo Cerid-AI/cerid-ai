@@ -23,7 +23,11 @@ def get_hallucination_report(
     redis_client,
     conversation_id: str,
 ) -> dict[str, Any] | None:
-    """Retrieve a previously stored hallucination report."""
+    """Retrieve a previously stored hallucination report; none for a forgotten
+    conversation, whose report stays in Redis while it is in the trash."""
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return None
     try:
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
         data = redis_client.get(key)

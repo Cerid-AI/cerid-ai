@@ -50,7 +50,7 @@ import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import config
 from app.db import neo4j as graph
@@ -904,6 +904,30 @@ def _check_storage_backpressure() -> None:
         _storage_warn_logged = False
 
 
+def _forget_gate(artifact_id: str, on_forgotten: str) -> dict[str, Any] | None:
+    """Decide what an ingest does with content whose artifact was forgotten.
+
+    ``readd`` (explicit ingest): the content comes back and the registry records
+    ``readded`` against the forget it cancels, so it imports on every machine.
+    ``skip`` (automatic rescans and polls): leave it forgotten, or a forgotten
+    file would return at the next poll. Content never forgotten passes untouched.
+    """
+    from core.forget import registry as forget_registry
+
+    if not forget_registry.is_forgotten("artifact", artifact_id):
+        return None
+    if on_forgotten == "skip":
+        return {
+            "status": "skipped",
+            "reason": "forgotten",
+            "artifact_id": artifact_id,
+            "chunks": 0,
+            "timestamp": utcnow_iso(),
+        }
+    forget_registry.record_readd("artifact", artifact_id, requested_by="ingest")
+    return None
+
+
 def ingest_content(
     content: str,
     domain: str = "general",
@@ -914,6 +938,7 @@ def ingest_content(
     enrich: bool = True,
     force_reindex: bool = False,
     prior_hashes: Sequence[str] = (),
+    on_forgotten: Literal["readd", "skip"] = "readd",
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -972,6 +997,10 @@ def ingest_content(
     # content_hash is globally UNIQUE, so a content-addressed id is consistent
     # with the one-artifact-per-content model the DB already enforces.
     artifact_id = content_hash
+
+    gated = _forget_gate(artifact_id, on_forgotten)
+    if gated is not None:
+        return gated
 
     # force_reindex deliberately re-embeds unchanged content, so the exact-hash
     # dedup short-circuit is skipped; the filename re-ingest branch below routes
@@ -2050,6 +2079,7 @@ async def ingest_file(
     skip_quality: bool = False,
     extra_metadata: dict[str, Any] | None = None,
     force_reindex: bool = False,
+    on_forgotten: Literal["readd", "skip"] = "readd",
 ) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store.
 
@@ -2194,6 +2224,7 @@ async def ingest_file(
         pre_chunked=pre_chunked,
         force_reindex=force_reindex,
         prior_hashes=prior_hashes,
+        on_forgotten=on_forgotten,
     )
     result["filename"] = filename
     result["categorize_mode"] = mode

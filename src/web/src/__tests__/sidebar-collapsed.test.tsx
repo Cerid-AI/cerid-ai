@@ -12,6 +12,8 @@ vi.mock("@/lib/api", () => ({
     updates: [{ update_id: "coding:x", model_id: "x", update_type: "new", details: {}, detected_at: "now" }],
   }),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
+  fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
+  ConversationGoneError: class ConversationGoneError extends Error { id = "" },
   syncConversation: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
 }))

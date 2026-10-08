@@ -335,7 +335,32 @@ def remove_content(
 
 
 CONVERSATIONS_DOMAIN = "conversations"
-_TRANSCRIPT_FILENAME_PREFIX = "chat_"
+TRANSCRIPT_FILENAME_PREFIX = "chat_"
+
+
+def conversation_transcript_artifact_ids(conversation_id: str, *, chroma: Any | None = None) -> list[str]:
+    """The distinct ``chat_*`` transcript artifacts a conversation produced.
+
+    The conversation id is stamped on the Chroma rows only, never on the
+    ``:Artifact`` node, so the rows are the index. Memory artifacts extracted
+    from the same conversation share the metadata key and are excluded.
+    """
+    from app.deps import get_chroma
+
+    chroma = chroma or get_chroma()
+    collection = chroma.get_or_create_collection(name=config.collection_name(CONVERSATIONS_DOMAIN))
+    rows = collection.get(where={"conversation_id": conversation_id}, include=["metadatas"])
+    artifact_ids: list[str] = []
+    for meta in rows.get("metadatas") or []:
+        artifact_id = str((meta or {}).get("artifact_id") or "")
+        filename = str((meta or {}).get("filename") or "")
+        if (
+            artifact_id
+            and filename.startswith(TRANSCRIPT_FILENAME_PREFIX)
+            and artifact_id not in artifact_ids
+        ):
+            artifact_ids.append(artifact_id)
+    return artifact_ids
 
 
 def remove_conversation_transcripts(
@@ -363,18 +388,7 @@ def remove_conversation_transcripts(
     from app.deps import get_chroma, get_neo4j
 
     chroma = chroma or get_chroma()
-    collection = chroma.get_or_create_collection(name=config.collection_name(CONVERSATIONS_DOMAIN))
-    rows = collection.get(where={"conversation_id": conversation_id}, include=["metadatas"])
-    artifact_ids: list[str] = []
-    for meta in rows.get("metadatas") or []:
-        artifact_id = str((meta or {}).get("artifact_id") or "")
-        filename = str((meta or {}).get("filename") or "")
-        if (
-            artifact_id
-            and filename.startswith(_TRANSCRIPT_FILENAME_PREFIX)
-            and artifact_id not in artifact_ids
-        ):
-            artifact_ids.append(artifact_id)
+    artifact_ids = conversation_transcript_artifact_ids(conversation_id, chroma=chroma)
     if not artifact_ids:
         return []
 
@@ -425,6 +439,7 @@ def hide_content(
     redis: Any | None = None,
     archived_at: str | None = None,
     extra_props: dict[str, Any] | None = None,
+    only_if_visible: bool = False,
 ) -> bool:
     """SOFT delete / quarantine — mark the artifact ``archived`` and make it
     unretrievable without dropping its chunks (reversible by clearing the flag).
@@ -438,16 +453,38 @@ def hide_content(
 
     ``extra_props`` carries caller-specific fields (quarantine's ``purge_after`` /
     ``quarantine_reason``) merged onto the node in the same write.
+    ``only_if_visible`` leaves an already-archived artifact as it is (see
+    ``set_archived``).
     """
     from app.db.neo4j.artifacts import set_archived
     from app.deps import get_neo4j
 
     neo4j = neo4j or get_neo4j()
-    ok = set_archived(neo4j, artifact_id, archived_at=archived_at, extra=extra_props)
+    ok = set_archived(
+        neo4j, artifact_id, archived_at=archived_at, extra=extra_props, only_if_visible=only_if_visible,
+    )
     if ok:
         # Node is flagged — the hide has succeeded. The cache bust is best-effort
         # freshness and cannot fail this result (see invalidate_caches).
         # ``set_archived`` returns only a bool, not the artifact's domain — scoping
         # this would need an extra Neo4j read, so it stays a full flush.
         invalidate_caches(trigger=f"lifecycle.hide:{artifact_id}", redis=redis)
+    return ok
+
+
+def unhide_content(
+    artifact_id: str,
+    *,
+    reason: str,
+    neo4j: Any | None = None,
+    redis: Any | None = None,
+) -> bool:
+    """Reverse ``hide_content(..., extra_props={"archived_reason": reason})``."""
+    from app.db.neo4j.artifacts import clear_archived
+    from app.deps import get_neo4j
+
+    neo4j = neo4j or get_neo4j()
+    ok = clear_archived(neo4j, artifact_id, reason=reason)
+    if ok:
+        invalidate_caches(trigger=f"lifecycle.unhide:{artifact_id}", redis=redis)
     return ok

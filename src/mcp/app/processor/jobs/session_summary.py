@@ -119,6 +119,10 @@ class SessionSummaryJob(BaseJob):
         if not ENABLE_SESSION_SUMMARIZATION:
             return self._skip("feature_disabled")
 
+        from core.forget import registry as forget_registry
+        if forget_registry.is_forgotten("conversation", self._conversation_id):
+            return self._skip("forgotten")
+
         logger.info(
             "session_summary.start conversation=%s tenant=%s",
             self._conversation_id,

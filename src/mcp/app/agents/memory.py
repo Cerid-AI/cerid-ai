@@ -49,6 +49,10 @@ async def extract_and_store_memories(
     ingesting historical content (the eval calls core ``extract_memories``
     directly with the session date, so it is unaffected by this default).
     """
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return {"status": "skipped", "reason": "forgotten"}
+
     if ingest_fn is None:
         from app.services.ingestion import ingest_content
         ingest_fn = ingest_content

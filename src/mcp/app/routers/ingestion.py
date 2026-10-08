@@ -531,6 +531,10 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     if not config.ENABLE_FEEDBACK_LOOP:
         return {"status": "skipped", "reason": "Feedback loop disabled (ENABLE_FEEDBACK_LOOP=false)"}
 
+    from core.forget import registry as forget_registry
+    if req.conversation_id and forget_registry.is_forgotten("conversation", req.conversation_id):
+        return {"status": "skipped", "reason": "forgotten"}
+
     # E1 CR-043: a message-sentiment ping (thumbs up/down) is a lightweight write
     # to the feedback-loop store — NOT a turn to re-ingest. Record it and ack,
     # skipping the conversation-metrics + heavy turn-ingest path below.

@@ -1497,6 +1497,9 @@ SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, emp
 # env var was never read by either path.
 TOMBSTONE_TTL_DAYS = int(os.getenv("TOMBSTONE_TTL_DAYS", "90"))
 TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jsonl")
+# Forget engine (docs/superpowers/specs/2026-10-07-forget-engine-design.md): trashed
+# subjects older than this many days are purged by the daily maintenance job; 0 = never.
+FORGET_TRASH_DAYS = int(os.getenv("FORGET_TRASH_DAYS", "30"))
 # Settings that depend on what this machine has installed. Kept out of the
 # sync directory, which is shared between machines.
 HOST_SETTINGS_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "host_settings.json")

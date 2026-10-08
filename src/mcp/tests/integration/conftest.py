@@ -308,7 +308,8 @@ def _sweep_orphan_verification_reports(stack_reachable: bool) -> Iterator[None]:
 
 
 _CLEANUP_ROUTES = {
-    "conversation": "/user-state/conversations/{id}",
+    # A plain DELETE moves to the trash for 30 days; test data is purged now.
+    "conversation": "/user-state/conversations/{id}?permanent=true",
     "artifact": "/admin/artifacts/{id}",
 }
 
