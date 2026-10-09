@@ -17,6 +17,11 @@ vi.mock("@/lib/api", () => ({
   adminDeleteArtifact: vi.fn(),
   updateArtifactTags: vi.fn(),
   reIngestArtifact: vi.fn(),
+  previewForgetItems: vi.fn(),
+  forgetSubjects: vi.fn(),
+  restoreForget: vi.fn(),
+  ForgetHttpError: class extends Error { status = 500 },
+  ForgetConflictError: class extends Error {},
 }))
 
 // Mock the KB injection context
@@ -105,7 +110,7 @@ vi.mock("@/components/kb/knowledge-library-dialog", () => ({
   ),
 }))
 
-import { fetchAllArtifacts, fetchAllTags, queryKB } from "@/lib/api"
+import { fetchAllArtifacts, fetchAllTags, queryKB, previewForgetItems, forgetSubjects } from "@/lib/api"
 import { KnowledgePane } from "@/components/kb/knowledge-pane"
 
 const mockFetchAllArtifacts = fetchAllArtifacts as ReturnType<typeof vi.fn>
@@ -601,5 +606,119 @@ describe("KnowledgePane — axe-clean (D.3)", () => {
     const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
     await waitFor(() => screen.getByRole("button", { name: /retry/i }), { timeout: 3000 })
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  // ---- Forgetting from search ----
+
+  describe("forgetting from search", () => {
+    const now = new Date().toISOString()
+    const base = { domain: "research", collection: "domain_research", ingested_at: now }
+    const A1 = "a".repeat(64)
+    const A2 = "b".repeat(64)
+    const searchResults = {
+      results: [
+        { ...base, content: "first passage of the paper", relevance: 0.9, artifact_id: A1, filename: "paper.pdf",
+          chunk_index: 0, chunk_id: `${A1}_1111111111111111` },
+        { ...base, content: "second passage of the paper", relevance: 0.5, artifact_id: A1, filename: "paper.pdf",
+          chunk_index: 1, chunk_id: `${A1}_2222222222222222` },
+        { ...base, content: "a parent's text shown for its child", relevance: 0.7, artifact_id: A2, filename: "notes.md",
+          chunk_index: 3, chunk_id: `${A2}_3333333333333333`, parent_chunk_id: `${A2}_4444444444444444`,
+          parent_substituted: true },
+      ],
+    }
+
+    async function search() {
+      mockQueryKB.mockResolvedValue(searchResults)
+      render(<KnowledgePane />, { wrapper: createWrapper() })
+      const input = screen.getByPlaceholderText(/search artifacts/i)
+      fireEvent.change(input, { target: { value: "the paper" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      await waitFor(() => expect(screen.getByText("paper.pdf")).toBeInTheDocument())
+    }
+
+    it("lists every passage per document and sends the chosen subjects to the preview", async () => {
+      vi.mocked(previewForgetItems).mockResolvedValue({
+        subject: null, title: "", derived_facts: 0, notes: [], out_of_reach: [],
+        groups: [
+          { key: "documents", default: "checked", items: [{ kind: "artifact", id: A2, label: "notes.md", passages: 2 }] },
+          { key: "passages", default: "checked", items: [
+            { kind: "chunk", id: `${A1}_2222222222222222`, label: "second passage of the paper", document: "paper.pdf" },
+          ] },
+          { key: "memories", default: "checked", items: [] },
+        ],
+      })
+      vi.mocked(forgetSubjects).mockResolvedValue({ forget_id: "fg_0123456789abcdef", state: "trashed", receipt: null })
+      await search()
+      fireEvent.click(screen.getByRole("button", { name: "Select" }))
+
+      const passages = screen.getAllByRole("checkbox", { name: "Passage from paper.pdf" })
+      expect(passages).toHaveLength(2)
+      fireEvent.click(passages[1])
+      fireEvent.click(screen.getByRole("checkbox", { name: "Whole document notes.md" }))
+      expect(screen.getByRole("checkbox", { name: "Whole document paper.pdf" })).toHaveAttribute("data-state", "indeterminate")
+      fireEvent.click(screen.getByRole("button", { name: "Forget selected (2)" }))
+
+      await waitFor(() => expect(previewForgetItems).toHaveBeenCalled())
+      expect(vi.mocked(previewForgetItems).mock.calls[0][0]).toEqual([
+        { kind: "chunk", id: `${A1}_2222222222222222` },
+        { kind: "artifact", id: A2 },
+      ])
+      fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }))
+      await waitFor(() => expect(forgetSubjects).toHaveBeenCalledWith([
+        { kind: "artifact", id: A2 },
+        { kind: "chunk", id: `${A1}_2222222222222222` },
+      ], "trash"))
+    })
+
+    it("names the parent for a child hit even when its own text was shown", async () => {
+      mockQueryKB.mockResolvedValue({ results: [
+        { ...base, content: "a HyPE hit on a child", relevance: 0.6, artifact_id: A2, filename: "notes.md",
+          chunk_index: 4, chunk_id: `${A2}_5555555555555555`, parent_chunk_id: `${A2}_4444444444444444` },
+      ] })
+      render(<KnowledgePane />, { wrapper: createWrapper() })
+      const input = screen.getByPlaceholderText(/search artifacts/i)
+      fireEvent.change(input, { target: { value: "the hit" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      await waitFor(() => expect(screen.getByText("notes.md")).toBeInTheDocument())
+      fireEvent.click(screen.getByRole("button", { name: "Select" }))
+      fireEvent.click(screen.getByRole("checkbox", { name: "Passage from notes.md" }))
+      fireEvent.click(screen.getByRole("button", { name: "Forget selected (1)" }))
+      await waitFor(() => expect(previewForgetItems).toHaveBeenCalled())
+      expect(vi.mocked(previewForgetItems).mock.calls.at(-1)?.[0]).toEqual([
+        { kind: "chunk", id: `${A2}_4444444444444444` },
+      ])
+    })
+
+    it("names the parent for a passage whose parent text was shown", async () => {
+      await search()
+      fireEvent.click(screen.getByRole("button", { name: "Select" }))
+      fireEvent.click(screen.getByRole("checkbox", { name: "Passage from notes.md" }))
+      fireEvent.click(screen.getByRole("button", { name: "Forget selected (1)" }))
+      await waitFor(() => expect(previewForgetItems).toHaveBeenCalled())
+      expect(vi.mocked(previewForgetItems).mock.calls.at(-1)?.[0]).toEqual([
+        { kind: "chunk", id: `${A2}_4444444444444444` },
+      ])
+    })
+
+    it("Delete on a card opens the forget dialog for that document", async () => {
+      const art = makeArtifact({ id: A1, filename: "paper.pdf" })
+      mockFetchAllArtifacts.mockResolvedValue(artifactsPage([art]))
+      render(<KnowledgePane />, { wrapper: createWrapper() })
+      fireEvent.click(await screen.findByTitle("Delete artifact"))
+      await waitFor(() => expect(previewForgetItems).toHaveBeenCalled())
+      expect(vi.mocked(previewForgetItems).mock.calls.at(-1)?.[0]).toEqual([{ kind: "artifact", id: A1 }])
+    })
+
+    it("choosing a whole document replaces its passage choices", async () => {
+      await search()
+      fireEvent.click(screen.getByRole("button", { name: "Select" }))
+      fireEvent.click(screen.getAllByRole("checkbox", { name: "Passage from paper.pdf" })[0])
+      fireEvent.click(screen.getByRole("checkbox", { name: "Whole document paper.pdf" }))
+      expect(screen.getByRole("button", { name: "Forget selected (1)" })).toBeInTheDocument()
+      fireEvent.click(screen.getAllByRole("checkbox", { name: "Passage from paper.pdf" })[0])
+      // Unchoosing one passage of a chosen document keeps the other passage.
+      expect(screen.getByRole("button", { name: "Forget selected (1)" })).toBeInTheDocument()
+      expect(screen.getAllByRole("checkbox", { name: "Passage from paper.pdf" })[1]).toBeChecked()
+    })
   })
 })

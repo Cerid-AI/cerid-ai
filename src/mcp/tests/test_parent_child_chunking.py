@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.retrieval.chunk_ids import ChunkIdAssigner, is_positional_chunk_id
 from utils.chunker import (
     chunk_text,
     chunk_with_parents,
@@ -71,7 +72,7 @@ class TestChildHasParentMetadata:
 
         for child in children:
             assert child["parent_chunk_id"] is not None
-            assert child["parent_chunk_id"].startswith("art2_parent_")
+            assert child["parent_chunk_id"] in {c["chunk_id"] for c in chunks if c["chunk_level"] == "parent"}
             assert child["chunk_level"] == "child"
             assert isinstance(child["child_index"], int)
             assert child["child_index"] >= 0
@@ -190,21 +191,13 @@ class TestGetParentChunks:
 class TestChunkIdFormats:
     """Verify chunk ID format conventions."""
 
-    def test_parent_id_format(self):
+    def test_ids_are_content_addressed_and_owned_by_the_artifact(self):
         text = _make_long_text(600)
         chunks = chunk_with_parents(text, artifact_id="doc99", max_tokens=512)
 
-        parents = [c for c in chunks if c["chunk_level"] == "parent"]
-        for p in parents:
-            assert p["chunk_id"].startswith("doc99_parent_")
-
-    def test_child_id_format(self):
-        text = _make_long_text(600)
-        chunks = chunk_with_parents(text, artifact_id="doc99", max_tokens=512)
-
-        children = [c for c in chunks if c["chunk_level"] == "child"]
-        for c in children:
-            assert c["chunk_id"].startswith("doc99_child_")
-            # Format: {artifact_id}_child_{parent_idx}_{child_idx}
-            parts = c["chunk_id"].split("_")
-            assert len(parts) == 4  # doc99, child, parent_idx, child_idx
+        ids = ChunkIdAssigner("doc99")
+        for c in chunks:
+            assert c["chunk_id"].startswith("doc99_")
+            assert not is_positional_chunk_id(c["chunk_id"])
+            assert c["chunk_id"] == ids.assign(c["chunk_level"], c["text"])
+        assert len({c["chunk_id"] for c in chunks}) == len(chunks)

@@ -194,32 +194,21 @@ class TestClearDomain:
 
 class TestDeleteArtifact:
     def test_delete_not_found(self, client: TestClient):
-        from app.services.content_lifecycle import RemovalResult
-
         with (
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.get_chroma"),
-            patch(
-                "app.services.content_lifecycle.remove_content",
-                return_value=RemovalResult(found=False, artifact_id="nonexistent-id"),
-            ),
+            patch("app.db.neo4j.artifacts.get_artifact", return_value=None),
+            patch("app.services.forget.engine.purge_artifact") as purge,
         ):
             res = client.delete("/admin/artifacts/nonexistent-id")
         assert res.status_code == 404
+        purge.assert_not_called()
 
     def test_delete_success(self, client: TestClient):
-        from app.services.content_lifecycle import RemovalResult
-
-        removal = RemovalResult(
-            found=True,
-            artifact_id="art-123",
-            domain="code",
-            chunk_ids=["c1", "c2", "c3"],
-        )
+        art = {"id": "art-123", "filename": "a.md", "domain": "code", "chunk_count": 3}
         with (
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.get_chroma"),
-            patch("app.services.content_lifecycle.remove_content", return_value=removal),
+            patch("app.db.neo4j.artifacts.get_artifact", return_value=art),
+            patch("app.services.forget.engine.purge_artifact") as purge,
         ):
             res = client.delete("/admin/artifacts/art-123")
 
@@ -227,6 +216,19 @@ class TestDeleteArtifact:
         data = res.json()
         assert data["deleted"] is True
         assert data["chunks_removed"] == 3
+        assert data["filename"] == "a.md"
+        purge.assert_called_once_with("art-123", requested_by="admin")
+
+    def test_delete_with_a_store_still_erasing_is_not_reported_done(self, client: TestClient):
+        art = {"id": "art-123", "filename": "a.md", "domain": "code", "chunk_count": 3}
+        with (
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.db.neo4j.artifacts.get_artifact", return_value=art),
+            patch("app.services.forget.engine.purge_artifact", return_value=False),
+        ):
+            res = client.delete("/admin/artifacts/art-123")
+        assert res.status_code == 503
+        assert "retried" in res.json()["detail"]
 
 
 class TestKBStats:
@@ -267,29 +269,23 @@ class TestSemanticCacheInvalidationHook:
     rebuild.
     """
 
-    def test_delete_artifact_routes_through_remove_content(self, client: TestClient):
-        """Admin hard-delete must use the multi-store lifecycle coordinator
-        (BM25/SPLADE + C1/C2/C3 bust) — not Neo4j+Chroma-only."""
-        from app.services.content_lifecycle import RemovalResult
-
-        removal = RemovalResult(
-            found=True,
-            artifact_id="art-123",
-            domain="code",
-            chunk_ids=["c1"],
-        )
+    def test_delete_artifact_routes_through_the_forget_engine(self, client: TestClient):
+        """Admin hard-delete goes through the forget engine, whose artifact
+        adapter calls the multi-store lifecycle coordinator (BM25/SPLADE +
+        C1/C2/C3 bust), and leaves a receipt."""
+        art = {"id": "art-123", "filename": "a.md", "domain": "code", "chunk_count": 1}
         with (
             patch("app.routers.kb_admin.get_neo4j"),
-            patch("app.routers.kb_admin.get_chroma"),
-            patch(
-                "app.services.content_lifecycle.remove_content",
-                return_value=removal,
-            ) as mock_remove,
+            patch("app.db.neo4j.artifacts.get_artifact", return_value=art),
+            patch("app.services.forget.engine.forget_permanently") as forget,
+            patch("app.services.forget.engine.config.SYNC_DIR", "/tmp/sync"),
         ):
             res = client.delete("/admin/artifacts/art-123")
 
         assert res.status_code == 200
-        mock_remove.assert_called_once()
+        (subjects,), kwargs = forget.call_args
+        assert [(s.kind, s.id) for s in subjects] == [("artifact", "art-123")]
+        assert kwargs["requested_by"] == "admin"
 
 
     def test_clear_domain_invalidates_semantic_cache(self, client: TestClient, monkeypatch):

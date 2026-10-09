@@ -32,7 +32,10 @@ import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
 import { TAGS_TRUSTED } from "@/lib/tag-trust"
 import { DuplicateDetector } from "./duplicate-detector"
-import { fetchAllArtifacts, fetchAllTags, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
+import { ForgetSelectionBar, PassageSelectList } from "./forget-selection"
+import { useForgetItemsFlow } from "@/hooks/use-forget-items-flow"
+import { documentSubjects, groupByDocument, useForgetSelection } from "@/hooks/use-forget-selection"
+import { fetchAllArtifacts, fetchAllTags, queryKB, uploadFile, recategorizeArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
 import type { TagsPage } from "@/lib/api"
 import { notifyError } from "@/lib/query-client"
 import { useKBInjection } from "@/contexts/kb-injection-context"
@@ -458,16 +461,15 @@ export function KnowledgePane() {
     }
   }, [queryClient])
 
-  const handleDelete = useCallback(async (artifactId: string) => {
-    try {
-      await adminDeleteArtifact(artifactId)
-      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-      queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
-      queryClient.invalidateQueries({ queryKey: ["kb-search"] })
-    } catch (err) {
-      notifyError(err, { op: "artifact.delete", artifactId })
-    }
-  }, [queryClient])
+  const selection = useForgetSelection()
+  const { setActive: setSelecting, clear: clearSelection } = selection
+  useEffect(() => { clearSelection() }, [activeSearch, clearSelection])
+  const forgetFlow = useForgetItemsFlow(useCallback(() => setSelecting(false), [setSelecting]))
+  const { start: startForget } = forgetFlow
+
+  const handleDelete = useCallback((artifactId: string) => {
+    startForget([{ kind: "artifact", id: artifactId }])
+  }, [startForget])
 
   const handleUpdateTags = useCallback(async (artifactId: string, tags: string[]) => {
     try {
@@ -554,6 +556,20 @@ export function KnowledgePane() {
   const paginatedResults = results.slice(0, displayLimit)
   const relevanceScores = results.map((r) => r.relevance)
   const hasMore = activeSearch ? searchWindowFull : displayLimit < totalCount
+
+  // Selection mode lists every passage search returned for the documents on
+  // screen (the cards show only each document's best one), in card order.
+  const rawSearchResults = searchResults?.results
+  const selectableResults = useMemo(() => {
+    if (!activeSearch) return paginatedResults
+    const order = new Map(paginatedResults.map((r, i) => [r.artifact_id, i]))
+    return (rawSearchResults ?? [])
+      .filter((r) => order.has(r.artifact_id))
+      .sort((a, b) => (order.get(a.artifact_id) ?? 0) - (order.get(b.artifact_id) ?? 0))
+  }, [activeSearch, paginatedResults, rawSearchResults])
+  const selectableDocuments = useMemo(
+    () => documentSubjects(groupByDocument(selectableResults)), [selectableResults],
+  )
   // UX-28: name the scope the count describes. An unlabeled "Showing 50 of
   // 94 artifacts" beside a corpus-wide hero count ("744 artifacts") read as
   // a contradiction; the 94 was a filtered subset all along.
@@ -880,8 +896,8 @@ export function KnowledgePane() {
         )}
       </div>
 
-      {/* Sort controls */}
-      {dateFiltered.length > 1 && (
+      {/* Sort and selection controls */}
+      {(dateFiltered.length > 1 || (dateFiltered.length > 0 && !!activeSearch)) && (
         <div className="flex items-center gap-1 border-b px-4 py-1.5">
           <ArrowUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
           <span className="text-label-xs text-muted-foreground mr-1">Sort:</span>
@@ -924,6 +940,7 @@ export function KnowledgePane() {
             Name
           </Button>
           <div className="ml-auto flex items-center gap-1">
+            <ForgetSelectionBar selection={selection} all={selectableDocuments} onForget={startForget} />
             <button
               onClick={() => toggleView("grid")}
               className={cn("rounded p-1", viewMode === "grid" ? "bg-muted" : "hover:bg-muted/50")}
@@ -1014,7 +1031,9 @@ export function KnowledgePane() {
               )}
 
               {!isLoading && !isError && results.length > 0 && (
-                viewMode === "grid" ? (
+                selection.active ? (
+                  <PassageSelectList results={selectableResults} selection={selection} />
+                ) : viewMode === "grid" ? (
                   <div className="grid grid-cols-2 gap-2 p-3 lg:grid-cols-3">
                     {paginatedResults.map((result) => (
                       <ArtifactCard
@@ -1119,6 +1138,7 @@ export function KnowledgePane() {
         uploading={uploadingFiles}
       />
 
+      {forgetFlow.dialog}
       <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} localTags={availableTags} />
       <DuplicateDetector open={showDuplicates} onClose={() => setShowDuplicates(false)} />
     </div>

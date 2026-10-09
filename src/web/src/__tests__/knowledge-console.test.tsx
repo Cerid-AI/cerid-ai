@@ -260,3 +260,56 @@ describe("KnowledgeConsole relevance figures (audit 50)", () => {
     expect(bars.map((b) => b.getAttribute("aria-valuenow"))).toEqual(["100", "100", "100"])
   })
 })
+
+describe("KnowledgeConsole forgetting", () => {
+  it("offers KB passages and memories, naming a verified memory by its node", async () => {
+    const api = await import("@/lib/api")
+    const preview = vi.spyOn(api, "previewForgetItems").mockResolvedValue({
+      subject: null, title: "", groups: [], derived_facts: 0, notes: [], out_of_reach: [],
+    })
+    const aid = "a".repeat(64)
+    render(<KnowledgeConsole {...baseProps({
+      hasQueried: true,
+      kbSources: [{
+        content: "x", relevance: 0.8, artifact_id: aid, filename: "plan.md", domain: "projects",
+        chunk_index: 0, chunk_id: `${aid}_0123456789abcdef`, collection: "domain_projects", ingested_at: "",
+      }],
+      memorySources: [
+        { content: "Prefers tea", relevance: 0.6, memory_type: "preference", age_days: 3, summary: "Prefers tea",
+          memory_id: "m".repeat(64), source_authority: 0.7, base_similarity: 0.6, access_count: 0,
+          source_type: "memory", forget_kind: "artifact" },
+        { content: "The limit is $23,500", relevance: 0.5, memory_type: "empirical", age_days: 1, summary: "",
+          memory_id: "11111111-2222-3333-4444-555555555555", source_authority: 0.9, base_similarity: 0.5,
+          access_count: 0, source_type: "memory", forget_kind: "memory" },
+      ],
+      externalSources: [{ content: "web", relevance: 0.4, source_url: "https://example.com", source_type: "external" }],
+    })} />, { wrapper })
+
+    fireEvent.click(screen.getByRole("button", { name: "Select" }))
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+    fireEvent.click(screen.getByRole("button", { name: "Forget selected (3)" }))
+    await vi.waitFor(() => expect(preview).toHaveBeenCalled())
+    expect(preview.mock.calls[0][0]).toEqual([
+      { kind: "chunk", id: `${aid}_0123456789abcdef` },
+      { kind: "artifact", id: "m".repeat(64) },
+      { kind: "memory", id: "11111111-2222-3333-4444-555555555555" },
+    ])
+    preview.mockRestore()
+  })
+})
+
+describe("KnowledgeConsole selection across answers", () => {
+  it("drops choices made among the previous answer's sources", () => {
+    const mem = (id: string) => ({
+      content: id, relevance: 0.5, memory_type: "preference", age_days: 1, summary: id, memory_id: id,
+      source_authority: 0.7, base_similarity: 0.5, access_count: 0, source_type: "memory" as const,
+      forget_kind: "artifact" as const,
+    })
+    const { rerender } = render(<KnowledgeConsole {...baseProps({ hasQueried: true, memorySources: [mem("m1")] })} />, { wrapper })
+    fireEvent.click(screen.getByRole("button", { name: "Select" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Memory: m1" }))
+    expect(screen.getByRole("button", { name: "Forget selected (1)" })).toBeInTheDocument()
+    rerender(<KnowledgeConsole {...baseProps({ hasQueried: true, memorySources: [mem("m2")] })} />)
+    expect(screen.getByRole("button", { name: "Forget selected (0)" })).toBeDisabled()
+  })
+})

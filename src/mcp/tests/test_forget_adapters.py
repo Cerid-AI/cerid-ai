@@ -29,7 +29,7 @@ def _chroma_with(rows):
 
 def test_purge_order_is_derived_first_record_last():
     assert [a.name for a in ADAPTERS] == [
-        "artifacts", "verified_memories", "transcripts", "verification_report_graph",
+        "artifacts", "chunks", "verified_memories", "transcripts", "verification_report_graph",
         "redis_conversation_keys", "sync_file", "conversation_node",
     ]
 

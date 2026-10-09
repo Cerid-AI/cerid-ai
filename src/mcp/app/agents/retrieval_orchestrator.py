@@ -292,6 +292,7 @@ async def orchestrated_query(
             "age_days": m.get("age_days", 0.0),
             "summary": m.get("summary", ""),
             "memory_id": m.get("memory_id", ""),
+            "forget_kind": m.get("forget_kind", "artifact"),
             "source_authority": m.get("source_authority", 0.7),
             "base_similarity": m.get("base_similarity", 0.0),
             "access_count": m.get("access_count", 0),

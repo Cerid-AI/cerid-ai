@@ -16,8 +16,9 @@ Every new ingest now follows a two-phase commit protocol:
    ``content + source_uri + tenant``) is stamped on each row purely as a
    recovery/deadletter correlation tag (AF-062: nothing queries Chroma by it
    — actual write-idempotency comes from the content-addressed
-   ``artifact_id = content_hash`` plus per-chunk ids ``{artifact_id}_chunk_{i}``
-   and ``collection.upsert`` overwriting the same rows on re-delivery).
+   ``artifact_id = content_hash`` plus content-addressed chunk ids
+   (``core/retrieval/chunk_ids.py``) and ``collection.upsert`` overwriting the
+   same rows on re-delivery).
 
 2. **Commit Neo4j** — call ``graph.create_artifact`` (fresh) or
    ``graph.update_artifact`` (re-ingest).  On success, flip all staged chunks to
@@ -58,7 +59,9 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
 from app.services.storage_metrics import get_storage_report
 from core.context.identity import get_tenant_id
+from core.forget import registry as forget_registry
 from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
+from core.retrieval.chunk_ids import ChunkIdAssigner
 from core.utils import cache
 from core.utils.embeddings import embedding_stamp
 from core.utils.loop_local import LoopLocal
@@ -292,6 +295,8 @@ def _stage_chunks_pending(
     after ``collection.upsert()`` so the rows are invisible to the retrieval gate
     until Neo4j commits successfully.
     """
+    if not chunk_ids:
+        return
     pending_at = utcnow_iso()
     metadatas_patch = [
         {
@@ -309,6 +314,8 @@ def _stage_chunks_pending(
 
 def _flip_chunks_committed(collection: Any, chunk_ids: list[str]) -> None:
     """Flip cerid_state from pending → committed after Neo4j succeeds."""
+    if not chunk_ids:
+        return
     metadatas_patch = [{"cerid_state": "committed"} for _ in chunk_ids]
     try:
         collection.update(ids=chunk_ids, metadatas=metadatas_patch)
@@ -476,6 +483,26 @@ def _check_duplicate(content_hashes: Sequence[str], domain: str) -> dict | None:
     return None
 
 
+def _drop_purged_chunks(
+    records: list[dict[str, Any]], pre_metas: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Leave out passages the forget engine purged, and the children of a
+    purged parent, so re-ingesting a document cannot write them back. A
+    trashed passage is still written: the read filter hides it, and Restore
+    brings it back. ``pre_metas`` is index-aligned with ``records`` when set."""
+    try:
+        purged = forget_registry.purged_ids("chunk")
+    except Exception as exc:  # noqa: BLE001 — an unreadable registry must not block ingest
+        log_swallowed_error("app.services.ingestion.purged_chunks", exc)
+        return records, pre_metas
+    if not purged:
+        return records, pre_metas
+    keep = [i for i, r in enumerate(records) if r["id"] not in purged and (r.get("parent_id") or "") not in purged]
+    if len(keep) == len(records):
+        return records, pre_metas
+    return [records[i] for i in keep], ([pre_metas[i] for i in keep] if pre_metas else pre_metas)
+
+
 def _reingest_artifact(
     prev: dict,
     content: str,
@@ -628,9 +655,10 @@ def _reingest_artifact(
         else:
             pc_active = False
     if not chunk_records:
-        for i, c in enumerate(chunks):
+        chunk_id_for = ChunkIdAssigner(artifact_id)
+        for c in chunks:
             chunk_records.append({
-                "id": f"{artifact_id}_chunk_{i}",
+                "id": chunk_id_for.assign("child", c),
                 "text": c,
                 "level": "child",
                 "parent_id": "",
@@ -653,6 +681,7 @@ def _reingest_artifact(
     # strip the version provenance the re-embed job keys on.
     base_meta.update(embedding_stamp(domain))
 
+    chunk_records, pre_chunk_metadatas = _drop_purged_chunks(chunk_records, pre_chunk_metadatas)
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
     if pre_chunk_metadatas:
@@ -687,11 +716,14 @@ def _reingest_artifact(
 
     # upsert (not add): content-addressed chunk IDs make re-delivery of identical
     # content overwrite the same rows instead of duplicating them (idempotent).
-    collection.upsert(
-        ids=chunk_ids,
-        documents=chunk_documents,
-        metadatas=chunk_metadatas,
-    )
+    # Every passage of the new text can be one the user purged; the node is
+    # then updated to hold none.
+    if chunk_ids:
+        collection.upsert(
+            ids=chunk_ids,
+            documents=chunk_documents,
+            metadatas=chunk_metadatas,
+        )
 
     # AF-005 (CL-3): stage the re-ingested chunks 'pending' through the SAME
     # two-phase helper the fresh path uses, so a failed Neo4j update below leaves
@@ -912,8 +944,6 @@ def _forget_gate(artifact_id: str, on_forgotten: str) -> dict[str, Any] | None:
     ``skip`` (automatic rescans and polls): leave it forgotten, or a forgotten
     file would return at the next poll. Content never forgotten passes untouched.
     """
-    from core.forget import registry as forget_registry
-
     if not forget_registry.is_forgotten("artifact", artifact_id):
         return None
     if on_forgotten == "skip":
@@ -990,8 +1020,8 @@ def ingest_content(
     collection = chroma.get_or_create_collection(name=coll_name)
 
     content_hash = _content_hash(content)
-    # Content-addressed artifact_id → the chunker derives chunk IDs as
-    # ``{artifact_id}_chunk_{i}`` etc., so identical content re-delivered (e.g. a
+    # Content-addressed artifact_id → chunk ids hash it with each chunk's text
+    # (core/retrieval/chunk_ids.py), so identical content re-delivered (e.g. a
     # connector replays within the pending window before the Neo4j node commits)
     # upserts the SAME rows instead of creating duplicates — idempotent ingest.
     # content_hash is globally UNIQUE, so a content-addressed id is consistent
@@ -1203,9 +1233,10 @@ def ingest_content(
             # Fall through to flat if the helper returned nothing.
             pc_active = False
     if not chunk_records:
-        for i, c in enumerate(chunks):
+        chunk_id_for = ChunkIdAssigner(artifact_id)
+        for c in chunks:
             chunk_records.append({
-                "id": f"{artifact_id}_chunk_{i}",
+                "id": chunk_id_for.assign("child", c),
                 "text": c,
                 "level": "child",
                 "parent_id": "",
@@ -1347,6 +1378,17 @@ def ingest_content(
     _tenant = base_meta["tenant_id"]
     recovery_correlation_key = _recovery_correlation_key(content, _source_uri, _tenant)
 
+    # Wikilink edges name their source chunk by position in this sequence.
+    pre_drop_retrieval_ids = [r["id"] for r in chunk_records if r["retrieve_eligible"]]
+    chunk_records, pre_chunk_metadatas = _drop_purged_chunks(chunk_records, pre_chunk_metadatas)
+    if not chunk_records:
+        return {
+            "status": "skipped",
+            "reason": "forgotten",
+            "artifact_id": artifact_id,
+            "chunks": 0,
+            "timestamp": utcnow_iso(),
+        }
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
     if pre_chunk_metadatas:
@@ -1679,7 +1721,8 @@ def ingest_content(
         # parents interleaved when pc is on) would point at a parent row
         # — not retrieval-visible — for any wikilink past the first
         # parent's position. Caught in C2 audit.
-        retrieval_chunk_ids = child_chunk_ids if child_chunk_ids else chunk_ids
+        retrieval_chunk_ids = pre_drop_retrieval_ids
+        kept_chunk_ids = set(child_chunk_ids if child_chunk_ids else chunk_ids)
         for edge_chunk in wikilink_edge_chunks:
             edge_meta = edge_chunk.get("metadata", {})
             try:
@@ -1687,13 +1730,14 @@ def ingest_content(
                 source_idx = int(source_idx_str)
                 # Guard against an out-of-range chunk index (shouldn't
                 # happen but the chunker is across the import boundary).
+                if not retrieval_chunk_ids:
+                    continue
                 if 0 <= source_idx < len(retrieval_chunk_ids):
                     source_chunk_id = retrieval_chunk_ids[source_idx]
                 else:
-                    source_chunk_id = (
-                        retrieval_chunk_ids[0] if retrieval_chunk_ids
-                        else f"{artifact_id}_chunk_0"
-                    )
+                    source_chunk_id = retrieval_chunk_ids[0]
+                if source_chunk_id not in kept_chunk_ids:
+                    continue  # the linking passage was purged
                 target = str(edge_meta.get("wikilink_target", "")).strip()
                 if not target:
                     continue

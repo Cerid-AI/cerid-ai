@@ -200,6 +200,17 @@ env vars (URL + three model names) are the operator's surface; the
 `docs/AMD_GPU_MODEL_RECOMMENDATIONS.md` matrix picks GGUFs by VRAM
 tier.
 
+**Chunk ids.** A chunk row's id is `{artifact_id}_{h16}`
+(`core/retrieval/chunk_ids.py`). `h16` hashes the artifact id, the level
+(`parent` or `child`), the chunk text without the source header and the
+contextual line ingest prepends, and the count of identical passages before it
+in the artifact. Ids never encode position, so re-chunking cannot give a
+forgotten passage's id to other text. The `{artifact_id}_` prefix is how
+`core/retrieval/artifact_rows.py` decides which rows an artifact owns. Rows
+written under the old positional ids (`_chunk_N`, `_parent_N`, `_child_N_M`) are
+re-keyed by `app/services/chunk_id_migration.py` at boot and after each sync
+import.
+
 **Embedding provenance stamp.** Every chunk written to ChromaDB carries
 `embedding_model` and `embedding_model_version`, merged in by
 `core/utils/embeddings.py::embedding_stamp` at both chunk-write paths

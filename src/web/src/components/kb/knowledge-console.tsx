@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { safeHttpUrl } from "@/lib/kb-utils"
 import { useQuery } from "@tanstack/react-query"
@@ -36,6 +36,10 @@ import { RelevanceBar } from "@/components/ui/relevance-bar"
 import { fetchDataSources, updateSettings } from "@/lib/api"
 import { useNavigation } from "@/contexts/navigation-context"
 import { IngestionProgress } from "./ingestion-progress"
+import { ForgetSelectionBar, SelectableRow } from "./forget-selection"
+import { useForgetItemsFlow } from "@/hooks/use-forget-items-flow"
+import { memorySubject, passageSubject, useForgetSelection } from "@/hooks/use-forget-selection"
+import type { ForgetSubject } from "@/lib/api"
 import { DegradedBanner } from "@/components/chat/degraded-banner"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
@@ -391,6 +395,33 @@ export function KnowledgeConsole({
   const externalScores = externalSources.map((r) => r.relevance)
   const totalSources = kbSources.length + memorySources.length + externalSources.length
 
+  // Choosing sources to forget: KB passages and memories (external results are not stored).
+  const selection = useForgetSelection()
+  const { setActive: setSelecting, clear: clearSelection } = selection
+  const forgetFlow = useForgetItemsFlow(useCallback(() => setSelecting(false), [setSelecting]))
+  const selectable = useMemo(() => {
+    const seen = new Map<string, ForgetSubject>()
+    for (const r of kbSources) {
+      const s = passageSubject(r)
+      if (s) seen.set(`${s.kind}:${s.id}`, s)
+    }
+    for (const m of memorySources) {
+      const s = memorySubject(m)
+      seen.set(`${s.kind}:${s.id}`, s)
+    }
+    return [...seen.values()]
+  }, [kbSources, memorySources])
+  // A new answer brings new results; choices made among the old ones go.
+  const selectableKey = selectable.map((x) => `${x.kind}:${x.id}`).join("|")
+  useEffect(() => { clearSelection() }, [selectableKey, clearSelection])
+
+  const selectableRow = (subject: ForgetSubject | null, label: string, card: React.ReactNode, key: string) =>
+    selection.active && subject ? (
+      <SelectableRow key={key} checked={selection.isSelected(subject)} onToggle={() => selection.toggle(subject)} label={label}>
+        {card}
+      </SelectableRow>
+    ) : card
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       {/* Header */}
@@ -474,6 +505,11 @@ export function KnowledgeConsole({
 
           {hasQueried && (
             <>
+              {selectable.length > 0 && (
+                <div className="flex justify-end px-3 pt-1.5">
+                  <ForgetSelectionBar selection={selection} all={selectable} onForget={forgetFlow.start} />
+                </div>
+              )}
               <SourceSection
                 title="KB Sources"
                 icon={<Database className="h-3 w-3 shrink-0 text-blue-400" />}
@@ -485,7 +521,11 @@ export function KnowledgeConsole({
                 {kbSources.length === 0 ? (
                   <p className="text-label-sm text-muted-foreground py-1">No KB matches</p>
                 ) : (
-                  kbSources.map((r, i) => <KBSourceCard key={`kb-${r.artifact_id}-${r.chunk_index}-${i}`} result={r} among={kbScores} />)
+                  kbSources.map((r, i) => {
+                    const key = `kb-${r.artifact_id}-${r.chunk_index}-${i}`
+                    return selectableRow(passageSubject(r), `Passage from ${r.filename}`,
+                      <KBSourceCard key={key} result={r} among={kbScores} />, key)
+                  })
                 )}
               </SourceSection>
 
@@ -500,7 +540,11 @@ export function KnowledgeConsole({
                 {memorySources.length === 0 ? (
                   <p className="text-label-sm text-muted-foreground py-1">No memory matches</p>
                 ) : (
-                  memorySources.map((r, i) => <MemorySourceCard key={`mem-${r.memory_id}-${i}`} result={r} among={memoryScores} />)
+                  memorySources.map((r, i) => {
+                    const key = `mem-${r.memory_id}-${i}`
+                    return selectableRow(memorySubject(r), `Memory: ${r.summary || r.content.slice(0, 60)}`,
+                      <MemorySourceCard key={key} result={r} among={memoryScores} />, key)
+                  })
                 )}
               </SourceSection>
 
@@ -552,6 +596,7 @@ export function KnowledgeConsole({
           </div>
         </div>
       )}
+      {forgetFlow.dialog}
     </div>
   )
 }

@@ -127,7 +127,8 @@ class FakeChromaBackend:
 
 class FakeChromaCollection:
     """In-memory double for a chromadb 1.5.9 ``Collection`` as the paging jobs
-    use it (``get`` by ``limit``/``offset``/``include``, ``update``, ``upsert``).
+    use it (``get`` by ``ids``/``where``/``limit``/``offset``/``include``,
+    ``update``, ``upsert``, ``delete`` by ids).
 
     Faithful behaviours:
 
@@ -181,6 +182,7 @@ class FakeChromaCollection:
     def get(
         self,
         ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
         limit: int | None = None,
         offset: int = 0,
         include: list[str] | None = None,
@@ -189,7 +191,10 @@ class FakeChromaCollection:
         if ids is not None:
             rows = [self._ids.index(i) for i in ids if i in self._ids]
         else:
-            rows = list(range(len(self._ids)))[offset:]
+            rows = list(range(len(self._ids)))
+            if where:
+                rows = [j for j in rows if all(self._meta[j].get(k) == v for k, v in where.items())]
+            rows = rows[offset:]
             if limit is not None:
                 rows = rows[:limit]
         out: dict[str, Any] = {"ids": [self._ids[j] for j in rows]}
@@ -220,6 +225,12 @@ class FakeChromaCollection:
             if metadatas is not None:
                 self._meta[j] = dict(metadatas[i])
 
+    def delete(self, ids: list[str] | None = None) -> None:
+        for cid in ids or []:
+            if cid in self._ids:
+                j = self._ids.index(cid)
+                del self._ids[j], self._docs[j], self._embs[j], self._meta[j]
+
     def embedding_of(self, cid: str) -> Any:
         """Test accessor: the stored vector for one id."""
         return np.array(self._embs[self._ids.index(cid)])
@@ -247,4 +258,10 @@ class FakeChromaClient:
         name = kwargs["name"]
         if name not in self._cols:
             raise ValueError(f"Collection {name} does not exist.")
+        return self._cols[name]
+
+    def get_or_create_collection(self, **kwargs: Any) -> FakeChromaCollection:
+        name = kwargs["name"]
+        if name not in self._cols:
+            self._cols[name] = FakeChromaCollection(name)
         return self._cols[name]

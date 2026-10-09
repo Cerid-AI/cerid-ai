@@ -313,6 +313,7 @@ async def list_artifacts_endpoint(
             offset=offset,
             limit=limit,
             include_machine=include_machine,
+            include_forgotten=False,
         )
         # WB-24: expose the true total (not the page's length) so a client
         # paging via `offset` can tell when it has fetched everything, instead
@@ -327,6 +328,7 @@ async def list_artifacts_endpoint(
             min_quality=min_quality,
             search=search,
             include_machine=include_machine,
+            include_forgotten=False,
         )
         response.headers["X-Total-Count"] = str(total)
         response.headers["X-Has-More"] = "true" if offset + len(items) < total else "false"

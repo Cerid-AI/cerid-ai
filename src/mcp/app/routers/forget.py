@@ -7,13 +7,14 @@ import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 import config
 from app.services.forget import engine
-from app.services.forget.preview import preview_conversation
+from app.services.forget.preview import passage_ids, preview_conversation, preview_items
 from app.sync.user_state import validate_conversation_id
 from core.forget.registry import Subject
+from core.retrieval.chunk_ids import chunk_artifact_id
 
 
 def _is_admin(request: Request) -> bool:
@@ -31,8 +32,12 @@ def _require_admin_in_multi_user(request: Request) -> None:
 
 router = APIRouter(prefix="/forget", tags=["forget"], dependencies=[Depends(_require_admin_in_multi_user)])
 
-_HTTP_KINDS = frozenset({"conversation", "artifact", "memory"})
+_HTTP_KINDS = frozenset({"conversation", "artifact", "chunk", "memory"})
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+# A chunk id is its artifact's id, an underscore and a 16-hex suffix (or a
+# positional suffix on rows not yet migrated).
+_CHUNK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,160}$")
+_PREVIEW_MAX = 200
 
 
 class SubjectIn(BaseModel):
@@ -52,8 +57,20 @@ class ForgetResponse(BaseModel):
 
 
 class ForgetPreviewRequest(BaseModel):
-    kind: Literal["conversation"]
-    id: str
+    """Either one conversation (``kind`` + ``id``) or a selection of documents,
+    passages and memories (``subjects``)."""
+
+    kind: Literal["conversation"] | None = None
+    id: str | None = None
+    subjects: list[SubjectIn] | None = Field(default=None, max_length=_PREVIEW_MAX)
+
+    @model_validator(mode="after")
+    def _one_form(self) -> ForgetPreviewRequest:
+        if (self.kind is not None) == (self.subjects is not None):
+            raise ValueError("send either kind and id, or subjects")
+        if self.kind is not None and not self.id:
+            raise ValueError("id is required with kind")
+        return self
 
 
 class ForgetPreviewGroup(BaseModel):
@@ -63,10 +80,11 @@ class ForgetPreviewGroup(BaseModel):
 
 
 class ForgetPreviewResponse(BaseModel):
-    subject: dict[str, str]
+    subject: dict[str, str] | None
     title: str
     groups: list[ForgetPreviewGroup]
     derived_facts: int
+    notes: list[str] = []
     out_of_reach: list[str]
 
 
@@ -121,18 +139,22 @@ def _conversation_id(raw: str) -> str:
 def _subject(kind: str, raw: str) -> Subject:
     if kind == "conversation":
         return Subject(kind, _conversation_id(raw))
+    if kind == "chunk":
+        if not _CHUNK_ID_RE.match(raw or "") or not chunk_artifact_id(raw):
+            raise HTTPException(status_code=400, detail=f"Invalid chunk id: {raw!r}")
+        return Subject(kind, raw)
     if not _ID_RE.match(raw or ""):
         raise HTTPException(status_code=400, detail=f"Invalid {kind} id: {raw!r}")
     return Subject(kind, raw)
 
 
-def _subjects(req: ForgetRequest) -> list[Subject]:
-    if not req.subjects:
+def _subjects(items: list[SubjectIn], kinds: frozenset[str] = _HTTP_KINDS) -> list[Subject]:
+    if not items:
         raise HTTPException(status_code=400, detail="no subjects")
-    bad = sorted({s.kind for s in req.subjects} - _HTTP_KINDS)
+    bad = sorted({s.kind for s in items} - kinds)
     if bad:
         raise HTTPException(status_code=400, detail=f"kind not supported: {', '.join(bad)}")
-    return [_subject(s.kind, s.id) for s in req.subjects]
+    return [_subject(s.kind, s.id) for s in items]
 
 
 def _user_id(request: Request) -> str:
@@ -141,12 +163,23 @@ def _user_id(request: Request) -> str:
 
 @router.post("/preview", response_model=ForgetPreviewResponse)
 def preview(req: ForgetPreviewRequest) -> dict[str, Any]:
-    return preview_conversation(_conversation_id(req.id))
+    if req.subjects is not None:
+        return preview_items(_subjects(req.subjects, _HTTP_KINDS - {"conversation"}))
+    return preview_conversation(_conversation_id(req.id or ""))
+
+
+def _passages(subjects: list[Subject]) -> list[Subject]:
+    """Chunk subjects resolved to the passages retrieval serves (a child stands
+    for its parent), so the registry, the read filter and the purge agree."""
+    chunks = [s.id for s in subjects if s.kind == "chunk"]
+    if not chunks:
+        return subjects
+    return [s for s in subjects if s.kind != "chunk"] + [Subject("chunk", c) for c in passage_ids(chunks)]
 
 
 @router.post("", response_model=ForgetResponse)
 def forget(req: ForgetRequest, request: Request) -> dict[str, Any]:
-    subjects = _subjects(req)
+    subjects = _passages(_subjects(req.subjects))
     user_id = _user_id(request)
     try:
         if req.mode == "permanent":

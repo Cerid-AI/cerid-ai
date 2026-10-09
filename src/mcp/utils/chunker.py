@@ -19,6 +19,7 @@ import re
 import tiktoken
 
 from config.constants import CHUNK_OVERLAP_RATIO
+from core.retrieval.chunk_ids import ChunkIdAssigner
 
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
@@ -262,9 +263,10 @@ def chunk_with_parents(
             mode=mode,
             context_header=context_header,
         )
+        ids = ChunkIdAssigner(artifact_id)
         return [
             {
-                "chunk_id": f"{artifact_id}_chunk_{i}",
+                "chunk_id": ids.assign("child", c),
                 "text": c,
                 "chunk_level": "flat",
                 "parent_chunk_id": None,
@@ -284,9 +286,10 @@ def chunk_with_parents(
     )
 
     results: list[dict] = []
+    ids = ChunkIdAssigner(artifact_id)
 
-    for parent_idx, parent_text in enumerate(parent_texts):
-        parent_id = f"{artifact_id}_parent_{parent_idx}"
+    for parent_text in parent_texts:
+        parent_id = ids.assign("parent", parent_text)
         parent_token_count = count_tokens(parent_text)
 
         # Emit the parent chunk
@@ -309,7 +312,7 @@ def chunk_with_parents(
         )
 
         for child_idx, child_text in enumerate(child_texts):
-            child_id = f"{artifact_id}_child_{parent_idx}_{child_idx}"
+            child_id = ids.assign("child", child_text)
             results.append(
                 {
                     "chunk_id": child_id,

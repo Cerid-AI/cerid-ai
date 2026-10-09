@@ -322,3 +322,34 @@ def test_retry_started_purges_touches_only_forgets_whose_purge_started(tmp_path,
     assert engine.retry_started_purges() == [started]
     assert reg.state_of("conversation", "c1") == "purged"
     assert reg.state_of("conversation", "c2") == "trashed"
+
+
+def test_purge_artifact_forgets_permanently_with_a_receipt(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from app.services.forget import engine
+    from tests.helpers.forget import isolate_forget
+
+    isolate_forget(monkeypatch, tmp_path)
+    receipt = {"adapters": {"artifacts": {"status": "done"}, "chunks": {"status": "pending"}}}
+    with patch.object(engine, "forget_permanently", return_value=receipt) as forget:
+        assert engine.purge_artifact("a" * 64, requested_by="admin") is False
+    receipt["adapters"]["chunks"]["status"] = "done"
+    with patch.object(engine, "forget_permanently", return_value=receipt):
+        assert engine.purge_artifact("a" * 64, requested_by="admin") is True
+    (subjects,), kwargs = forget.call_args
+    assert [(s.kind, s.id) for s in subjects] == [("artifact", "a" * 64)]
+    assert kwargs == {"requested_by": "admin", "user_id": ""}
+
+
+def test_purge_artifact_without_a_sync_dir_removes_directly(monkeypatch):
+    from unittest.mock import patch
+
+    from app.services.forget import engine
+
+    monkeypatch.setattr("config.SYNC_DIR", "")
+    with patch("app.services.content_lifecycle.remove_content") as remove, \
+         patch.object(engine, "forget_permanently") as forget:
+        engine.purge_artifact("a" * 64, requested_by="sdk")
+    remove.assert_called_once_with("a" * 64)
+    forget.assert_not_called()

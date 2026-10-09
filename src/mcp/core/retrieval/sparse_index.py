@@ -170,6 +170,28 @@ class SparseIndex:
         self._rewrite_disk()
         return len(remove_set)
 
+    def rekey(self, mapping: dict[str, str]) -> int:
+        """Rename chunk ids in place, keeping each vector and tenant. An entry
+        whose new id is already indexed is dropped instead."""
+        hits = [c for c in self._docs if c in mapping]
+        if not hits:
+            return 0
+        docs: dict[str, dict[int, float]] = {}
+        tenants: dict[str, str] = {}
+        for cid, vec in self._docs.items():
+            new = mapping.get(cid, cid)
+            if new in docs:
+                continue
+            docs[new] = vec
+            tenants[new] = self._doc_tenant.get(cid, config.DEFAULT_TENANT_ID)
+        self._docs, self._doc_tenant = docs, tenants
+        self._postings = defaultdict(list)
+        for cid, vec in self._docs.items():
+            for tid, weight in vec.items():
+                self._postings[tid].append((cid, weight))
+        self._rewrite_disk()
+        return len(hits)
+
     # -- search --------------------------------------------------------------
 
     def search(
@@ -377,6 +399,11 @@ def remove_chunks(domain: str, chunk_ids: list[str]) -> int:
         return 0
     idx = get_index(domain)
     return idx.remove_documents(chunk_ids)
+
+
+def rekey_chunks(domain: str, mapping: dict[str, str]) -> int:
+    """Rename chunk ids in a domain's sparse corpus (the chunk-id migration)."""
+    return get_index(domain).rekey(mapping)
 
 
 def search_sparse(

@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -31,7 +30,6 @@ from app.sync._helpers import (
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
-    _count_jsonl_lines,
     _default_sync_dir,
     _ensure_dir,
     _iter_jsonl,
@@ -81,6 +79,21 @@ def _is_forgotten_verified_memory(row_id: str) -> bool:
     return row_id.startswith(_VERIFIED_MEMORY_ROW_PREFIX) and forget_registry.is_forgotten(
         "memory", row_id[len(_VERIFIED_MEMORY_ROW_PREFIX):],
     )
+
+
+def _is_forgotten_chunk(row_id: str, meta: dict[str, Any]) -> bool:
+    """A forgotten passage, or a child of one (the parent is what was forgotten)."""
+    parent = str(meta.get("parent_chunk_id") or "")
+    return forget_registry.is_forgotten("chunk", row_id) or (
+        bool(parent) and forget_registry.is_forgotten("chunk", parent)
+    )
+
+
+def _is_forgotten_lexical_row(row_id: str) -> bool:
+    """A keyword-index row of a forgotten passage or a forgotten artifact."""
+    from core.retrieval.chunk_ids import chunk_artifact_id
+    aid = chunk_artifact_id(row_id)
+    return forget_registry.is_forgotten("chunk", row_id) or bool(aid and _is_forgotten_artifact(aid))
 
 
 def _forgotten_transcript_artifact_ids(sync_dir: str) -> set[str]:
@@ -448,6 +461,7 @@ def import_chroma(
                     (artifact_id and _is_forgotten_artifact(str(artifact_id)))
                     or _is_forgotten_transcript(meta)
                     or _is_forgotten_verified_memory(str(chunk_id))
+                    or _is_forgotten_chunk(str(chunk_id), meta)
                 ):
                     skipped += 1
                     continue
@@ -584,16 +598,14 @@ def import_bm25(sync_dir: str | None = None) -> dict[str, Any]:
     for src_file in sorted(src_dir.glob("*.jsonl")):
         dst_file = dst_dir / src_file.name
 
+        # A domain new to this machine merges into an empty corpus, so its rows
+        # pass the same forgotten-passage check as any other import.
         if not dst_file.exists():
             try:
-                shutil.copy2(str(src_file), str(dst_file))
-                line_count = _count_jsonl_lines(str(src_file))
-                chunks_added += line_count
-                files_processed += 1
-                logger.debug("BM25 copied new corpus file: %s (%d chunks)", src_file.name, line_count)
+                dst_file.touch()
             except OSError as exc:
-                logger.warning("BM25 copy failed for %s: %s", src_file.name, exc)
-            continue
+                logger.warning("BM25 corpus create failed for %s: %s", src_file.name, exc)
+                continue
 
         try:
             existing_ids: set = set()
@@ -605,7 +617,7 @@ def import_bm25(sync_dir: str | None = None) -> dict[str, Any]:
             new_rows: list[dict[str, Any]] = []
             for row in _iter_jsonl(str(src_file)):
                 cid = row.get("chunk_id") or row.get("id")
-                if cid and cid not in existing_ids:
+                if cid and cid not in existing_ids and not _is_forgotten_lexical_row(str(cid)):
                     new_rows.append(row)
                     chunks_added += 1
                 else:
@@ -1017,8 +1029,19 @@ def import_all(
             log_swallowed_error('app.sync.import_', exc)
             logger.warning("BM25 index rebuild failed after import: %s", exc)
 
+    # A machine that has not migrated exports positional chunk ids; re-key them
+    # now so they land on the rows this machine already holds.
+    rekey_result: dict[str, Any] = {}
+    try:
+        from app.services.chunk_id_migration import migrate_chunk_ids
+        rekey_result = migrate_chunk_ids(neo4j=driver)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_.chunk_id_migration', exc)
+
     logger.info("Full import complete from %s", sync_dir)
     return {
+        "chunk_ids_rekeyed": rekey_result,
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,

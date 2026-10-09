@@ -66,3 +66,19 @@ def remove_artifact_hype_rows(chroma: Any, base_collection: str, artifact_id: st
     if ids:
         hype.delete(ids=ids)
     return len(ids)
+
+
+def remove_chunk_hype_rows(chroma: Any, base_collection: str, artifact_id: str, chunk_ids: list[str]) -> int:
+    """Delete the HyPE questions written for some of an artifact's chunks.
+
+    A question's id is ``{source_chunk_id}_hype_{n}``, so ownership by chunk
+    is decided by id prefix, as it is by artifact.
+    """
+    hype = _hype_collection(chroma, base_collection)
+    if hype is None or not chunk_ids:
+        return 0
+    prefixes = tuple(f"{cid}_hype_" for cid in chunk_ids)
+    ids = [h for h in artifact_row_ids(hype, artifact_id, key="source_artifact_id") if h.startswith(prefixes)]
+    if ids:
+        hype.delete(ids=ids)
+    return len(ids)
