@@ -1,6 +1,6 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-07-10 (V1 Task 5.2 reference-number reconciliation — TrustScore section updated to the six live components, the 7-day verification window, and the actual eval cadences; the five primitives are unchanged).
+> **Last reviewed:** 2026-10-08 (walked against the code at 1.0.10: the five primitives, the TrustScore's six components and targets, and the brief cadence hold. Corrected: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, the internal release-driver link is gone from this public document, and forgetting is named alongside accumulating).
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.
@@ -19,6 +19,11 @@ machine is only what you send to your chosen LLM provider — chat/query
 context, and (by default) per-document snippets for categorization and
 claims for verification. Every egress path is listed in the Data Egress
 panel. Run fully local to send nothing.
+
+What Cerid accumulates it can also forget. Deleting a conversation moves it to a
+trash that empties on a schedule, or forgets it permanently with a receipt; its
+transcripts, reports and caches go with it, and no client, job or sync import
+brings it back. Memories already derived from it are the next step.
 
 ## The five primitives
 
@@ -94,9 +99,10 @@ makes that understanding **visible to the user as readable pages**.
 - **Contradiction ledger** persists every disagreement the NLI guard
   detects, dated and sourced. Surfaces in entity pages, weekly synthesis,
   and a standalone `/wiki/contradictions` route.
-- **Pre-computed snapshots** ship with curated knowledge packs. A user
-  installing a pack sees populated wiki pages within seconds, not after
-  hours of local processing.
+- **Knowledge packs** install curated corpora as ordinary sources; their
+  entity pages build in the background like any other source's. Pre-computed
+  wiki snapshots shipped inside a pack, so pages appear within seconds of
+  install, are not built yet.
 
 The Wiki is what makes Cerid a *thinking partner* rather than a *queryable
 storage system*.
@@ -109,7 +115,8 @@ generation, eval runs — flows through one queue. One worker. One throttle.
 One pause button. One cost projection.
 
 Three modes:
-- **Local-only** (default) — all jobs against local Ollama. Zero API spend.
+- **Local-only** (default) — all jobs against the host's local inference
+  server (MLX on the Mac Studio, Ollama or Quenchforge elsewhere). Zero API spend.
 - **Hybrid** — local for cheap jobs, API for expensive ones. User-configurable
   cost cap with auto-fallback to local when breached.
 - **Disabled** — queue accumulates; nothing executes until re-enabled.
@@ -118,7 +125,7 @@ CPU-aware: worker dequeue pauses when load average exceeds the configured
 ceiling. The system keeps up with what's reasonable for the host; users
 see queue depth and can pay for API speedup if they choose.
 
-Every job is visible in the Monitoring pane. Every cost is projected
+Every job is visible in the Monitoring view (Settings → Diagnostics). Every cost is projected
 before submission and tracked after. Every wiki page being refreshed
 shows its updating state in real time.
 
@@ -174,7 +181,6 @@ Rebuild pipeline lives under `docs/assets/demo-video/` in the monorepo working t
 
 ## See also
 
-- [`tasks/2026-05-10-v0.92-final-plan.md`](../tasks/2026-05-10-v0.92-final-plan.md) — current release driver
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — layered system architecture
 - [`docs/PRESERVATION.md`](PRESERVATION.md) — capability invariants
 - [`docs/EVAL_BASELINES.md`](EVAL_BASELINES.md) — retrieval-quality regression ledger
