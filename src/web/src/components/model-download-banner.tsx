@@ -55,6 +55,10 @@ function isAnyUncached(status: ModelsStatusResponse | undefined): boolean {
   return status.reranker.cached === false || status.embedder.cached === false
 }
 
+function isPrimaryUncached(lane: ModelsStatusResponse["reranker"]): boolean {
+  return lane.cached === false && lane.needs_local_cache !== false && lane.role !== "fallback"
+}
+
 function readDismissed(): boolean {
   try {
     return window.localStorage.getItem(DISMISS_KEY) === "true"
@@ -166,11 +170,13 @@ export function ModelDownloadBanner() {
     // (e.g., both served by Quenchforge), there's nothing to download —
     // hide the banner so it isn't perpetually warning about a cache that
     // can never satisfy itself.
-    const rerankerRemote = status.reranker.needs_local_cache === false
-    const embedderRemote = status.embedder.needs_local_cache === false
-    if (rerankerRemote && embedderRemote) return "hidden"
-    if (isBothCached(status)) return "cached"
     if (isAnyLoading(status) || downloading) return "loading"
+    if (isBothCached(status)) return "cached"
+    // Only a primary model that is not cached makes the first query download
+    // anything. A fallback behind a remote provider (the local model server on
+    // the Studio) is fetched only if that provider goes down, so it is no
+    // reason to warn on every screen; Settings → Models still offers it.
+    if (!isPrimaryUncached(status.reranker) && !isPrimaryUncached(status.embedder)) return "hidden"
     return "idle_uncached"
   })()
 

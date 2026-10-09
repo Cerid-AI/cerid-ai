@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils"
 import { useNavigation } from "@/contexts/navigation-context"
 import { fetchHealth } from "@/lib/api/settings"
 import { clearRecommendation, dismissRecommendation } from "@/lib/api/recommendations"
-import { SETTINGS_REGISTRY, type SettingDef } from "@/lib/settings-registry"
+import { SETTINGS_REGISTRY, type CategoryId, type SettingDef } from "@/lib/settings-registry"
 import type { PatchResult } from "./categories/page-props"
 import type { RecommendedFeature, SettingsUpdate } from "@/lib/types"
 import { logSwallowedError } from "@/lib/log-swallowed"
@@ -67,12 +67,25 @@ function owningDef(rec: RecommendedFeature): SettingDef | undefined {
   )
 }
 
+/** Categories that hold a setting the recommendation would change. */
+function recCategories(rec: RecommendedFeature): Set<CategoryId> {
+  const keys = Object.keys((rec.enable_payload ?? {}) as Record<string, unknown>)
+  return new Set(
+    SETTINGS_REGISTRY
+      .filter((d) => d.writer.kind === "settings-patch" && keys.includes(d.writer.key))
+      .map((d) => d.category),
+  )
+}
+
 export interface RecommendationBannerProps {
   /** PATCH /settings — wired in from the shell so the banner shares one source of truth. */
   patch: (body: SettingsUpdate) => Promise<PatchResult>
+  /** On a category page: show only recommendations whose settings live in
+   *  that category. Omitted on the overview, which lists every one. */
+  category?: CategoryId
 }
 
-export function RecommendationBanner({ patch }: RecommendationBannerProps) {
+export function RecommendationBanner({ patch, category }: RecommendationBannerProps) {
   const qc = useQueryClient()
   const { data } = useQuery({
     queryKey: ["health-recommendations"],
@@ -102,7 +115,7 @@ export function RecommendationBanner({ patch }: RecommendationBannerProps) {
   })
 
   const recs = (data?.recommended_features ?? []).filter(
-    (r) => !dismissedLocally.has(r.id),
+    (r) => !dismissedLocally.has(r.id) && (!category || recCategories(r).has(category)),
   )
   if (recs.length === 0) return null
 

@@ -67,6 +67,9 @@ export type ModelCacheStatus = {
   // F-07-01: false when the model is served remotely (no local cache needed).
   // Absent on older server builds; treat undefined as `true`.
   needs_local_cache?: boolean
+  // "fallback" when a remote provider serves the lane and the local model only
+  // answers if it is unreachable. Absent on older server builds; treat as "primary".
+  role?: "primary" | "fallback"
   cached: boolean
   files: Record<string, string | null>
   // Workstream E Phase E.6.6: true when a worker thread is currently

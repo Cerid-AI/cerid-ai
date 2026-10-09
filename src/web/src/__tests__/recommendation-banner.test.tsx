@@ -18,6 +18,7 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { RecommendationBanner } from "@/components/settings/recommendation-banner"
+import type { RecommendedFeature } from "@/lib/types"
 
 const SAMPLE_REC = {
   id: "sparse_retrieval",
@@ -38,7 +39,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
-function mockHealthFetch(features: typeof SAMPLE_REC[]) {
+function mockHealthFetch(features: RecommendedFeature[]) {
   globalThis.fetch = vi.fn().mockImplementation((url: string) => {
     if (typeof url === "string" && url.includes("/health")) {
       return Promise.resolve({
@@ -133,5 +134,29 @@ describe("RecommendationBanner", () => {
       )
       expect(dismissCall).toBeDefined()
     })
+  })
+
+  it("on a category page shows only the recommendations whose settings live there", async () => {
+    const HYPE = { ...SAMPLE_REC, id: "hype", label: "HyPE questions", enable_payload: { enable_hype: true } }
+    mockHealthFetch([SAMPLE_REC, HYPE])
+    const patch = vi.fn()
+    const { unmount } = render(wrap(<RecommendationBanner patch={patch} category="retrieval" />))
+    expect(await screen.findByText("SPLADE-v3 sparse retrieval")).toBeInTheDocument()
+    expect(screen.queryByText("HyPE questions")).not.toBeInTheDocument()
+    unmount()
+
+    render(wrap(<RecommendationBanner patch={patch} category="appearance" />))
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText("SPLADE-v3 sparse retrieval")).not.toBeInTheDocument()
+    expect(screen.queryByText("HyPE questions")).not.toBeInTheDocument()
+  })
+
+  it("without a category (the overview) shows every recommendation", async () => {
+    const HYPE = { ...SAMPLE_REC, id: "hype", label: "HyPE questions", enable_payload: { enable_hype: true } }
+    mockHealthFetch([SAMPLE_REC, HYPE])
+    render(wrap(<RecommendationBanner patch={vi.fn()} />))
+    expect(await screen.findByText("SPLADE-v3 sparse retrieval")).toBeInTheDocument()
+    expect(screen.getByText("HyPE questions")).toBeInTheDocument()
   })
 })
