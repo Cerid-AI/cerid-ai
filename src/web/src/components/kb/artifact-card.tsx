@@ -97,7 +97,8 @@ interface ArtifactCardProps {
   domains?: string[]
   onRecategorize?: (artifactId: string, newDomain: string) => Promise<void>
   onPreview?: (artifactId: string) => void
-  onDelete?: (artifactId: string) => Promise<void>
+  /** Opens the forget dialog, which confirms. */
+  onDelete?: (artifactId: string) => void
   onUpdateTags?: (artifactId: string, tags: string[]) => Promise<void>
   onReIngest?: (artifactId: string) => Promise<void>
   onToggleStar?: (artifactId: string) => Promise<void>
@@ -112,8 +113,6 @@ export function ArtifactCard({ result, relevanceAmong, isSelected, onSelect, onI
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const [editingTags, setEditingTags] = useState(false)
   const [tagInput, setTagInput] = useState("")
   const [editedTags, setEditedTags] = useState<string[]>([])
@@ -498,31 +497,6 @@ export function ArtifactCard({ result, relevanceAmong, isSelected, onSelect, onI
           </div>
         )}
 
-        {/* Delete confirmation — rendered in compact mode too: the delete
-            button below is always visible, so gating the confirmation on
-            !compact made delete a silent no-op in the default grid view. */}
-        {confirmDelete && onDelete && (
-          <div role="presentation" className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-            <span className="text-label-sm text-destructive">Delete this artifact?</span>
-            <div className="flex-1" />
-            <Button
-              variant="destructive"
-              size="xs"
-              className="h-5 text-label-xs"
-              disabled={deleting}
-              onClick={async () => {
-                setDeleting(true)
-                try { await onDelete(result.artifact_id) } finally { setDeleting(false); setConfirmDelete(false) }
-              }}
-            >
-              {deleting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-              Delete
-            </Button>
-            <Button variant="ghost" size="xs" className="h-5 text-label-xs" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-          </div>
-        )}
 
         {/* Actions — always visible; compact mode uses smaller icons in a single row */}
         <div className={cn("flex items-center gap-0.5", compact ? "mt-1" : "mt-2")}>
@@ -625,7 +599,7 @@ export function ArtifactCard({ result, relevanceAmong, isSelected, onSelect, onI
               className={cn("artifact-action-btn hover:text-destructive", compact ? "h-5 w-5" : "h-6 w-6")}
               onClick={(e) => {
                 e.stopPropagation()
-                setConfirmDelete(!confirmDelete)
+                onDelete(result.artifact_id)
               }}
               title="Delete artifact"
             >

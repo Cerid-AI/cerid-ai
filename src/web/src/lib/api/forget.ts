@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-// Forget engine: preview what a conversation produced, move it to the Trash or
+// Forget engine: preview what a conversation produced, or what a selection of
+// documents, passages and memories would take with it; move it to the Trash or
 // forget it permanently, restore, empty the Trash, and read receipts.
 
 import { MCP_BASE, mcpHeaders, extractError } from "./common"
 
-export type ForgetKind = "conversation" | "artifact" | "memory"
+export type ForgetKind = "conversation" | "artifact" | "chunk" | "memory"
 export interface ForgetSubject { kind: ForgetKind; id: string }
 export type ForgetMode = "trash" | "permanent"
 
@@ -15,14 +16,24 @@ export interface PreviewItem extends ForgetSubject {
   shared_with?: number
   used_by?: number
   default?: "checked" | "unchecked"
+  /** Items preview: the document a passage belongs to, its domain, a parent
+   *  passage's child count, and a document's passage count. */
+  document?: string
+  domain?: string
+  children?: number
+  passages?: number
 }
-export type PreviewGroupKey = "transcripts" | "memories" | "summary" | "verified_memories" | "cited_documents"
+export type PreviewGroupKey =
+  | "transcripts" | "memories" | "summary" | "verified_memories" | "cited_documents"
+  | "documents" | "passages"
 export interface PreviewGroup { key: PreviewGroupKey; default: "always" | "checked" | "unchecked"; items: PreviewItem[] }
 export interface ForgetPreview {
-  subject: ForgetSubject
+  /** The conversation previewed; null for a selection of items. */
+  subject: ForgetSubject | null
   title: string
   groups: PreviewGroup[]
   derived_facts: number
+  notes?: string[]
   out_of_reach: string[]
 }
 
@@ -87,6 +98,11 @@ async function get<T>(path: string, fallback: string): Promise<T> {
 
 export function previewForget(conversationId: string): Promise<ForgetPreview> {
   return post("/forget/preview", { kind: "conversation", id: conversationId }, "Couldn't load the preview")
+}
+
+/** What forgetting documents, passages and memories picked from search would remove. */
+export function previewForgetItems(subjects: ForgetSubject[]): Promise<ForgetPreview> {
+  return post("/forget/preview", { subjects }, "Couldn't load the preview")
 }
 
 export function forgetSubjects(subjects: ForgetSubject[], mode: ForgetMode): Promise<ForgetResult> {

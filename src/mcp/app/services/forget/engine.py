@@ -238,6 +238,18 @@ def forget_permanently(subjects: list[Subject], *, requested_by: str, user_id: s
     return _purge_subjects(forget_id, subjects, requested_by, user_id)
 
 
+def purge_artifact(artifact_id: str, *, requested_by: str, user_id: str = "") -> bool:
+    """Permanently forget one artifact: the delete routes. Returns whether every
+    store finished; a store left pending is retried by the maintenance job. With
+    no sync dir there is no registry to record it in, so it is removed directly."""
+    if not config.SYNC_DIR:
+        from app.services.content_lifecycle import remove_content
+        remove_content(artifact_id)
+        return True
+    receipt = forget_permanently([Subject("artifact", artifact_id)], requested_by=requested_by, user_id=user_id)
+    return all(a.get("status") == "done" for a in receipt["adapters"].values())
+
+
 def empty_trash(*, older_than_days: int | None = None) -> list[str]:
     """Purge trashed subjects older than the window (all of them when it is
     ``None``), plus any whose purge already started and is still pending."""
@@ -283,6 +295,14 @@ def _labels(subjects: list[Subject]) -> dict[tuple[str, str], str]:
                 found = {r["id"]: r["label"] or "" for r in rows}
             for s in graph:
                 out[(s.kind, s.id)] = found.get(s.id, "")
+        except Exception as exc:  # noqa: BLE001 — labels are cosmetic; the list still renders
+            log_swallowed_error("forget.trash_label", exc)
+    chunks = [s.id for s in subjects if s.kind == "chunk"]
+    if chunks:
+        try:
+            from app.services.forget.preview import chunk_details
+            for cid, d in chunk_details(chunks).items():
+                out[("chunk", cid)] = f"{d['filename']}: {d['excerpt']}"
         except Exception as exc:  # noqa: BLE001 — labels are cosmetic; the list still renders
             log_swallowed_error("forget.trash_label", exc)
     return out

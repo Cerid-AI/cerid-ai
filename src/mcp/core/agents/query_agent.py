@@ -24,6 +24,7 @@ import config
 from config.constants import COLLECTION_COUNT_CACHE_TTL_S
 from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
+from core.forget.read_filter import drop_forgotten
 from core.observability.span_helpers import breadcrumb, span
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
@@ -1015,7 +1016,7 @@ async def multi_domain_query(
 
     all_results = [r for results in domain_results for r in results]
 
-    return all_results
+    return drop_forgotten(all_results)
 
 
 # ---------------------------------------------------------------------------
@@ -3215,6 +3216,9 @@ async def _agent_query_impl(
             metadata_filter=metadata_filter,
             domain_record_types=domain_record_types,
         )
+    # Graph expansion and HyPE hydration add results after the per-domain arms
+    # filtered theirs; this runs whether or not the Neo4j join below does.
+    results = drop_forgotten(results)
 
     from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)

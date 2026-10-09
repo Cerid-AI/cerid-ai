@@ -381,6 +381,7 @@ def list_artifacts(
     offset: int = 0,
     limit: int = 50,
     include_machine: bool = True,
+    include_forgotten: bool = True,
 ) -> list[dict[str, Any]]:
     """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, quality, and a filename/summary substring.
 
@@ -394,6 +395,9 @@ def list_artifacts(
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
 
+    if not include_forgotten:
+        # Moved to Trash by the forget engine: hidden everywhere until restored.
+        conditions.append("NOT coalesce(a.archived_reason, '') STARTS WITH 'forget:'")
     if not include_machine:
         # coalesce: a null filename must be filtered as machine noise, not
         # dropped from BOTH views by null-propagation through NOT.
@@ -486,6 +490,7 @@ def count_artifacts(
     min_quality: float | None = None,
     search: str | None = None,
     include_machine: bool = True,
+    include_forgotten: bool = True,
 ) -> int:
     """Count artifacts matching the same filters as :func:`list_artifacts`,
     without materializing rows. Used wherever a caller needs a true total
@@ -501,6 +506,8 @@ def count_artifacts(
     conditions = []
     params: dict[str, Any] = {}
 
+    if not include_forgotten:
+        conditions.append("NOT coalesce(a.archived_reason, '') STARTS WITH 'forget:'")
     if not include_machine:
         conditions.append(
             "NOT (coalesce(a.filename, '') = '' "

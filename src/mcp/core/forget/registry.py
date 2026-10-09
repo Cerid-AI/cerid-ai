@@ -192,6 +192,15 @@ class Registry:
     def is_forgotten(self, kind: str, id: str) -> bool:
         return self.state_of(kind, id) in FORGOTTEN_STATES
 
+    def ids_in_states(self, kind: str, states: frozenset[str]) -> frozenset[str]:
+        """Every id of one kind whose current state is one of ``states``, from a single refresh."""
+        with self._lock:
+            self._refresh()
+            return frozenset(s.id for s, e in self._by_subject.items() if s.kind == kind and e.state in states)
+
+    def forgotten_ids(self, kind: str) -> frozenset[str]:
+        return self.ids_in_states(kind, FORGOTTEN_STATES)
+
     def record_readd(self, kind: str, id: str, *, requested_by: str, machine_id: str | None = None) -> bool:
         """Cancel every live forget of a subject because its content was added again.
 
@@ -243,6 +252,14 @@ def is_forgotten(kind: str, id: str) -> bool:
     if not id:
         return False
     return get_registry().is_forgotten(kind, id)
+
+
+def forgotten_ids(kind: str) -> frozenset[str]:
+    return get_registry().forgotten_ids(kind)
+
+
+def purged_ids(kind: str) -> frozenset[str]:
+    return get_registry().ids_in_states(kind, frozenset({"purged"}))
 
 
 def record_readd(kind: str, id: str, *, requested_by: str) -> bool:

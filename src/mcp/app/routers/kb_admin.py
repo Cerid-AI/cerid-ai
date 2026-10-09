@@ -873,18 +873,23 @@ async def purge_test_residue(req: PurgeTestResidueRequest | None = None):
 
 @router.delete("/admin/artifacts/{artifact_id}", response_model=DeleteArtifactResponse)
 async def delete_single_artifact(artifact_id: str):
-    """Hard-delete a single artifact via the multi-store lifecycle coordinator."""
+    """Permanently forget one artifact through the forget engine, with a receipt."""
     try:
-        from app.services.content_lifecycle import remove_content
+        from app.db.neo4j.artifacts import get_artifact
+        from app.services.forget.engine import purge_artifact
 
-        removal = await asyncio.to_thread(
-            remove_content, artifact_id, neo4j=get_neo4j(), chroma=get_chroma()
-        )
-        if not removal.found:
+        art = await asyncio.to_thread(get_artifact, get_neo4j(), artifact_id)
+        if not art:
             raise HTTPException(status_code=404, detail="Artifact not found")
+        done = await asyncio.to_thread(purge_artifact, artifact_id, requested_by="admin")
+        if not done:
+            raise HTTPException(
+                status_code=503,
+                detail="Erasing started but a store did not finish; it is retried automatically",
+            )
 
-        chunks_removed = len(removal.chunk_ids or [])
-        filename = ""
+        chunks_removed = int(art.get("chunk_count") or 0)
+        filename = str(art.get("filename") or "")
         audit_log.audit(
             "artifact.delete",
             target=artifact_id,

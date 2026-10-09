@@ -1073,6 +1073,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_swallowed_error("app.main.prewarm_bm25", e)
 
+    # Re-key chunks still under positional ids (spec §6.4). Idempotent and
+    # resumable; a store with nothing left to move only lists ids.
+    try:
+        from app.services.chunk_id_migration import migrate_chunk_ids
+
+        async def _migrate_chunk_ids() -> None:
+            try:
+                await asyncio.to_thread(migrate_chunk_ids)
+            except Exception as exc:  # noqa: BLE001 — retried at the next boot and after each sync import
+                log_swallowed_error("app.main.chunk_id_migration", exc)
+
+        asyncio.create_task(_migrate_chunk_ids())
+    except Exception as e:
+        log_swallowed_error("app.main.chunk_id_migration_start", e)
+
     # Task 5: background refresh of the divergence-heavy run_invariants()
     # snapshot. It used to run inline on every /health rebuild (1,317/day,
     # 200 sampled artifacts each) — now it refreshes on its own

@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -15,6 +16,10 @@ import { DomainFilter } from "./domain-filter"
 import { TagFilter } from "./tag-filter"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
+import { ForgetSelectionBar, SelectableRow } from "./forget-selection"
+import { useForgetItemsFlow } from "@/hooks/use-forget-items-flow"
+import { memorySubject, passageSubject, useForgetSelection } from "@/hooks/use-forget-selection"
+import type { ForgetSubject } from "@/lib/api"
 import { useSettings } from "@/hooks/use-settings"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { UseKBContextReturn } from "@/hooks/use-kb-context"
@@ -99,6 +104,26 @@ export function KBContextPanel({
   }, [results])
   const kbScores = kbResults.map((r) => r.relevance)
   const memoryScores = memoryResults.map((m) => m.relevance)
+
+  // Choosing results to forget: each passage shown, and each memory.
+  const selection = useForgetSelection()
+  const { setActive: setSelecting, clear: clearSelection } = selection
+  const forgetFlow = useForgetItemsFlow(useCallback(() => setSelecting(false), [setSelecting]))
+  const selectable = useMemo(() => {
+    const seen = new Map<string, ForgetSubject>()
+    for (const r of kbResults) {
+      const s = passageSubject(r)
+      if (s) seen.set(`${s.kind}:${s.id}`, s)
+    }
+    for (const m of memoryResults) {
+      const s = memorySubject(m)
+      seen.set(`${s.kind}:${s.id}`, s)
+    }
+    return [...seen.values()]
+  }, [kbResults, memoryResults])
+  // A new answer brings new results; choices made among the old ones go.
+  const selectableKey = selectable.map((x) => `${x.kind}:${x.id}`).join("|")
+  useEffect(() => { clearSelection() }, [selectableKey, clearSelection])
 
   // Drag-drop for file ingestion
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -272,6 +297,12 @@ export function KBContextPanel({
         </TooltipProvider>
       )}
 
+      {selectable.length > 0 && (
+        <div className="flex justify-end px-3">
+          <ForgetSelectionBar selection={selection} all={selectable} onForget={forgetFlow.start} />
+        </div>
+      )}
+
       {/* Results */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-0 space-y-2 p-3">
@@ -313,20 +344,34 @@ export function KBContextPanel({
           )}
 
           {/* KB Results */}
-          {kbResults.map((result) => (
-            <ArtifactCard
-              key={`${result.artifact_id}-${result.chunk_index}`}
-              result={result}
-              relevanceAmong={kbScores}
-              isSelected={selectedArtifactId === result.artifact_id}
-              onSelect={() =>
-                setSelectedArtifactId(
-                  selectedArtifactId === result.artifact_id ? null : result.artifact_id,
-                )
-              }
-              onInject={() => injectResult(result)}
-            />
-          ))}
+          {kbResults.map((result) => {
+            const card = (
+              <ArtifactCard
+                key={`${result.artifact_id}-${result.chunk_index}`}
+                result={result}
+                relevanceAmong={kbScores}
+                isSelected={selectedArtifactId === result.artifact_id}
+                onSelect={() =>
+                  setSelectedArtifactId(
+                    selectedArtifactId === result.artifact_id ? null : result.artifact_id,
+                  )
+                }
+                onInject={() => injectResult(result)}
+              />
+            )
+            const subject = selection.active ? passageSubject(result) : null
+            if (!subject) return card
+            return (
+              <SelectableRow
+                key={`${result.artifact_id}-${result.chunk_index}`}
+                checked={selection.isSelected(subject)}
+                onToggle={() => selection.toggle(subject)}
+                label={`Passage from ${result.filename}`}
+              >
+                {card}
+              </SelectableRow>
+            )
+          })}
 
           {/* Memories section */}
           {hasQueried && (
@@ -355,6 +400,14 @@ export function KBContextPanel({
                   )}
                   {memoryResults.map((m, i) => (
                     <div key={`mem-${m.memory_id}-${i}`} className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
+                      {selection.active && (
+                        <Checkbox
+                          className="mt-0.5 shrink-0"
+                          checked={selection.isSelected(memorySubject(m))}
+                          onCheckedChange={() => selection.toggle(memorySubject(m))}
+                          aria-label={`Memory: ${m.summary || m.content.slice(0, 60)}`}
+                        />
+                      )}
                       <Brain className={cn("h-3 w-3 shrink-0 mt-0.5", {
                         "text-blue-400": m.memory_type === "empirical",
                         "text-amber-400": m.memory_type === "decision",
@@ -530,6 +583,7 @@ export function KBContextPanel({
           </div>
         </div>
       </div>
+      {forgetFlow.dialog}
     </div>
   )
 }

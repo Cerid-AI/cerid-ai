@@ -7,7 +7,7 @@ vi.stubEnv("VITE_MCP_URL", "http://test-mcp:8888")
 vi.stubEnv("VITE_CERID_API_KEY", "")
 
 const {
-  previewForget, forgetSubjects, restoreForget, emptyTrash, fetchTrash, fetchReceipts, fetchReceipt,
+  previewForget, previewForgetItems, forgetSubjects, restoreForget, emptyTrash, fetchTrash, fetchReceipts, fetchReceipt,
   ForgetConflictError,
 } = await import("@/lib/api")
 
@@ -34,7 +34,16 @@ describe("forget API client", () => {
     vi.stubGlobal("fetch", f)
     const pv = await previewForget("c1")
     expect(call(f)).toEqual({ url: "http://test-mcp:8888/forget/preview", method: "POST", body: { kind: "conversation", id: "c1" } })
-    expect(pv.subject.id).toBe("c1")
+    expect(pv.subject?.id).toBe("c1")
+  })
+
+  it("previews a selection of documents and passages", async () => {
+    const f = mockFetch({ subject: null, title: "", groups: [], derived_facts: 0, notes: [], out_of_reach: [] })
+    vi.stubGlobal("fetch", f)
+    const subjects = [{ kind: "artifact" as const, id: "a".repeat(64) }, { kind: "chunk" as const, id: `${"b".repeat(64)}_0123456789abcdef` }]
+    const pv = await previewForgetItems(subjects)
+    expect(call(f)).toEqual({ url: "http://test-mcp:8888/forget/preview", method: "POST", body: { subjects } })
+    expect(pv.subject).toBeNull()
   })
 
   it("forgets subjects in the chosen mode", async () => {

@@ -24,6 +24,7 @@ import config
 from config.settings import MEMORY_TYPE_MIGRATION
 from core.agents.fact_derivation import OPEN_INTERVAL, resolve_valid_from
 from core.context.identity import with_tenant_scope
+from core.retrieval.artifact_rows import VERIFIED_MEMORY_PREFIX
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
@@ -997,6 +998,9 @@ async def recall_memories(
             scored_memories.append({
                 "memory_id": artifact_id,
                 "chunk_id": chunk_id,
+                # How the forget engine names this memory: a verified memory
+                # is a :Memory node, any other is an artifact.
+                "forget_kind": "memory" if str(chunk_id).startswith(VERIFIED_MEMORY_PREFIX) else "artifact",
                 "text": results["documents"][0][i] if results["documents"] else "",
                 "base_similarity": round(base_similarity, 4),
                 "adjusted_score": round(adjusted_score, 4),

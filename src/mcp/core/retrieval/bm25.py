@@ -192,6 +192,35 @@ class BM25Index:
             self._rewrite_disk()
         return len(remove_set)
 
+    def rekey(self, mapping: dict[str, str]) -> int:
+        """Rename chunk ids in place, keeping each entry's text and tenant.
+
+        An entry whose new id is already indexed is dropped instead, so a row
+        synced in under its old id converges with the migrated one.
+        """
+        with self._lock:
+            hits = [c for c in self._doc_ids if c in mapping]
+            if not hits:
+                return 0
+            kept_texts: list[str] = []
+            kept_ids: list[str] = []
+            tenants: dict[str, str] = {}
+            seen: set[str] = set()
+            for cid, text in zip(self._doc_ids, self._texts):
+                new = mapping.get(cid, cid)
+                if new in seen:
+                    continue
+                seen.add(new)
+                kept_texts.append(text)
+                kept_ids.append(new)
+                tenants[new] = self._doc_tenant.get(cid, config.DEFAULT_TENANT_ID)
+            self._texts, self._doc_ids, self._doc_tenant = kept_texts, kept_ids, tenants
+            self._doc_id_set = set(kept_ids)
+            self._stale_ids.update(hits)
+            self._dirty = True
+            self._rewrite_disk()
+        return len(hits)
+
     def search(
         self,
         query: str,
@@ -581,6 +610,11 @@ def remove_chunks(domain: str, chunk_ids: list[str]) -> int:
     """
     idx = get_index(domain)
     return idx.remove_documents(chunk_ids)
+
+
+def rekey_chunks(domain: str, mapping: dict[str, str]) -> int:
+    """Rename chunk ids in a domain's BM25 corpus (the chunk-id migration)."""
+    return get_index(domain).rekey(mapping)
 
 
 def search_bm25(

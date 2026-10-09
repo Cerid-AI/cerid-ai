@@ -110,8 +110,8 @@
 - `PATCH /user-state/preferences` — Update user preferences
 
 **Forget engine** (`app/routers/forget.py`; admin-only in multi-user mode):
-- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked)
-- `POST /forget` — `{subjects: [{kind: conversation|artifact|memory, id}], mode: trash|permanent}`; returns `forget_id`, `state`, and the receipt for a permanent forget
+- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked). Or `{subjects: [...]}` (at most 200 artifact, chunk and memory subjects, picked from search): `documents` (passage count, conversations that cited each), `passages` (live excerpt, document, child-passage count; a passage of a selected document folds into it), `memories`, `derived_facts`, and `notes` (for example when every passage of a document is selected). `subject` is null for a selection
+- `POST /forget` — `{subjects: [{kind: conversation|artifact|chunk|memory, id}], mode: trash|permanent}`; returns `forget_id`, `state`, and the receipt for a permanent forget. A chunk id is its artifact's id plus `_` and 16 hex characters; forgetting a parent passage takes its child passages and their HyPE questions with it
 - `POST /forget/{forget_id}/restore` — Restore a trashed forget (409 once its purge has started)
 - `POST /forget/trash/empty` — Erase everything in the Trash
 - `GET /forget/trash` — Trashed forgets with live labels, newest first

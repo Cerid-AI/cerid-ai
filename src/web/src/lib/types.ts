@@ -477,6 +477,12 @@ export interface KBQueryResult {
   keywords?: string // JSON string array — backend never parses this before returning it (query_agent.py)
   chunk_index: number
   chunk_count?: number
+  /** The chunk's row id; absent on browse rows built from an artifact. */
+  chunk_id?: string
+  /** Set on a child chunk: the parent whose text was shown in its place when
+   *  ``parent_substituted`` is true. */
+  parent_chunk_id?: string
+  parent_substituted?: boolean
   collection: string
   ingested_at: string
   graph_source?: boolean
@@ -513,6 +519,9 @@ export interface MemoryRecallResult {
   source_type: "memory"
   /** Provenance: "verification" for promoted verified facts, undefined for standard memories */
   memory_source_type?: string
+  /** How the forget engine names this memory: a verified memory is a "memory",
+   *  any other is the "artifact" it was stored as. */
+  forget_kind?: "artifact" | "memory"
 }
 
 export interface ExternalSourceResult {

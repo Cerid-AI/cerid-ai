@@ -1106,8 +1106,8 @@ async def sdk_ingest_upload(
 )
 async def sdk_delete_artifact(artifact_id: str, request: Request):
     from app.db.neo4j.artifacts import get_artifact
-    from app.deps import get_chroma, get_neo4j
-    from app.services.content_lifecycle import remove_content
+    from app.deps import get_neo4j
+    from app.services.forget.engine import purge_artifact
 
     art = await asyncio.to_thread(get_artifact, get_neo4j(), artifact_id)
     if not art:
@@ -1115,12 +1115,13 @@ async def sdk_delete_artifact(artifact_id: str, request: Request):
     _ensure_domain_allowed(request, art.get("domain") or "")
 
     async def _work():
-        removal = await asyncio.to_thread(
-            remove_content, artifact_id, neo4j=get_neo4j(), chroma=get_chroma(),
-        )
-        if not removal.found:
-            raise HTTPException(status_code=404, detail="Artifact not found")
-        chunks_removed = len(removal.chunk_ids or [])
+        done = await asyncio.to_thread(purge_artifact, artifact_id, requested_by="sdk")
+        if not done:
+            raise HTTPException(
+                status_code=503,
+                detail="Erasing started but a store did not finish; it is retried automatically",
+            )
+        chunks_removed = int(art.get("chunk_count") or 0)
         return SDKDeleteArtifactResponse(
             deleted=True,
             artifact_id=artifact_id,

@@ -531,7 +531,10 @@ class TestImportAllWiring:
             "app.sync.tombstones.apply_tombstones", return_value={"deleted": 0},
         ), patch(
             "app.sync.manifest.read_manifest", side_effect=FileNotFoundError,
-        ):
+        ), patch(
+            # The real one would open the configured Chroma beside a mock graph.
+            "app.services.chunk_id_migration.migrate_chunk_ids", return_value={"rows": 0},
+        ) as mock_rekey:
             result = import_mod.import_all(driver, sync_dir=str(tmp_path))
 
         assert result["memories"] == {"memories_merged": 3, "edges_merged": 1}
@@ -540,6 +543,8 @@ class TestImportAllWiring:
         mock_mem.assert_called_once()
         mock_ent.assert_called_once()
         mock_conv.assert_called_once()
+        mock_rekey.assert_called_once_with(neo4j=driver)
+        assert result["chunk_ids_rekeyed"] == {"rows": 0}
 
 
 # ---------------------------------------------------------------------------

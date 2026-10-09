@@ -467,13 +467,18 @@ async def curate(
                 continue
 
             for artifact in candidates:
-                chunk_id = f"{artifact['id']}_chunk_0"
                 try:
-                    result = collection.get(ids=[chunk_id])
-                    docs = result.get("documents", [])
-                    if not docs or not docs[0]:
+                    result = collection.get(
+                        where={"artifact_id": artifact["id"]}, include=["documents", "metadatas"],
+                    )
+                    rows = [
+                        ((meta or {}).get("chunk_index", 0), doc)
+                        for doc, meta in zip(result.get("documents") or [], result.get("metadatas") or [])
+                        if doc
+                    ]
+                    if not rows:
                         continue
-                    text = docs[0]
+                    text = min(rows, key=lambda r: r[0])[1]
                 except Exception as exc:
                     from core.utils.swallowed import log_swallowed_error
                     log_swallowed_error('core.agents.curator', exc)

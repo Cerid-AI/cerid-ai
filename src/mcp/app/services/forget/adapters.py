@@ -11,6 +11,7 @@ coordinator, which every retrieval arm already filters.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -73,6 +74,86 @@ class ArtifactAdapter:
         result = remove_content(subject.id)
         n_facts = int(facts["n"]) if facts else 0
         return PurgeResult(removed=(1 if result.found else 0) + n_facts, detail={"facts": n_facts})
+
+
+def _remove_ids(raw: Any, gone: set[str]) -> list[str] | None:
+    """``raw`` (a JSON list of chunk ids) without ``gone``, or None when unchanged."""
+    try:
+        ids = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except (ValueError, TypeError):
+        return None
+    kept = [i for i in ids if i not in gone]
+    return kept if len(kept) != len(ids) else None
+
+
+class ChunkAdapter:
+    """One passage of a document. Hiding is the read filter's job (every
+    retrieval path drops a forgotten chunk and the children of a forgotten
+    parent); hide and restore only bust the query caches so a cached answer
+    does not outlive the change. Purging removes the chunk and, when it is a
+    parent, its children, with their HyPE questions, from every store, and
+    takes them out of the artifact's ``chunk_ids`` and its MENTIONS edges."""
+
+    name, kinds = "chunks", frozenset({"chunk"})
+
+    def hide(self, subject: Subject, forget_id: str) -> None:
+        from app.services.content_lifecycle import invalidate_caches
+        invalidate_caches(trigger=f"forget.hide_chunk:{subject.id}")
+
+    def restore(self, subject: Subject, forget_id: str) -> None:
+        from app.services.content_lifecycle import invalidate_caches
+        invalidate_caches(trigger=f"forget.restore_chunk:{subject.id}")
+
+    def purge(self, subject: Subject) -> PurgeResult:
+        from app.deps import get_chroma, get_neo4j
+        from app.services.content_lifecycle import remove_chunks
+        from core.retrieval.chunk_ids import chunk_artifact_id
+
+        artifact_id = chunk_artifact_id(subject.id)
+        if not artifact_id:
+            return PurgeResult()
+        driver = get_neo4j()
+        with driver.session() as session:
+            node = session.run(
+                "MATCH (a:Artifact {id: $aid}) RETURN a.domain AS domain, a.chunk_ids AS ids", aid=artifact_id,
+            ).single()
+        domain = str(node["domain"] or "") if node else ""
+        chroma = get_chroma()
+        names = [config.collection_name(domain)] if domain else [
+            str(getattr(c, "name", c)) for c in chroma.list_collections()
+        ]
+        rows: set[str] = set()
+        for name in names:
+            if name.endswith("_hype"):
+                continue
+            collection = chroma.get_or_create_collection(name=name)
+            got = collection.get(ids=[subject.id], include=["metadatas"])
+            if not got.get("ids"):
+                continue
+            rows.add(subject.id)
+            domain = domain or str(((got.get("metadatas") or [{}])[0] or {}).get("domain") or "")
+            children = collection.get(where={"parent_chunk_id": subject.id}, include=[])
+            rows.update(c for c in children.get("ids") or [] if c.startswith(f"{artifact_id}_"))
+        result = remove_chunks(artifact_id, sorted(rows), domain, chroma=chroma) if rows else None
+        gone = rows | {subject.id}
+        with driver.session() as session:
+            ids = _remove_ids(node["ids"], gone) if node else None
+            if ids is not None:
+                session.run(
+                    "MATCH (a:Artifact {id: $aid}) SET a.chunk_ids = $ids, a.chunk_count = $n",
+                    aid=artifact_id, ids=json.dumps(ids), n=len(ids),
+                )
+            for row in list(session.run(
+                "MATCH (:Artifact {id: $aid})-[m:MENTIONS]->() RETURN elementId(m) AS rid, m.chunk_ids AS ids",
+                aid=artifact_id,
+            )):
+                kept = _remove_ids(row["ids"], gone)
+                if kept is not None:
+                    session.run(
+                        "MATCH ()-[m:MENTIONS]->() WHERE elementId(m) = $rid SET m.chunk_ids = $ids",
+                        rid=row["rid"], ids=json.dumps(kept),
+                    )
+        return PurgeResult(removed=len(rows), detail={"stores": result.removed if result else {}})
 
 
 def verified_memory_ids_for_conversation(conversation_id: str) -> list[str]:
@@ -281,6 +362,7 @@ class ConversationNodeAdapter:
 
 ADAPTERS: list[ForgetAdapter] = [
     ArtifactAdapter(),
+    ChunkAdapter(),
     VerifiedMemoryAdapter(),
     TranscriptsAdapter(),
     VerificationReportGraphAdapter(),
@@ -301,6 +383,7 @@ CLAIMS: dict[str, str] = {
     "redis:cerid:private_mode:session:{cid}": "redis_conversation_keys",
     "sync:user/conversations/{cid}.json": "sync_file",
     "chroma:conversations:memory_*": "artifacts",
+    "chroma:*:{artifact_id}_{h16}": "chunks",
     "chroma:conversations:session_summary_*": "artifacts",
     "chroma:conversations:verified_memory_*": "verified_memories",
     "neo4j:Conversation.id": "conversation_node",

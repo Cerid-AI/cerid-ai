@@ -16,7 +16,7 @@ import {
 import { previewForget } from "@/lib/api"
 import type { ForgetMode, ForgetPreview, ForgetSubject, PreviewGroup, PreviewItem } from "@/lib/api"
 
-const HEADINGS: Record<PreviewGroup["key"], string> = {
+const HEADINGS: Partial<Record<PreviewGroup["key"], string>> = {
   transcripts: "Chat transcripts",
   memories: "Memories from this chat",
   summary: "Session summary",
@@ -124,7 +124,7 @@ export function ForgetConversationDialog({
           <div className="space-y-4">
             {state.preview.groups.filter((g) => g.items.length > 0).map((group) => (
               <section key={group.key} aria-labelledby={`forget-group-${group.key}`} className="space-y-1.5">
-                <h3 id={`forget-group-${group.key}`} className="text-sm font-medium">{HEADINGS[group.key]}</h3>
+                <h3 id={`forget-group-${group.key}`} className="text-sm font-medium">{HEADINGS[group.key] ?? group.key}</h3>
                 {group.key === "transcripts" ? (
                   <p className="text-xs text-muted-foreground">
                     {plural(group.items.length, "transcript")}, always removed with the chat

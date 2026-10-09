@@ -40,6 +40,7 @@ from core.retrieval.artifact_rows import (
     artifact_hype_row_ids,
     artifact_row_ids,
     remove_artifact_hype_rows,
+    remove_chunk_hype_rows,
 )
 from core.utils.swallowed import log_swallowed_error
 
@@ -430,6 +431,35 @@ def remove_orphan_chunks(
         )
 
     return RemovalResult(found=True, domain=domain, chunk_ids=list(chunk_ids), removed=removed)
+
+
+def remove_chunks(
+    artifact_id: str,
+    chunk_ids: list[str],
+    domain: str,
+    *,
+    chroma: Any | None = None,
+    redis: Any | None = None,
+) -> RemovalResult:
+    """HARD delete some of an artifact's chunks from every retrieval store,
+    their HyPE questions included, and bust the query caches. The artifact
+    node is the caller's to update: only it knows what the chunks were to the
+    node (the forget engine's chunk adapter rewrites ``chunk_ids``)."""
+    from app.deps import get_chroma
+
+    if not chunk_ids:
+        return RemovalResult(found=False, artifact_id=artifact_id, domain=domain)
+    chroma = chroma or get_chroma()
+    removed = _fan_out_removal(chunk_ids, domain, chroma)
+    try:
+        removed["hype"] = remove_chunk_hype_rows(chroma, config.collection_name(domain), artifact_id, chunk_ids)
+    except Exception as exc:  # noqa: BLE001 — best-effort, like every participant
+        log_swallowed_error("content_lifecycle.chunk_hype_remove", exc)
+    invalidate_caches(trigger=f"lifecycle.remove_chunks:{artifact_id}", redis=redis, domain=domain or None)
+    return RemovalResult(
+        found=bool(removed.get("chroma")), artifact_id=artifact_id, domain=domain,
+        chunk_ids=list(chunk_ids), removed=removed,
+    )
 
 
 def hide_content(
