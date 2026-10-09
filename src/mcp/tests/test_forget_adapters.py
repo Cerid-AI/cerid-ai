@@ -6,11 +6,15 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from app.services.forget.adapters import (
+    ADAPTERS,
     CLAIMS,
-    CONVERSATION_ADAPTERS,
+    OUT_OF_REACH,
+    ArtifactAdapter,
+    ConversationNodeAdapter,
     RedisKeysAdapter,
     SyncFileAdapter,
     TranscriptsAdapter,
+    VerifiedMemoryAdapter,
 )
 from core.forget.registry import Subject
 
@@ -24,8 +28,9 @@ def _chroma_with(rows):
 
 
 def test_purge_order_is_derived_first_record_last():
-    assert [a.name for a in CONVERSATION_ADAPTERS] == [
-        "transcripts", "verification_report_graph", "redis_conversation_keys", "sync_file",
+    assert [a.name for a in ADAPTERS] == [
+        "artifacts", "verified_memories", "transcripts", "verification_report_graph",
+        "redis_conversation_keys", "sync_file", "conversation_node",
     ]
 
 
@@ -131,3 +136,147 @@ def test_a_forget_hide_never_takes_over_an_earlier_archive():
                         only_if_visible=True) is False
     assert unhide_content("a1", reason="forget:fg_x", neo4j=neo4j, redis=_redis()) is False
     assert neo4j.nodes["a1"]["archived"] is True
+
+
+class _Session:
+    """Records every Cypher statement; ``replies`` maps a substring to the row .single() returns."""
+
+    def __init__(self, replies=None):
+        self.queries: list[tuple[str, dict]] = []
+        self.replies = replies or {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def run(self, query, **params):
+        self.queries.append((query, params))
+        result = MagicMock()
+        row = next((r for key, r in self.replies.items() if key in query), None)
+        result.single.return_value = row
+        return result
+
+
+def _driver(session):
+    driver = MagicMock()
+    driver.session.return_value = session
+    return driver
+
+
+A = Subject("artifact", "a" * 64)
+M = Subject("memory", "11111111-2222-3333-4444-555555555555")
+
+
+def test_artifact_hide_and_restore_use_the_lifecycle_coordinator_with_the_forget_reason():
+    with patch("app.services.content_lifecycle.hide_content") as hide, \
+         patch("app.services.content_lifecycle.unhide_content") as unhide:
+        ArtifactAdapter().hide(A, "fg_x")
+        ArtifactAdapter().restore(A, "fg_x")
+    hide.assert_called_once_with(A.id, extra_props={"archived_reason": "forget:fg_x"}, only_if_visible=True)
+    unhide.assert_called_once_with(A.id, reason="forget:fg_x")
+
+
+def test_artifact_purge_sweeps_sole_source_facts_and_unsupersedes_before_removing():
+    session = _Session({"[:FACT]->(f:Fact)": {"n": 2}})
+    order: list[str] = []
+    removal = MagicMock(found=True)
+
+    def remove(aid):
+        order.append(f"remove:{aid}")
+        assert len(session.queries) == 2, "facts and supersession must be handled while the edges still exist"
+        return removal
+
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.content_lifecycle.remove_content", side_effect=remove):
+        result = ArtifactAdapter().purge(A)
+    fact_q, unsup_q = session.queries[0][0], session.queries[1][0]
+    assert "NOT EXISTS" in fact_q and "DETACH DELETE f" in fact_q
+    assert "superseded_by: $aid" in unsup_q and "REMOVE old.superseded_by, old.valid_until" in unsup_q
+    assert order == [f"remove:{A.id}"]
+    assert result.removed == 3 and result.detail == {"facts": 2}
+
+
+def test_verified_memory_hide_marks_the_node_and_drops_the_recall_document():
+    session = _Session()
+    coll = MagicMock()
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.content_lifecycle.invalidate_caches"):
+        VerifiedMemoryAdapter().hide(M, "fg_x")
+    query, params = session.queries[0]
+    assert "m.status = 'forgotten'" in query and params == {"mid": M.id, "fid": "fg_x"}
+    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
+
+
+def test_verified_memory_restore_rebuilds_the_document_from_the_node_text():
+    session = _Session({"m.text AS text": {"text": "Water boils at 100 C at sea level."}})
+    coll = MagicMock()
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.content_lifecycle.invalidate_caches"):
+        VerifiedMemoryAdapter().restore(M, "fg_x")
+    assert "forget_id: $fid" in session.queries[0][0]
+    assert "SET m.status = 'active'" in session.queries[1][0], "the node is reactivated after the document"
+    kwargs = coll.upsert.call_args.kwargs
+    assert kwargs["ids"] == [f"verified_memory_{M.id}"]
+    assert kwargs["documents"] == ["Water boils at 100 C at sea level."]
+    meta = kwargs["metadatas"][0]
+    assert meta["artifact_id"] == M.id and meta["memory_source_type"] == "verification"
+    assert meta["filename"] == f"verified_fact_{M.id[:8]}"
+
+
+def test_verified_memory_restore_of_another_forget_changes_nothing():
+    session = _Session()  # no row: the node was hidden by a different forget
+    coll = MagicMock()
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.forget.adapters._verified_collection", return_value=coll):
+        VerifiedMemoryAdapter().restore(M, "fg_other")
+    coll.upsert.assert_not_called()
+
+
+def test_verified_memory_purge_deletes_document_and_node():
+    session = _Session({"DETACH DELETE m": {"n": 1}})
+    coll = MagicMock()
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.content_lifecycle.invalidate_caches"):
+        result = VerifiedMemoryAdapter().purge(M)
+    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
+    assert result.removed == 1
+
+
+def test_conversation_node_is_deleted_only_when_nothing_kept_hangs_off_it():
+    session = _Session({"Conversation": {"n": 0}})
+    with patch("app.deps.get_neo4j", return_value=_driver(session)):
+        result = ConversationNodeAdapter().purge(S)
+    query, params = session.queries[0]
+    assert "WHERE NOT ()-[:EXTRACTED_FROM]->(c)" in query and params == {"cid": "c1"}
+    assert result.removed == 0
+
+
+def test_phase_two_stores_are_claimed_not_out_of_reach():
+    for pattern, owner in {
+        "chroma:conversations:memory_*": "artifacts",
+        "chroma:conversations:session_summary_*": "artifacts",
+        "neo4j:Conversation.id": "conversation_node",
+        "neo4j:Memory (verified)": "verified_memories",
+    }.items():
+        assert CLAIMS[pattern] == owner
+        assert pattern not in OUT_OF_REACH
+
+
+def test_verified_memory_restore_rebuilds_the_document_before_reactivating_the_node():
+    """If the rebuild fails, the node stays forgotten so a retry can still find it."""
+    session = _Session({"m.text AS text": {"text": "fact"}})
+    coll = MagicMock()
+    coll.upsert.side_effect = RuntimeError("chroma down")
+    with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.content_lifecycle.invalidate_caches"):
+        try:
+            VerifiedMemoryAdapter().restore(M, "fg_x")
+        except RuntimeError:
+            pass
+    assert not any("SET m.status = 'active'" in q for q, _ in session.queries)

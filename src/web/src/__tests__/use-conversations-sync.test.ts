@@ -7,6 +7,9 @@ vi.mock("@/lib/api", () => ({
   syncConversation: vi.fn().mockResolvedValue(undefined),
   syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
+  forgetSubjects: vi.fn().mockResolvedValue({ forget_id: "fg_1", state: "trashed", receipt: null }),
+  restoreForget: vi.fn().mockResolvedValue({ restored: 1 }),
+  ForgetHttpError: class ForgetHttpError extends Error { status = 0 },
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
   fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
   ConversationGoneError: class ConversationGoneError extends Error { id = "" },
@@ -30,14 +33,14 @@ describe("useConversations cloud sync", () => {
     })
   })
 
-  it("calls deleteConversationSync on remove", async () => {
+  it("moves a removed conversation to the Trash through the forget engine", async () => {
     const { result } = renderHook(() => useConversations())
     let id: string
     act(() => { id = result.current.create("openrouter/openai/gpt-4o-mini") })
     vi.mocked(api.syncConversation).mockClear()
     act(() => { result.current.remove(id!) })
     await vi.waitFor(() => {
-      expect(api.deleteConversationSync).toHaveBeenCalledWith(id!)
+      expect(api.forgetSubjects).toHaveBeenCalledWith([{ kind: "conversation", id: id! }], "trash")
     })
   })
 

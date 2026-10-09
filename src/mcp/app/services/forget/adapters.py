@@ -1,9 +1,10 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
-"""Per-store forget adapters for conversation subjects (phase 1).
+"""Per-store forget adapters.
 
 Order is purge order: derived stores first, the conversation record last, so
-a failure part-way never leaves derived data pointing at nothing. Each purge is
+a failure part-way never leaves derived data pointing at nothing. The engine
+also orders subjects (artifacts and memories before the conversation). Each purge is
 idempotent. Hiding is needed only where a store serves reads without consulting
 the registry: transcripts are archived through the content-lifecycle
 coordinator, which every retrieval arm already filters.
@@ -34,6 +35,137 @@ class ForgetAdapter(Protocol):
 
 def _reason(forget_id: str) -> str:
     return f"forget:{forget_id}"
+
+
+_FACT_SWEEP = (
+    "MATCH (a:Artifact {id: $aid})-[:FACT]->(f:Fact) "
+    "WHERE NOT EXISTS { MATCH (o:Artifact)-[:FACT]->(f) WHERE o.id <> $aid } "
+    "WITH collect(f) AS fs, count(f) AS n FOREACH (f IN fs | DETACH DELETE f) RETURN n"
+)
+# Forgetting the newer of a superseded pair makes the older current again (spec §7).
+_UNSUPERSEDE = (
+    "MATCH (old:Artifact {superseded_by: $aid}) "
+    "REMOVE old.superseded_by, old.valid_until RETURN count(old) AS n"
+)
+
+
+class ArtifactAdapter:
+    """Memory, summary and KB-document artifacts. Facts whose only source is
+    the artifact go with it: deleting the artifact alone would leave them
+    orphaned, since provenance is only the [:FACT] edge."""
+
+    name, kinds = "artifacts", frozenset({"artifact"})
+
+    def hide(self, subject: Subject, forget_id: str) -> None:
+        from app.services.content_lifecycle import hide_content
+        hide_content(subject.id, extra_props={"archived_reason": _reason(forget_id)}, only_if_visible=True)
+
+    def restore(self, subject: Subject, forget_id: str) -> None:
+        from app.services.content_lifecycle import unhide_content
+        unhide_content(subject.id, reason=_reason(forget_id))
+
+    def purge(self, subject: Subject) -> PurgeResult:
+        from app.deps import get_neo4j
+        from app.services.content_lifecycle import remove_content
+        with get_neo4j().session() as session:
+            facts = session.run(_FACT_SWEEP, aid=subject.id).single()
+            session.run(_UNSUPERSEDE, aid=subject.id)
+        result = remove_content(subject.id)
+        n_facts = int(facts["n"]) if facts else 0
+        return PurgeResult(removed=(1 if result.found else 0) + n_facts, detail={"facts": n_facts})
+
+
+def verified_memory_ids_for_conversation(conversation_id: str) -> list[str]:
+    """Verified memories linked to the conversation's report. A memory promoted
+    before its report was saved has no link and cannot be found this way."""
+    from app.deps import get_neo4j
+    with get_neo4j().session() as session:
+        rows = session.run(
+            "MATCH (m:Memory)-[:VERIFIED_BY]->(:VerificationReport {conversation_id: $cid}) "
+            "RETURN DISTINCT m.id AS id",
+            cid=conversation_id,
+        )
+        return [r["id"] for r in rows if r["id"]]
+
+
+def _verified_collection() -> Any:
+    from app.deps import get_chroma
+    return get_chroma().get_or_create_collection(name=config.collection_name("conversations"))
+
+
+def delete_verified_memory(memory_id: str) -> bool:
+    """Delete one verified memory's recall document and node. These have no
+    chunk ids to fan out from, so they bypass remove_content and bust the
+    query caches here."""
+    from app.deps import get_neo4j
+    from app.services.content_lifecycle import invalidate_caches
+    _verified_collection().delete(ids=[f"verified_memory_{memory_id}"])
+    with get_neo4j().session() as session:
+        rec = session.run(
+            "MATCH (m:Memory {id: $mid}) WITH collect(m) AS ms, count(m) AS n "
+            "FOREACH (m IN ms | DETACH DELETE m) RETURN n",
+            mid=memory_id,
+        ).single()
+    invalidate_caches(trigger=f"forget.verified_memory:{memory_id}")
+    return bool(rec and rec["n"])
+
+
+class VerifiedMemoryAdapter:
+    """Verified-claim memories: a :Memory node plus one Chroma document.
+    Hiding removes the document recall reads and marks the node; the node
+    keeps the text, so restore rebuilds the document."""
+
+    name, kinds = "verified_memories", frozenset({"memory"})
+
+    def hide(self, subject: Subject, forget_id: str) -> None:
+        from app.deps import get_neo4j
+        from app.services.content_lifecycle import invalidate_caches
+        with get_neo4j().session() as session:
+            session.run(
+                "MATCH (m:Memory {id: $mid}) WHERE coalesce(m.status, 'active') = 'active' "
+                "SET m.status = 'forgotten', m.forget_id = $fid",
+                mid=subject.id, fid=forget_id,
+            )
+        _verified_collection().delete(ids=[f"verified_memory_{subject.id}"])
+        invalidate_caches(trigger=f"forget.hide_verified_memory:{subject.id}")
+
+    def restore(self, subject: Subject, forget_id: str) -> None:
+        from datetime import datetime, timezone
+
+        from app.deps import get_neo4j
+        from app.services.content_lifecycle import invalidate_caches
+        with get_neo4j().session() as session:
+            rec = session.run(
+                "MATCH (m:Memory {id: $mid, forget_id: $fid}) RETURN m.text AS text",
+                mid=subject.id, fid=forget_id,
+            ).single()
+        if not rec or not rec["text"]:
+            return
+        # The document first: if it fails, the node is still marked with this
+        # forget, so a retried restore finds it again.
+        now_iso = datetime.now(timezone.utc).isoformat()
+        _verified_collection().upsert(
+            ids=[f"verified_memory_{subject.id}"],
+            documents=[rec["text"]],
+            metadatas=[{
+                "artifact_id": subject.id,
+                "memory_type": "empirical",
+                "memory_source_type": "verification",
+                "domain": "conversations",
+                "filename": f"verified_fact_{subject.id[:8]}",
+                "ingested_at": now_iso,
+                "decay_anchor": now_iso,
+            }],
+        )
+        with get_neo4j().session() as session:
+            session.run(
+                "MATCH (m:Memory {id: $mid, forget_id: $fid}) SET m.status = 'active' REMOVE m.forget_id",
+                mid=subject.id, fid=forget_id,
+            )
+        invalidate_caches(trigger=f"forget.restore_verified_memory:{subject.id}")
+
+    def purge(self, subject: Subject) -> PurgeResult:
+        return PurgeResult(removed=1 if delete_verified_memory(subject.id) else 0)
 
 
 class TranscriptsAdapter:
@@ -124,11 +256,37 @@ class SyncFileAdapter:
         return PurgeResult(removed=1 if existed else 0)
 
 
-CONVERSATION_ADAPTERS: list[ForgetAdapter] = [
+class ConversationNodeAdapter:
+    """The bare :Conversation node, kept while any memory the user chose to
+    keep still hangs off it."""
+
+    name, kinds = "conversation_node", frozenset({"conversation"})
+
+    def hide(self, subject: Subject, forget_id: str) -> None:
+        return None
+
+    def restore(self, subject: Subject, forget_id: str) -> None:
+        return None
+
+    def purge(self, subject: Subject) -> PurgeResult:
+        from app.deps import get_neo4j
+        with get_neo4j().session() as session:
+            rec = session.run(
+                "MATCH (c:Conversation {id: $cid}) WHERE NOT ()-[:EXTRACTED_FROM]->(c) "
+                "WITH collect(c) AS cs, count(c) AS n FOREACH (c IN cs | DETACH DELETE c) RETURN n",
+                cid=subject.id,
+            ).single()
+        return PurgeResult(removed=int(rec["n"]) if rec else 0)
+
+
+ADAPTERS: list[ForgetAdapter] = [
+    ArtifactAdapter(),
+    VerifiedMemoryAdapter(),
     TranscriptsAdapter(),
     VerificationReportGraphAdapter(),
     RedisKeysAdapter(),
     SyncFileAdapter(),
+    ConversationNodeAdapter(),
 ]
 
 # Store patterns that hold conversation-keyed data, and the adapter that owns
@@ -142,13 +300,14 @@ CLAIMS: dict[str, str] = {
     "redis:conv:{cid}:sentiment": "redis_conversation_keys",
     "redis:cerid:private_mode:session:{cid}": "redis_conversation_keys",
     "sync:user/conversations/{cid}.json": "sync_file",
+    "chroma:conversations:memory_*": "artifacts",
+    "chroma:conversations:session_summary_*": "artifacts",
+    "chroma:conversations:verified_memory_*": "verified_memories",
+    "neo4j:Conversation.id": "conversation_node",
+    "neo4j:Memory (verified)": "verified_memories",
 }
 
 OUT_OF_REACH: dict[str, str] = {
-    "chroma:conversations:memory_*": "derived memory; offered in the phase 2 delete dialog",
-    "chroma:conversations:session_summary_*": "derived summary; offered in the phase 2 delete dialog",
-    "neo4j:Conversation.id": "kept while extracted memories reference it; phase 2",
-    "neo4j:Memory (verified)": "derived memory; phase 2",
     "redis:cerid:proc:job:{jobid}": "job payloads expire after 14 days; queued jobs skip a forgotten conversation (write barrier); phase 6 stores references",
     "redis:ingest:log / verify:*": "analytics lists expire after 30 days",
 }

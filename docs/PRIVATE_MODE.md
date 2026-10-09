@@ -26,7 +26,7 @@ or the server's level ladder disagree.
 | 1 | Skip saves & sync | Unchanged: knowledge-base and memory context are still injected. | Withheld: memory extraction and verified-fact promotion return without storing anything. | Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped. | Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload. | Unchanged: the MCP tool-call audit line is written. | Not blocked: the chat still goes to the configured provider. Under the hybrid or cloud-first profile, internal pipeline stages pinned to the cloud run on the local provider instead. |
 | 2 | Also skip the knowledge base | Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty. | Withheld: memory extraction and verified-fact promotion return without storing anything. | Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped. | Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload. | Unchanged: the MCP tool-call audit line is written. | Not blocked: what you type still goes to the configured provider. |
 | 3 | Also skip the audit line | Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty. | Withheld: memory extraction and verified-fact promotion return without storing anything. | Withheld: conversation saves, sync and deletes are refused; verification reports are not written to Redis or Neo4j; SDK claim feedback is dropped. | Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload. | Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs. | Not blocked: what you type still goes to the configured provider. |
-| 4 | Full ephemeral | Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty. | Withheld: memory extraction and verified-fact promotion return without storing anything. | Withheld as at L1. When the last L4 tab closes the browser posts a session wipe and the level resets to 0; the wipe carries a per-tab id, not the conversation id, so it erases nothing beyond that reset. Cached query results are not wiped; they expire on their own. | Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload. | Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs. | Not blocked: what you type still goes to the configured provider. |
+| 4 | Full ephemeral | Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty. | Withheld: memory extraction and verified-fact promotion return without storing anything. | Withheld as at L1. When an L4 tab closes, the browser asks the server to forget that tab's private conversations permanently, with whatever memories and verified facts they produced before the tab reached L4, and keeps a receipt. When the last L4 tab closes the level resets to 0. Cached query results are not wiped; they expire on their own. | Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload. | Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs. | Not blocked: what you type still goes to the configured provider. |
 
 ## Where each level is enforced
 
@@ -55,21 +55,17 @@ or the server's level ladder disagree.
   `mcp.tool_call` audit line. Metrics (`utils/metrics.py`) and the enterprise
   audit log (`docs/ENTERPRISE_AUDIT_LOG.md`) are not gated.
 - **L4, ephemeral.** `POST /settings/private-mode/session-wipe`
-  (`app/routers/settings.py`) and `app/services/session_wipe.py`; the browser
-  posts it from `hooks/use-settings.ts` on `beforeunload`.
+  (`app/routers/settings.py`) forgets the tab's private conversations through
+  the forget engine (`app/services/forget/`) with a receipt; the browser sends
+  it from `hooks/use-private-session-wipe.ts` on `beforeunload`, with the tab's
+  session id (registered by `POST /settings/private-mode`) and the API key. In
+  multi-user mode only an admin's wipe forgets; a member's releases the tab.
 
 ## Known gaps
 
 These are the current behaviour, stated so the contract above is true. They
 are tracked for a ruling, not fixed by the contract.
 
-- The L4 wipe is posted with a synthetic per-tab id
-  (`hooks/use-settings.ts`), and `POST /settings/private-mode` is called
-  without `conversation_id`, so the server's L4 session registry is never
-  filled and `wipe_conversation_state` never finds a conversation to erase.
-  What the wipe endpoint can erase when given a real id: the sync-dir copy,
-  memories extracted from the conversation, the `:Conversation` and
-  `:VerificationReport` nodes and verified `:Memory` nodes.
 - Thumbs-rating feedback (`POST /ingest/feedback` from the message bubble),
   `POST /agent/hallucination/feedback` and `/agent/memory/archive` are not
   gated at any level.

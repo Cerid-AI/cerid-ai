@@ -23,9 +23,8 @@ Level semantics (mirrors ``app/routers/settings.py::PrivateModeRequest``):
 L2 (KB bypass) and L3 (audit skip) are enforced at their own call sites
 — ``app/routers/query.py`` / ``app/routers/agents.py`` for L2,
 ``app/tools.py``'s ``mcp.tool_call`` audit line for L3. L4 (full
-ephemeral) is additionally backed by the session-wipe orchestrator in
-``app/services/session_wipe.py``, invoked from
-``POST /settings/private-mode/session-wipe``.
+ephemeral) is additionally backed by ``POST /settings/private-mode/session-wipe``,
+which forgets the closing tab's conversations through the forget engine.
 
 This module only reads the *global* private-mode key. The per-session
 override (``cerid:private_mode:session:<id>``) is out of scope — it

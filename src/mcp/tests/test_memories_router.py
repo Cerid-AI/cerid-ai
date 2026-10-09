@@ -260,8 +260,9 @@ def test_delete_falls_through_to_a_verified_memory_node(monkeypatch):
     monkeypatch.setattr(memories_router, "get_chroma", lambda: object())
     monkeypatch.setattr(memories_router, "get_redis", lambda: None)
     monkeypatch.setattr(
-        "app.services.session_wipe._delete_verified_memory",
-        lambda driver, memory_id: deleted.append(memory_id),
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, **k: deleted.extend((s.kind, s.id, k["requested_by"]) for s in subjects)
+        or {"forget_id": "fg_x", "adapters": {}},
     )
 
     app = FastAPI()
@@ -269,7 +270,32 @@ def test_delete_falls_through_to_a_verified_memory_node(monkeypatch):
     resp = TestClient(app).delete("/memories/mem-1")
 
     assert resp.status_code == 200, resp.text
-    assert deleted == ["mem-1"]
+    assert deleted == [("memory", "mem-1", "memories")]
+
+
+def test_delete_of_an_extracted_memory_forgets_the_artifact(monkeypatch):
+    """One deletion path (spec §6.1): the pane's delete goes through the forget
+    engine, which removes every store's rows and the facts only it sourced."""
+    from app.routers import memories as memories_router
+
+    graph = FakeMemoryGraph(artifacts=[_artifact("art-1")], memories=[])
+    deleted: list[tuple[str, str]] = []
+    monkeypatch.setattr(memories_router, "get_neo4j", lambda: graph)
+    monkeypatch.setattr(memories_router, "get_chroma", lambda: object())
+    monkeypatch.setattr(memories_router, "get_redis", lambda: None)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, **k: deleted.extend((s.kind, s.id) for s in subjects) or {"forget_id": "fg_x", "adapters": {}},
+    )
+
+    app = FastAPI()
+    app.include_router(memories_router.router)
+    resp = TestClient(app).delete("/memories/art-1")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "deleted", "memory_id": "art-1"}
+    assert deleted == [("artifact", "art-1")]
+    assert not any("DETACH DELETE" in q for q in graph.queries), "the route no longer deletes by hand"
 
 
 def test_delete_of_an_unknown_id_is_still_a_404(monkeypatch):
@@ -282,3 +308,32 @@ def test_delete_of_an_unknown_id_is_still_a_404(monkeypatch):
     app = FastAPI()
     app.include_router(memories_router.router)
     assert TestClient(app).delete("/memories/nope").status_code == 404
+
+
+def test_multi_user_member_cannot_delete_a_memory(monkeypatch):
+    """Memories are shared knowledge-base data, and the delete is a permanent
+    forget: in multi-user mode it is an admin's call, like the forget routes."""
+    from app.routers import memories as memories_router
+
+    graph = FakeMemoryGraph(artifacts=[_artifact("art-1")], memories=[])
+    deleted: list[str] = []
+    monkeypatch.setattr(memories_router, "get_neo4j", lambda: graph)
+    monkeypatch.setattr(memories_router, "get_redis", lambda: None)
+    monkeypatch.setattr("config.CERID_MULTI_USER", True)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, **k: deleted.extend(s.id for s in subjects) or {"forget_id": "fg_x", "adapters": {}},
+    )
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def who(request, call_next):
+        request.state.user_id = "u1"
+        request.state.role = request.headers.get("x-test-role", "member")
+        return await call_next(request)
+
+    app.include_router(memories_router.router)
+    tc = TestClient(app)
+    assert tc.delete("/memories/art-1").status_code == 403 and deleted == []
+    assert tc.delete("/memories/art-1", headers={"x-test-role": "admin"}).status_code == 200
+    assert deleted == ["art-1"]

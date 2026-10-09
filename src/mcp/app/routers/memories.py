@@ -4,15 +4,15 @@
 """Memories API — browse, edit, and delete extracted conversation memories."""
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+import config
 from app.deps import get_chroma, get_neo4j, get_redis
-from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
 from core.utils import cache
 
 
@@ -307,31 +307,40 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 # ---------------------------------------------------------------------------
 
 @router.delete("/memories/{memory_id}", response_model=DeleteMemoryResponse)
-async def delete_memory(memory_id: str):
-    """Delete a memory from Neo4j and its chunks from ChromaDB."""
+async def delete_memory(
+    memory_id: str,
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
+    """Forget a memory permanently: an extracted memory artifact or a verified :Memory.
+
+    Memories are shared knowledge-base data and this is a permanent forget, so
+    in multi-user mode only an admin may do it (the forget routes' rule).
+    """
+    state = getattr(request, "state", None)
+    if config.CERID_MULTI_USER and not (getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"):
+        raise HTTPException(status_code=403, detail="Deleting a memory needs an admin in multi-user mode")
     try:
         driver = get_neo4j()
-        chroma = get_chroma()
 
         # Fetch the memory artifact and its chunk IDs
         with driver.session() as session:
             check = session.run(
                 "MATCH (a:Artifact {id: $memory_id})-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
                 "WHERE a.filename STARTS WITH 'memory_' "
-                "RETURN a.id AS id, a.chunk_ids AS chunk_ids, a.filename AS filename",
+                "RETURN a.id AS id, a.filename AS filename",
                 memory_id=memory_id,
             )
             record = check.single()
 
-        if not record:
-            # A verified-claim promotion is a :Memory node, not an
-            # :Artifact — it is listed by the same pane, so it has to be
-            # deletable from it. The wipe helper is the one path that
-            # knows the deterministic Chroma companion id and busts the
-            # query caches afterwards; duplicating it here would leak
-            # orphan documents.
-            from app.services.session_wipe import _delete_verified_memory
+        from app.services.forget import engine as forget_engine
+        from core.forget.registry import Subject
 
+        if record:
+            subject = Subject("artifact", memory_id)
+            filename = record["filename"] or ""
+        else:
+            # A verified-claim promotion is a :Memory node, not an :Artifact;
+            # the pane lists both, so it deletes both.
             with driver.session() as session:
                 verified = session.run(
                     "MATCH (m:Memory {id: $memory_id}) RETURN m.id AS id",
@@ -339,31 +348,15 @@ async def delete_memory(memory_id: str):
                 ).single()
             if not verified:
                 raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
-            _delete_verified_memory(driver, memory_id)
-            logger.info(f"Deleted verified memory node {memory_id[:8]}")
-            return {"status": "deleted", "memory_id": memory_id}
+            subject = Subject("memory", memory_id)
+            filename = ""
 
-        # Delete chunks from ChromaDB, with the parent chunks and HyPE
-        # questions the node does not list.
-        chunk_ids: list[str] = []
-        chunk_ids_raw = record["chunk_ids"]
-        if chunk_ids_raw:
-            try:
-                chunk_ids = json.loads(chunk_ids_raw)
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"Failed to parse chunk_ids for memory {memory_id[:8]}: {e}")
-        collection = chroma.get_or_create_collection(name=CONVERSATIONS_COLLECTION)
-        rows = list(dict.fromkeys(chunk_ids + artifact_row_ids(collection, memory_id)))
-        if rows:
-            collection.delete(ids=rows)
-            logger.info(f"Deleted {len(rows)} chunks from ChromaDB for memory {memory_id[:8]}")
-        remove_artifact_hype_rows(chroma, CONVERSATIONS_COLLECTION, memory_id)
-
-        with driver.session() as session:
-            session.run(
-                "MATCH (a:Artifact {id: $memory_id}) DETACH DELETE a",
-                memory_id=memory_id,
-            )
+        # One deletion path (spec §6.1): the engine removes every store's rows,
+        # the facts only this memory sourced, and records a receipt.
+        try:
+            await asyncio.to_thread(forget_engine.forget_permanently, [subject], requested_by="memories")
+        except forget_engine.ForgetUnavailable as exc:
+            raise HTTPException(status_code=412, detail=str(exc)) from exc
 
         try:
             cache.log_event(
@@ -371,7 +364,7 @@ async def delete_memory(memory_id: str):
                 event_type="memory_delete",
                 artifact_id=memory_id,
                 domain="conversations",
-                filename=record["filename"] or "",
+                filename=filename,
             )
         except Exception as e:
             from core.utils.swallowed import log_swallowed_error

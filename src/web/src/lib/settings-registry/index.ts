@@ -10,6 +10,7 @@ import {
   Server,
   Shield,
   SlidersHorizontal,
+  Trash2,
   type LucideIcon,
 } from "lucide-react"
 import type { CategoryId, SearchMatch, SettingDef, SettingsCtx } from "./types"
@@ -21,6 +22,7 @@ import { PRIVACY_DEFS } from "./privacy"
 import { EXTENSIONS_DEFS } from "./extensions"
 import { PLAN_DEFS } from "./plan"
 import { SYSTEM_DEFS } from "./system"
+import { DATA_DEFS } from "./data"
 
 export type {
   CategoryId,
@@ -48,6 +50,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
   ...EXTENSIONS_DEFS,
   ...APPEARANCE_DEFS,
   ...PLAN_DEFS,
+  ...DATA_DEFS,
   ...SYSTEM_DEFS,
 ]
 
@@ -67,6 +70,7 @@ export const CATEGORY_META: CategoryMeta[] = [
   { id: "extensions", label: "Extensions", description: "Plugins, MCP servers, providers, automations", icon: Puzzle },
   { id: "appearance", label: "Appearance", description: "Make it yours", icon: Palette },
   { id: "plan", label: "Plan & Billing", description: "Manage your plan", icon: CreditCard },
+  { id: "data", label: "Data", description: "Trash, receipts and how long deleted items are kept", icon: Trash2 },
   { id: "system", label: "System", description: "Operate the server", icon: Server },
 ]
 

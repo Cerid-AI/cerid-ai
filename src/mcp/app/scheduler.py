@@ -673,6 +673,8 @@ def _forget_maintenance() -> tuple[list[str], list[str]]:
         ("migrated", lambda: tombstones.migrate_tombstones_to_registry(sync_dir=config.SYNC_DIR)),
         ("applied", engine.apply_remote),
     ]
+    # Started purges are retried whatever the window; the window only adds the age-based empty.
+    steps.append(("retried", lambda: len(engine.retry_started_purges())))
     if config.FORGET_TRASH_DAYS > 0:
         steps.append(("emptied", lambda: len(engine.empty_trash(older_than_days=config.FORGET_TRASH_DAYS))))
     done: list[str] = []

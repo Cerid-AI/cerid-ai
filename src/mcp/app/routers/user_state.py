@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 import config
@@ -162,11 +162,22 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
 
 
 @router.delete("/conversations/{conv_id}", response_model=RemoveConversationResponse)
-def remove_conversation(conv_id: str, permanent: bool = False):
+def remove_conversation(
+    conv_id: str,
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+    permanent: bool = False,
+):
     """Forget a conversation: Move to Trash by default, ``?permanent=true`` to purge now.
 
-    Allowed at every private-mode level: forgetting only reduces data.
+    Allowed at every private-mode level: forgetting only reduces data. In
+    multi-user mode conversations carry no owner, so only an admin may purge;
+    a move to the Trash stays restorable.
     """
+    state = getattr(request, "state", None)
+    if permanent and config.CERID_MULTI_USER and not (
+        getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Forgetting permanently needs an admin in multi-user mode")
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=412, detail="Sync directory not configured")

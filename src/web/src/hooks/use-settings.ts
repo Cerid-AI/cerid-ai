@@ -4,7 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { logSwallowedError } from "@/lib/log-swallowed"
 import { fetchSettings, updateSettings, syncPreferences, fetchUserState, fetchPrivateMode, enablePrivateMode, disablePrivateMode } from "@/lib/api"
-import { wipePrivateSession } from "@/lib/api/settings"
+import { getTabSessionId } from "@/hooks/use-private-session-wipe"
 import type { RagMode, RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
@@ -209,36 +209,6 @@ export function useSettings() {
   // yet, the server's answer is authoritative."
   const privateModeLocalWriteRef = useRef(false)
 
-  // L4 ephemeral lifecycle (Cycle 3.2 / v0.93.5). When Private Mode is at
-  // Level 4, register a beforeunload handler that fires the backend
-  // session-wipe via sendBeacon so the wipe completes even as the page
-  // unloads. The conversation_id is a per-tab synthetic — same scope
-  // L4's "this tab only" contract promises.
-  useEffect(() => {
-    if (privateModeLevel !== 4) return undefined
-    let tabId: string
-    try {
-      tabId = sessionStorage.getItem("cerid-l4-tab-id") ?? ""
-      if (!tabId) {
-        tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-        sessionStorage.setItem("cerid-l4-tab-id", tabId)
-      }
-    } catch (err) {
-      logSwallowedError(err, "use-settings.l4_tab_id")
-      tabId = `tab-${Date.now()}`
-    }
-    const onBeforeUnload = () => {
-      try {
-        wipePrivateSession(tabId)
-      } catch (err) {
-        logSwallowedError(err, "use-settings.l4_wipe")
-      }
-    }
-    window.addEventListener("beforeunload", onBeforeUnload)
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload)
-    }
-  }, [privateModeLevel])
 
   // Hydrate from server on mount (non-blocking, localStorage is immediate fallback)
   const hydratedRef = useRef(false)
@@ -468,7 +438,7 @@ export function useSettings() {
         setPrivateModeLevel(level)
         persist("cerid-private-mode", "true")
         persist("cerid-private-mode-level", String(level))
-        enablePrivateMode(level).catch(() => { revertPrivateMode(prev, prevLevel) })
+        enablePrivateMode(level, getTabSessionId()).catch(() => { revertPrivateMode(prev, prevLevel) })
       } else {
         setPrivateModeLevel(0)
         persist("cerid-private-mode", "false")
@@ -488,7 +458,7 @@ export function useSettings() {
     persist("cerid-private-mode", String(level > 0))
     persist("cerid-private-mode-level", String(level))
     if (level > 0) {
-      enablePrivateMode(level).catch(() => { revertPrivateMode(prevEnabled, prevLevel) })
+      enablePrivateMode(level, getTabSessionId()).catch(() => { revertPrivateMode(prevEnabled, prevLevel) })
     } else {
       disablePrivateMode(false).catch(() => { revertPrivateMode(prevEnabled, prevLevel) })
     }

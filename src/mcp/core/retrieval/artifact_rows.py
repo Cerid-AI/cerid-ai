@@ -23,7 +23,7 @@ from core.utils.swallowed import log_swallowed_error
 
 # The verified-claim promotion path writes one document per ``:Memory`` node at
 # this id, with ``artifact_id`` set to the memory id. It has no ``:Artifact``
-# node by design (see app/services/session_wipe.py).
+# node by design (see VerifiedMemoryAdapter in app/services/forget/adapters.py).
 VERIFIED_MEMORY_PREFIX = "verified_memory_"
 
 

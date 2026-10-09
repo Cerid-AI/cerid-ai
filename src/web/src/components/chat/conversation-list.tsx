@@ -22,6 +22,8 @@ import { Archive, ArchiveRestore, Search, Trash2, Pencil, X } from "lucide-react
 import { cn } from "@/lib/utils"
 import { snapshotPositions, playFromSnapshot } from "@/lib/flip"
 import type { Conversation } from "@/lib/types"
+import type { ForgetMode, ForgetSubject } from "@/lib/api"
+import { ForgetConversationDialog } from "@/components/chat/forget-conversation-dialog"
 
 /** Highlight matching substrings in text by wrapping them in <mark> tags. */
 function HighlightedText({ text, query }: { text: string; query: string }): ReactNode {
@@ -46,14 +48,15 @@ interface ConversationListProps {
   conversations: Conversation[]
   activeId: string | null
   onSelect: (id: string) => void
-  onDelete: (id: string) => void
+  /** Forget conversations: Move to Trash or Forget permanently, with the
+   *  derived items the delete dialog selected (none for bulk). */
+  onForget: (ids: string[], mode: ForgetMode, derived: ForgetSubject[]) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
   onRename?: (id: string, newTitle: string) => void
   showArchived: boolean
   archivedCount: number
   onToggleShowArchived: () => void
-  onBulkDelete: (ids: string[]) => void
   onBulkArchive: (ids: string[]) => void
 }
 
@@ -61,14 +64,13 @@ export function ConversationList({
   conversations,
   activeId,
   onSelect,
-  onDelete,
+  onForget,
   onArchive,
   onUnarchive,
   onRename,
   showArchived,
   archivedCount,
   onToggleShowArchived,
-  onBulkDelete,
   onBulkArchive,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("")
@@ -171,20 +173,20 @@ export function ConversationList({
     void playFromSnapshot(snaps)
   }, [])
 
-  const handleBulkDelete = useCallback(() => {
+  const handleBulkDelete = useCallback((mode: ForgetMode) => {
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
-    withFlip(() => onBulkDelete(ids))
+    withFlip(() => onForget(ids, mode, []))
     setConfirmDeleteOpen(false)
     exitEditMode()
-  }, [selectedIds, onBulkDelete, exitEditMode, withFlip])
+  }, [selectedIds, onForget, exitEditMode, withFlip])
 
-  const handleConfirmSingleDelete = useCallback(() => {
+  const handleConfirmSingleDelete = useCallback((mode: ForgetMode, derived: ForgetSubject[]) => {
     if (!pendingDeleteId) return
     const id = pendingDeleteId
-    withFlip(() => onDelete(id))
+    withFlip(() => onForget([id], mode, derived))
     setPendingDeleteId(null)
-  }, [pendingDeleteId, onDelete, withFlip])
+  }, [pendingDeleteId, onForget, withFlip])
 
   const handleBulkArchive = useCallback(() => {
     const ids = Array.from(selectedIds)
@@ -451,50 +453,39 @@ export function ConversationList({
         </Button>
       </div>
 
-      {/* Bulk delete confirmation dialog */}
+      {/* Bulk delete: conversations only, no per-chat preview */}
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {selectedIds.size} conversation{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. The selected conversation{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted.
+              Move to Trash hides {selectedIds.size !== 1 ? "them" : "it"} everywhere, and you can restore from
+              Settings → Data. Forget permanently erases {selectedIds.size !== 1 ? "them" : "it"} now and keeps a
+              receipt. Memories derived from these chats are kept; delete a chat on its own to choose those.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleBulkDelete}
+              onClick={() => handleBulkDelete("permanent")}
             >
-              Delete
+              Forget permanently
+            </AlertDialogAction>
+            <AlertDialogAction onClick={() => handleBulkDelete("trash")}>
+              Move to Trash
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Single-row delete confirmation dialog */}
-      <AlertDialog
+      <ForgetConversationDialog
+        conversationId={pendingDeleteId}
+        title={conversations.find((c) => c.id === pendingDeleteId)?.title ?? ""}
         open={pendingDeleteId !== null}
         onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. The conversation will be permanently deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleConfirmSingleDelete}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={handleConfirmSingleDelete}
+      />
     </div>
   )
 }

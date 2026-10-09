@@ -362,19 +362,27 @@ def test_duplicate_resolution_leaves_none_of_the_removed_artifacts_rows(store):
     assert _ids(hype) == set()
 
 
-def test_deleting_a_memory_leaves_none_of_its_rows(store, monkeypatch):
+def test_deleting_a_memory_leaves_none_of_its_rows(store, monkeypatch, tmp_path):
+    """The pane's delete runs through the forget engine into remove_content."""
+    from tests.helpers.forget import isolate_forget
 
+    isolate_forget(monkeypatch, tmp_path)
     col, hype = _coll(store, "conversations"), _hype(store, "conversations")
     a_children = _seed(col, A)
     _seed_hype(hype, A, a_children)
     _seed(col, B)
     b_rows = _rows_of(col, B)
-    graph = _Graph({"a.chunk_ids AS chunk_ids": [
-        {"id": A, "chunk_ids": json.dumps(a_children), "filename": "memory_a"},
-    ]})
+    graph = _Graph({
+        "a.chunk_ids AS chunk_ids": [
+            {"id": A, "chunk_ids": json.dumps(a_children), "filename": "memory_a", "domain": "conversations"},
+        ],
+        "STARTS WITH 'memory_'": [{"id": A, "filename": "memory_a"}],
+    })
     monkeypatch.setattr(memories, "get_neo4j", lambda: graph)
-    monkeypatch.setattr(memories, "get_chroma", lambda: store)
     monkeypatch.setattr(memories, "get_redis", lambda: None)
+    monkeypatch.setattr("app.deps.get_neo4j", lambda: graph)
+    monkeypatch.setattr("app.deps.get_chroma", lambda: store)
+    monkeypatch.setattr("app.deps.get_redis", lambda: MagicMock())
 
     asyncio.run(memories.delete_memory(A))
 

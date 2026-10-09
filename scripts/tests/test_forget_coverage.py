@@ -22,8 +22,8 @@ _MCP = _ROOT / "src" / "mcp"
 sys.path.insert(0, str(_MCP))
 
 from app.services.forget.adapters import (  # noqa: E402
+    ADAPTERS,
     CLAIMS,
-    CONVERSATION_ADAPTERS,
     OUT_OF_REACH,
 )
 
@@ -159,7 +159,7 @@ def test_every_conversation_keyed_store_is_claimed():
 
 
 def test_every_claim_names_a_real_adapter():
-    adapters = {a.name for a in CONVERSATION_ADAPTERS}
+    adapters = {a.name for a in ADAPTERS}
     assert not {owner for owner in CLAIMS.values() if owner not in adapters}
 
 

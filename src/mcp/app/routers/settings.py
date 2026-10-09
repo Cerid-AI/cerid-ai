@@ -4,20 +4,20 @@
 """Settings endpoints — expose server configuration to the GUI."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field, model_validator
 
 import config
 import config.features as features_mod
-from app.deps import get_neo4j, get_redis
+from app.deps import get_redis
 from app.services.private_mode import PRIVATE_MODE_KEY, get_private_mode_level
-from app.services.session_wipe import wipe_conversation_state
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
 from utils.features import set_toggle
@@ -28,8 +28,8 @@ from utils.web_search import get_search_provider
 class WipePrivateSessionResponse(BaseModel):
     wiped: bool
     level_after: int
-    conversation_id: Any
-    summary: dict[str, Any] = Field(default_factory=dict)
+    forgotten: int
+    forget_id: str | None = None
 
 
 class ResetPrivateModeResponse(BaseModel):
@@ -64,6 +64,7 @@ class GetSettingsEndpointResponse(BaseModel):
     hallucination_threshold: Any
     auto_inject_threshold: Any
     auto_inject_max: Any
+    forget_trash_days: Any
     cost_sensitivity: Any
     feature_tier: Any
     feature_flags: Any
@@ -200,6 +201,10 @@ class SettingsUpdateRequest(BaseModel):
     )
     auto_inject_max: int | None = Field(
         None, ge=1, description="Maximum number of chunks auto-injected per message"
+    )
+    forget_trash_days: int | None = Field(
+        None, ge=0, le=365,
+        description="Days a forgotten item stays in the Trash before it is erased (0 = never automatically)",
     )
     enable_model_router: bool | None = Field(
         None, description="Toggle automatic model routing based on query complexity"
@@ -432,6 +437,7 @@ SYNCED_SETTING_KEYS = frozenset({
     "enable_auto_inject",
     "auto_inject_threshold",
     "auto_inject_max",
+    "forget_trash_days",
     "enable_model_router",
     "storage_mode",
     "enable_self_rag",
@@ -483,6 +489,7 @@ async def get_settings_endpoint():
         "hallucination_threshold": config.HALLUCINATION_THRESHOLD,
         "auto_inject_threshold": config.AUTO_INJECT_THRESHOLD,
         "auto_inject_max": config.AUTO_INJECT_MAX,
+        "forget_trash_days": config.FORGET_TRASH_DAYS,
         "cost_sensitivity": config.COST_SENSITIVITY,
         "feature_tier": config.FEATURE_TIER,
         "feature_flags": config.FEATURE_FLAGS,
@@ -621,6 +628,10 @@ def apply_settings_update(req: SettingsUpdateRequest) -> dict[str, str | bool | 
     if req.auto_inject_max is not None:
         config.AUTO_INJECT_MAX = req.auto_inject_max  # type: ignore[assignment]
         updated["auto_inject_max"] = req.auto_inject_max
+
+    if req.forget_trash_days is not None:
+        config.FORGET_TRASH_DAYS = req.forget_trash_days  # type: ignore[assignment]
+        updated["forget_trash_days"] = req.forget_trash_days
 
     if req.enable_model_router is not None:
         set_toggle("enable_model_router", req.enable_model_router)
@@ -931,11 +942,20 @@ def apply_settings_update(req: SettingsUpdateRequest) -> dict[str, str | bool | 
 
 
 @router.patch("/settings", response_model=UpdateSettingsEndpointResponse)
-async def update_settings_endpoint(req: SettingsUpdateRequest):
+async def update_settings_endpoint(
+    req: SettingsUpdateRequest, request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
     """Update a subset of settings at runtime.
 
     Only settings that make sense to change without a restart are accepted.
     """
+    # Shortening the Trash window erases every user's Trash at the next
+    # maintenance run, so in multi-user mode it is an admin's call.
+    state = getattr(request, "state", None)
+    if req.forget_trash_days is not None and config.CERID_MULTI_USER and not (
+        getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Changing the Trash window needs an admin in multi-user mode")
     updated = apply_settings_update(req)
 
     if not updated:
@@ -1060,6 +1080,10 @@ class PrivateModeRequest(BaseModel):
         None, min_length=1, max_length=128,
         description="Caller's session/thread id, registered while this caller sits at level 4.",
     )
+    session_id: str | None = Field(
+        None, min_length=1, max_length=128,
+        description="Alias of conversation_id for a caller (a browser tab) that is not one conversation.",
+    )
 
 
 @router.post("/settings/private-mode", response_model=SetPrivateModeResponse)
@@ -1072,14 +1096,15 @@ async def set_private_mode(req: PrivateModeRequest):
     """
     redis = get_redis()
     redis.set(_PRIVATE_MODE_KEY, str(req.level))
-    if req.conversation_id:
-        session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
+    session_id = req.session_id or req.conversation_id
+    if session_id:
+        session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{session_id}"
         if req.level >= _PRIVATE_MODE_L4:
             redis.set(session_key, str(req.level))
-            _register_l4_session(redis, req.conversation_id)
+            _register_l4_session(redis, session_id)
         else:
             redis.delete(session_key)
-            _release_l4_session(redis, req.conversation_id)
+            _release_l4_session(redis, session_id)
     logger.info("Private mode set to level %d", req.level)
     return {"level": req.level}
 
@@ -1102,130 +1127,110 @@ async def reset_private_mode():
 
 
 class SessionWipeRequest(BaseModel):
-    """Body for the L4 session-wipe endpoint.
+    """Body for the L4 session wipe, sent by a closing L4 tab.
 
-    Frontend fires this via ``navigator.sendBeacon()`` on ``beforeunload``
-    when L4 is active.  ``conversation_id`` is the canonical chat thread
-    id the frontend already tracks for localStorage caching; the backend
-    uses it to scope the wipe (so a wipe from one L4 tab doesn't affect
-    another open tab's state) — pass the same id to
-    ``POST /settings/private-mode`` when entering L4 so this endpoint can
-    tell the last session out from one of several.
+    ``session_id`` is the id the tab registered with ``POST
+    /settings/private-mode`` (so the wipe releases only that tab's hold on the
+    global level); ``conversation_ids`` are the tab's private conversations,
+    forgotten permanently. ``conversation_id`` is the older single-id form and
+    counts as both.
     """
 
-    conversation_id: str = Field(
-        ..., min_length=1, max_length=128,
-        description="Conversation thread id whose ephemeral state should be erased.",
-    )
+    session_id: str | None = Field(None, min_length=1, max_length=128)
+    conversation_id: str | None = Field(None, min_length=1, max_length=128)
+    conversation_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def _needs_a_session(self) -> SessionWipeRequest:
+        if not (self.session_id or self.conversation_id):
+            raise ValueError("session_id or conversation_id is required")
+        return self
+
+
+def _forget_private_conversations(cids: list[str]) -> tuple[str | None, bool]:
+    """Forget the conversations permanently with everything the delete dialog
+    checks by default (their memories, summary and verified memories; never a
+    memory another conversation shares, never a cited document). Returns the
+    forget id and whether every store finished."""
+    from app.services.forget import engine as forget_engine
+    from app.services.forget.preview import preview_conversation
+    from core.forget.registry import Subject
+
+    subjects: list[Subject] = []
+    for cid in cids:
+        subjects.append(Subject("conversation", cid))
+        try:
+            pv = preview_conversation(cid, forgetting=frozenset(cids))
+        except Exception as exc:  # noqa: BLE001 — the conversation itself is still forgotten
+            log_swallowed_error("session_wipe.preview", exc, context={"conversation_id": cid})
+            continue
+        for group in pv.get("groups") or []:
+            if group.get("default") != "checked":
+                continue
+            subjects += [
+                Subject(i["kind"], i["id"]) for i in group.get("items") or []
+                if i.get("default", "checked") == "checked"
+            ]
+    if not subjects:
+        return None, True
+    try:
+        receipt = forget_engine.forget_permanently(subjects, requested_by="private_wipe")
+    except forget_engine.ForgetUnavailable as exc:
+        log_swallowed_error("session_wipe.forget_unavailable", exc)
+        return None, False
+    done = all((a or {}).get("status") == "done" for a in (receipt.get("adapters") or {}).values())
+    return receipt.get("forget_id"), done
 
 
 @router.post("/settings/private-mode/session-wipe", status_code=200, response_model=WipePrivateSessionResponse)
-async def wipe_private_session(req: SessionWipeRequest):
-    """L4 contract: erase whatever persisted for a conversation.
+async def wipe_private_session(
+    req: SessionWipeRequest, request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
+    """L4: erase what persisted for the closing tab's conversations.
 
-    L1 (task 1.1) already blocks conversation saves, memory extraction,
-    and feedback writes server-side, so during a true L4 session nothing
-    reaches these stores in the first place. This endpoint is
-    belt-and-suspenders for the window BEFORE a conversation escalated to
-    L4 (e.g. it was saved at L0/L1 and only bumped to full-ephemeral
-    later). The frontend calls this endpoint via ``sendBeacon`` from a
-    ``beforeunload`` handler when L4 is active.
-
-    What is actually wiped for ``req.conversation_id``
-    (see ``app.services.session_wipe.wipe_conversation_state``):
-
-    * The conversation itself, from the sync-directory JSON store
-      (skipped if no sync directory is configured).
-    * Memory artifacts extracted from the conversation — both the
-      Neo4j ``:Artifact`` node and its Chroma chunks, via the same
-      both-stores purge helper the retention job uses (skipped if
-      Neo4j is unreachable).
-    * The ``:Conversation`` node and its ``:VerificationReport`` node
-      in Neo4j.
-    * Verified-memory ``:Memory`` nodes (and their Chroma companion docs)
-      linked to this conversation's ``:VerificationReport`` via
-      ``VERIFIED_BY``. Verified-memory promotion is itself blocked
-      server-side at L1+ (task 1.2b — ``app/routers/agents.py`` injects no
-      write function once private mode engages), so this only cleans up
-      memories promoted *before* the conversation escalated past L0.
-    * The per-session override at ``cerid:private_mode:session:{id}`` and
-      this session's entry in the L4 registry. The global
-      ``cerid:private_mode:global`` flag is shared by every tab and every
-      direct API/SDK/MCP caller, so it is only wound back — to an explicit
-      ``"0"``, per the reset endpoint's E1 R13 note — once no other live L4
-      session is registered. ``level_after`` reports the level that is
-      actually in force afterwards.
-
-    Each of the above is independently best-effort: one store's failure
-    is logged (``log_swallowed_error``) and does not prevent the others
-    from being wiped, and never turns into a 500 for the caller.
-
-    What is deliberately NOT wiped, and why that's fine:
-
-    * Cached query results — the query cache is keyed by
-      ``(query, domain, top_k)``, not by conversation, and carries a
-      300s TTL. There is nothing conversation-scoped to delete; it
-      self-expires.
-    * Audit-log entries — at L3+ the audit line is never written in the
-      first place (task 1.2a), so at L4 there is nothing to delete.
-
-    Returns ``{wiped: true, level_after: 0, conversation_id}`` on
-    success.  The endpoint is idempotent — re-firing with the same id
-    is safe.
-
-    Audit-trail note: this endpoint INTENTIONALLY logs the wipe at INFO
-    level with the conversation_id so operators can verify the L4
-    lifecycle in their logs without compromising the conversation
-    contents themselves.
+    At L1 and above nothing new is saved, so this covers a conversation that
+    was saved before the tab escalated to L4. Each conversation is forgotten
+    permanently through the forget engine, with a receipt. The tab's session
+    is released from the L4 registry, and the shared global level drops to an
+    explicit "0" only when no other L4 session remains (``level_after``).
+    Idempotent: a second wipe forgets nothing new.
     """
-    try:
-        neo4j_driver = get_neo4j()
-    except Exception as exc:
-        log_swallowed_error("session_wipe.get_neo4j", exc, context={"conversation_id": req.conversation_id})
-        neo4j_driver = None
+    from app.sync.user_state import validate_conversation_id
 
-    # WB-45: "wiped" must reflect whether the graph store was actually
-    # reachable and the orchestrator ran to completion — the endpoint
-    # previously returned the literal `True` unconditionally, so a caller had
-    # no way to tell "everything was wiped" from "Neo4j was unreachable and
-    # every graph deletion was skipped".
-    orchestrator_ran = True
+    session_id = req.session_id or req.conversation_id or ""
+    raw = list(dict.fromkeys(req.conversation_ids + ([req.conversation_id] if req.conversation_id else [])))
     try:
-        summary = wipe_conversation_state(
-            req.conversation_id,
-            sync_dir=_sync_dir() or None,
-            neo4j_driver=neo4j_driver,
-            redis_client=get_redis(),
-        )
-    except Exception as exc:
-        log_swallowed_error("session_wipe.orchestrator", exc, context={"conversation_id": req.conversation_id})
-        summary = {}
-        orchestrator_ran = False
+        cids = [validate_conversation_id(c) for c in raw]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Multi-user mode: conversations carry no owner, so a member's wipe could
+    # otherwise erase anyone's conversation by id (the forget routes are
+    # admin-only there for the same reason). A member's wipe still releases
+    # the tab's session; it forgets nothing.
+    state = getattr(request, "state", None)
+    refused = config.CERID_MULTI_USER and not (
+        getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"
+    )
+    if refused:
+        cids = []
+    forget_id, wiped = await asyncio.to_thread(_forget_private_conversations, cids) if cids else (None, not refused)
 
     redis = get_redis()
-    session_key = f"{_PRIVATE_MODE_SESSION_PREFIX}{req.conversation_id}"
-    redis.delete(session_key)
-    # F021: the pre-fix code deleted the GLOBAL key here, which
-    # get_private_mode_level() resolves to 0 — one closing tab dropped every
-    # other tab and every direct caller out of private mode with no signal.
-    remaining_l4_sessions = _release_l4_session(redis, req.conversation_id)
+    redis.delete(f"{_PRIVATE_MODE_SESSION_PREFIX}{session_id}")
+    # F021: the global key is shared by every tab and direct caller; drop it
+    # only when the last L4 session is gone.
+    remaining_l4_sessions = _release_l4_session(redis, session_id)
     if remaining_l4_sessions:
         level_after = get_private_mode_level()
     else:
         redis.set(_PRIVATE_MODE_KEY, "0")
         level_after = 0
-
-    wiped = neo4j_driver is not None and orchestrator_ran
     logger.info(
         "private_mode.l4_session_wiped",
-        extra={"conversation_id": req.conversation_id, "wipe_summary": summary, "wiped": wiped},
+        extra={"forgotten": len(cids), "forget_id": forget_id, "wiped": wiped},
     )
-    return {
-        "wiped": wiped,
-        "level_after": level_after,
-        "conversation_id": req.conversation_id,
-        "summary": summary,
-    }
+    return {"wiped": wiped, "level_after": level_after, "forgotten": len(cids), "forget_id": forget_id}
 
 
 # ── Tier endpoint ───────────────────────────────────────────────────────────

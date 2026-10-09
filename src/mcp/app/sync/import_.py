@@ -71,6 +71,18 @@ def _is_forgotten_transcript(meta: dict[str, Any]) -> bool:
     )
 
 
+_VERIFIED_MEMORY_ROW_PREFIX = "verified_memory_"
+
+
+def _is_forgotten_verified_memory(row_id: str) -> bool:
+    """A verified memory's recall document (``verified_memory_{id}``) whose
+    memory is trashed or purged. Its ``artifact_id`` is the memory id, which
+    the registry records under kind ``memory``, not ``artifact``."""
+    return row_id.startswith(_VERIFIED_MEMORY_ROW_PREFIX) and forget_registry.is_forgotten(
+        "memory", row_id[len(_VERIFIED_MEMORY_ROW_PREFIX):],
+    )
+
+
 def _forgotten_transcript_artifact_ids(sync_dir: str) -> set[str]:
     """Transcript artifact ids of forgotten conversations, read from the Chroma
     export: the conversation id is stamped on the rows, never on the node."""
@@ -433,8 +445,10 @@ def import_chroma(
                 meta = row.get("metadata") or {}
                 artifact_id = meta.get("artifact_id")
                 if (
-                    artifact_id and _is_forgotten_artifact(str(artifact_id))
-                ) or _is_forgotten_transcript(meta):
+                    (artifact_id and _is_forgotten_artifact(str(artifact_id)))
+                    or _is_forgotten_transcript(meta)
+                    or _is_forgotten_verified_memory(str(chunk_id))
+                ):
                     skipped += 1
                     continue
 
@@ -704,6 +718,8 @@ def import_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
                 memory_id = row.get("id")
                 props = row.get("props")
                 if not memory_id or not props:
+                    continue
+                if forget_registry.is_forgotten("memory", str(memory_id)):
                     continue
                 try:
                     session.run(

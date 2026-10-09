@@ -16,6 +16,7 @@ import { ChatPanel } from "@/components/chat/chat-panel"
 import { QuickCaptureFab } from "@/components/quick-capture/quick-capture-fab"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
+import { PrivateSessionWipe } from "@/hooks/use-private-session-wipe"
 import { AuthProvider } from "@/contexts/auth-context"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ProtectedRoute } from "@/components/auth/protected-route"
@@ -252,6 +253,7 @@ export default function App() {
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
     <ConversationsProvider>
+    <PrivateSessionWipe />
     <KBInjectionProvider>
     <AppLayout featureTier={featureTier} onCycleTier={cycleTier} onActivePaneChange={setCurrentPane} initialPane={initialPane}>
       {(activePane, openSidebar) => {

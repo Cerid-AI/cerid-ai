@@ -372,3 +372,59 @@ class TestProcessorModeSettings:
         assert response.json()["updated"]["processor_api_threshold_tokens"] == 8000
         assert config.PROCESSOR_API_THRESHOLD_TOKENS == 8000
         assert config.settings.PROCESSOR_API_THRESHOLD_TOKENS == 8000
+
+
+class TestForgetTrashDays:
+    def test_patch_sets_the_auto_empty_window_and_get_reports_it(self):
+        import config
+
+        client = TestClient(_make_app())
+        assert client.patch("/settings", json={"forget_trash_days": 7}).status_code == 200
+        assert config.FORGET_TRASH_DAYS == 7
+        assert client.get("/settings").json()["forget_trash_days"] == 7
+        assert client.patch("/settings", json={"forget_trash_days": 0}).status_code == 200
+        assert config.FORGET_TRASH_DAYS == 0
+
+    def test_out_of_range_windows_are_rejected(self):
+        client = TestClient(_make_app())
+        assert client.patch("/settings", json={"forget_trash_days": -1}).status_code == 422
+        assert client.patch("/settings", json={"forget_trash_days": 366}).status_code == 422
+
+    def test_the_window_is_shared_through_the_sync_folder(self):
+        from app.routers.settings import SYNCED_SETTING_KEYS
+
+        assert "forget_trash_days" in SYNCED_SETTING_KEYS
+
+
+class TestForgetTrashDaysMultiUser:
+    """Shortening the window erases everyone's Trash at the next maintenance
+    run, so in multi-user mode only an admin may change it."""
+
+    def _app(self, role):
+        from app.routers.settings import router
+
+        app = FastAPI()
+
+        @app.middleware("http")
+        async def who(request, call_next):
+            request.state.user_id = "u1"
+            request.state.role = role
+            return await call_next(request)
+
+        app.include_router(router)
+        return TestClient(app)
+
+    def test_member_cannot_change_the_window(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr("config.CERID_MULTI_USER", True)
+        before = config.FORGET_TRASH_DAYS
+        assert self._app("member").patch("/settings", json={"forget_trash_days": 1}).status_code == 403
+        assert config.FORGET_TRASH_DAYS == before
+
+    def test_admin_can(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr("config.CERID_MULTI_USER", True)
+        assert self._app("admin").patch("/settings", json={"forget_trash_days": 3}).status_code == 200
+        assert config.FORGET_TRASH_DAYS == 3

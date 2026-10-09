@@ -889,6 +889,8 @@ export interface ServerSettings {
   enable_auto_inject: boolean
   auto_inject_threshold: number
   auto_inject_max: number
+  /** Days a forgotten item stays in the Trash; 0 = never emptied automatically. */
+  forget_trash_days?: number
   feature_tier: string
   feature_flags: Record<string, boolean>
   domains: string[]
@@ -1020,6 +1022,7 @@ export interface SettingsUpdate {
   enable_auto_inject?: boolean
   auto_inject_threshold?: number
   auto_inject_max?: number
+  forget_trash_days?: number
   enable_self_rag?: boolean
   storage_mode?: string
   hybrid_vector_weight?: number

@@ -60,6 +60,7 @@ import PrivacyCategory from "./categories/privacy"
 import ExtensionsCategory from "./categories/extensions"
 import PlanBillingCategory from "./categories/plan-billing"
 import SystemCategory from "./categories/system"
+import DataCategory from "./categories/data"
 
 type LoadState = "loading" | "error" | "ready"
 type Selected = CategoryId | "diagnostics" | "overview" | "analytics"
@@ -86,6 +87,7 @@ const CATEGORY_PAGES: Record<CategoryId, ComponentType<SettingsCategoryPageProps
   extensions: ExtensionsCategory,
   appearance: AppearanceCategory,
   plan: PlanBillingCategory,
+  data: DataCategory,
   system: SystemCategory,
 }
 
