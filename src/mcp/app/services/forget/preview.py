@@ -220,10 +220,26 @@ def _citations_by_artifact(aids: set[str]) -> dict[str, int]:
     return counts
 
 
+def _conversation_items(subjects: list[Any]) -> list[dict[str, Any]]:
+    """Conversations in a selection, titled. Forgetting one takes its
+    transcripts and its own records; what it produced (memories, a summary)
+    is offered only by the conversation's delete dialog."""
+    from app.sync.user_state import read_conversation
+
+    out = []
+    for cid in dict.fromkeys(s.id for s in subjects if s.kind == "conversation"):
+        if not _live("conversation", cid):
+            continue
+        convo = read_conversation(config.SYNC_DIR, cid) if config.SYNC_DIR else {}
+        if convo:
+            out.append({"kind": "conversation", "id": cid, "label": _label(convo.get("title"), "Untitled chat")})
+    return out
+
+
 def preview_items(subjects: list[Any]) -> dict[str, Any]:
-    """What forgetting documents, passages and memories picked from search
-    would remove. A passage of a document that is itself selected folds into
-    the document."""
+    """What forgetting documents, passages, memories and conversations picked
+    from search would remove. A passage of a document that is itself selected
+    folds into the document."""
     from app.deps import get_neo4j
 
     artifacts = sorted({s.id for s in subjects if s.kind == "artifact" and _live("artifact", s.id)})
@@ -287,6 +303,7 @@ def preview_items(subjects: list[Any]) -> dict[str, Any]:
             ] + [
                 {"kind": "memory", "id": v["id"], "label": _label(v.get("text"), v["id"])} for v in verified
             ]},
+            {"key": "conversations", "default": "checked", "items": _conversation_items(subjects)},
         ],
         "derived_facts": facts,
         "notes": notes,

@@ -4,8 +4,18 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { ForgetConflictError, ForgetHttpError, forgetSubjects, restoreForget } from "@/lib/api"
-import type { ForgetMode, ForgetSubject } from "@/lib/api"
+import type { ForgetMode, ForgetSource, ForgetSubject } from "@/lib/api"
 import { QUERY_KEYS } from "@/lib/query-keys"
+
+/** Window events carrying conversation ids forgotten or restored outside the
+ *  conversations hook, so the chat list follows without a reload. */
+export const CONVERSATIONS_FORGOTTEN_EVENT = "cerid:conversations-forgotten"
+export const CONVERSATIONS_RESTORED_EVENT = "cerid:conversations-restored"
+
+function announce(event: string, subjects: ForgetSubject[]): void {
+  const ids = subjects.filter((s) => s.kind === "conversation").map((s) => s.id)
+  if (ids.length > 0) window.dispatchEvent(new CustomEvent(event, { detail: ids }))
+}
 
 /** Every query that can show a document, a passage or a memory, and the Trash. */
 const KB_QUERY_KEYS: readonly (readonly string[])[] = [
@@ -23,10 +33,11 @@ export async function forgetItemsWithUndo(
   queryClient: QueryClient,
   subjects: ForgetSubject[],
   mode: ForgetMode,
+  source: ForgetSource = "api",
 ): Promise<boolean> {
   let result
   try {
-    result = await forgetSubjects(subjects, mode)
+    result = await forgetSubjects(subjects, mode, source)
   } catch (err) {
     toast.error(
       err instanceof ForgetHttpError && err.status < 500
@@ -36,6 +47,7 @@ export async function forgetItemsWithUndo(
     return false
   }
   refresh(queryClient)
+  announce(CONVERSATIONS_FORGOTTEN_EVENT, subjects)
   if (mode === "permanent") {
     toast.success(
       result.state === "purged"
@@ -49,7 +61,10 @@ export async function forgetItemsWithUndo(
       label: "Undo",
       onClick: () => {
         restoreForget(result.forget_id)
-          .then(() => refresh(queryClient))
+          .then(() => {
+            refresh(queryClient)
+            announce(CONVERSATIONS_RESTORED_EVENT, subjects)
+          })
           .catch((err: unknown) => {
             toast.error(
               err instanceof ForgetConflictError

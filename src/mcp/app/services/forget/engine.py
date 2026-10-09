@@ -78,6 +78,11 @@ def _age_days(at: str) -> float:
     return (datetime.now(timezone.utc) - then).total_seconds() / 86400
 
 
+def forget_available() -> bool:
+    """Whether there is a registry to record forgets in."""
+    return bool(config.SYNC_DIR)
+
+
 def _require_registry() -> Registry:
     if not config.SYNC_DIR:
         raise ForgetUnavailable("sync dir not configured")

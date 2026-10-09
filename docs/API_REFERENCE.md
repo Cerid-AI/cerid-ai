@@ -110,8 +110,9 @@
 - `PATCH /user-state/preferences` — Update user preferences
 
 **Forget engine** (`app/routers/forget.py`; admin-only in multi-user mode):
-- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked). Or `{subjects: [...]}` (at most 200 artifact, chunk and memory subjects, picked from search): `documents` (passage count, conversations that cited each), `passages` (live excerpt, document, child-passage count; a passage of a selected document folds into it), `memories`, `derived_facts`, and `notes` (for example when every passage of a document is selected). `subject` is null for a selection
-- `POST /forget` — `{subjects: [{kind: conversation|artifact|chunk|memory, id}], mode: trash|permanent}`; returns `forget_id`, `state`, and the receipt for a permanent forget. A chunk id is its artifact's id plus `_` and 16 hex characters; forgetting a parent passage takes its child passages and their HyPE questions with it
+- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked). Or `{subjects: [...]}` (at most 200 artifact, chunk, memory and conversation subjects, picked from search): `documents` (passage count, conversations that cited each), `passages` (live excerpt, document, child-passage count; a passage of a selected document folds into it), `memories`, `conversations`, `derived_facts`, and `notes` (for example when every passage of a document is selected). `subject` is null for a selection
+- `POST /forget/assist/search` — `{scope, allow_cloud?}`: everything matching a plain-language description (documents with their matching passages, documents sharing entities with them, memories, conversations), grouped and explained by the local model on the `forget_assist` stage, which never leaves the machine. `status` is `grouped`, `needs_consent` (the local model is unavailable; `cloud_model` names the model a repeat with `allow_cloud: true` would use) or `ungrouped` (with `reason`, for example local-only or Private Mode refusing the cloud). Nothing is forgotten here
+- `POST /forget` — `{subjects: [{kind: conversation|artifact|chunk|memory, id}], mode: trash|permanent, source?: api|agent}`; returns `forget_id`, `state`, and the receipt for a permanent forget. A chunk id is its artifact's id plus `_` and 16 hex characters; forgetting a parent passage takes its child passages and their HyPE questions with it
 - `POST /forget/{forget_id}/restore` — Restore a trashed forget (409 once its purge has started)
 - `POST /forget/trash/empty` — Erase everything in the Trash
 - `GET /forget/trash` — Trashed forgets with live labels, newest first
@@ -153,9 +154,9 @@
 - `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (59 total)
+### MCP Tools (62 total)
 
-59 tools ship by default (64 with the optional trading module: 23 legacy `MCP_TOOLS` + 36 `@register_tool` + 5 trading). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
+62 tools ship by default (67 with the optional trading module: 23 legacy `MCP_TOOLS` + 39 `@register_tool` + 5 trading). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -177,6 +178,7 @@
 - `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
 - `pkb_web_search` — Agentic web search with verification
 - `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
+- `pkb_forget_search` → `pkb_forget_preview` → `pkb_forget_execute` — Find what matches a description of what to forget; preview a chosen set with a single-use confirm token (15 minutes); execute only what the token covers, once. Refused in multi-user mode, where MCP carries no caller role
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
 Versioned facade for external consumers — 17 endpoints. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
@@ -184,6 +186,8 @@ Versioned facade for external consumers — 17 endpoints. Delegates to existing 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode`, `context_sources` and `source_config` — see [Source gates](#source-gates) below)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`; `summary` carries the same keys, `agreed` included)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
+- `POST /sdk/v1/forget/preview` — What forgetting documents (`artifact`) or passages (`chunk`) would remove, and a single-use `confirm_token` for exactly that set, mode and consumer (15 minutes). A consumer limited to some domains may forget only within the domains it may write (403 otherwise, and for memory and conversation subjects). In multi-user mode both forget endpoints need an admin, and the token is bound to the signed-in user as well
+- `POST /sdk/v1/forget/execute` — `{confirm_token}`: runs the previewed forget once (409 for a spent, expired or foreign token; idempotent with an `Idempotency-Key`)
 - `GET /sdk/v1/health` — Health check with `version`, `app_version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model). `version` is the `/sdk/v1` **wire contract** version (e.g. `1.3.0`); `app_version` is the application build (e.g. `1.0.7`) — they are different numbers.
 
 **External-client backend support.** `/sdk/v1/ingest` and `/sdk/v1/query` accept **client-defined domains** without pre-registering the domain itself — an unknown domain inside the consumer's grant degrades to empty results, never a 400. The grant is the consumer's `allowed_domains` in `CONSUMER_REGISTRY` (keyed by `X-Client-ID`); a domain outside it returns **403** `consumer_domain_restricted`, and a consumer that is not in the registry is granted `general` only. `/sdk/v1/ingest` accepts a `metadata` object (arbitrary provenance, stored + retrievable; `tags` preserved alongside). `/sdk/v1/llm/complete` accepts custom `task_type` values (unknown → safe internal routing). See [`SDK_GUIDE.md` § Using Cerid as a backend](SDK_GUIDE.md).

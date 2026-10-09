@@ -122,7 +122,27 @@ interface PostCase {
   invoke: (client: CeridClient) => Promise<unknown>;
 }
 
+const FORGET_PREVIEW = {
+  groups: [{ key: "documents", default: "checked", items: [{ kind: "artifact", id: "a".repeat(64) }] }],
+  derived_facts: 0, notes: [], out_of_reach: [], mode: "trash", confirm_token: "tok", expires_in: 900,
+};
+const FORGET_DONE = { forget_id: "fg_0123456789abcdef", state: "trashed", subjects: 1 };
+
 const POST_CASES: PostCase[] = [
+  {
+    label: "kb.forgetPreview",
+    path: "/sdk/v1/forget/preview",
+    method: "post",
+    responseFixture: FORGET_PREVIEW,
+    invoke: (c) => c.kb.forgetPreview([{ kind: "artifact", id: "a".repeat(64) }], { mode: "trash" }),
+  },
+  {
+    label: "kb.forgetExecute",
+    path: "/sdk/v1/forget/execute",
+    method: "post",
+    responseFixture: FORGET_DONE,
+    invoke: (c) => c.kb.forgetExecute("tok"),
+  },
   {
     label: "kb.query",
     path: "/sdk/v1/query",
@@ -220,6 +240,13 @@ interface MaximalCase {
 }
 
 const MAXIMAL_CASES: MaximalCase[] = [
+  {
+    label: "kb.forgetPreview",
+    path: "/sdk/v1/forget/preview",
+    responseFixture: FORGET_PREVIEW,
+    invoke: (c) =>
+      c.kb.forgetPreview([{ kind: "chunk", id: `${"a".repeat(64)}_0123456789abcdef` }], { mode: "permanent" }),
+  },
   {
     label: "kb.ingest",
     path: "/sdk/v1/ingest",
@@ -320,14 +347,14 @@ const GET_CASES: GetCase[] = [
     label: "system.health",
     path: "/sdk/v1/health",
     method: "get",
-    responseFixture: { status: "healthy", version: "1.3.0", services: {}, features: {} },
+    responseFixture: { status: "healthy", version: "1.4.0", services: {}, features: {} },
     invoke: (c) => c.system.health(),
   },
   {
     label: "system.settings",
     path: "/sdk/v1/settings",
     method: "get",
-    responseFixture: { version: "1.3.0", tier: "community", features: {} },
+    responseFixture: { version: "1.4.0", tier: "community", features: {} },
     invoke: (c) => c.system.settings(),
   },
   {

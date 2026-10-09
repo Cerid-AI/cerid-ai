@@ -117,6 +117,28 @@ class DeleteArtifactResponse(_SDKBase):
     message: str = Field(default="")
 
 
+class ForgetPreviewResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/forget/preview``: what forgetting would
+    remove, and a single-use confirm token for exactly that set and mode.
+    ``confirm_token`` is empty when nothing listed is left to forget."""
+
+    groups: List[Dict[str, Any]] = Field(default_factory=list)
+    derived_facts: int = Field(default=0)
+    notes: List[str] = Field(default_factory=list)
+    out_of_reach: List[str] = Field(default_factory=list)
+    mode: str = Field(default="trash")
+    confirm_token: str = Field(default="")
+    expires_in: int = Field(default=0)
+
+
+class ForgetExecuteResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/forget/execute``."""
+
+    forget_id: str = Field(default="")
+    state: str = Field(default="trashed")
+    subjects: int = Field(default=0)
+
+
 class CollectionsResponse(_SDKBase):
     """Response from ``GET /sdk/v1/collections``."""
 

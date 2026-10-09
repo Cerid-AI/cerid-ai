@@ -103,3 +103,24 @@ async def test_multi_domain_query_drops_a_forgotten_passage(reg, monkeypatch):
     )
     assert "card" not in {r["chunk_id"] for r in after}
     assert {r["chunk_id"] for r in after} == {r["chunk_id"] for r in before} - {"card"}
+
+
+@pytest.mark.asyncio
+async def test_verification_never_cites_a_forgotten_memory(reg):
+    """The claim verifier queries the memory rows directly, outside the retrieval pipeline."""
+    from core.agents.hallucination.verification import _query_memories
+
+    collection = MagicMock()
+    collection.query.return_value = {
+        "ids": [["m1_0123456789abcdef", "m2_0123456789abcdef"]],
+        "documents": [["The 2025 limit is $23,500.", "Prefers index funds."]],
+        "metadatas": [[{"artifact_id": "m1", "memory_type": "empirical"},
+                       {"artifact_id": "m2", "memory_type": "preference"}]],
+        "distances": [[0.2, 0.3]],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+
+    assert [r["artifact_id"] for r in await _query_memories("limit", chroma)] == ["m1", "m2"]
+    _forget(reg, "artifact", "m1")
+    assert [r["artifact_id"] for r in await _query_memories("limit", chroma)] == ["m2"]

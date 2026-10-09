@@ -539,6 +539,162 @@
         "title": "SDKDeleteArtifactResponse",
         "type": "object"
       },
+      "SDKForgetExecuteRequest": {
+        "description": "Request body for ``POST /sdk/v1/forget/execute``.",
+        "properties": {
+          "confirm_token": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Confirm Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_token"
+        ],
+        "title": "SDKForgetExecuteRequest",
+        "type": "object"
+      },
+      "SDKForgetExecuteResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/forget/execute``.",
+        "properties": {
+          "forget_id": {
+            "default": "",
+            "title": "Forget Id",
+            "type": "string"
+          },
+          "state": {
+            "default": "trashed",
+            "enum": [
+              "trashed",
+              "purged",
+              "trashed_pending"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subjects": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Subjects",
+            "type": "integer"
+          }
+        },
+        "title": "SDKForgetExecuteResponse",
+        "type": "object"
+      },
+      "SDKForgetPreviewRequest": {
+        "description": "Request body for ``POST /sdk/v1/forget/preview``.",
+        "properties": {
+          "mode": {
+            "default": "trash",
+            "enum": [
+              "trash",
+              "permanent"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/SDKForgetSubject"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Subjects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "subjects"
+        ],
+        "title": "SDKForgetPreviewRequest",
+        "type": "object"
+      },
+      "SDKForgetPreviewResponse": {
+        "additionalProperties": true,
+        "description": "What forgetting the subjects would remove, and a single-use token for\nexactly that set and mode. ``confirm_token`` is empty when nothing listed\nis left to forget.",
+        "properties": {
+          "confirm_token": {
+            "default": "",
+            "title": "Confirm Token",
+            "type": "string"
+          },
+          "derived_facts": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Derived Facts",
+            "type": "integer"
+          },
+          "expires_in": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "mode": {
+            "default": "trash",
+            "enum": [
+              "trash",
+              "permanent"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "out_of_reach": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Out Of Reach",
+            "type": "array"
+          }
+        },
+        "title": "SDKForgetPreviewResponse",
+        "type": "object"
+      },
+      "SDKForgetSubject": {
+        "description": "One thing to forget: a document (artifact), a passage (chunk), a\nmemory or a conversation, by id.",
+        "properties": {
+          "id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "artifact",
+              "chunk",
+              "memory",
+              "conversation"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "SDKForgetSubject",
+        "type": "object"
+      },
       "SDKHallucinationResponse": {
         "additionalProperties": true,
         "description": "Response from ``POST /sdk/v1/hallucination`` \u2014 claim verification.",
@@ -1320,7 +1476,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Cerid AI SDK",
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1383,6 +1539,94 @@
           }
         },
         "summary": "List Collections",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/forget/execute": {
+      "post": {
+        "description": "Forget what a confirm token from `/forget/preview` was issued for, in the mode it was previewed with. The token works once and only for the consumer it was issued to; send an Idempotency-Key to retry safely.",
+        "operationId": "sdk_forget_execute_sdk_v1_forget_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SDKForgetExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKForgetExecuteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Multi-user mode and the caller is not an admin"
+          },
+          "409": {
+            "description": "The confirm token is unknown, expired, already used or issued to another consumer"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Execute a Forget",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/forget/preview": {
+      "post": {
+        "description": "Show what forgetting the subjects would remove and issue a single-use confirm token for exactly that set and mode, valid 15 minutes. Nothing is changed. A consumer limited to some domains may forget only documents and passages in the domains it may write. In multi-user mode only an admin may forget.",
+        "operationId": "sdk_forget_preview_sdk_v1_forget_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SDKForgetPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKForgetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Consumer is not allowed to query the requested domain"
+          },
+          "404": {
+            "description": "A subject was not found"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Preview a Forget",
         "tags": [
           "SDK"
         ]

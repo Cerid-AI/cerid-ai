@@ -6,10 +6,10 @@ import type { ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { ForgetItemsDialog } from "@/components/kb/forget-items-dialog"
 import { forgetItemsWithUndo } from "@/lib/forget-items-with-undo"
-import type { ForgetMode, ForgetSubject } from "@/lib/api"
+import type { ForgetMode, ForgetSource, ForgetSubject } from "@/lib/api"
 
 /** The forget dialog and what happens on confirm, for any surface. */
-export function useForgetItemsFlow(onDone?: () => void): {
+export function useForgetItemsFlow(onDone?: () => void, source: ForgetSource = "api"): {
   start: (subjects: ForgetSubject[]) => void
   dialog: ReactNode
 } {
@@ -27,8 +27,8 @@ export function useForgetItemsFlow(onDone?: () => void): {
 
   const confirm = useCallback((mode: ForgetMode, chosen: ForgetSubject[]) => {
     setOpen(false)
-    void forgetItemsWithUndo(queryClient, chosen, mode).then((ok) => { if (ok) onDone?.() })
-  }, [queryClient, onDone])
+    void forgetItemsWithUndo(queryClient, chosen, mode, source).then((ok) => { if (ok) onDone?.() })
+  }, [queryClient, onDone, source])
 
   const dialog = (
     <ForgetItemsDialog key={round} subjects={subjects} open={open} onOpenChange={setOpen} onConfirm={confirm} />

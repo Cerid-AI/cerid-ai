@@ -9,4 +9,4 @@
  * settings responses (see `SystemResource`); a differing major version throws
  * `ProtocolVersionError` rather than letting payload skew pass silently.
  */
-export const SDK_PROTOCOL_VERSION = "1.3.0";
+export const SDK_PROTOCOL_VERSION = "1.4.0";

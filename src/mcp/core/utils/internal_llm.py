@@ -419,6 +419,18 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
     provider under ``hybrid``/``cloud-first``: see
     :func:`set_private_mode_level_probe`.
     """
+    from config.stage_profiles import (
+        CLOUD_ESCALATION_STAGES,
+        CONSENTED_CLOUD_STAGES,
+        LOCAL_FIRST_STAGES,
+        PRIVATE_LOCAL_STAGES,
+    )
+
+    if stage in PRIVATE_LOCAL_STAGES:
+        # Never leaves the machine: no pin, profile or Private Mode rule applies.
+        from config.environment_profiles import degrade_target_provider
+
+        return degrade_target_provider(default_provider, os.environ.get("HOST_RECOMMENDED_LOCAL_BACKEND"))
     if not stage:
         resolved = default_provider
     else:
@@ -426,10 +438,9 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
         if env_override:
             resolved = env_override
         else:
-            from config.stage_profiles import CLOUD_ESCALATION_STAGES, LOCAL_FIRST_STAGES
-
+            cloud_stages = CLOUD_ESCALATION_STAGES | CONSENTED_CLOUD_STAGES
             if stage in LOCAL_FIRST_STAGES or (
-                stage in CLOUD_ESCALATION_STAGES
+                stage in cloud_stages
                 and getattr(config, "CERID_ENVIRONMENT_PROFILE", "") == "local-only"
             ):
                 from config.environment_profiles import degrade_target_provider
@@ -438,7 +449,7 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
                     default_provider,
                     os.environ.get("HOST_RECOMMENDED_LOCAL_BACKEND"),
                 )
-            elif stage in CLOUD_ESCALATION_STAGES:
+            elif stage in cloud_stages:
                 resolved = "openrouter"
             else:
                 pipeline_providers = getattr(config, "PIPELINE_PROVIDERS", {})
@@ -953,6 +964,12 @@ async def call_internal_llm(
     override = _llm_override.get()
     if override is not None:
         provider, resolved_model = override
+    from config.stage_profiles import PRIVATE_LOCAL_STAGES
+
+    if stage in PRIVATE_LOCAL_STAGES and provider not in ("ollama", "quenchforge"):
+        raise RuntimeError(
+            f"Stage {stage!r} runs only on a local provider; {provider!r} is not one."
+        )
     log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})
@@ -1206,9 +1223,12 @@ async def _call_ollama(
 
 def _cloud_fallback_refused_by(stage: str | None) -> str:
     """Which setting forbids the local-to-cloud fallback for *stage*; "" allows it."""
+    from config.stage_profiles import INBOX_STAGES, PRIVATE_LOCAL_STAGES
+
+    if stage in PRIVATE_LOCAL_STAGES:
+        return "the stage never leaves the machine"
     if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
         return "ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false"
-    from config.stage_profiles import INBOX_STAGES
 
     if stage in INBOX_STAGES and not getattr(config, "INBOX_CLOUD_FALLBACK", False):
         return "CERID_INBOX_CLOUD_FALLBACK is not true"

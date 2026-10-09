@@ -52,6 +52,7 @@ from core.agents.hallucination.patterns import (
     memory_authority_boost,
 )
 from core.context.identity import with_tenant_scope
+from core.forget.read_filter import drop_forgotten
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import (
     TIME_SENSITIVE_VERDICT_TTL_S,
@@ -948,13 +949,14 @@ async def _query_memories(
 
         formatted = []
         if results["ids"] and results["ids"][0]:
-            for i, _chunk_id in enumerate(results["ids"][0]):
+            for i, chunk_id in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i] if results["distances"] else 1.0
                 relevance = l2_distance_to_relevance(distance)
                 metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 formatted.append({
                     "relevance": round(relevance, 4),
                     "artifact_id": metadata.get("artifact_id", ""),
+                    "chunk_id": chunk_id,
                     "filename": metadata.get("filename", ""),
                     "domain": "conversations",
                     "content": results["documents"][0][i] if results["documents"] else "",
@@ -962,7 +964,9 @@ async def _query_memories(
                     "memory_source": True,
                     "created_at": metadata.get("created_at") or metadata.get("ingested_at") or None,
                 })
-        return formatted
+        # This reads the memory rows directly, outside the retrieval pipeline,
+        # so it applies the forget filter itself.
+        return drop_forgotten(formatted)
     except Exception as e:
         log_swallowed_error('core.agents.hallucination.verification', e)
         logger.debug("Memory query failed (non-blocking): %s", e)

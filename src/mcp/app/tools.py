@@ -41,7 +41,7 @@ _audit_logger = logging.getLogger("ai-companion.mcp_tool_audit")
 #   * The static ``MCP_TOOLS`` list below carries 23 legacy entries that
 #     predate the ``@register_tool`` decorator (v0.95 cerid-kb overhaul).
 #   * ``app/mcp_tools/*.py`` modules use ``@register_tool`` from
-#     ``app.tool_registry`` for 32 newer tools (Phase 1.6+).
+#     ``app.tool_registry`` for 39 newer tools (Phase 1.6+).
 #
 # Both sources are composed by :func:`get_all_tools` (below), which
 # CONCATENATES them — it does NOT de-duplicate, despite what this comment
@@ -720,7 +720,7 @@ def _summarize_args(arguments: dict) -> dict[str, Any]:
     embedded image base64). Keys matching credential-like names are
     stubbed regardless of size.
     """
-    _REDACT_KEYS = {"password", "token", "secret", "api_key", "authorization"}
+    _REDACT_KEYS = {"password", "token", "secret", "api_key", "authorization", "confirm_token"}
     out: dict[str, Any] = {}
     for k, v in arguments.items():
         if k.lower() in _REDACT_KEYS:

@@ -195,6 +195,7 @@ class TestEveryMutatingPostIsWrapped:
         "/sdk/v1/ingest/voice-note",
         "/sdk/v1/memory/extract",
         "/sdk/v1/ingest/upload",
+        "/sdk/v1/forget/execute",
     }
 
     # POSTs that only read/compute — POST is used for request-body ergonomics,
@@ -205,6 +206,9 @@ class TestEveryMutatingPostIsWrapped:
         "/sdk/v1/llm/complete",
         "/sdk/v1/search",
         "/sdk/v1/memory/recall",
+        # Issues a confirm token in Redis but changes no data; a retry mints
+        # another token and the first one expires unused.
+        "/sdk/v1/forget/preview",
     }
 
     def _post_paths(self) -> set[str]:

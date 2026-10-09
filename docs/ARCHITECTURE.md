@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-08-09 (v1.0.1 — tool count remeasured 2026-10-04: 59 MCP tools, 64 with the optional trading module, registered via the `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; `_warnings` envelope; `/health.invariants.mcp` rollups.)
+> **Last refresh:** 2026-08-09 (v1.0.1 — tool count remeasured 2026-10-09: 62 MCP tools, 67 with the optional trading module, registered via the `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; `_warnings` envelope; `/health.invariants.mcp` rollups.)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 
@@ -78,7 +78,7 @@ cerid-ai-internal/
 │   │   ├── main.py          # FastAPI entry + lifespan
 │   │   ├── tools.py         # Legacy MCP tool dispatcher; most tools register via
 │   │   │                    # @register_tool in tool_registry.py + mcp_tools/
-│   │   │                    # (59 tools; 64 with the optional trading module)
+│   │   │                    # (62 tools; 67 with the optional trading module)
 │   │   └── internal_modules.py  # /health.invariants.internal_modules flags
 │   ├── config/              # settings.py, taxonomy.py, features.py, providers.py
 │   ├── routers/             # billing.py ONLY (internal-only; whole dir stripped from public)

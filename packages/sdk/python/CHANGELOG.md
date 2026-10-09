@@ -4,6 +4,22 @@ Versioned independently of the Cerid AI product. `SDK_PROTOCOL_VERSION`
 tracks the `/sdk/v1/` wire contract; the package version tracks this
 client's release cadence.
 
+## [0.3.0] — Unreleased — protocol 1.4.0
+
+### Added
+
+- Forgetting with a confirmation step: `kb.forget_preview(subjects, mode=)` and `kb.forget_execute(confirm_token)` (sync and async).
+  A preview names what would be removed (documents, passages) and returns a
+  single-use `confirm_token` bound to exactly that set and mode, valid 15
+  minutes. Execute runs only what the token covers, once, for the consumer
+  it was issued to; a spent, expired or foreign token is a 409. A consumer
+  limited to some domains may forget only documents and passages in the
+  domains it may write. Types: `ForgetPreviewResponse` and `ForgetExecuteResponse`.
+
+### Changed
+
+- `SDK_PROTOCOL_VERSION` is `1.4.0` (two new endpoints, same major version).
+
 ## [0.2.2] — Unreleased — protocol 1.3.0
 
 ### Added
