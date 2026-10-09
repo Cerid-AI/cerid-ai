@@ -8,9 +8,10 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from core.utils import cache
 
@@ -306,8 +307,18 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 # ---------------------------------------------------------------------------
 
 @router.delete("/memories/{memory_id}", response_model=DeleteMemoryResponse)
-async def delete_memory(memory_id: str):
-    """Forget a memory permanently: an extracted memory artifact or a verified :Memory."""
+async def delete_memory(
+    memory_id: str,
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
+    """Forget a memory permanently: an extracted memory artifact or a verified :Memory.
+
+    Memories are shared knowledge-base data and this is a permanent forget, so
+    in multi-user mode only an admin may do it (the forget routes' rule).
+    """
+    state = getattr(request, "state", None)
+    if config.CERID_MULTI_USER and not (getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"):
+        raise HTTPException(status_code=403, detail="Deleting a memory needs an admin in multi-user mode")
     try:
         driver = get_neo4j()
 

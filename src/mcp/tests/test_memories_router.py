@@ -308,3 +308,32 @@ def test_delete_of_an_unknown_id_is_still_a_404(monkeypatch):
     app = FastAPI()
     app.include_router(memories_router.router)
     assert TestClient(app).delete("/memories/nope").status_code == 404
+
+
+def test_multi_user_member_cannot_delete_a_memory(monkeypatch):
+    """Memories are shared knowledge-base data, and the delete is a permanent
+    forget: in multi-user mode it is an admin's call, like the forget routes."""
+    from app.routers import memories as memories_router
+
+    graph = FakeMemoryGraph(artifacts=[_artifact("art-1")], memories=[])
+    deleted: list[str] = []
+    monkeypatch.setattr(memories_router, "get_neo4j", lambda: graph)
+    monkeypatch.setattr(memories_router, "get_redis", lambda: None)
+    monkeypatch.setattr("config.CERID_MULTI_USER", True)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, **k: deleted.extend(s.id for s in subjects) or {"forget_id": "fg_x", "adapters": {}},
+    )
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def who(request, call_next):
+        request.state.user_id = "u1"
+        request.state.role = request.headers.get("x-test-role", "member")
+        return await call_next(request)
+
+    app.include_router(memories_router.router)
+    tc = TestClient(app)
+    assert tc.delete("/memories/art-1").status_code == 403 and deleted == []
+    assert tc.delete("/memories/art-1", headers={"x-test-role": "admin"}).status_code == 200
+    assert deleted == ["art-1"]
