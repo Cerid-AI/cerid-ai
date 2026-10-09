@@ -41,6 +41,8 @@ export interface ForgetSelection {
   toggleDocument: (doc: ForgetSubject, passages: ForgetSubject[]) => void
   togglePassage: (doc: ForgetSubject, passage: ForgetSubject, passages: ForgetSubject[]) => void
   selectAll: (subjects: ForgetSubject[]) => void
+  /** Choose `add` and drop `remove` in one step. */
+  update: (add: ForgetSubject[], remove: ForgetSubject[]) => void
   clear: () => void
 }
 
@@ -99,11 +101,20 @@ export function useForgetSelection(): ForgetSelection {
     setChosen(new Map(subjects.map((s) => [keyOf(s), s])))
   }, [])
 
+  const update = useCallback((add: ForgetSubject[], remove: ForgetSubject[]) => {
+    setChosen((prev) => {
+      const next = new Map(prev)
+      for (const r of remove) next.delete(keyOf(r))
+      for (const a of add) next.set(keyOf(a), a)
+      return next
+    })
+  }, [])
+
   const subjects = useMemo(() => [...chosen.values()], [chosen])
 
   return {
     active, setActive, count: chosen.size, subjects, isSelected, toggle,
-    documentState, toggleDocument, togglePassage, selectAll, clear,
+    documentState, toggleDocument, togglePassage, selectAll, update, clear,
   }
 }
 

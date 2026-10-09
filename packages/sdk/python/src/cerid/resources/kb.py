@@ -11,6 +11,8 @@ from cerid.errors import _raise_for_status
 from cerid.models import (
     CollectionsResponse,
     DeleteArtifactResponse,
+    ForgetExecuteResponse,
+    ForgetPreviewResponse,
     IngestExternalResponse,
     IngestResponse,
     QueryResponse,
@@ -192,6 +194,47 @@ class KBResource:
         )
         _raise_for_status(resp)
         return DeleteArtifactResponse.model_validate(resp.json())
+
+    def forget_preview(
+        self,
+        subjects: List[Dict[str, str]],
+        *,
+        mode: str = "trash",
+        timeout: Optional[float] = None,
+    ) -> ForgetPreviewResponse:
+        """Preview forgetting documents (``{"kind": "artifact", "id": ...}``) or
+        passages (``"chunk"``) in the consumer's domains. Nothing changes; show
+        the groups to a person and call :meth:`forget_execute` with the
+        returned ``confirm_token`` only after they confirm. ``mode`` is
+        ``"trash"`` (restorable) or ``"permanent"``."""
+        body = self._client._build_json(subjects=subjects, mode=mode)
+        resp = self._http.post(
+            self._client._url("/forget/preview"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return ForgetPreviewResponse.model_validate(resp.json())
+
+    def forget_execute(
+        self,
+        confirm_token: str,
+        *,
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> ForgetExecuteResponse:
+        """Forget what a preview's ``confirm_token`` covers, in the previewed
+        mode. The token works once; a retry with the same idempotency key
+        returns the first result."""
+        body = self._client._build_json(confirm_token=confirm_token)
+        resp = self._http.post(
+            self._client._url("/forget/execute"),
+            json=body,
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return ForgetExecuteResponse.model_validate(resp.json())
 
     def ingest_external(
         self,
@@ -385,6 +428,47 @@ class AsyncKBResource:
         )
         _raise_for_status(resp)
         return DeleteArtifactResponse.model_validate(resp.json())
+
+    async def forget_preview(
+        self,
+        subjects: List[Dict[str, str]],
+        *,
+        mode: str = "trash",
+        timeout: Optional[float] = None,
+    ) -> ForgetPreviewResponse:
+        """Preview forgetting documents (``{"kind": "artifact", "id": ...}``) or
+        passages (``"chunk"``) in the consumer's domains. Nothing changes; show
+        the groups to a person and call :meth:`forget_execute` with the
+        returned ``confirm_token`` only after they confirm. ``mode`` is
+        ``"trash"`` (restorable) or ``"permanent"``."""
+        body = self._client._build_json(subjects=subjects, mode=mode)
+        resp = await self._http.post(
+            self._client._url("/forget/preview"),
+            json=body,
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return ForgetPreviewResponse.model_validate(resp.json())
+
+    async def forget_execute(
+        self,
+        confirm_token: str,
+        *,
+        timeout: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> ForgetExecuteResponse:
+        """Forget what a preview's ``confirm_token`` covers, in the previewed
+        mode. The token works once; a retry with the same idempotency key
+        returns the first result."""
+        body = self._client._build_json(confirm_token=confirm_token)
+        resp = await self._http.post(
+            self._client._url("/forget/execute"),
+            json=body,
+            headers=self._client._write_headers(idempotency_key),
+            timeout=self._client._http_timeout(timeout),
+        )
+        _raise_for_status(resp)
+        return ForgetExecuteResponse.model_validate(resp.json())
 
     async def ingest_external(
         self,

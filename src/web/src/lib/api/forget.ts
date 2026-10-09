@@ -10,6 +10,8 @@ import { MCP_BASE, mcpHeaders, extractError } from "./common"
 export type ForgetKind = "conversation" | "artifact" | "chunk" | "memory"
 export interface ForgetSubject { kind: ForgetKind; id: string }
 export type ForgetMode = "trash" | "permanent"
+/** Who asked: the forget dialogs ("api") or the forget assistant ("agent"). Recorded with the forget. */
+export type ForgetSource = "api" | "agent"
 
 export interface PreviewItem extends ForgetSubject {
   label: string
@@ -25,7 +27,7 @@ export interface PreviewItem extends ForgetSubject {
 }
 export type PreviewGroupKey =
   | "transcripts" | "memories" | "summary" | "verified_memories" | "cited_documents"
-  | "documents" | "passages"
+  | "documents" | "passages" | "conversations"
 export interface PreviewGroup { key: PreviewGroupKey; default: "always" | "checked" | "unchecked"; items: PreviewItem[] }
 export interface ForgetPreview {
   /** The conversation previewed; null for a selection of items. */
@@ -100,13 +102,44 @@ export function previewForget(conversationId: string): Promise<ForgetPreview> {
   return post("/forget/preview", { kind: "conversation", id: conversationId }, "Couldn't load the preview")
 }
 
+/** One thing the forget assistant found. A document lists the passages that matched. */
+export interface AssistCandidate extends ForgetSubject {
+  store: "knowledge_base" | "memories" | "conversations"
+  label: string
+  excerpt: string
+  domain: string
+  reason: string
+  score: number
+  passages: { kind: "chunk"; id: string; excerpt: string }[]
+}
+export interface AssistGroup { title: string; explanation: string; items: AssistCandidate[] }
+export interface AssistResult {
+  /** grouped: sorted by a model; needs_consent: the local model is unavailable and
+   *  the cloud model may be asked; ungrouped: shown as found, with the reason. */
+  status: "grouped" | "needs_consent" | "ungrouped"
+  model: "local" | "cloud" | null
+  reason: string
+  cloud_model: string
+  scope: string
+  total: number
+  groups: AssistGroup[]
+}
+
+/** Everything matching a plain-language description, grouped by the local model.
+ *  `allowCloud` is the user's consent to group on the cloud model instead. */
+export function searchForgetAssist(scope: string, allowCloud = false): Promise<AssistResult> {
+  return post("/forget/assist/search", { scope, allow_cloud: allowCloud }, "Search failed")
+}
+
 /** What forgetting documents, passages and memories picked from search would remove. */
 export function previewForgetItems(subjects: ForgetSubject[]): Promise<ForgetPreview> {
   return post("/forget/preview", { subjects }, "Couldn't load the preview")
 }
 
-export function forgetSubjects(subjects: ForgetSubject[], mode: ForgetMode): Promise<ForgetResult> {
-  return post("/forget", { subjects, mode }, "Forget failed")
+export function forgetSubjects(
+  subjects: ForgetSubject[], mode: ForgetMode, source: ForgetSource = "api",
+): Promise<ForgetResult> {
+  return post("/forget", { subjects, mode, source }, "Forget failed")
 }
 
 export async function restoreForget(forgetId: string): Promise<{ restored: number }> {

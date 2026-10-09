@@ -7,7 +7,7 @@ vi.stubEnv("VITE_MCP_URL", "http://test-mcp:8888")
 vi.stubEnv("VITE_CERID_API_KEY", "")
 
 const {
-  previewForget, previewForgetItems, forgetSubjects, restoreForget, emptyTrash, fetchTrash, fetchReceipts, fetchReceipt,
+  previewForget, previewForgetItems, searchForgetAssist, forgetSubjects, restoreForget, emptyTrash, fetchTrash, fetchReceipts, fetchReceipt,
   ForgetConflictError,
 } = await import("@/lib/api")
 
@@ -51,8 +51,24 @@ describe("forget API client", () => {
     vi.stubGlobal("fetch", f)
     const subjects = [{ kind: "conversation" as const, id: "c1" }, { kind: "artifact" as const, id: "a1" }]
     const r = await forgetSubjects(subjects, "permanent")
-    expect(call(f)).toEqual({ url: "http://test-mcp:8888/forget", method: "POST", body: { subjects, mode: "permanent" } })
+    expect(call(f)).toEqual({ url: "http://test-mcp:8888/forget", method: "POST", body: { subjects, mode: "permanent", source: "api" } })
     expect(r.forget_id).toBe("fg_1")
+  })
+
+  it("names the assistant as the source of its forgets", async () => {
+    const f = mockFetch({ forget_id: "fg_2", state: "trashed", receipt: null })
+    vi.stubGlobal("fetch", f)
+    await forgetSubjects([{ kind: "artifact", id: "a1" }], "trash", "agent")
+    expect(call(f).body).toMatchObject({ source: "agent" })
+  })
+
+  it("asks the assistant, and only sends allow_cloud when the user agreed", async () => {
+    const f = mockFetch({ status: "grouped", model: "local", reason: "", cloud_model: "", scope: "x", total: 0, groups: [] })
+    vi.stubGlobal("fetch", f)
+    await searchForgetAssist("my old 401k")
+    expect(call(f)).toEqual({ url: "http://test-mcp:8888/forget/assist/search", method: "POST", body: { scope: "my old 401k", allow_cloud: false } })
+    await searchForgetAssist("my old 401k", true)
+    expect(JSON.parse(f.mock.calls[1][1].body)).toEqual({ scope: "my old 401k", allow_cloud: true })
   })
 
   it("restores, and a 409 is a ForgetConflictError", async () => {

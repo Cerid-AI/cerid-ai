@@ -28,6 +28,7 @@ from __future__ import annotations
 from app.mcp_tools import (
     batch,  # noqa: F401
     feedback,  # noqa: F401
+    forget,  # noqa: F401
     fundamentals,  # noqa: F401
     graph_tools,  # noqa: F401
     inbox,  # noqa: F401

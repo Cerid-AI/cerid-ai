@@ -92,6 +92,36 @@ export interface DeleteArtifactResponse {
   [key: string]: unknown;
 }
 
+/** One thing to forget: a document (artifact) or a passage (chunk) in the
+ *  consumer's domains; an unrestricted consumer may also name a memory or a
+ *  conversation. */
+export interface ForgetSubject {
+  kind: "artifact" | "chunk" | "memory" | "conversation";
+  id: string;
+}
+
+export type ForgetMode = "trash" | "permanent";
+
+export interface ForgetPreviewResponse {
+  groups: Array<{ key: string; default: string; items: Array<Record<string, unknown>> }>;
+  derived_facts: number;
+  notes: string[];
+  out_of_reach: string[];
+  mode: ForgetMode;
+  /** Single use, for exactly the listed items and mode; empty when nothing is left to forget. */
+  confirm_token: string;
+  /** Seconds until the token expires. */
+  expires_in: number;
+  [key: string]: unknown;
+}
+
+export interface ForgetExecuteResponse {
+  forget_id: string;
+  state: "trashed" | "purged" | "trashed_pending";
+  subjects: number;
+  [key: string]: unknown;
+}
+
 export interface IngestRequest {
   content: string;
   domain?: string;

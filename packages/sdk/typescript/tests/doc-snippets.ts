@@ -68,3 +68,10 @@ export async function guideKeepWebOut(client: CeridClient): Promise<void> {
     context_sources: { kb: true, memory: true, external: false },
   });
 }
+
+export async function guideForget(client: CeridClient): Promise<void> {
+  const artifactId = "a".repeat(64); // an id from a search or ingest result
+  const preview = await client.kb.forgetPreview([{ kind: "artifact", id: artifactId }], { mode: "trash" });
+  const done = await client.kb.forgetExecute(preview.confirm_token);
+  console.log(done.state);
+}

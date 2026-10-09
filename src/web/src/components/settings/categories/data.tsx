@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { DataState } from "@/components/ui/data-state"
 import { SettingRow, SliderRow, ConfirmActionButton } from "@/components/settings/settings-primitives"
+import { ForgetAssistant } from "@/components/settings/forget-assistant"
 import { getDef } from "@/lib/settings-registry"
 import { QUERY_KEYS } from "@/lib/query-keys"
 import {
@@ -262,6 +263,9 @@ export default function DataCategory({ settings, patch }: SettingsCategoryPagePr
         <p className="text-xs text-muted-foreground">
           {days === 0 ? "Never empty automatically" : `Erased automatically after ${plural(days, "day")}`}
         </p>
+      </Section>
+      <Section title="Forget with the assistant">
+        <ForgetAssistant />
       </Section>
       <TrashSection />
       <ReceiptsSection />

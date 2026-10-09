@@ -31,6 +31,8 @@ import pytest
 from cerid import AsyncCeridClient, CeridClient
 from cerid.__version__ import SDK_PROTOCOL_VERSION
 from cerid.models import (
+    ForgetExecuteResponse,
+    ForgetPreviewResponse,
     HallucinationResponse,
     HealthResponse,
     IngestExternalResponse,
@@ -135,7 +137,30 @@ def _assert_response_model_covers_required(response_model: type, response_schema
 # ---------------------------------------------------------------------------
 PostCase = tuple[str, str, str, Callable[[CeridClient], Any], type, dict[str, Any]]
 
+_FORGET_PREVIEW = {
+    "groups": [{"key": "documents", "default": "checked", "items": [{"kind": "artifact", "id": "a" * 64}]}],
+    "derived_facts": 0, "notes": [], "out_of_reach": [], "mode": "trash",
+    "confirm_token": "tok", "expires_in": 900,
+}
+_FORGET_DONE = {"forget_id": "fg_0123456789abcdef", "state": "trashed", "subjects": 1}
+
 POST_CASES: list[PostCase] = [
+    (
+        "kb.forget_preview",
+        "/sdk/v1/forget/preview",
+        "post",
+        lambda c: c.kb.forget_preview([{"kind": "artifact", "id": "a" * 64}], mode="trash"),
+        ForgetPreviewResponse,
+        _FORGET_PREVIEW,
+    ),
+    (
+        "kb.forget_execute",
+        "/sdk/v1/forget/execute",
+        "post",
+        lambda c: c.kb.forget_execute("tok"),
+        ForgetExecuteResponse,
+        _FORGET_DONE,
+    ),
     (
         "kb.query",
         "/sdk/v1/query",
@@ -272,7 +297,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.health(),
         HealthResponse,
-        {"status": "healthy", "version": "1.3.0", "services": {"chromadb": "connected"}},
+        {"status": "healthy", "version": "1.4.0", "services": {"chromadb": "connected"}},
     ),
     (
         "system.settings",
@@ -280,7 +305,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.settings(),
         SettingsResponse,
-        {"version": "1.3.0", "tier": "community", "features": {}},
+        {"version": "1.4.0", "tier": "community", "features": {}},
     ),
     (
         "system.plugins",
@@ -460,6 +485,18 @@ INGEST_FIXTURE = {"status": "success", "artifact_id": "a1", "chunks": 1, "domain
 
 DEAD_PARAM_CASES: list[tuple[str, str, Callable[[CeridClient], Any], dict[str, Any]]] = [
     (
+        "kb.forget_preview",
+        "/sdk/v1/forget/preview",
+        lambda c: c.kb.forget_preview([{"kind": "chunk", "id": "a" * 64 + "_0123456789abcdef"}], mode="permanent"),
+        _FORGET_PREVIEW,
+    ),
+    (
+        "kb.forget_execute",
+        "/sdk/v1/forget/execute",
+        lambda c: c.kb.forget_execute("tok"),
+        _FORGET_DONE,
+    ),
+    (
         "kb.query",
         "/sdk/v1/query",
         lambda c: c.kb.query("q", domains=["general"], top_k=5),
@@ -564,6 +601,12 @@ def test_request_body_carries_no_key_the_server_ignores(
 # 422'd. A spec-required field must be unskippable at the call site.
 # ---------------------------------------------------------------------------
 DEFAULT_CALL_CASES: list[tuple[str, str, Callable[[CeridClient], Any], dict[str, Any]]] = [
+    (
+        "kb.forget_preview",
+        "/sdk/v1/forget/preview",
+        lambda c: c.kb.forget_preview([{"kind": "artifact", "id": "a" * 64}]),
+        _FORGET_PREVIEW,
+    ),
     (
         "verify.check",
         "/sdk/v1/hallucination",

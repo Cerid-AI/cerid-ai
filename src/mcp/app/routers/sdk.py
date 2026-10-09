@@ -43,6 +43,10 @@ import config.taxonomy as taxonomy_mod
 from app.middleware.idempotency import idempotent
 from app.models.sdk import (
     SDKDeleteArtifactResponse,
+    SDKForgetExecuteRequest,
+    SDKForgetExecuteResponse,
+    SDKForgetPreviewRequest,
+    SDKForgetPreviewResponse,
     SDKHallucinationResponse,
     SDKHealthResponse,
     SDKLLMCompleteRequest,
@@ -1129,5 +1133,112 @@ async def sdk_delete_artifact(artifact_id: str, request: Request):
             chunks_removed=chunks_removed,
             message=f"Deleted artifact {artifact_id[:8]}",
         )
+
+    return await idempotent(request, _work)
+
+
+_409_TOKEN = {"description": "The confirm token is unknown, expired, already used or issued to another consumer"}
+
+
+def _forget_user(request: Request) -> str:
+    return str(getattr(request.state, "user_id", "") or "")
+
+
+def _forget_caller(request: Request) -> str:
+    """Who a confirm token is bound to: the consumer, and the signed-in user when there is one."""
+    caller = f"sdk:{request.headers.get('x-client-id', 'gui')}"
+    user = _forget_user(request)
+    return f"{caller}:{user}" if user else caller
+
+
+def _require_admin_to_forget(request: Request) -> None:
+    """Multi-user mode: conversations carry no owner and artifacts are shared,
+    so forgetting is an admin action there, as on the /forget routes."""
+    if not config.CERID_MULTI_USER:
+        return
+    is_admin = bool(getattr(request.state, "is_admin", False)) or getattr(request.state, "role", "") == "admin"
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Forgetting needs an admin in multi-user mode")
+
+
+def _ensure_may_forget(request: Request, subjects: list[Any]) -> None:
+    """A consumer limited to some domains may forget documents and passages in
+    the domains it may write, and nothing else: memories and conversations
+    carry no domain to check."""
+    from app.db.neo4j.artifacts import get_artifact
+    from app.deps import get_neo4j
+    from core.retrieval.chunk_ids import chunk_artifact_id
+
+    allowed = _writable_domains(request)
+    if allowed is None:
+        return
+    driver = get_neo4j()
+    for subject in subjects:
+        if subject.kind in ("memory", "conversation"):
+            raise _restricted_http()
+        artifact_id = subject.id if subject.kind == "artifact" else chunk_artifact_id(subject.id)
+        art = get_artifact(driver, artifact_id) if artifact_id else None
+        if not art:
+            raise HTTPException(status_code=404, detail=f"Not found: {subject.kind} {subject.id}")
+        if (art.get("domain") or "") not in allowed:
+            raise _restricted_http()
+
+
+@router.post(
+    "/forget/preview",
+    response_model=SDKForgetPreviewResponse,
+    summary="Preview a Forget",
+    description=(
+        "Show what forgetting the subjects would remove and issue a single-use confirm token for exactly that "
+        "set and mode, valid 15 minutes. Nothing is changed. A consumer limited to some domains may forget "
+        "only documents and passages in the domains it may write. In multi-user mode only an admin may forget."
+    ),
+    responses={403: _403, 404: {"description": "A subject was not found"}, 422: _422, 503: _503},
+)
+async def sdk_forget_preview(req: SDKForgetPreviewRequest, request: Request):
+    from app.deps import get_redis
+    from app.services.forget import confirm
+    from app.services.forget.subjects import parse_subjects
+
+    _require_admin_to_forget(request)
+    try:
+        subjects = parse_subjects(req.subjects)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await asyncio.to_thread(_ensure_may_forget, request, subjects)
+    result = await asyncio.to_thread(
+        confirm.preview_for_token, get_redis(), subjects, req.mode, _forget_caller(request),
+    )
+    return SDKForgetPreviewResponse(**result)
+
+
+@router.post(
+    "/forget/execute",
+    response_model=SDKForgetExecuteResponse,
+    summary="Execute a Forget",
+    description=(
+        "Forget what a confirm token from `/forget/preview` was issued for, in the mode it was previewed with. "
+        "The token works once and only for the consumer it was issued to; send an Idempotency-Key to retry "
+        "safely."
+    ),
+    responses={403: {"description": "Multi-user mode and the caller is not an admin"}, 409: _409_TOKEN, 422: _422, 503: _503},
+)
+async def sdk_forget_execute(req: SDKForgetExecuteRequest, request: Request):
+    from app.deps import get_redis
+    from app.services.forget import confirm, engine
+
+    _require_admin_to_forget(request)
+
+    async def _work():
+        try:
+            result = await asyncio.to_thread(
+                confirm.execute, get_redis(), req.confirm_token, _forget_caller(request), requested_by="sdk",
+                user_id=_forget_user(request),
+            )
+        except confirm.ConfirmTokenError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except engine.ForgetUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return SDKForgetExecuteResponse(**result)
 
     return await idempotent(request, _work)

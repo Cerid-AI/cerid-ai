@@ -142,6 +142,8 @@ STAGE_PROFILES: dict[str, tuple[TaskType, Hardness]] = {
     "inbox_triage_review": (TaskType.CLASSIFICATION, Hardness.MODERATE),
     "inbox_triage_escalate": (TaskType.CLASSIFICATION, Hardness.FRONTIER),
     "inbox_triage_draft": (TaskType.GENERATION, Hardness.HARD),
+    "forget_assist": (TaskType.CLASSIFICATION, Hardness.MODERATE),
+    "forget_assist_cloud": (TaskType.CLASSIFICATION, Hardness.MODERATE),
     # --- Reranking ---
     "assembler_rerank": (TaskType.RERANKING, Hardness.SIMPLE),
     "rerank_llm": (TaskType.RERANKING, Hardness.SIMPLE),
@@ -174,6 +176,9 @@ INTERACTIVE_STAGES = frozenset({
     "rerank_llm",
     # The heavy local classification rung waits on the chat slot, not the 3B slot.
     "inbox_triage_review",
+    # The user waits on the forget assistant's grouping.
+    "forget_assist",
+    "forget_assist_cloud",
 })
 
 MCP_STAGE_PREFIX = "mcp_"
@@ -220,6 +225,16 @@ CLOUD_ESCALATION_STAGES = frozenset({
 # stage's outcome: internal_llm does not re-send the body to OpenRouter
 # unless CERID_INBOX_CLOUD_FALLBACK=true.
 INBOX_STAGES = LOCAL_FIRST_STAGES | CLOUD_ESCALATION_STAGES
+
+# Stages that never leave the machine: forced to the local backend whatever
+# the profile, a PROVIDER_STAGE pin or a call override says, and a local
+# failure is the outcome (no cloud fallback, no opt-in flag). The forget
+# assistant reads what the user wants forgotten.
+PRIVATE_LOCAL_STAGES = frozenset({"forget_assist"})
+
+# The same work, sent to the cloud only after the user consented to it on
+# that request. Never under the local-only profile.
+CONSENTED_CLOUD_STAGES = frozenset({"forget_assist_cloud"})
 
 
 def is_background_stage(stage: str | None) -> bool:

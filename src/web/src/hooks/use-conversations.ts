@@ -17,6 +17,7 @@ import {
 } from "@/lib/api"
 import type { ForgetMode, ForgetResult, ForgetSubject } from "@/lib/api"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { CONVERSATIONS_FORGOTTEN_EVENT, CONVERSATIONS_RESTORED_EVENT } from "@/lib/forget-items-with-undo"
 
 /** What became of a forget: done on the server, held back because private
  *  mode keeps everything local (the tombstone outbox sends it later), or not
@@ -723,6 +724,36 @@ export function useConversations() {
       })
       .catch(() => { /* Server unavailable */ })
   }, [enqueueServer, dropLocal, pushConversation])
+
+  // Conversations forgotten or restored elsewhere in this tab (the forget
+  // assistant in Settings → Data) leave or rejoin the list without a reload.
+  useEffect(() => {
+    const onForgotten = (e: Event) => dropLocal(new Set((e as CustomEvent<string[]>).detail ?? []))
+    const onRestored = (e: Event) => {
+      const ids = new Set((e as CustomEvent<string[]>).detail ?? [])
+      if (ids.size === 0) return
+      fetchSyncedConversations()
+        .then((serverConvos) => {
+          const back = serverConvos.filter((c) => ids.has(c.id))
+          if (back.length === 0) return
+          setConversations((prev) => {
+            const have = new Set(prev.map((c) => c.id))
+            const merged = [...back.filter((c) => !have.has(c.id)), ...prev]
+              .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+              .slice(0, MAX_CONVERSATIONS)
+            saveConversations(merged)
+            return merged
+          })
+        })
+        .catch(() => { /* Server unavailable: the next load brings them back */ })
+    }
+    window.addEventListener(CONVERSATIONS_FORGOTTEN_EVENT, onForgotten)
+    window.addEventListener(CONVERSATIONS_RESTORED_EVENT, onRestored)
+    return () => {
+      window.removeEventListener(CONVERSATIONS_FORGOTTEN_EVENT, onForgotten)
+      window.removeEventListener(CONVERSATIONS_RESTORED_EVENT, onRestored)
+    }
+  }, [dropLocal])
 
   return {
     conversations, visibleConversations, active, activeId, setActiveId,

@@ -12,6 +12,8 @@
  *   client.kb.ingest()          — POST /sdk/v1/ingest
  *   client.kb.ingestFile()      — POST /sdk/v1/ingest/file
  *   client.kb.ingestExternal()  — POST /sdk/v1/ingest/external
+ *   client.kb.forgetPreview()   — POST /sdk/v1/forget/preview
+ *   client.kb.forgetExecute()   — POST /sdk/v1/forget/execute
  *   client.kb.collections()     — GET  /sdk/v1/collections
  *   client.kb.taxonomy()        — GET  /sdk/v1/taxonomy
  *   client.verify.check()       — POST /sdk/v1/hallucination
@@ -30,6 +32,10 @@ import type {
   CeridClientOptions,
   CollectionsResponse,
   DeleteArtifactResponse,
+  ForgetExecuteResponse,
+  ForgetMode,
+  ForgetPreviewResponse,
+  ForgetSubject,
   DetailedHealthResponse,
   HallucinationCheckRequest,
   HallucinationResponse,
@@ -192,6 +198,28 @@ export class KBResource extends BaseResource {
       `/sdk/v1/artifacts/${encodeURIComponent(artifactId)}`,
       opts,
     );
+  }
+
+  /**
+   * Preview forgetting documents or passages. Nothing changes: show the groups
+   * to a person and call `forgetExecute` with the returned `confirm_token` only
+   * after they confirm. `mode` is "trash" (restorable) or "permanent".
+   */
+  async forgetPreview(
+    subjects: ForgetSubject[],
+    params: { mode?: ForgetMode } = {},
+    opts?: RequestOptions,
+  ): Promise<ForgetPreviewResponse> {
+    return this._post<ForgetPreviewResponse>(
+      "/sdk/v1/forget/preview",
+      { subjects, mode: params.mode ?? "trash" },
+      opts,
+    );
+  }
+
+  /** Forget what a preview's `confirm_token` covers, in the previewed mode. The token works once. */
+  async forgetExecute(confirmToken: string, opts?: RequestOptions): Promise<ForgetExecuteResponse> {
+    return this._post<ForgetExecuteResponse>("/sdk/v1/forget/execute", { confirm_token: confirmToken }, opts, true);
   }
 
   /**

@@ -1,6 +1,6 @@
 {
   "name": "@cerid-ai/sdk",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Zero-dependency typed client for the Cerid AI SDK API.",
   "type": "module",
   "main": "dist/index.js",

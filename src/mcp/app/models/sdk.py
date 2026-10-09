@@ -14,7 +14,7 @@ can evolve agent return shapes independently of the SDK schema.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -282,3 +282,46 @@ class SDKDeleteArtifactResponse(_SDKBase):
     filename: str = Field(default="")
     chunks_removed: int = Field(default=0, ge=0)
     message: str = Field(default="")
+
+
+class SDKForgetSubject(BaseModel):
+    """One thing to forget: a document (artifact), a passage (chunk), a
+    memory or a conversation, by id."""
+
+    kind: Literal["artifact", "chunk", "memory", "conversation"]
+    id: str = Field(min_length=1, max_length=160)
+
+
+class SDKForgetPreviewRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/forget/preview``."""
+
+    subjects: list[SDKForgetSubject] = Field(min_length=1, max_length=200)
+    mode: Literal["trash", "permanent"] = "trash"
+
+
+class SDKForgetPreviewResponse(_SDKBase):
+    """What forgetting the subjects would remove, and a single-use token for
+    exactly that set and mode. ``confirm_token`` is empty when nothing listed
+    is left to forget."""
+
+    groups: list[dict[str, Any]] = Field(default_factory=list)
+    derived_facts: int = Field(default=0, ge=0)
+    notes: list[str] = Field(default_factory=list)
+    out_of_reach: list[str] = Field(default_factory=list)
+    mode: Literal["trash", "permanent"] = "trash"
+    confirm_token: str = Field(default="")
+    expires_in: int = Field(default=0, ge=0)
+
+
+class SDKForgetExecuteRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/forget/execute``."""
+
+    confirm_token: str = Field(min_length=1, max_length=128)
+
+
+class SDKForgetExecuteResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/forget/execute``."""
+
+    forget_id: str = Field(default="")
+    state: Literal["trashed", "purged", "trashed_pending"] = "trashed"
+    subjects: int = Field(default=0, ge=0)

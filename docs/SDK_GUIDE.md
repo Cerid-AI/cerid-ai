@@ -2,12 +2,13 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.3.0**. Client packages are `cerid-sdk`
+**1.4.0**. Client packages are `cerid-sdk`
 ([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
-([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.2.2** in this
-tree; the registries still serve 0.1.1 until it is published, which is a
-separate step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
-product. New in 1.3.0: the hallucination `summary` carries an integer
+([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.3.0** in this
+tree; the registries serve 0.2.2 until 0.3.0 is published, which is a separate
+step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
+product. New in 1.4.0: forgetting with a confirmation step (see "Forget" below).
+New in 1.3.0: the hallucination `summary` carries an integer
 `agreed`, and `verified` counts only claims a source backs (see "Verify
 claims" in the Python quickstart below). Additive in 1.2.0:
 `POST /sdk/v1/memory/recall`,
@@ -346,7 +347,7 @@ request.
 **GET /sdk/v1/settings**
 
 ```json
-{"version": "1.3.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
+{"version": "1.4.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
 ```
 
 ## Rate Limiting
@@ -433,3 +434,34 @@ natively support the Model Context Protocol. See
 The REST SDK endpoints and MCP tools share the same backend services and
 middleware stack. Choose REST for traditional HTTP clients, MCP for
 agent-to-agent communication.
+
+## Forget
+
+A product can forget documents and passages in the domains it may write, with
+a person confirming first. Two calls:
+
+1. `POST /sdk/v1/forget/preview` with `{"subjects": [{"kind": "artifact" | "chunk", "id": ...}], "mode": "trash" | "permanent"}`
+   answers what would be removed, grouped, and a `confirm_token` bound to
+   exactly those items, that mode and this consumer, valid for `expires_in`
+   seconds (15 minutes). Nothing changes. Show the groups to the person.
+2. `POST /sdk/v1/forget/execute` with `{"confirm_token": ...}` runs it once.
+   A spent, expired or foreign token answers 409; send an `Idempotency-Key` to
+   retry safely.
+
+A consumer limited to some domains gets 403 for a document or passage outside
+the domains it may write, and for memory and conversation subjects, which carry
+no domain. `trash` is restorable from Settings → Data until the Trash empties.
+
+```python
+artifact_id = "a" * 64  # an id from a search or ingest result
+preview = client.kb.forget_preview([{"kind": "artifact", "id": artifact_id}], mode="trash")
+# show preview.groups to the person; on their yes:
+done = client.kb.forget_execute(preview.confirm_token)
+```
+
+```typescript
+const artifactId = "a".repeat(64); // an id from a search or ingest result
+const preview = await client.kb.forgetPreview([{ kind: "artifact", id: artifactId }], { mode: "trash" });
+const done = await client.kb.forgetExecute(preview.confirm_token);
+```
+

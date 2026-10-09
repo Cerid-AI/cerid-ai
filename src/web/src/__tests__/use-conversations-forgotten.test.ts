@@ -139,4 +139,19 @@ describe("useConversations honours server-side forgets", () => {
     expect(result.current.activeId).toBeNull()
     expect(result.current.syncFailing).toBe(false)
   })
+
+  it("follows the forget assistant: drops what it forgot and takes back what it restored", async () => {
+    const { CONVERSATIONS_FORGOTTEN_EVENT, CONVERSATIONS_RESTORED_EVENT } = await import("@/lib/forget-items-with-undo")
+    localStorage.setItem("cerid-conversations", JSON.stringify([local("a"), local("b")]))
+    const { result } = renderHook(() => useConversations())
+    await vi.waitFor(() => expect(result.current.conversations.map((c) => c.id)).toEqual(["a", "b"]))
+
+    act(() => { window.dispatchEvent(new CustomEvent(CONVERSATIONS_FORGOTTEN_EVENT, { detail: ["a"] })) })
+    expect(result.current.conversations.map((c) => c.id)).toEqual(["b"])
+    expect(stored()).toEqual(["b"])
+
+    vi.mocked(api.fetchSyncedConversations).mockResolvedValueOnce([local("a", 3), local("other", 4)])
+    act(() => { window.dispatchEvent(new CustomEvent(CONVERSATIONS_RESTORED_EVENT, { detail: ["a"] })) })
+    await vi.waitFor(() => expect(result.current.conversations.map((c) => c.id).sort()).toEqual(["a", "b"]))
+  })
 })

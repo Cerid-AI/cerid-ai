@@ -28,6 +28,12 @@ DOCS = [PACKAGE_ROOT / "README.md", REPO_ROOT / "docs" / "SDK_GUIDE.md"]
 
 # One canned 200 per endpoint, shaped like the server's response models.
 RESPONSES: dict[str, dict[str, Any]] = {
+    "/sdk/v1/forget/preview": {
+        "groups": [{"key": "documents", "default": "checked", "items": [{"kind": "artifact", "id": "a" * 64}]}],
+        "derived_facts": 0, "notes": [], "out_of_reach": [], "mode": "trash",
+        "confirm_token": "tok", "expires_in": 900,
+    },
+    "/sdk/v1/forget/execute": {"forget_id": "fg_0123456789abcdef", "state": "trashed", "subjects": 1},
     "/sdk/v1/query": {
         "context": "Chunking splits documents on semantic boundaries.",
         "sources": [{"content": "…", "relevance": 0.92}],

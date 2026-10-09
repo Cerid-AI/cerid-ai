@@ -667,7 +667,7 @@ describe("KnowledgePane — axe-clean (D.3)", () => {
       await waitFor(() => expect(forgetSubjects).toHaveBeenCalledWith([
         { kind: "artifact", id: A2 },
         { kind: "chunk", id: `${A1}_2222222222222222` },
-      ], "trash"))
+      ], "trash", "api"))
     })
 
     it("names the parent for a child hit even when its own text was shown", async () => {

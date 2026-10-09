@@ -154,9 +154,18 @@ def test_route_refuses_a_malformed_chunk_id(client):
         assert client.post("/forget", json={"subjects": [{"kind": "chunk", "id": bad}]}).status_code == 400
 
 
-def test_route_refuses_a_conversation_in_a_selection(client):
-    resp = client.post("/forget/preview", json={"subjects": [{"kind": "conversation", "id": "c1"}]})
-    assert resp.status_code == 400
+def test_route_previews_a_conversation_in_a_selection(client, env):
+    import config
+    from app.sync.user_state import write_conversation
+
+    write_conversation(config.SYNC_DIR, {"id": "conv-401k-1", "title": "Rolling over the 401k", "messages": []})
+    resp = client.post("/forget/preview", json={"subjects": [
+        {"kind": "conversation", "id": "conv-401k-1"}, {"kind": "conversation", "id": "conv-missing"},
+    ]})
+    assert resp.status_code == 200, resp.text
+    assert [(i["id"], i["label"]) for i in _groups(resp.json())["conversations"]] == [
+        ("conv-401k-1", "Rolling over the 401k"),
+    ]
 
 
 def test_route_takes_one_form_and_at_most_200_subjects(client):

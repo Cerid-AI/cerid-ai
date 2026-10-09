@@ -21,6 +21,7 @@ const HEADINGS: Partial<Record<PreviewGroup["key"], string>> = {
   documents: "Documents",
   passages: "Passages",
   memories: "Memories",
+  conversations: "Conversations",
 }
 
 const key = (s: ForgetSubject) => `${s.kind}:${s.id}`
