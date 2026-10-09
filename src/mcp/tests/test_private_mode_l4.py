@@ -20,8 +20,6 @@ the three deliverables of the v0.93.5 L4 enforcement pass:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import fakeredis
 import pytest
 from fastapi import FastAPI
@@ -47,6 +45,8 @@ def client(monkeypatch):
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
     monkeypatch.setattr("app.routers.settings.get_redis", lambda: fake)
     monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake)
+    # Never reach the real forget engine: config.SYNC_DIR is the operator's folder.
+    monkeypatch.setattr("app.routers.settings._forget_private_conversations", lambda cids: (None, True))
     return TestClient(app), fake
 
 
@@ -75,14 +75,9 @@ def test_validator_rejects_l5_and_negative(client):
 
 def test_session_wipe_winds_the_global_flag_back_to_zero(client, monkeypatch):
     tc, fake = client
-    # WB-45: "wiped" now reflects whether Neo4j was reachable and the
-    # orchestrator ran — mock both to a deterministic success so this test
-    # stays about the Redis flag-clear, not real Neo4j reachability.
-    monkeypatch.setattr("app.routers.settings.get_neo4j", lambda: MagicMock())
-    fake_summary = {"conversation_sync_deleted": False}
     monkeypatch.setattr(
-        "app.routers.settings.wipe_conversation_state",
-        lambda *a, **k: fake_summary,
+        "app.routers.settings._forget_private_conversations",
+        lambda cids: ("fg_" + "2" * 16, True),
     )
     fake.set(_PRIVATE_MODE_KEY, "4")
     r = tc.post(
@@ -90,13 +85,7 @@ def test_session_wipe_winds_the_global_flag_back_to_zero(client, monkeypatch):
         json={"conversation_id": "conv-123"},
     )
     assert r.status_code == 200
-    body = r.json()
-    assert body == {
-        "wiped": True,
-        "level_after": 0,
-        "conversation_id": "conv-123",
-        "summary": fake_summary,
-    }
+    assert r.json() == {"wiped": True, "level_after": 0, "forgotten": 1, "forget_id": "fg_" + "2" * 16}
     assert fake.get(_PRIVATE_MODE_KEY) == "0"
 
 

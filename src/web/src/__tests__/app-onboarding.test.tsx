@@ -50,7 +50,10 @@ vi.mock("@/components/ui/pane-error-boundary", () => ({ PaneErrorBoundary: ({ ch
 vi.mock("@/components/chat/chat-panel", () => ({ ChatPanel: () => null }))
 vi.mock("@/components/quick-capture/quick-capture-fab", () => ({ QuickCaptureFab: () => null }))
 vi.mock("@/contexts/kb-injection-context", () => ({ KBInjectionProvider: ({ children }: Passthrough) => <>{children}</> }))
-vi.mock("@/contexts/conversations-context", () => ({ ConversationsProvider: ({ children }: Passthrough) => <>{children}</> }))
+vi.mock("@/contexts/conversations-context", () => ({
+  ConversationsProvider: ({ children }: Passthrough) => <>{children}</>,
+  useConversationsContext: () => ({ conversations: [] }),
+}))
 vi.mock("@/contexts/auth-context", () => ({ AuthProvider: ({ children }: Passthrough) => <>{children}</> }))
 vi.mock("@/components/ui/tooltip", () => ({ TooltipProvider: ({ children }: Passthrough) => <>{children}</> }))
 vi.mock("@/components/auth/protected-route", () => ({ ProtectedRoute: ({ children }: Passthrough) => <>{children}</> }))

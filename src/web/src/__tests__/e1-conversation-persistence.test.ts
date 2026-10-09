@@ -22,6 +22,9 @@ vi.mock("@/lib/api", () => ({
   syncConversation: vi.fn().mockResolvedValue(undefined),
   syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
+  forgetSubjects: vi.fn().mockResolvedValue({ forget_id: "fg_1", state: "trashed", receipt: null }),
+  restoreForget: vi.fn().mockResolvedValue({ restored: 1 }),
+  ForgetHttpError: class ForgetHttpError extends Error { status = 0 },
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
   fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
   ConversationGoneError: class ConversationGoneError extends Error { id = "" },
@@ -52,7 +55,7 @@ describe("useConversations delete durability (E1 CR-092)", () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
-    vi.mocked(api.deleteConversationSync).mockRejectedValue(new Error("500"))
+    vi.mocked(api.forgetSubjects).mockRejectedValue(new Error("500"))
     vi.mocked(api.fetchSyncedConversations).mockResolvedValue([])
   })
 
@@ -73,7 +76,7 @@ describe("useConversations delete durability (E1 CR-092)", () => {
         first.result.current.remove(id)
       })
       await vi.waitFor(() => {
-        expect(api.deleteConversationSync).toHaveBeenCalledWith(id)
+        expect(api.forgetSubjects).toHaveBeenCalledWith([{ kind: "conversation", id }], "trash")
       })
       first.unmount()
 
@@ -234,6 +237,7 @@ describe("useConversations persistence coordinator (E1 CR-060/083/101/110/061)",
 
     // Symmetric with the blocked save: the delete must NOT reach the server.
     expect(api.deleteConversationSync).not.toHaveBeenCalled()
+    expect(api.forgetSubjects).not.toHaveBeenCalled()
     // …but it is gone locally (tombstone suppresses any server replica).
     expect(result.current.conversations.some((c) => c.id === id)).toBe(false)
   })

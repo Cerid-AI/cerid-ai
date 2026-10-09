@@ -340,3 +340,45 @@ def test_chroma_import_follows_the_registry_not_the_clocks(tmp_path, monkeypatch
     import_.import_chroma(chroma_url="http://chroma.test:8000", sync_dir=str(tmp_path))
 
     assert ("same-hash_chunk_0" in server.written) is imported
+
+
+def test_memory_import_skips_a_forgotten_verified_memory(tmp_path: Path, mock_neo4j, reg):
+    from app.sync.export import MEMORIES_JSONL, MEMORY_EDGES_JSONL, NEO4J_SUBDIR
+    from app.sync.import_ import import_memories
+
+    driver, session = mock_neo4j
+    _forgotten(reg, "memory", "m-gone")
+    neo4j_dir = tmp_path / NEO4J_SUBDIR
+    neo4j_dir.mkdir(parents=True)
+    _write_jsonl(neo4j_dir / MEMORIES_JSONL, [
+        {"id": "m-gone", "props": {"id": "m-gone", "text": "erased"}},
+        {"id": "m-keep", "props": {"id": "m-keep", "text": "kept"}},
+    ])
+    (neo4j_dir / MEMORY_EDGES_JSONL).write_text("")
+    result = import_memories(driver, str(tmp_path))
+    merged = [c.kwargs.get("id") for c in session.run.call_args_list if "MERGE (m:Memory" in (c.args[0] if c.args else "")]
+    assert merged == ["m-keep"]
+    assert result["memories_merged"] == 1
+
+
+@pytest.mark.parametrize("state", ["trashed", "purged"])
+def test_chroma_import_skips_the_recall_document_of_a_forgotten_verified_memory(
+    tmp_path: Path, monkeypatch, reg, state,
+):
+    from app.sync import import_
+    from app.sync._helpers import CHROMA_SUBDIR
+    from tests.test_sync_chroma_roundtrip import _FakeChromaServer
+    _forgotten(reg, "memory", "mem-gone", state)
+    monkeypatch.setattr(import_.config, "DOMAINS", ["conversations"], raising=False)
+    _write_jsonl(tmp_path / CHROMA_SUBDIR / f"{config.collection_name('conversations')}.jsonl", [
+        {"id": "verified_memory_mem-gone", "document": "x",
+         "metadata": {"artifact_id": "mem-gone", "memory_source_type": "verification"}, "embedding": [0.1]},
+        {"id": "verified_memory_mem-kept", "document": "y",
+         "metadata": {"artifact_id": "mem-kept", "memory_source_type": "verification"}, "embedding": [0.2]},
+    ])
+    server = _FakeChromaServer(seed_chunks=0)
+    monkeypatch.setattr(import_, "httpx", server)
+
+    import_.import_chroma(chroma_url="http://chroma.test:8000", sync_dir=str(tmp_path))
+
+    assert set(server.written) == {"verified_memory_mem-kept"}

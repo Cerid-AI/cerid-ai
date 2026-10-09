@@ -941,11 +941,13 @@ export async function fetchPrivateMode(): Promise<{ enabled: boolean; level: num
   return { enabled: level > 0, level }
 }
 
-export async function enablePrivateMode(level: number = 1): Promise<void> {
+/** Set the private-mode level. `sessionId` registers this tab, so the L4
+ *  session wipe can tell the last L4 tab closing from one of several. */
+export async function enablePrivateMode(level: number = 1, sessionId?: string): Promise<void> {
   const res = await fetch(`${MCP_BASE}/settings/private-mode`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ level }),
+    body: JSON.stringify(sessionId ? { level, session_id: sessionId } : { level }),
   })
   // WB-37: throw on failure so callers can reconcile their optimistically-set
   // local state instead of believing a write that never landed.
@@ -964,32 +966,18 @@ export async function disablePrivateMode(clearCache: boolean = false): Promise<v
 }
 
 /**
- * L4 session-wipe (Cycle 3.2 / v0.93.5).  Called from a
- * ``beforeunload`` handler via ``navigator.sendBeacon()`` when L4 is
- * active, so the backend's ephemeral-state wipe completes even when
- * the page is unloading.
- *
- * ``sendBeacon`` doesn't accept custom headers, so the api-key header
- * is omitted on this call.  The endpoint is intentionally
- * unauthenticated for this reason — the worst case is a stray POST
- * clearing the private-mode flag, which is the same state any caller
- * can produce by hitting ``DELETE /settings/private-mode`` anyway.
+ * L4 session wipe, sent while a tab closes at Level 4. The server forgets the
+ * tab's private conversations permanently and releases the tab's hold on the
+ * private-mode level. A keepalive fetch survives the unload and, unlike a
+ * beacon, carries the API key, so the wipe is not refused when a key is set.
  */
-export function wipePrivateSession(conversationId: string): void {
-  if (typeof navigator === "undefined" || typeof navigator.sendBeacon !== "function") {
-    // Fallback for jsdom / SSR — fire-and-forget fetch.
-    void fetch(`${MCP_BASE}/settings/private-mode/session-wipe`, {
-      method: "POST",
-      headers: mcpHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ conversation_id: conversationId }),
-      keepalive: true,
-    }).catch(() => { /* noop — best-effort */ })
-    return
-  }
-  const blob = new Blob([JSON.stringify({ conversation_id: conversationId })], {
-    type: "application/json",
-  })
-  navigator.sendBeacon(`${MCP_BASE}/settings/private-mode/session-wipe`, blob)
+export function wipePrivateSession({ sessionId, conversationIds }: { sessionId: string; conversationIds: string[] }): void {
+  void fetch(`${MCP_BASE}/settings/private-mode/session-wipe`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ session_id: sessionId, conversation_ids: conversationIds }),
+    keepalive: true,
+  }).catch(() => { /* the tab is closing; nothing left to report to */ })
 }
 
 // ---------------------------------------------------------------------------

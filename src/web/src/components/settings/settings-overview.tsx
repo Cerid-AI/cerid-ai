@@ -64,7 +64,7 @@ const TIER_LABEL: Record<string, string> = {
   enterprise: "Enterprise",
 }
 
-/** Every destination the map can navigate to — the 8 registry categories
+/** Every destination the map can navigate to — the 9 registry categories
     plus the two console entries the sidebar also offers. */
 export type OverviewTarget = CategoryId | "analytics" | "diagnostics"
 
@@ -77,6 +77,7 @@ const CATEGORY_BLURBS: Record<CategoryId, string> = {
   extensions: "Install server plugins, govern MCP servers and external providers, and schedule Pro automations. (Connect personal data in Sources → Connectors.)",
   appearance: "Theme, density, and motion preferences for this device.",
   plan: "See your current tier and the features it unlocks.",
+  data: "The Trash for deleted chats, memories and documents, receipts for what was erased, and how long deleted items are kept.",
   system: "Storage, sync, backup, and server maintenance operations.",
 }
 

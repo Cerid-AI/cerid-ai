@@ -191,3 +191,134 @@ def test_apply_remote_never_purges_for_a_readd(wired):
     counts = engine.apply_remote()
     assert ("purge", "c7") not in a.calls and ("purge", "c7") not in b.calls
     assert counts["purged"] == 0
+
+
+def test_purge_runs_derived_subjects_before_the_conversation(tmp_path, monkeypatch):
+    reg = Registry(tmp_path / "forget", "m1")
+    seen: list[str] = []
+
+    class Recorder:
+        def __init__(self, kind):
+            self.name, self.kinds = f"rec_{kind}", frozenset({kind})
+
+        def hide(self, subject, forget_id):
+            return None
+
+        def restore(self, subject, forget_id):
+            return None
+
+        def purge(self, subject):
+            seen.append(subject.id)
+            return PurgeResult(removed=1)
+
+    adapters = {k: Recorder(k) for k in ("conversation", "artifact", "memory")}
+    monkeypatch.setattr(engine, "get_registry", lambda: reg)
+    monkeypatch.setattr(engine, "_adapters_for", lambda kind: [adapters[kind]])
+    monkeypatch.setattr(engine, "_receipts_dir", lambda: tmp_path / "forget" / "receipts")
+    monkeypatch.setattr(engine, "_applied_path", lambda: tmp_path / "applied.jsonl")
+    monkeypatch.setattr(engine, "_audit", lambda *args, **kwargs: None)
+    engine.forget_permanently(
+        [Subject("conversation", "c1"), Subject("memory", "m1"), Subject("artifact", "a1")],
+        requested_by="ui", user_id="u1",
+    )
+    assert seen == ["a1", "m1", "c1"]
+    assert {e.user_id for e in reg.forget_entries(reg.latest()[0].forget_id)} == {"u1"}
+
+
+def test_list_trash_groups_by_forget_newest_first_with_live_labels(wired, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    from app.sync.user_state import write_conversation
+
+    reg, _, _, tmp = wired
+    monkeypatch.setattr("config.SYNC_DIR", str(tmp))
+    write_conversation(str(tmp), {"id": "c1", "title": "Tax questions", "messages": []})
+    f1 = engine.trash([Subject("conversation", "c1"), Subject("conversation", "c2")], requested_by="ui")
+    f2 = engine.trash([Subject("artifact", "a" * 64)], requested_by="api")
+    f3 = engine.trash([Subject("conversation", "c3")], requested_by="ui")
+    engine.restore(f3)
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.run.return_value = iter([{"id": "a" * 64, "label": "report.pdf"}])
+    driver = MagicMock()
+    driver.session.return_value = session
+    with patch("app.deps.get_neo4j", return_value=driver):
+        trash = engine.list_trash()
+    assert [g["forget_id"] for g in trash] == [f2, f1]
+    by_id = {g["forget_id"]: g for g in trash}
+    assert by_id[f2]["subjects"] == [{"kind": "artifact", "id": "a" * 64, "label": "report.pdf"}]
+    assert {s["id"]: s["label"] for s in by_id[f1]["subjects"]} == {"c1": "Tax questions", "c2": ""}
+    assert by_id[f1]["purge_started"] is False and by_id[f1]["requested_by"] == "ui"
+
+
+def test_list_trash_marks_a_started_purge(wired, monkeypatch):
+    _, _, _, tmp = wired
+    monkeypatch.setattr("config.SYNC_DIR", str(tmp))
+    fa = engine.trash([Subject("conversation", "c1")], requested_by="ui", user_id="u1")
+    engine._write_receipt({"forget_id": fa, "subjects": [], "adapters": {}})
+    assert engine.list_trash()[0]["purge_started"] is True
+
+
+def test_list_receipts_summarises_counts_and_status(wired):
+    _, _, _, tmp = wired
+    done = engine.forget_permanently([Subject("conversation", "c1"), Subject("artifact", "a" * 64)], requested_by="ui")
+    engine._write_receipt({"forget_id": "fg_" + "0" * 16, "at": "2026-01-01T00:00:00Z", "requested_by": "ui",
+                           "subjects": [{"kind": "conversation", "id": "c9"}],
+                           "adapters": {"x": {"status": "pending", "removed": 0}}})
+    rows = {r["forget_id"]: r for r in engine.list_receipts()}
+    assert rows[done["forget_id"]]["subjects"] == {"conversation": 1, "artifact": 1}
+    assert rows[done["forget_id"]]["status"] == "done"
+    assert rows["fg_" + "0" * 16]["status"] == "pending"
+    assert engine.read_receipt(done["forget_id"])["forget_id"] == done["forget_id"]
+    assert engine.read_receipt("fg_" + "f" * 16) == {}
+
+
+class _KindAdapter:
+    def __init__(self, name, kind, fail=False):
+        self.name, self.kinds, self.fail = name, frozenset({kind}), fail
+
+    def hide(self, s, f):
+        return None
+
+    def restore(self, s, f):
+        return None
+
+    def purge(self, s):
+        if self.fail:
+            raise RuntimeError("store down")
+        return PurgeResult(removed=2)
+
+
+def _wire_kinds(tmp_path, monkeypatch, adapters):
+    reg = Registry(tmp_path / "forget", "m1")
+    monkeypatch.setattr(engine, "get_registry", lambda: reg)
+    monkeypatch.setattr(engine, "_adapters_for", lambda kind: [a for a in adapters if kind in a.kinds])
+    monkeypatch.setattr(engine, "_receipts_dir", lambda: tmp_path / "forget" / "receipts")
+    monkeypatch.setattr(engine, "_applied_path", lambda: tmp_path / "applied.jsonl")
+    monkeypatch.setattr(engine, "_audit", lambda *args, **kwargs: None)
+    return reg
+
+
+def test_a_retried_purge_keeps_the_earlier_attempts_store_counts(tmp_path, monkeypatch):
+    art, conv = _KindAdapter("artifacts", "artifact"), _KindAdapter("transcripts", "conversation", fail=True)
+    _wire_kinds(tmp_path, monkeypatch, [art, conv])
+    first = engine.forget_permanently([Subject("conversation", "c1"), Subject("artifact", "a1")], requested_by="ui")
+    assert first["adapters"]["transcripts"]["status"] == "pending"
+    conv.fail = False
+    engine.retry_started_purges()
+    receipt = engine.read_receipt(first["forget_id"])
+    assert receipt["adapters"]["artifacts"] == {"status": "done", "removed": 2}
+    assert receipt["adapters"]["transcripts"]["status"] == "done"
+    assert receipt["adapters"]["transcripts"]["removed"] == 2
+
+
+def test_retry_started_purges_touches_only_forgets_whose_purge_started(tmp_path, monkeypatch):
+    conv = _KindAdapter("transcripts", "conversation", fail=True)
+    reg = _wire_kinds(tmp_path, monkeypatch, [conv])
+    started = engine.forget_permanently([Subject("conversation", "c1")], requested_by="ui")["forget_id"]
+    engine.trash([Subject("conversation", "c2")], requested_by="ui")
+    conv.fail = False
+    assert engine.retry_started_purges() == [started]
+    assert reg.state_of("conversation", "c1") == "purged"
+    assert reg.state_of("conversation", "c2") == "trashed"

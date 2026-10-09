@@ -96,7 +96,7 @@
       "withholds": {
         "retrieval": "Withheld: no knowledge-base or memory context reaches the model. The server strips injected context from chat and SDK completions; KB search, memory recall and wiki enrichment return empty.",
         "memory": "Withheld: memory extraction and verified-fact promotion return without storing anything.",
-        "server": "Withheld as at L1. When the last L4 tab closes the browser posts a session wipe and the level resets to 0; the wipe carries a per-tab id, not the conversation id, so it erases nothing beyond that reset. Cached query results are not wiped; they expire on their own.",
+        "server": "Withheld as at L1. When an L4 tab closes, the browser asks the server to forget that tab's private conversations permanently, with whatever memories and verified facts they produced before the tab reached L4, and keeps a receipt. When the last L4 tab closes the level resets to 0. Cached query results are not wiped; they expire on their own.",
         "browser": "Withheld: the conversation is held in memory only, never written to local storage, and is gone on reload.",
         "audit": "Withheld: the MCP tool-call audit line (mcp.tool_call) is not written. Still recorded: metrics counters in Redis, the enterprise audit log and ordinary server logs.",
         "egress": "Not blocked: what you type still goes to the configured provider."

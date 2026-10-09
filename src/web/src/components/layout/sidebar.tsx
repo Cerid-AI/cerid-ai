@@ -21,6 +21,8 @@ import { withViewTransition } from "@/lib/view-transitions"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
+import type { ForgetMode, ForgetSubject } from "@/lib/api"
+import { forgetWithUndo } from "@/lib/forget-with-undo"
 import { applyModelUpdates, fetchHealth } from "@/lib/api/settings"
 import { useSettingsMode, setSettingsMode } from "@/lib/settings-mode"
 
@@ -79,10 +81,13 @@ const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground"
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier, activePanes }: SidebarProps) {
   const {
-    visibleConversations, activeId, setActiveId, create, remove, rename,
+    conversations, visibleConversations, activeId, setActiveId, create, rename,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
-    bulkDelete, bulkArchive, active,
+    bulkArchive, active, forget, restore,
   } = useConversationsContext()
+  const handleForget = (ids: string[], mode: ForgetMode, derived: ForgetSubject[]) => {
+    void forgetWithUndo({ conversations, forget, restore }, ids, mode, derived)
+  }
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
   const settingsMode = useSettingsMode()
   const { data: modelUpdates, isError: updatesCheckFailed } = useQuery({
@@ -321,14 +326,13 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                   conversations={visibleConversations}
                   activeId={activeId}
                   onSelect={handleSelectConversation}
-                  onDelete={remove}
+                  onForget={handleForget}
                   onArchive={archive}
                   onUnarchive={unarchive}
                   onRename={rename}
                   showArchived={showArchived}
                   archivedCount={archivedCount}
                   onToggleShowArchived={toggleShowArchived}
-                  onBulkDelete={bulkDelete}
                   onBulkArchive={bulkArchive}
                 />
               </div>

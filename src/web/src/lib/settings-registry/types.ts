@@ -20,6 +20,7 @@ export type CategoryId =
   | "extensions"
   | "appearance"
   | "plan"
+  | "data"
   | "system"
 
 export type Writer =

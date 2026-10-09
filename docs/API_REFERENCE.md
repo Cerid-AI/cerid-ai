@@ -105,8 +105,17 @@
 - `GET /user-state/conversations/{conv_id}` — Get single conversation
 - `POST /user-state/conversations` — Save conversation
 - `POST /user-state/conversations/bulk` — Bulk save conversations
-- `DELETE /user-state/conversations/{conv_id}` — Delete conversation
+- `DELETE /user-state/conversations/{conv_id}` — Move a conversation to the Trash (`?permanent=true` forgets it now)
+- `GET /user-state/forgotten` — Forgets changed since `?since=`, for client merges
 - `PATCH /user-state/preferences` — Update user preferences
+
+**Forget engine** (`app/routers/forget.py`; admin-only in multi-user mode):
+- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked)
+- `POST /forget` — `{subjects: [{kind: conversation|artifact|memory, id}], mode: trash|permanent}`; returns `forget_id`, `state`, and the receipt for a permanent forget
+- `POST /forget/{forget_id}/restore` — Restore a trashed forget (409 once its purge has started)
+- `POST /forget/trash/empty` — Erase everything in the Trash
+- `GET /forget/trash` — Trashed forgets with live labels, newest first
+- `GET /forget/receipts` and `GET /forget/receipts/{forget_id}` — Receipts: per-store counts, never content
 
 **KB admin:**
 - `GET /admin/kb/capabilities` — Parser capabilities report

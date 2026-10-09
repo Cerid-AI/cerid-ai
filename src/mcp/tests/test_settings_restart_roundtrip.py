@@ -57,6 +57,7 @@ _CANDIDATES: dict[str, tuple[Any, Any]] = {
     "cost_sensitivity": ("low", "high"),
     "auto_inject_threshold": (0.41, 0.42),
     "auto_inject_max": (7, 8),
+    "forget_trash_days": (7, 14),
     "storage_mode": ("archive", "extract_only"),
     "hybrid_vector_weight": (0.33, 0.34),
     "hybrid_keyword_weight": (0.35, 0.36),

@@ -19,8 +19,6 @@ the reset endpoint's own E1 R13 note (deletion makes
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import fakeredis
 import pytest
 from fastapi import FastAPI
@@ -41,9 +39,8 @@ def client(monkeypatch):
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
     monkeypatch.setattr("app.routers.settings.get_redis", lambda: fake)
     monkeypatch.setattr("app.services.private_mode.get_redis", lambda: fake)
-    monkeypatch.setattr("app.routers.settings.get_neo4j", lambda: MagicMock())
     monkeypatch.setattr(
-        "app.routers.settings.wipe_conversation_state", lambda *a, **k: {},
+        "app.routers.settings._forget_private_conversations", lambda cids: (None, True),
     )
     return TestClient(app), fake
 

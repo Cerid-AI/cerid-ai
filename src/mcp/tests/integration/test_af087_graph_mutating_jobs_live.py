@@ -47,27 +47,33 @@ def _uid(label: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# wipe_conversation_state — app/services/session_wipe.py
+# forget adapters — app/services/forget/adapters.py (the L4 wipe's Cypher)
 # ---------------------------------------------------------------------------
 
 
-class TestSessionWipeLive:
-    def test_wipe_deletes_real_conversation_report_and_memory_nodes(
+class TestForgetAdaptersLive:
+    def test_adapters_delete_real_conversation_report_and_memory_nodes(
         self, neo4j_driver, monkeypatch,
     ) -> None:
-        from app.services.session_wipe import wipe_conversation_state
+        from app.services.forget.adapters import (
+            ConversationNodeAdapter,
+            VerificationReportGraphAdapter,
+            VerifiedMemoryAdapter,
+            verified_memory_ids_for_conversation,
+        )
+        from core.forget.registry import Subject
 
         conv_id = _uid("conv")
         mem_id = _uid("mem")
 
-        # Isolate the Chroma side effect — AF-087 is about the Neo4j Cypher
-        # (session_wipe._delete_conversation_node / _delete_verification_report_node
-        # / _find_verified_memory_ids / _delete_verified_memory's DETACH DELETE),
+        # Isolate the Chroma side effect: AF-087 is about the Neo4j Cypher,
         # not the Chroma companion-doc delete, which is covered elsewhere.
         fake_collection = MagicMock()
         fake_chroma = MagicMock()
         fake_chroma.get_or_create_collection.return_value = fake_collection
         monkeypatch.setattr("app.deps.get_chroma", lambda: fake_chroma)
+        monkeypatch.setattr("app.deps.get_neo4j", lambda: neo4j_driver)
+        monkeypatch.setattr("app.services.content_lifecycle.invalidate_caches", lambda **k: None)
 
         with neo4j_driver.session() as s:
             s.run(
@@ -78,14 +84,10 @@ class TestSessionWipeLive:
             )
 
         try:
-            summary = wipe_conversation_state(
-                conv_id, sync_dir=None, neo4j_driver=neo4j_driver,
-            )
-
-            assert summary["conversation_node_deleted"] is True
-            assert summary["verification_report_deleted"] is True
-            assert summary["verified_memories_deleted"] == 1
-            assert summary["verified_memories_failed"] == 0
+            assert verified_memory_ids_for_conversation(conv_id) == [mem_id]
+            assert VerifiedMemoryAdapter().purge(Subject("memory", mem_id)).removed == 1
+            assert VerificationReportGraphAdapter().purge(Subject("conversation", conv_id)).removed == 1
+            assert ConversationNodeAdapter().purge(Subject("conversation", conv_id)).removed == 1
             fake_collection.delete.assert_called_once_with(ids=[f"verified_memory_{mem_id}"])
 
             with neo4j_driver.session() as s:

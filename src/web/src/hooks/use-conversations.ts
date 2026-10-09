@@ -11,7 +11,21 @@ import {
   fetchSyncedConversations,
   fetchForgottenConversations,
   ConversationGoneError,
+  forgetSubjects,
+  restoreForget,
+  ForgetHttpError,
 } from "@/lib/api"
+import type { ForgetMode, ForgetResult, ForgetSubject } from "@/lib/api"
+import { logSwallowedError } from "@/lib/log-swallowed"
+
+/** What became of a forget: done on the server, held back because private
+ *  mode keeps everything local (the tombstone outbox sends it later), or not
+ *  reachable (the tombstone outbox retries a plain move to Trash). */
+export type ForgetOutcome =
+  | { status: "done"; result: ForgetResult }
+  | { status: "deferred" }
+  | { status: "failed" }
+  | { status: "refused"; message: string }
 
 const STORAGE_KEY = "cerid-conversations"
 // Delete tombstones: ids whose local delete hasn't been acked by the server.
@@ -385,22 +399,80 @@ export function useConversations() {
     })
   }, [persist])
 
-  const remove = useCallback((convoId: string) => {
-    // Tombstone before the delete so a failed/remote-replica DELETE can't
-    // resurrect this conversation on the next mount merge (CR-092).
-    addTombstone(convoId)
+  // Forget conversations (and whatever derived items the delete dialog
+  // selected) through the server's forget engine. The tombstone is written
+  // first, so a failed or deferred forget is still retried by the mount merge
+  // as a plain move to Trash and the conversation can't resurrect (CR-092).
+  const forget = useCallback(async (
+    ids: string[],
+    opts: { mode: ForgetMode; derived?: ForgetSubject[] },
+  ): Promise<ForgetOutcome> => {
+    if (ids.length === 0) return { status: "failed" }
+    const idSet = new Set(ids)
+    // A save still waiting in the debounce must not land after the forget.
+    for (const id of ids) {
+      const timer = serverTimersRef.current.get(id)
+      if (timer) clearTimeout(timer)
+      serverTimersRef.current.delete(id)
+      serverPendingRef.current.delete(id)
+      addTombstone(id)
+    }
+    let removed: Conversation[] = []
     setConversations((prev) => {
-      const next = prev.filter((c) => c.id !== convoId)
+      removed = prev.filter((c) => idSet.has(c.id))
+      const next = prev.filter((c) => !idSet.has(c.id))
       flushLocalNow(next)
-      // Derive next active ID from fresh state (avoids stale closure)
       setActiveId((currentId) => {
-        if (currentId !== convoId) return currentId
+        if (!currentId || !idSet.has(currentId)) return currentId
         return next[0]?.id ?? null
       })
       return next
     })
-    enqueueServer(convoId, { kind: "delete" }, true)
-  }, [addTombstone, flushLocalNow, enqueueServer])
+    if (isPrivateModeActive()) return { status: "deferred" }  // CR-061: nothing leaves the browser
+    try {
+      const result = await forgetSubjects(
+        [...ids.map((id) => ({ kind: "conversation" as const, id })), ...(opts.derived ?? [])],
+        opts.mode,
+      )
+      for (const id of ids) clearTombstone(id)
+      setSyncFailing(false)
+      return { status: "done", result }
+    } catch (err) {
+      logSwallowedError(err, "use-conversations.forget")
+      if (!(err instanceof ForgetHttpError) || err.status < 400 || err.status >= 500) {
+        // Unreachable or a server failure: the tombstone stays, and the mount
+        // merge retries a move to Trash.
+        setSyncFailing(true)
+        return { status: "failed" }
+      }
+      // The server refused (4xx): nothing was forgotten, so put the chats back.
+      for (const id of ids) clearTombstone(id)
+      setConversations((prev) => {
+        const have = new Set(prev.map((c) => c.id))
+        const next = [...removed.filter((c) => !have.has(c.id)), ...prev].sort((a, b) => b.updatedAt - a.updatedAt)
+        flushLocalNow(next)
+        return next
+      })
+      return { status: "refused", message: err instanceof Error ? err.message : String(err) }
+    }
+  }, [addTombstone, clearTombstone, flushLocalNow])
+
+  // Undo a move to Trash. The server still holds the conversation, so the
+  // local copy is put back as it was and nothing is pushed again.
+  const restore = useCallback(async (forgetId: string, convos: Conversation[]): Promise<void> => {
+    await restoreForget(forgetId)
+    for (const c of convos) clearTombstone(c.id)
+    setConversations((prev) => {
+      const have = new Set(prev.map((c) => c.id))
+      const next = [...convos.filter((c) => !have.has(c.id)), ...prev].sort((a, b) => b.updatedAt - a.updatedAt)
+      flushLocalNow(next)
+      return next
+    })
+  }, [clearTombstone, flushLocalNow])
+
+  const remove = useCallback((convoId: string) => {
+    void forget([convoId], { mode: "trash" })
+  }, [forget])
 
   const replaceMessages = useCallback((convoId: string, newMessages: ChatMessage[]) => {
     setConversations((prev) => {
@@ -540,19 +612,8 @@ export function useConversations() {
   // Bulk operations
   const bulkDelete = useCallback((ids: string[]) => {
     if (ids.length === 0) return
-    const idSet = new Set(ids)
-    for (const id of ids) addTombstone(id)
-    setConversations((prev) => {
-      const next = prev.filter((c) => !idSet.has(c.id))
-      flushLocalNow(next)
-      setActiveId((currentId) => {
-        if (!currentId || !idSet.has(currentId)) return currentId
-        return next[0]?.id ?? null
-      })
-      return next
-    })
-    for (const id of ids) enqueueServer(id, { kind: "delete" }, true)
-  }, [addTombstone, flushLocalNow, enqueueServer])
+    void forget(ids, { mode: "trash" })
+  }, [forget])
 
   const bulkArchive = useCallback((ids: string[]) => {
     if (ids.length === 0) return
@@ -670,7 +731,7 @@ export function useConversations() {
     verifiedConversations, markVerified, clearVerified,
     saveVerification, getVerification, getAllVerificationReports,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
-    bulkDelete, bulkArchive,
+    bulkDelete, bulkArchive, forget, restore,
     syncFailing,
   }
 }

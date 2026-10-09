@@ -8,7 +8,7 @@ Retrieval fans out over four stores (Neo4j ``:Artifact`` node, Chroma vector
 chunks, BM25 keyword index, SPLADE sparse index) plus three caches (flat query
 cache C1, semantic cache C2, graph serving cache C3). Historically every
 delete/hide path honored a different, incomplete subset of those surfaces —
-``session_wipe`` touched two of the four stores; no delete path outside re-ingest
+the old L4 session wipe touched two of the four stores; no delete path outside re-ingest
 ever called ``remove_chunks`` on the lexical indexes; soft-delete set an
 ``archived`` flag the vector arm never read. There was no enumerated contract and
 no divergence probe, so the gaps were invisible to CI.
@@ -229,14 +229,14 @@ def invalidate_caches(trigger: str, redis: Any | None = None, domain: str | None
     cache (C3).
 
     Public: also called by delete paths outside this module that bypass
-    :func:`remove_content` (e.g. ``session_wipe._delete_verified_memory``,
+    :func:`remove_content` (e.g. ``forget.adapters.delete_verified_memory``,
     which deletes a verified-memory Chroma doc + ``:Memory`` node directly
     since neither carries ``chunk_ids`` for the fan-out path — AF-096).
 
     ``domain`` scopes the C1+C2 eviction to entries whose result touched that
     domain, instead of flushing everything — callers that know the mutation's
     single domain (``remove_content``, ``remove_orphan_chunks``) pass it;
-    callers that don't (``hide_content``, ``session_wipe``) leave it ``None``
+    callers that don't (``hide_content``, the forget adapters) leave it ``None``
     and keep the full-flush contract.
 
     Cache invalidation is freshness, not correctness: the removal that calls this

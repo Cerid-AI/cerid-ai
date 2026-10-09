@@ -41,22 +41,6 @@ def test_delete_hallucination_report_removes_key():
     assert delete_hallucination_report(fake, "cid-1") is False
 
 
-def test_session_wipe_clears_hall_cache():
-    from app.services.session_wipe import wipe_conversation_state
-    from core.agents.hallucination import REDIS_HALLUCINATION_PREFIX
-
-    fake = _FakeRedis()
-    key = f"{REDIS_HALLUCINATION_PREFIX}cid-2"
-    fake.store[key] = '{"claims": ["secret"]}'
-
-    summary = wipe_conversation_state(
-        "cid-2", sync_dir=None, neo4j_driver=None, redis_client=fake
-    )
-
-    assert summary["hallucination_cache_deleted"] is True
-    assert key not in fake.store
-
-
 def test_permanent_conversation_delete_clears_hall_cache(monkeypatch, tmp_path):
     """A plain DELETE now moves the conversation to Trash (restorable), so the
     report goes when the forget is purged: here, ``?permanent=true``."""

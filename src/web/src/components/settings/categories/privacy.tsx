@@ -97,10 +97,10 @@ function PrivateModeSection() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Enable L4 — Full ephemeral?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        L4 withholds everything L3 does. Activating it registers a tab-close
-                        handler that sends a session wipe to the server via{" "}
-                        <code className="font-mono text-xs">sendBeacon</code>; when the last L4
-                        tab closes, Private Mode switches itself off. The scope is{" "}
+                        L4 withholds everything L3 does. When a tab closes at L4, the server
+                        forgets that tab&apos;s private chats permanently, with anything they
+                        produced, and keeps a receipt; when the last L4 tab closes, Private Mode
+                        switches itself off. The scope is{" "}
                         <strong>global for this server — all tabs and sessions</strong>. It does
                         not block requests to the model provider.
                       </AlertDialogDescription>
@@ -150,9 +150,9 @@ function PrivateModeSection() {
           <Alert>
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="text-xs">
-              L4 is active. When the last L4 tab closes the browser posts a session wipe via{" "}
-              <code className="font-mono">sendBeacon</code> and Private Mode switches itself off.
-              This setting affects all tabs on this server.
+              L4 is active. Closing this tab forgets its private chats permanently. When the last
+              L4 tab closes, Private Mode switches itself off. This setting affects all tabs on
+              this server.
             </AlertDescription>
           </Alert>
         )}

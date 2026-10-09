@@ -44,4 +44,8 @@ export const QUERY_KEYS = {
 
   // -- Audit --
   audit: (hours: number, activeReports: string) => ["audit", hours, activeReports] as const,
+  // -- Forget engine --
+  forgetTrash: () => ["forget-trash"] as const,
+  forgetReceipts: () => ["forget-receipts"] as const,
+  forgetReceipt: (forgetId: string) => ["forget-receipt", forgetId] as const,
 } as const
