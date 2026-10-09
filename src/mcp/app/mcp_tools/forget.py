@@ -9,6 +9,11 @@ chosen set would remove and returns a single-use token bound to exactly that
 set and mode; ``pkb_forget_execute`` runs only what a token was issued for.
 MCP carries no caller role, so in multi-user mode the tools refuse: there is
 no way to tell an admin from a member here.
+
+Over MCP a forget only moves things to the Trash. The token proves a preview
+happened, not that a person approved it, and an agent can be steered by what it
+reads; the Trash keeps every such forget restorable from Settings → Data, and
+erasing for good stays with the person (Empty Trash, the web app, the SDK).
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ import config
 from app.tool_registry import InvalidParamsError, PermissionDeniedError, UpstreamUnavailableError, register_tool
 
 _CALLER = "mcp"
-_MODES = ("trash", "permanent")
+_MODES = ("trash",)
 _SCOPE_MIN, _SCOPE_MAX = 2, 300
 _MAX_SUBJECTS = 200
 
@@ -80,11 +85,12 @@ async def pkb_forget_search(scope: str) -> dict[str, Any]:
     name="pkb_forget_preview",
     description=(
         "Show what forgetting the chosen items would remove, grouped (documents, passages, memories, "
-        "conversations), and issue a single-use confirm token for exactly that set and mode, valid 15 minutes. "
-        "Nothing is changed. **Use when** the person has picked what to forget; show them the groups and ask "
-        "them to confirm before calling `pkb_forget_execute`. **Returns** `{groups, derived_facts, notes, "
-        "out_of_reach, mode, confirm_token, expires_in}`; `confirm_token` is empty when nothing is left to "
-        "forget."
+        "conversations), and issue a single-use confirm token for exactly that set, valid 15 minutes. "
+        "Nothing is changed. Over MCP a forget moves things to the Trash, restorable from Settings → Data; "
+        "erasing for good is done by the person in the app. **Use when** the person has picked what to "
+        "forget; show them the groups and ask them to confirm before calling `pkb_forget_execute`. "
+        "**Returns** `{groups, derived_facts, notes, out_of_reach, mode, confirm_token, expires_in}`; "
+        "`confirm_token` is empty when nothing is left to forget."
     ),
     input_schema={
         "type": "object",
@@ -92,7 +98,7 @@ async def pkb_forget_search(scope: str) -> dict[str, Any]:
             "subjects": {"type": "array", "items": _SUBJECT_SCHEMA, "maxItems": 200,
                          "description": "Items from pkb_forget_search the person chose."},
             "mode": {"type": "string", "enum": list(_MODES),
-                     "description": "trash (restorable from Settings → Data) or permanent."},
+                     "description": "trash: restorable from Settings → Data until the Trash is emptied."},
         },
         "required": ["subjects", "mode"],
     },
@@ -120,7 +126,7 @@ async def pkb_forget_preview(subjects: list[dict[str, Any]], mode: str) -> dict[
 
     _single_user()
     if mode not in _MODES:
-        raise InvalidParamsError("mode must be trash or permanent")
+        raise InvalidParamsError("over MCP a forget moves things to the Trash; mode must be trash")
     if not isinstance(subjects, list) or len(subjects) > _MAX_SUBJECTS:
         raise InvalidParamsError("subjects must be a list of at most 200 items")
     try:
@@ -133,10 +139,10 @@ async def pkb_forget_preview(subjects: list[dict[str, Any]], mode: str) -> dict[
 @register_tool(
     name="pkb_forget_execute",
     description=(
-        "Forget what a confirm token from `pkb_forget_preview` was issued for: move it to the Trash or erase it "
-        "permanently, as previewed. The token works once. **Use when** the person has confirmed the preview. "
+        "Forget what a confirm token from `pkb_forget_preview` was issued for: move it to the Trash, "
+        "restorable from Settings → Data. The token works once. **Use when** the person has confirmed the preview. "
         "Never call it without their confirmation. **Returns** `{forget_id, state, subjects}`; state is "
-        "trashed, purged, or trashed_pending when a store is still erasing."
+        "trashed."
     ),
     input_schema={
         "type": "object",
@@ -149,7 +155,7 @@ async def pkb_forget_preview(subjects: list[dict[str, Any]], mode: str) -> dict[
         "type": "object",
         "properties": {
             "forget_id": {"type": "string"},
-            "state": {"type": "string", "enum": ["trashed", "purged", "trashed_pending"]},
+            "state": {"type": "string", "enum": ["trashed"]},
             "subjects": {"type": "integer"},
         },
         "required": ["forget_id", "state", "subjects"],
