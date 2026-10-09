@@ -266,4 +266,31 @@ describe("ModelDownloadBanner", () => {
     expect(container.querySelector("[role=alert]")).toBeNull()
     expect(container.querySelector("[role=status]")).toBeNull()
   })
+
+  it("stays hidden when the only uncached model is a fallback behind a remote primary", async () => {
+    // The Studio: the embedder is served by the local model server, so the
+    // in-process ONNX embedder only answers if that server is down. The first
+    // semantic query does not download anything.
+    vi.spyOn(settingsApi, "fetchModelsStatus").mockResolvedValue({
+      reranker: { repo: "r", provider: "in-process", role: "primary", needs_local_cache: true, cached: true, files: {}, loading: false },
+      embedder: { repo: "e", provider: "quenchforge", role: "fallback", needs_local_cache: true, cached: false, files: {}, loading: false },
+    })
+
+    const { container } = render(<ModelDownloadBanner />, { wrapper })
+    await waitFor(() => expect(settingsApi.fetchModelsStatus).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 50))
+    expect(container.querySelector("[role=alert]")).toBeNull()
+  })
+
+  it("warns when a primary model is uncached", async () => {
+    vi.spyOn(settingsApi, "fetchModelsStatus").mockResolvedValue({
+      reranker: { repo: "r", provider: "in-process", role: "primary", needs_local_cache: true, cached: false, files: {}, loading: false },
+      embedder: { repo: "e", provider: "quenchforge", role: "fallback", needs_local_cache: true, cached: true, files: {}, loading: false },
+    })
+
+    render(<ModelDownloadBanner />, { wrapper })
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/First semantic query will trigger model download/i),
+    )
+  })
 })

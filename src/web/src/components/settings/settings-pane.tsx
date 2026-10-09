@@ -555,7 +555,7 @@ export default function SettingsPane() {
                   )}
                   <div className="density-stack">
                     <PaneErrorBoundary label="Recommendations" queryClient={queryClient}>
-                      <RecommendationBanner patch={patch} />
+                      <RecommendationBanner patch={patch} category={meta?.id} />
                     </PaneErrorBoundary>
                     {Page && meta && (
                       <PaneErrorBoundary label={meta.label} queryClient={queryClient}>
