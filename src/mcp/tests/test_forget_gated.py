@@ -254,3 +254,13 @@ def test_a_token_survives_an_execute_that_could_not_start(sdk, env, monkeypatch)
     done = sdk.post("/sdk/v1/forget/execute", json={"confirm_token": token}, headers=FINANCE)
     assert done.status_code == 200, done.text
 
+
+
+@pytest.mark.asyncio
+async def test_mcp_forgets_only_to_the_trash(env):
+    from app.mcp_tools import forget as tools
+    from app.tool_registry import InvalidParamsError
+
+    with pytest.raises(InvalidParamsError, match="Trash"):
+        await tools.pkb_forget_preview([{"kind": "artifact", "id": PERSONAL}], "permanent")
+    assert env["redis"].keys("cerid:forget:confirm:*") == []

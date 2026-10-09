@@ -178,7 +178,7 @@
 - `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
 - `pkb_web_search` — Agentic web search with verification
 - `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
-- `pkb_forget_search` → `pkb_forget_preview` → `pkb_forget_execute` — Find what matches a description of what to forget; preview a chosen set with a single-use confirm token (15 minutes); execute only what the token covers, once. Refused in multi-user mode, where MCP carries no caller role
+- `pkb_forget_search` → `pkb_forget_preview` → `pkb_forget_execute` — Find what matches a description of what to forget; preview a chosen set with a single-use confirm token (15 minutes); execute only what the token covers, once. Over MCP a forget only moves things to the Trash (an agent's forget stays restorable; erasing for good is the person's, in the app). Refused in multi-user mode, where MCP carries no caller role
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
 Versioned facade for external consumers — 17 endpoints. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
