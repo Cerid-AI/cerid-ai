@@ -38,8 +38,8 @@
 - `GET /digest` — Summary of recent KB activity, connections, and health status
 
 **Agent endpoints:**
-- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, optional Self-RAG validation, and unified RAG modes (manual/smart/custom_smart)
-- `POST /agent/memory/recall` — Direct memory recall endpoint for manual mode browsing
+- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, optional Self-RAG validation, and unified RAG modes (manual/smart/custom_smart). Returns only the current version of anything with history; a result with earlier versions carries `history` (up to three, newest first). `as_of` (ISO date or datetime) returns what was in force then and bypasses the caches
+- `POST /agent/memory/recall` — Direct memory recall endpoint for manual mode browsing; the same version rule and `as_of`
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
 - `POST /agent/triage/batch` — Batch triage with per-file error recovery
 - `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
@@ -83,7 +83,8 @@
 - `GET /memories` — List/filter memories (type, conversation_id, limit, offset)
 - `POST /memories/extract` — Extract memories from text (standalone endpoint)
 - `PATCH /memories/{id}` — Update memory summary
-- `DELETE /memories/{id}` — Delete a memory
+- `DELETE /memories/{id}` — Forget a memory permanently, with its earlier versions (a memory that replaced another keeps the older one as history)
+- `POST /memories/dedup` — Find near-duplicate memories; with `confirm: true` the older of each group become earlier versions of the newest
 
 **File upload:**
 - `POST /upload` — Upload file with optional domain, sub_category, tags, categorize_mode (50MB max)
@@ -110,9 +111,11 @@
 - `PATCH /user-state/preferences` — Update user preferences
 
 **Forget engine** (`app/routers/forget.py`; admin-only in multi-user mode):
-- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked). Or `{subjects: [...]}` (at most 200 artifact, chunk, memory and conversation subjects, picked from search): `documents` (passage count, conversations that cited each), `passages` (live excerpt, document, child-passage count; a passage of a selected document folds into it), `memories`, `conversations`, `derived_facts`, and `notes` (for example when every passage of a document is selected). `subject` is null for a selection
+- `POST /forget/preview` — `{kind: "conversation", id}`: what forgetting it removes, grouped (transcripts always; memories, summary and verified memories checked; cited documents unchecked). Or `{subjects: [...]}` (at most 200 artifact, chunk, memory and conversation subjects, picked from search): `documents` (passage count, version count, conversations that cited each), `passages` (live excerpt, document, child-passage count; a passage of a selected document folds into it), `memories`, `conversations`, `derived_facts`, and `notes` (for example when every passage of a document is selected). `subject` is null for a selection
 - `POST /forget/assist/search` — `{scope, allow_cloud?}`: everything matching a plain-language description (documents with their matching passages, documents sharing entities with them, memories, conversations), grouped and explained by the local model on the `forget_assist` stage, which never leaves the machine. `status` is `grouped`, `needs_consent` (the local model is unavailable; `cloud_model` names the model a repeat with `allow_cloud: true` would use) or `ungrouped` (with `reason`, for example local-only or Private Mode refusing the cloud). Nothing is forgotten here
 - `POST /forget` — `{subjects: [{kind: conversation|artifact|chunk|memory, id}], mode: trash|permanent, source?: api|agent}`; returns `forget_id`, `state`, and the receipt for a permanent forget. A chunk id is its artifact's id plus `_` and 16 hex characters; forgetting a parent passage takes its child passages and their HyPE questions with it
+- `POST /forget/undo-update` — `{kind: artifact|memory, id}`: undo the last update of a document or memory. The previous version is current again and the newer one goes to the Trash (for a document, the passages that version brought). 409 when there is no earlier version or the item is not the current one
+- `POST /forget/earlier-versions` — `{id, mode?: trash|permanent}`: forget a document's earlier versions (its closed passages) and keep the current one. Editing a document keeps the old text as history; this removes it. 409 when it has no earlier version
 - `POST /forget/{forget_id}/restore` — Restore a trashed forget (409 once its purge has started)
 - `POST /forget/trash/empty` — Erase everything in the Trash
 - `GET /forget/trash` — Trashed forgets with live labels, newest first
@@ -515,6 +518,8 @@ python3 scripts/cerid-sync.py import --force
 # Compare local vs sync snapshot
 python3 scripts/cerid-sync.py status
 ```
+
+**Versions:** artifacts carry their lineage fields (`lineage_id`, `version`, `versions`, `valid_from`, `valid_to`, `superseded_by`, `superseded_valid_to`, `invalid_at`), and an absent value clears the field on import, so both machines agree on which version is current. A passage the other machine closed or reopened is closed or reopened here (the Chroma result reports `updated` per domain and `total_updated`). `:Fact` versions travel in `neo4j/facts.jsonl` and import only where their source memory is present and not forgotten. `source_path` never syncs; each machine matches its own files.
 
 **Auto-import on startup:** When MCP starts with an empty Neo4j database and a valid `manifest.json` in the sync directory, it automatically imports all data. This enables zero-config bootstrap on a new machine.
 

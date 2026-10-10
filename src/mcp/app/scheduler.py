@@ -1787,7 +1787,8 @@ async def _run_session_summaries() -> None:
     """Phase E (bi-temporal memory plan) — once-per-session summarization scan.
 
     Finds conversations idle >= SESSION_SUMMARY_IDLE_MIN (default 30) minutes
-    with no session-summary artifact yet, and enqueues a SessionSummaryJob per
+    with no session-summary artifact yet, or with one marked stale because a
+    memory it summarized was superseded or forgotten, and enqueues a SessionSummaryJob per
     conversation (bounded by SESSION_SUMMARY_SCAN_LIMIT, default 20;
     ``enqueue_session_summary_job`` collapses duplicates via enqueue_if_absent).
 
@@ -1824,12 +1825,14 @@ async def _run_session_summaries() -> None:
                     """
                     MATCH (a:Artifact)-[:EXTRACTED_FROM]->(c:Conversation)
                     WHERE coalesce(a.memory_scope, '') <> 'session_summary'
+                      AND coalesce(a.archived, false) = false
                     WITH c, max(a.ingested_at) AS last_activity
                     WHERE last_activity < $cutoff
                     OPTIONAL MATCH (s:Artifact)-[:EXTRACTED_FROM]->(c)
-                      WHERE s.memory_scope = 'session_summary'
-                    WITH c, last_activity, s
-                    WHERE s IS NULL
+                      WHERE s.memory_scope = 'session_summary' AND coalesce(s.archived, false) = false
+                    WITH c, last_activity, collect(s) AS summaries
+                    WHERE size(summaries) = 0
+                       OR any(x IN summaries WHERE coalesce(x.summary_stale, false))
                     RETURN c.id AS cid
                     ORDER BY last_activity ASC
                     LIMIT $cap

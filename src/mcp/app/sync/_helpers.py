@@ -31,6 +31,31 @@ MEMORIES_JSONL = "memories.jsonl"
 MEMORY_EDGES_JSONL = "memory_edges.jsonl"
 ENTITIES_JSONL = "entities.jsonl"
 ENTITY_EDGES_JSONL = "entity_edges.jsonl"
+FACTS_JSONL = "facts.jsonl"
+
+#: A version's place in its lineage (forget phase 5, spec §7). Synced with
+#: every artifact so machines agree on which version is current; an absent
+#: value is meaningful (a current version has no ``valid_to``).
+LINEAGE_PROPS = (
+    "lineage_id", "version", "versions", "valid_from", "valid_to", "superseded_by",
+    "superseded_valid_to", "invalid_at",
+)
+#: The :Fact properties sync carries; anything else in a file is dropped.
+FACT_PROPS = (
+    "subject_id", "object_id", "predicate", "fact_key", "value", "source", "source_artifact_id",
+    "lineage_id", "event_date", "created_at", "valid_from", "valid_to", "invalid_at", "closed_by",
+)
+
+
+def without_wiki_page(props: dict[str, Any]) -> dict[str, Any]:
+    """An entity without its wiki page. Each machine writes its own pages from
+    its own sources: a page from another machine may predate a forget here."""
+    return {k: v for k, v in props.items() if not k.startswith("summary") and k != "external_references"}
+
+
+#: Who a memory artifact belongs to; carried when set. ``source_path`` is not
+#: synced: it names a file on one machine, and the other matches its own.
+IDENTITY_PROPS = ("memory_scope", "conversation_id")
 
 NEO4J_SUBDIR = "neo4j"
 CHROMA_SUBDIR = "chroma"

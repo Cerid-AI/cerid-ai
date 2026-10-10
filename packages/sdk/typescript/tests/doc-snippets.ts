@@ -75,3 +75,9 @@ export async function guideForget(client: CeridClient): Promise<void> {
   const done = await client.kb.forgetExecute(preview.confirm_token);
   console.log(done.state);
 }
+
+export async function guideVersions(client: CeridClient): Promise<void> {
+  const now = await client.kb.query({ query: "Which floor is the office on?" });
+  const then = await client.kb.query({ query: "Which floor is the office on?", as_of: "2025-12-31" });
+  console.log(now.results.length, then.results.length);
+}

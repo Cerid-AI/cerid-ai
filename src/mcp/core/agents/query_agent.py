@@ -24,7 +24,9 @@ import config
 from config.constants import COLLECTION_COUNT_CACHE_TTL_S
 from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
-from core.forget.read_filter import drop_forgotten
+from core.forget.read_filter import visible
+from core.lineage.current import CURRENT_ONLY_WHERE, VERSION_CLOSED, version_fields
+from core.lineage.history import attach_history, history_note
 from core.observability.span_helpers import breadcrumb, span
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
@@ -155,6 +157,7 @@ def _format_chroma_result(
         # of ours and the canonical shape above is unchanged for every existing
         # reader. Empty dict when the document carried nothing custom.
         "metadata": _custom_metadata(metadata),
+        **version_fields(metadata),
     }
 
 
@@ -175,6 +178,8 @@ _PROJECTED_METADATA_KEYS = frozenset({
     "parent_chunk_id", "window_text", "sheet_name", "row_idx",
     "column_headers", "summary", "quality_score", "tenant_id",
     "embedding_model", "embedding_model_version", "title_derived",
+    "valid_from", "valid_to", "superseded_by", "superseded_valid_to", "lineage_id", "version",
+    "version_closed", "source_path",
 })
 
 # Internal namespaces. ``cerid_`` is the two-store commit protocol's own state
@@ -234,6 +239,15 @@ def _parent_child_enabled() -> bool:
         "true",
         "1",
     )
+
+
+def _fuse_where(where: dict | None, clause: dict[str, Any]) -> dict[str, Any]:
+    """AND ``clause`` into a Chroma ``where`` clause."""
+    if not where:
+        return dict(clause)
+    if "$and" in where:
+        return {"$and": [*where["$and"], clause]}
+    return {"$and": [where, clause]}
 
 
 def _pc_fuse_child_filter(where: dict | None) -> dict | None:
@@ -665,6 +679,7 @@ async def multi_domain_query(
     metadata_filter: dict | None = None,
     domain_record_types: dict[str, list[str]] | None = None,
     skipped_empty_out: set[str] | None = None,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results.
 
@@ -749,6 +764,10 @@ async def multi_domain_query(
             # the relevance score still reflects the precise child match.
             if pc_enabled:
                 _where = _pc_fuse_child_filter(_where)
+            # Closed versions stay out of the ranking unless the question is
+            # about the past (spec §7); the read filter below still decides.
+            if as_of is None:
+                _where = _fuse_where(_where, CURRENT_ONLY_WHERE)
             query_kwargs: dict[str, Any] = {
                 "query_texts": [query],
                 "n_results": top_k,
@@ -929,6 +948,10 @@ async def multi_domain_query(
                                 # ChromaDB's where-clause was bypassed for these IDs.
                                 if not chunk_matches_tenant(meta):
                                     continue
+                                # A keyword index can hold a passage closed elsewhere
+                                # (a sync); current answers never take one.
+                                if as_of is None and meta.get(VERSION_CLOSED):
+                                    continue
                                 # Phase O.1: exclude pending chunks on BM25-only path.
                                 import os as _os
                                 if _os.getenv("CERID_FILTER_PENDING_CHUNKS", "true").strip().lower() not in ("false", "0", "no", "off"):
@@ -1016,7 +1039,7 @@ async def multi_domain_query(
 
     all_results = [r for results in domain_results for r in results]
 
-    return drop_forgotten(all_results)
+    return visible(all_results, as_of)
 
 
 # ---------------------------------------------------------------------------
@@ -1173,6 +1196,7 @@ async def graph_expand_results(
                 "collection": config.collection_name(domain),
                 "chunk_id": chunk_id,
                 "graph_source": True,
+                **version_fields(metadata),
                 "relationship_type": rel_artifact.get("relationship_type", ""),
                 "relationship_reason": rel_artifact.get("relationship_reason", ""),
             })
@@ -1331,6 +1355,7 @@ async def graph_expand_results_via_entities(
                 "collection": config.collection_name(domain),
                 "chunk_id": chunk_id,
                 "graph_source": True,
+                **version_fields(metadata),
                 "graph_expansion_mode": "local_graphrag",
                 "shared_entity_count": shared_count,
             })
@@ -2202,6 +2227,9 @@ def assemble_context(
         provenance = _format_table_provenance(table_fields)
         if provenance:
             content = f"{provenance}\n{content}"
+        note = history_note(result)
+        if note:
+            content = f"{content}\n{note}"
         content_len = len(content)
 
         if char_count + content_len > max_chars:
@@ -2227,6 +2255,7 @@ def assemble_context(
             # its own metadata. Absent (not ``{}``) when the document carried
             # nothing custom, matching the table-fields rule beside it.
             **({"metadata": result["metadata"]} if result.get("metadata") else {}),
+            **({"history": result["history"]} if result.get("history") else {}),
             # AF-059 — tabular provenance onto citations; absent (not
             # defaulted) for non-tabular sources so the shape stays honest.
             **table_fields,
@@ -2262,6 +2291,7 @@ async def agent_query(
     exclude_packs: bool = False,
     budget_seconds: float | None = None,
     memory_enabled: bool = True,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
 
@@ -2304,6 +2334,7 @@ async def agent_query(
                 domain_record_types=domain_record_types,
                 exclude_packs=exclude_packs,
                 memory_enabled=memory_enabled,
+                as_of=as_of,
             ),
             timeout=budget,
         )
@@ -2355,6 +2386,7 @@ async def agent_query_full(
     enable_self_rag: bool | None = None,
     budget_seconds: float | None = None,
     memory_enabled: bool = True,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Canonical full agentic-retrieval path.
 
@@ -2404,6 +2436,7 @@ async def agent_query_full(
             exclude_packs=exclude_packs,
             budget_seconds=budget_seconds,
             memory_enabled=memory_enabled,
+                as_of=as_of,
         )
 
     # External CRAG may fire on low KB confidence; the low_confidence boolean is
@@ -2427,6 +2460,7 @@ async def agent_query_full(
         redis_client=redis_client,
         model=model,
         budget_seconds=budget_seconds,
+        as_of=as_of,
     )
 
     # top_k is documented as "maximum results to return", and until this cap
@@ -2748,6 +2782,7 @@ async def _recall_memory_surface(
     chroma_client: Any,
     neo4j_driver: Any,
     top_k: int,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     """Recall episodic memories and adapt them to the query-result shape (GA P0.5 A2).
 
@@ -2762,7 +2797,7 @@ async def _recall_memory_surface(
         from core.agents.memory import recall_memories
 
         mems = await recall_memories(
-            query, chroma_client=chroma_client, neo4j_driver=neo4j_driver, top_k=top_k,
+            query, chroma_client=chroma_client, neo4j_driver=neo4j_driver, top_k=top_k, as_of=as_of,
         )
     except Exception as exc:  # noqa: BLE001 — observability boundary
         log_swallowed_error("core.agents.query_agent.memory_surface", exc)
@@ -2781,6 +2816,10 @@ async def _recall_memory_surface(
             "created_at": m.get("created_at"),
             "source_authority": "user_memory",
             "memory_type": m.get("memory_type", "fact"),
+            # The version fields, so the shared read filter can judge the row
+            # like any other, and the memory's history notes.
+            **{k: m[k] for k in ("valid_from", "valid_to", "superseded_by", "lineage_id", "version") if k in m},
+            **({"history": m["history"]} if m.get("history") else {}),
         }
         for m in mems
     ]
@@ -2850,6 +2889,7 @@ async def _agent_query_impl(
     domain_record_types: dict[str, list[str]] | None = None,
     exclude_packs: bool = False,
     memory_enabled: bool = True,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly.
 
@@ -2890,7 +2930,7 @@ async def _agent_query_impl(
         # lookup also skips the store (below) — it is gated on _query_embedding,
         # which is only set inside this block.
         if (
-            ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache
+            ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache and as_of is None
             and metadata_filter is None and domain_record_types is None and not exclude_packs
         ):
             try:
@@ -3052,6 +3092,7 @@ async def _agent_query_impl(
                             metadata_filter=metadata_filter,
                             domain_record_types=domain_record_types,
                             skipped_empty_out=domains_skipped_empty,
+                            as_of=as_of,
                         )
 
                     results = await parallel_retrieve(sub_queries, _retrieve_sub)
@@ -3067,6 +3108,7 @@ async def _agent_query_impl(
                     metadata_filter=metadata_filter,
                     domain_record_types=domain_record_types,
                     skipped_empty_out=domains_skipped_empty,
+                    as_of=as_of,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
 
@@ -3080,7 +3122,7 @@ async def _agent_query_impl(
     ):
         with timer.step("memory_surface"):
             _mem = await _recall_memory_surface(
-                search_query, chroma_client, neo4j_driver, effective_top_k,
+                search_query, chroma_client, neo4j_driver, effective_top_k, as_of=as_of,
             )
             if _mem:
                 results = results + _mem
@@ -3090,7 +3132,9 @@ async def _agent_query_impl(
     # wiki/concept page for the matched entity. Behind the surface-bias flag
     # ENABLE_SURFACE_BIASED_RETRIEVAL (default ON) — a no-op until app startup
     # registers a wiki fetcher.
-    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary":
+    # A compiled page describes the current state, so a historical (``as_of``)
+    # question goes without it.
+    if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary" and as_of is None:
         _hint = _surface_route.get("matched_entity_hint")
         if _hint:
             with timer.step("wiki_surface"):
@@ -3125,6 +3169,7 @@ async def _agent_query_impl(
                 # chunks from adjacent domains.
                 metadata_filter=metadata_filter,
                 domain_record_types=domain_record_types,
+                as_of=as_of,
             )
             for r in cross_results:
                 r["relevance"] = round(
@@ -3218,7 +3263,7 @@ async def _agent_query_impl(
         )
     # Graph expansion and HyPE hydration add results after the per-domain arms
     # filtered theirs; this runs whether or not the Neo4j join below does.
-    results = drop_forgotten(results)
+    results = visible(results, as_of)
 
     from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)
@@ -3381,6 +3426,10 @@ async def _agent_query_impl(
     # (The former Step 5.7 absolute floor moved to Step 4.95, pre-rerank —
     # post-rerank relevance is the cross-encoder's ordinal sigmoid, where an
     # absolute threshold has no calibrated meaning.)
+
+    # Step 5.9: history notes (spec §7). A returned version with earlier
+    # versions says what it used to be, so an answer can mention the change.
+    attach_history(results[:top_k], chroma_client, neo4j_driver)
 
     # Step 6: Assemble context
     with timer.step("context_assembly"):

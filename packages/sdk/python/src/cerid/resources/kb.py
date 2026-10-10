@@ -52,6 +52,7 @@ class KBResource:
         strict_domains: Optional[bool] = None,
         context_sources: Optional[Dict[str, bool]] = None,
         model: Optional[str] = None,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> QueryResponse:
         """Multi-domain KB search with hybrid BM25+vector retrieval.
@@ -60,6 +61,10 @@ class KBResource:
         ``{"kb": True, "memory": True, "external": False}`` to keep open-web
         results out. It is the only request field that does: ``strict_domains``
         narrows the KB's own domain bleed and never touches the web.
+
+        ``as_of`` (an ISO date or datetime) answers from what was in force
+        then; by default only the current version of anything with history is
+        returned, and a result with earlier versions carries ``history``.
         """
         body = self._client._build_json(
             query=query,
@@ -69,6 +74,7 @@ class KBResource:
             strict_domains=strict_domains,
             context_sources=context_sources,
             model=model,
+            as_of=as_of,
         )
         resp = self._http.post(
             self._client._url("/query"),
@@ -85,6 +91,7 @@ class KBResource:
         domain: str = "general",
         top_k: int = 5,
         exclude_packs: bool = False,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> SearchResponse:
         """Raw vector search without agent orchestration.
@@ -93,7 +100,7 @@ class KBResource:
         only the operator's own content (personal-first retrieval).
         """
         body = self._client._build_json(
-            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs
+            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs, as_of=as_of
         )
         resp = self._http.post(
             self._client._url("/search"),
@@ -290,6 +297,7 @@ class AsyncKBResource:
         strict_domains: Optional[bool] = None,
         context_sources: Optional[Dict[str, bool]] = None,
         model: Optional[str] = None,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> QueryResponse:
         """Multi-domain KB search with hybrid BM25+vector retrieval.
@@ -298,6 +306,10 @@ class AsyncKBResource:
         ``{"kb": True, "memory": True, "external": False}`` to keep open-web
         results out. It is the only request field that does: ``strict_domains``
         narrows the KB's own domain bleed and never touches the web.
+
+        ``as_of`` (an ISO date or datetime) answers from what was in force
+        then; by default only the current version of anything with history is
+        returned, and a result with earlier versions carries ``history``.
         """
         body = self._client._build_json(
             query=query,
@@ -307,6 +319,7 @@ class AsyncKBResource:
             strict_domains=strict_domains,
             context_sources=context_sources,
             model=model,
+            as_of=as_of,
         )
         resp = await self._http.post(
             self._client._url("/query"),
@@ -323,6 +336,7 @@ class AsyncKBResource:
         domain: str = "general",
         top_k: int = 5,
         exclude_packs: bool = False,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> SearchResponse:
         """Raw vector search without agent orchestration.
@@ -331,7 +345,7 @@ class AsyncKBResource:
         only the operator's own content (personal-first retrieval).
         """
         body = self._client._build_json(
-            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs
+            query=query, domain=domain, top_k=top_k, exclude_packs=exclude_packs, as_of=as_of
         )
         resp = await self._http.post(
             self._client._url("/search"),

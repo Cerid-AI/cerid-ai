@@ -22,11 +22,13 @@ from app.services.ingestion import ingest_content, ingest_file
 from app.services.private_mode import private_blocks, saves_blocked
 from app.tool_registry import (
     TOOL_REGISTRY,
+    InvalidParamsError,
     InvalidToolError,
     ToolError,
     execute_registered_tool,
     get_registered_schemas,
 )
+from core.lineage.current import AS_OF_PATTERN
 from core.utils.swallowed import log_swallowed_error
 from plugins import get_plugin_tool_definitions, get_plugin_tool_handlers
 
@@ -183,6 +185,11 @@ MCP_TOOLS = [
                 "metadata_filter": {
                     "type": "object",
                     "description": "ChromaDB where-clause to scope retrieval by chunk metadata, e.g. {\"filename\": \"report.pdf\"}, or {\"pack_id\": \"mdn-web-docs\"} to scope to a single pack.",
+                },
+                "as_of": {
+                    "type": "string",
+                    "pattern": AS_OF_PATTERN,
+                    "description": "Historical question: an ISO date or datetime. Returns the version of each memory or document in force then. Omit for current knowledge; results with earlier versions carry `history`.",
                 },
             },
             "required": ["query"],
@@ -712,6 +719,18 @@ MCP_TOOLS = [
 
 # ── Tool execution ────────────────────────────────────────────────────────────
 
+def _as_of(arguments: dict) -> str | None:
+    """The validated ``as_of`` of a retrieval tool call, or None."""
+    import re
+
+    value = arguments.get("as_of")
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not re.fullmatch(AS_OF_PATTERN, value):
+        raise InvalidParamsError("as_of must be an ISO date or datetime, e.g. 2023-12-31")
+    return value
+
+
 def _summarize_args(arguments: dict) -> dict[str, Any]:
     """Drop fields larger than 256 chars + redact obvious credentials.
 
@@ -779,7 +798,8 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
         # boost. The agent_query path stays untouched for the vector/
         # graph/memory surfaces; wiki context is composed on top.
         wiki_page = None
-        if "wiki" in active_surfaces and surface_decision.matched_entity_hint:
+        # A compiled page is current-only; a historical question goes without it.
+        if "wiki" in active_surfaces and surface_decision.matched_entity_hint and not arguments.get("as_of"):
             try:
                 from app.services.wiki_pages import get_entity_page  # noqa: PLC0415
 
@@ -796,7 +816,7 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
         async with KB_POOL.acquire():
             result = await guarded_agent_query_full(
                 request_context=build_request_context(
-                    skip_cache=arguments.get("skip_cache", False),
+                    skip_cache=bool(arguments.get("skip_cache", False) or arguments.get("as_of")),
                     metadata_filter=arguments.get("metadata_filter"),
                 ),
                 query=query_text,
@@ -811,6 +831,7 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
                 # /agent/query for the same query.
                 graph_store=get_graph_store(),
                 exclude_packs=arguments.get("exclude_packs", False),
+                as_of=_as_of(arguments),
             )
 
         # Attach surface route metadata + wiki page when fetched.

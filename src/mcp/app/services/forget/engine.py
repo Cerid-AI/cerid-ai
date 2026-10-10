@@ -248,8 +248,13 @@ def purge_artifact(artifact_id: str, *, requested_by: str, user_id: str = "") ->
     store finished; a store left pending is retried by the maintenance job. With
     no sync dir there is no registry to record it in, so it is removed directly."""
     if not config.SYNC_DIR:
+        from app.deps import get_neo4j
         from app.services.content_lifecycle import remove_content
+        from app.services.forget.adapters import settle
+        from core.lineage.writer import lineage_of
+        lineage = lineage_of(get_neo4j(), artifact_id)
         remove_content(artifact_id)
+        settle(artifact_id, lineage_id=lineage)
         return True
     receipt = forget_permanently([Subject("artifact", artifact_id)], requested_by=requested_by, user_id=user_id)
     return all(a.get("status") == "done" for a in receipt["adapters"].values())

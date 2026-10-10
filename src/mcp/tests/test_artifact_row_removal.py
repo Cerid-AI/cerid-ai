@@ -256,10 +256,14 @@ def reingest(store, monkeypatch):
     return run
 
 
-def test_reingest_leaves_no_row_of_the_old_content(store, reingest):
+def test_reingest_keeps_the_old_content_as_a_closed_version(store, reingest):
+    """Forget phase 5 (spec §7): an edited document keeps its previous version.
+    The old rows stay, closed at the moment of the edit, and every query that
+    is not about the past leaves them out; only the new text is current."""
 
     col, hype = _coll(store, "general"), _hype(store, "general")
     old_children = _seed(col, A, parents=3)
+    old_rows = _rows_of(col, A)
     _seed_hype(hype, A, old_children)
     b_children = _seed(col, B)
     _seed_hype(hype, B, b_children)
@@ -271,25 +275,87 @@ def test_reingest_leaves_no_row_of_the_old_content(store, reingest):
 
     assert result["status"] == "updated"
     expected = {c["chunk_id"] for c in chunker.chunk_with_parents(new_content, artifact_id=A)}
-    assert _rows_of(col, A) == expected
-    assert f"{A}_parent_2" not in _ids(col)
+    current = set(col.get(where={"$and": [{"artifact_id": A}, {"version_closed": {"$ne": 1}}]})["ids"])
+    assert current == expected
+    closed = set(col.get(where={"$and": [{"artifact_id": A}, {"version_closed": 1}]})["ids"])
+    assert closed == old_rows - expected
+    got = col.get(where={"artifact_id": A}, include=["metadatas"])
+    metas = dict(zip(got["ids"], got["metadatas"]))
+    for cid in closed:
+        assert metas[cid]["valid_to"] and metas[cid]["lineage_id"] == A and metas[cid]["version"] == 1
+    for cid in expected:
+        assert metas[cid]["valid_to"] == "" and metas[cid]["version"] == 2 and metas[cid]["valid_from"]
     assert hype.get(where={"source_artifact_id": A})["ids"] == []
     assert _rows_of(col, B) == b_rows
     assert _ids(hype) == b_hype
+
+
+def _current_of(col, aid: str) -> set[str]:
+    return set(col.get(where={"$and": [{"artifact_id": aid}, {"version_closed": {"$ne": 1}}]})["ids"])
+
+
+def test_a_passage_the_new_version_keeps_keeps_when_it_became_true(store, reingest):
+    col = _coll(store, "general")
+    alpha = " ".join(f"Alpha sentence number {i} is here." for i in range(80))
+    beta = " ".join(f"Beta sentence {i}." for i in range(80))
+    first = f"{alpha}\n\n{beta}"
+    reingest({"id": A, "content_hash": "", "chunk_ids": "[]"}, first, "h1")
+    got = col.get(where={"artifact_id": A}, include=["metadatas"])
+    v1 = dict(zip(got["ids"], got["metadatas"]))
+    reingest({"id": A, "content_hash": "h1", "chunk_ids": "[]", "version": 2}, first + " Gamma.", "h2")
+    got = col.get(where={"artifact_id": A}, include=["metadatas"])
+    now = dict(zip(got["ids"], got["metadatas"]))
+    kept = set(v1) & _current_of(col, A)
+    assert kept and _current_of(col, A) - kept  # some passages carried over, some are new
+    for cid in kept:
+        assert now[cid]["valid_from"] == v1[cid]["valid_from"]
+    for cid in _current_of(col, A) - kept:
+        assert now[cid]["valid_from"] > v1[next(iter(kept))]["valid_from"]
+
+
+def test_going_back_to_an_earlier_text_reopens_its_passages(store, reingest):
+    col = _coll(store, "general")
+    one, two = "The office is on the fifth floor.", "The office is on the ninth floor."
+    reingest({"id": A, "content_hash": "", "chunk_ids": "[]"}, one, "h1")
+    first_rows = _current_of(col, A)
+    reingest({"id": A, "content_hash": "h1", "chunk_ids": "[]", "version": 2}, two, "h2")
+    assert _current_of(col, A).isdisjoint(first_rows)
+    reingest({"id": A, "content_hash": "h2", "chunk_ids": "[]", "version": 3}, one, "h3")
+    assert _current_of(col, A) == first_rows  # the same text is the same rows, open again
+    got = col.get(ids=sorted(first_rows), include=["metadatas"])
+    assert all(m["version"] == 4 and m["valid_to"] == "" for m in got["metadatas"])
 
 
 def test_force_reindex_of_unchanged_text_keeps_its_hype_questions(store, reingest):
     """The same text yields the same chunk ids, so its questions still hold and
     nothing on this path would generate them again."""
     col, hype = _coll(store, "general"), _hype(store, "general")
+    reingest({"id": A, "content_hash": "", "chunk_ids": "[]"}, "the same note", "same")
+    children = [c for c in _current_of(col, A)
+                if (col.get(ids=[c], include=["metadatas"])["metadatas"][0] or {}).get("chunk_level") != "parent"]
+    _seed_hype(hype, A, children)
+    a_hype = _rows_of(hype, A)
+
+    reingest({"id": A, "content_hash": "same", "chunk_ids": json.dumps(children)}, "the same note", "same")
+
+    assert a_hype and _rows_of(hype, A) == a_hype
+
+
+def test_force_reindex_that_chunks_the_same_text_differently_replaces_rows_not_versions(
+    store, reingest, monkeypatch,
+):
+    """Re-chunking unchanged text is not a new version: rows it no longer
+    produces go, with their questions, instead of becoming history."""
+    col, hype = _coll(store, "general"), _hype(store, "general")
     old_children = _seed(col, A)
     _seed_hype(hype, A, old_children)
-    a_hype = _rows_of(hype, A)
     prev = {"id": A, "content_hash": "same", "chunk_ids": json.dumps(old_children)}
 
     reingest(prev, "the same note", "same")
 
-    assert _rows_of(hype, A) == a_hype
+    assert not set(old_children) & _ids(col)
+    assert col.get(where={"$and": [{"artifact_id": A}, {"version_closed": 1}]})["ids"] == []
+    assert hype.get(where={"source_artifact_id": A})["ids"] == []
 
 
 # ── the other removal paths ──────────────────────────────────────────────────

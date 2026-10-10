@@ -4,7 +4,7 @@
 """Bi-temporal memory plan Phase B — config-level contract tests.
 
 Covers B2 (GRAPH_RELATIONSHIP_TYPES additions + the Cypher-injection
-regex guard) and B3 (ENABLE_FACT_INVALIDATION_FILTER default). No
+regex guard). No
 Neo4j / no live services — pure config module assertions, mirroring
 tests/test_email_attachment_ingestion.py's
 test_unknown_relationship_type_blocked_by_settings_allowlist idiom.
@@ -47,38 +47,10 @@ class TestGraphRelationshipTypes:
             )
 
 
-class TestFactInvalidationFilterFlag:
-    def test_default_is_off(self, monkeypatch) -> None:
-        """No writer exists yet (m0006 is schema-only) — default OFF,
-        mirroring how ENABLE_MEMORY_SUPERSESSION_FILTER's read-time
-        filter only shipped default-ON once its write path existed."""
-        monkeypatch.delenv("ENABLE_FACT_INVALIDATION_FILTER", raising=False)
-        import importlib
+def test_the_retired_read_flags_are_gone() -> None:
+    """Recall's two flags gave way to the shared read filter (forget phase 5):
+    the current version is the only one returned, with no switch to turn it off."""
+    from config import features
 
-        from config import features
-        importlib.reload(features)
-        try:
-            assert features.ENABLE_FACT_INVALIDATION_FILTER is False
-        finally:
-            importlib.reload(features)
-
-    def test_env_override_enables(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_FACT_INVALIDATION_FILTER", "true")
-        import importlib
-
-        from config import features
-        importlib.reload(features)
-        try:
-            assert features.ENABLE_FACT_INVALIDATION_FILTER is True
-        finally:
-            monkeypatch.delenv("ENABLE_FACT_INVALIDATION_FILTER", raising=False)
-            importlib.reload(features)
-
-    def test_not_registered_in_feature_toggles_runtime_registry(self) -> None:
-        """Mirrors ENABLE_MEMORY_SUPERSESSION_FILTER's shape exactly: it is
-        a standalone module-level ENABLE_* var, not one of the curated
-        entries in FEATURE_TOGGLES (config/features.py:452-475)."""
-        from config.features import FEATURE_TOGGLES
-
-        assert "enable_fact_invalidation_filter" not in FEATURE_TOGGLES
-        assert "enable_memory_supersession_filter" not in FEATURE_TOGGLES
+    assert not hasattr(features, "ENABLE_FACT_INVALIDATION_FILTER")
+    assert not hasattr(features, "ENABLE_MEMORY_SUPERSESSION_FILTER")

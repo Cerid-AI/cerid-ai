@@ -5,7 +5,7 @@
  * KB context utilities — semantic dedup + domain headers for LLM injection.
  */
 
-import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult } from "./types"
+import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, HistoryEntry } from "./types"
 
 // ---------------------------------------------------------------------------
 // Context budget — mirrors backend MODEL_CONTEXT_CHAR_BUDGETS (settings.py)
@@ -149,7 +149,18 @@ export function formatChunkWithHeader(source: KBQueryResult): string {
   const dateStr = extractDate(source.created_at)
   if (dateStr) attrs.push(`date="${dateStr}"`)
   const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : ""
-  return `<document${attrStr}>\n${source.content}\n</document>`
+  return `<document${attrStr}>\n${source.content}${historyBlock(source.history)}\n</document>`
+}
+
+/**
+ * Earlier versions of a document or memory, for the model: the current value is
+ * the content above, and the preamble tells the model to answer from it and
+ * mention an earlier one when it matters. Empty when there is no history.
+ */
+export function historyBlock(history: HistoryEntry[] | undefined): string {
+  if (!history?.length) return ""
+  const lines = history.map((h) => `- until ${extractDate(h.valid_to) ?? "unknown"}: ${h.value}`)
+  return `\n<history>\n${lines.join("\n")}\n</history>`
 }
 
 /**
@@ -175,7 +186,7 @@ export function formatMemoryForInjection(memory: MemoryRecallResult): string {
   if (memory.age_days != null) attrs.push(`age_days="${Math.round(memory.age_days)}"`)
   const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : ""
   const label = memory.summary || memory.content
-  return `<memory${attrStr}>\n${label}\n</memory>`
+  return `<memory${attrStr}>\n${label}${historyBlock(memory.history)}\n</memory>`
 }
 
 /**
@@ -193,6 +204,7 @@ export function memoryToKBResult(memory: MemoryRecallResult): KBQueryResult {
     collection: "memories",
     ingested_at: "",
     source_type: "memory",
+    ...(memory.history?.length ? { history: memory.history } : {}),
   }
 }
 

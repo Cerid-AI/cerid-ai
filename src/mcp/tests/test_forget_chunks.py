@@ -60,6 +60,8 @@ class Graph:
         if "SET m.chunk_ids" in query:
             self.mentions[p["rid"]] = p["ids"]
             return _Result([])
+        if "SET e.summary_refresh_due" in query or "SET s.summary_stale" in query:
+            return _Result([])  # derived pages and summaries (none here)
         raise AssertionError(query)
 
 

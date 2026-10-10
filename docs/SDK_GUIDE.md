@@ -2,12 +2,14 @@
 
 Stable, versioned API for external consumers at `/sdk/v1/`. This contract
 survives internal refactoring of core paths. Current wire-protocol version:
-**1.4.0**. Client packages are `cerid-sdk`
+**1.5.0**. Client packages are `cerid-sdk`
 ([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
 ([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.3.0** in this
 tree; the registries serve 0.2.2 until 0.3.0 is published, which is a separate
 step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
-product. New in 1.4.0: forgetting with a confirmation step (see "Forget" below).
+product. New in 1.5.0: `as_of` on query, search and memory recall, and history on
+results (see "Versions and history" below). New in 1.4.0: forgetting with a
+confirmation step (see "Forget" below).
 New in 1.3.0: the hallucination `summary` carries an integer
 `agreed`, and `verified` counts only claims a source backs (see "Verify
 claims" in the Python quickstart below). Additive in 1.2.0:
@@ -347,7 +349,7 @@ request.
 **GET /sdk/v1/settings**
 
 ```json
-{"version": "1.4.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
+{"version": "1.5.0", "tier": "community", "features": {"hallucination_check": true, "workflow_engine": false}}
 ```
 
 ## Rate Limiting
@@ -463,5 +465,26 @@ done = client.kb.forget_execute(preview.confirm_token)
 const artifactId = "a".repeat(64); // an id from a search or ingest result
 const preview = await client.kb.forgetPreview([{ kind: "artifact", id: artifactId }], { mode: "trash" });
 const done = await client.kb.forgetExecute(preview.confirm_token);
+```
+
+## Versions and history
+
+When newer knowledge replaces older, Cerid keeps the older as history. Query,
+search and memory recall return only the current version of anything with
+history, and a result whose content has earlier versions carries `history`:
+up to three `{value, valid_from, valid_to}` entries, newest first, so an answer
+can say "this is Y, but it used to be X". Pass `as_of` (an ISO date or
+datetime) to ask what was in force then; a date covers the whole day.
+
+```python
+now = client.kb.query("Which floor is the office on?")
+for result in now.results:
+    print(result.get("content"), result.get("history"))
+then = client.kb.query("Which floor is the office on?", as_of="2025-12-31")
+```
+
+```typescript
+const now = await client.kb.query({ query: "Which floor is the office on?" });
+const then = await client.kb.query({ query: "Which floor is the office on?", as_of: "2025-12-31" });
 ```
 

@@ -24,6 +24,9 @@ import config
 from config.settings import MEMORY_TYPE_MIGRATION
 from core.agents.fact_derivation import OPEN_INTERVAL, resolve_valid_from
 from core.context.identity import with_tenant_scope
+from core.forget.read_filter import visible
+from core.lineage.current import CANDIDATE_OVERFETCH, is_current_memory, version_fields
+from core.lineage.history import attach_history
 from core.retrieval.artifact_rows import VERIFIED_MEMORY_PREFIX
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
@@ -35,6 +38,8 @@ from core.utils.time import utcnow, utcnow_iso
 from utils.encryption import decrypt_field
 
 logger = logging.getLogger("ai-companion.memory")
+
+_CONFLICT_CANDIDATES = 5
 
 # ---------------------------------------------------------------------------
 # Phase K2.1 — entity-extraction enqueue dependency injection slot.
@@ -267,6 +272,48 @@ async def extract_memories(
 # Store extracted memories
 # ---------------------------------------------------------------------------
 
+async def _supersede_memory(
+    neo4j_driver: Any,
+    chroma_client: Any,
+    old_id: str,
+    new_id: str,
+    *,
+    valid_to: str,
+    new_content: str,
+    redis_client: Any = None,
+) -> None:
+    """Close ``old_id`` in favour of ``new_id`` through the lineage writer, then
+    surface a genuine disagreement on the contradiction ledger. Best-effort: a
+    refused or failed supersede leaves both versions as they were and never
+    loses the new memory."""
+    from core.agents.fact_invalidation import route_supersession_to_ledger
+    from core.lineage import writer
+
+    try:
+        old_content = await asyncio.to_thread(_memory_text, chroma_client, old_id)
+        result = await asyncio.to_thread(
+            writer.supersede, neo4j_driver, chroma_client, old_id, new_id, valid_to=valid_to,
+        )
+    except Exception as exc:  # noqa: BLE001 — supersession must not break the store path
+        log_swallowed_error("core.agents.memory.supersede", exc, redis_client=redis_client)
+        return
+    if not result.ok:
+        logger.warning("Memory %s not superseded by %s: %s", old_id, new_id, result.reason)
+        return
+    await route_supersession_to_ledger(
+        old_content=old_content, new_content=new_content, old_artifact_id=old_id,
+    )
+
+
+def _memory_text(chroma_client: Any, memory_id: str) -> str:
+    if chroma_client is None:
+        return ""
+    got = chroma_client.get_or_create_collection(name=config.collection_name("conversations")).get(
+        where={"artifact_id": {"$eq": memory_id}}, include=["documents"],
+    )
+    return next((d for d in got.get("documents") or [] if d and d.strip()), "")
+
+
 async def extract_and_store_memories(
     response_text: str,
     conversation_id: str,
@@ -334,15 +381,11 @@ async def extract_and_store_memories(
     # Import consolidation only when enabled (avoids import cost when disabled)
     consolidation_enabled = False
     classify_memory: Any = None
-    mark_superseded: Any = None
     try:
         from config.features import FEATURE_TOGGLES
         consolidation_enabled = FEATURE_TOGGLES.get("enable_memory_consolidation", False)
         if consolidation_enabled:
-            from core.agents.memory_consolidation import (
-                classify_memory,
-                mark_superseded,
-            )
+            from core.agents.memory_consolidation import classify_memory
     except ImportError:
         pass
 
@@ -472,50 +515,12 @@ async def extract_and_store_memories(
                 stored = True
                 new_artifact_id = result.get("artifact_id", "")
 
-                # Mark superseded memory if this was an UPDATE
-                if (
-                    action_label == "UPDATE"
-                    and supersede_target
-                    and neo4j_driver
-                    and new_artifact_id
-                    and mark_superseded is not None
-                ):
-                    await asyncio.to_thread(
-                        mark_superseded, neo4j_driver, supersede_target, new_artifact_id
+                if action_label == "UPDATE" and supersede_target and neo4j_driver and new_artifact_id:
+                    await _supersede_memory(
+                        neo4j_driver, chroma_client, supersede_target, new_artifact_id,
+                        valid_to=metadata["valid_from"], new_content=effective_content,
+                        redis_client=redis_client,
                     )
-
-                    # Phase D — close the superseded memory's bi-temporal fact
-                    # intervals in BOTH stores so the :Fact layer never diverges
-                    # from the memory layer (plan R4/R7). chroma_client is
-                    # already DI-threaded into this function (like neo4j_driver);
-                    # resolve the conversations collection the same way recall /
-                    # conflict-detection do — no app import (core↛app). Wholly
-                    # best-effort: closure must never break the store path.
-                    try:
-                        from core.agents.fact_invalidation import (
-                            close_superseded_memory_intervals,
-                        )
-
-                        fact_collection = None
-                        if chroma_client is not None:
-                            fact_collection = await asyncio.to_thread(
-                                chroma_client.get_or_create_collection,
-                                name=config.collection_name("conversations"),
-                            )
-                        await close_superseded_memory_intervals(
-                            neo4j_driver,
-                            fact_collection,
-                            old_artifact_id=supersede_target,
-                            new_artifact_id=new_artifact_id,
-                            new_valid_from=metadata["valid_from"],
-                            new_content=effective_content,
-                        )
-                    except Exception as exc:  # noqa: BLE001 — closure must not break the store path
-                        log_swallowed_error(
-                            "core.agents.memory.fact_invalidation",
-                            exc,
-                            redis_client=redis_client,
-                        )
 
                 if redis_client:
                     try:
@@ -665,7 +670,7 @@ async def detect_memory_conflict(
         collection = chroma_client.get_or_create_collection(name=coll_name)
         results = collection.query(
             query_texts=[new_memory_text],
-            n_results=5,
+            n_results=_CONFLICT_CANDIDATES * CANDIDATE_OVERFETCH,
             include=["documents", "metadatas", "distances"],
             where=with_tenant_scope(None),
         )
@@ -681,8 +686,8 @@ async def detect_memory_conflict(
     for i, chunk_id in enumerate(results["ids"][0]):
         distance = results["distances"][0][i] if results["distances"] else 1.0
         similarity = l2_distance_to_relevance(distance)
-        if similarity >= similarity_threshold:
-            metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+        metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+        if similarity >= similarity_threshold and is_current_memory(metadata):
             conflicts.append({
                 "memory_id": metadata.get("artifact_id", chunk_id),
                 "text": results["documents"][0][i] if results["documents"] else "",
@@ -690,7 +695,7 @@ async def detect_memory_conflict(
                 "created_at": metadata.get("valid_from", metadata.get("ingested_at", "")),
             })
 
-    return conflicts
+    return conflicts[:_CONFLICT_CANDIDATES]
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +892,7 @@ async def recall_memories(
     neo4j_driver: Any,
     top_k: int = 10,
     min_score: float | None = None,
+    as_of: str | None = None,
 ) -> list[dict]:
     """Context-aware memory retrieval with decay scoring.
 
@@ -1014,44 +1020,22 @@ async def recall_memories(
                 "summary": decrypt_field(str(metadata.get("summary", "")))
                 if metadata.get("summary")
                 else "",
-                # Bi-temporal valid-time end: "" (OPEN_INTERVAL) = still true;
-                # a non-empty value marks a closed interval (Phase D). Captured
-                # here so the read-side admission filter below can drop closed
-                # intervals without a second Chroma round-trip.
-                "valid_to": metadata.get("valid_to", OPEN_INTERVAL),
+                # The version fields (valid_from, valid_to, lineage_id, ...):
+                # the shared read filter below admits only the version current
+                # now, or in force at ``as_of``, without another round-trip.
+                **version_fields(metadata),
             })
 
-    # Step 3.5: Supersession-at-read — drop candidates explicitly marked
-    # superseded by a newer fact. The write path sets ``superseded_by`` (via
-    # conflict resolution / mark_superseded), but recall previously ignored it
-    # and could surface a stale value alongside its replacement — the
-    # knowledge-update failure mode. We check Neo4j once for the whole candidate
-    # set using the driver this function already holds (keeping the core↛app
-    # boundary intact — no app.db import). Best-effort: a Neo4j hiccup leaves
-    # recall unchanged rather than failing.
-    from config.features import ENABLE_MEMORY_SUPERSESSION_FILTER
-
-    if ENABLE_MEMORY_SUPERSESSION_FILTER and neo4j_driver and scored_memories:
-        candidate_ids = [m["memory_id"] for m in scored_memories]
-        try:
-            with neo4j_driver.session() as session:
-                rows = session.run(
-                    "UNWIND $ids AS aid "
-                    "MATCH (a:Artifact {id: aid}) "
-                    "WHERE a.superseded_by IS NOT NULL "
-                    "RETURN a.id AS id",
-                    ids=candidate_ids,
-                )
-                superseded_ids = {r["id"] for r in rows}
-        except Exception as exc:  # noqa: BLE001 — recall proceeds unfiltered
-            log_swallowed_error(
-                "core.agents.memory.recall_memories_supersession", exc,
-            )
-            superseded_ids = set()
-        if superseded_ids:
-            scored_memories = [
-                m for m in scored_memories if m["memory_id"] not in superseded_ids
-            ]
+    # Step 3.5: one read filter for every retrieval path (spec §7): nothing
+    # forgotten, and of each memory's lineage only the version current now, or
+    # in force at ``as_of``. The lineage writer stamps every Chroma row of a
+    # version it closes, so the metadata already read here is authoritative.
+    if scored_memories:
+        kept = {
+            m["chunk_id"]
+            for m in visible([{**m, "artifact_id": m["memory_id"]} for m in scored_memories], as_of)
+        }
+        scored_memories = [m for m in scored_memories if m["chunk_id"] in kept]
 
     # Drop archived candidates. The flag is set on the Neo4j node (retention
     # sweep, soft delete, quarantine) and is not in the Chroma metadata, so it
@@ -1075,38 +1059,10 @@ async def recall_memories(
                 m for m in scored_memories if m["memory_id"] not in archived_ids
             ]
 
-    # Step 3.6: Interval admission (bi-temporal :Fact layer, plan D3) — drop
-    # candidates whose validity interval is CLOSED (non-empty valid_to). DARK by
-    # default (ENABLE_FACT_INVALIDATION_FILTER, default off): with the flag off,
-    # this block is skipped entirely and recall is byte-identical to before.
-    # Missing / empty valid_to = open = admitted (back-compat with pre-Phase-C
-    # memories that were never stamped). No extra Neo4j round-trip: the write
-    # side keeps the two stores in lockstep (close_superseded_memory_intervals
-    # mirror-closes the Chroma valid_to whenever it closes a :Fact), so the
-    # Chroma metadata already surfaced here is authoritative for admission.
-    #
-    # PRECEDENCE (plan F2 — validity gates ADMISSIBILITY, boosts order the
-    # SURVIVORS): this admission filter (and Step 3.5's supersession filter) run
-    # BEFORE the Step 4 ordering below — they REMOVE candidates from
-    # scored_memories, so nothing downstream can resurrect a closed interval. The
-    # only ranking signal here (adjusted_score, computed in the Step 2a scoring
-    # loop) is applied purely by the Step 4 `sort` over whatever survives
-    # admission; no proximity/recency boost is added after this point, so a boost
-    # can never re-admit a filtered candidate. The event-time proximity boost
-    # (core/retrieval/temporal_filter.apply_proximity_boost) is additive-only and
-    # lives on the retrieval-ranking path, never here — it reorders, never admits.
-    from config.features import ENABLE_FACT_INVALIDATION_FILTER
-
-    if ENABLE_FACT_INVALIDATION_FILTER and scored_memories:
-        scored_memories = [
-            m
-            for m in scored_memories
-            if not str(m.get("valid_to", OPEN_INTERVAL)).strip()
-        ]
-
     # Step 4: Sort by adjusted score descending
     scored_memories.sort(key=lambda m: m["adjusted_score"], reverse=True)
     top_results = scored_memories[:top_k]
+    attach_history(top_results, chroma_client, neo4j_driver)
 
     # Step 3: Reinforce access counts for retrieved memories
     if neo4j_driver and top_results:

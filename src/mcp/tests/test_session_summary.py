@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -209,8 +210,8 @@ _SUMMARY = {
     "event_date": "2026-06-01",
 }
 _TURNS = [
-    {"content": "turn one", "created_at": "2026-06-01T10:00:00+00:00", "valid_from": "2026-06-01"},
-    {"content": "turn two", "created_at": "2026-06-01T10:05:00+00:00", "valid_from": "2026-06-01"},
+    {"chunk_id": "t1", "content": "turn one", "created_at": "2026-06-01T10:00:00+00:00", "valid_from": "2026-06-01"},
+    {"chunk_id": "t2", "content": "turn two", "created_at": "2026-06-01T10:05:00+00:00", "valid_from": "2026-06-01"},
 ]
 
 
@@ -248,7 +249,7 @@ async def test_run_no_op_when_flag_off(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_skips_when_already_summarized(monkeypatch):
     monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
-    driver, _sess = _fake_driver(single_row={"id": "existing-summary"})
+    driver, _sess = _fake_driver(single_row={"ids": ["existing-summary"], "stale": False})
 
     with (
         patch("app.deps.get_neo4j", return_value=driver),
@@ -359,3 +360,161 @@ def test_enqueue_session_summary_job_dedups_via_if_absent():
     assert job_id == "job-1"
     _job, kwargs = mock_enq.call_args
     assert kwargs["payload"] == {"conversation_id": "conv-9", "tenant_id": "default"}
+
+
+# ---- a summary whose memories changed (forget phase 5, spec §7) ----
+
+@pytest.mark.asyncio
+async def test_a_stale_summary_is_written_again_and_the_old_one_erased(monkeypatch):
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, sess = _fake_driver(single_row={"ids": ["art:old"], "stale": True})
+    erased: list[Any] = []
+    monkeypatch.setattr("app.services.forget.engine.forget_available", lambda: True)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, requested_by: erased.append(([s.id for s in subjects], requested_by)) or {},
+    )
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", return_value=_TURNS),
+        patch("core.agents.session_summary.summarize_session", new_callable=AsyncMock, return_value=_SUMMARY),
+        patch("app.services.ingestion.ingest_content",
+              return_value={"status": "success", "artifact_id": "art:new"}),
+    ):
+        result = await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+
+    assert result.metadata["artifact_id"] == "art:new" and result.metadata["retired"] == 1
+    assert erased == [(["art:old"], "derived")]
+    marks = [c.args[0] for c in sess.run.call_args_list if "SET a.memory_scope" in c.args[0]]
+    assert marks and "REMOVE a.summary_stale" in marks[0]
+
+
+@pytest.mark.asyncio
+async def test_the_same_text_again_keeps_its_summary(monkeypatch):
+    """Content-addressed: an unchanged summary comes back under its own id."""
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, _sess = _fake_driver(single_row={"ids": ["art:same"], "stale": True})
+    forget = MagicMock()
+    monkeypatch.setattr("app.services.forget.engine.forget_permanently", forget)
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", return_value=_TURNS),
+        patch("core.agents.session_summary.summarize_session", new_callable=AsyncMock, return_value=_SUMMARY),
+        patch("app.services.ingestion.ingest_content",
+              return_value={"status": "duplicate", "artifact_id": "art:same"}),
+    ):
+        result = await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+    assert result.metadata["retired"] == 0
+    forget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_summary_with_nothing_left_to_summarize_is_erased(monkeypatch):
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, _sess = _fake_driver(single_row={"ids": ["art:old"], "stale": True})
+    erased: list[Any] = []
+    monkeypatch.setattr("app.services.forget.engine.forget_available", lambda: True)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, requested_by: erased.append([s.id for s in subjects]) or {},
+    )
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", return_value=[]),
+    ):
+        result = await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+    assert result.metadata["skipped"] == "no_memories" and erased == [["art:old"]]
+
+
+def test_only_current_memories_are_summarized(monkeypatch):
+    from core.forget import registry as forget_registry
+    from tests.helpers.fake_chroma import FakeChromaClient, FakeChromaCollection
+
+    col = FakeChromaCollection("conversations")
+    rows = {
+        "now": {"memory_type": "fact", "valid_to": ""},
+        "before": {"memory_type": "fact", "valid_to": "2026-06-01", "superseded_by": "now", "version_closed": 1},
+        "trashed": {"memory_type": "fact", "valid_to": ""},
+        "summary": {"memory_type": "fact", "memory_scope": "session_summary"},
+        "child": {"memory_type": "fact", "valid_to": "", "parent_chunk_id": "parent_c"},
+    }
+    for cid, meta in rows.items():
+        col.upsert(ids=[f"{cid}_c"], documents=[f"text {cid}"], embeddings=[[1.0, 0.0]],
+                   metadatas=[{"artifact_id": cid, "conversation_id": "conv-1", **meta}])
+    gone = {"artifact": frozenset({"trashed"}), "chunk": frozenset({"parent_c"})}
+    monkeypatch.setattr(forget_registry, "forgotten_ids", lambda kind: gone.get(kind, frozenset()))
+    monkeypatch.setattr("core.forget.read_filter.forgotten_ids", lambda kind: gone.get(kind, frozenset()))
+    monkeypatch.setattr("config.collection_name", lambda domain: "conversations")
+    from app.processor.jobs.session_summary import _fetch_session_turns
+
+    turns = _fetch_session_turns(FakeChromaClient([col]), "conv-1")
+    assert [t["content"] for t in turns] == ["text now"]
+
+
+@pytest.mark.asyncio
+async def test_a_memory_forgotten_while_summarizing_takes_the_new_summary_with_it(monkeypatch):
+    """The forget's refresh collapses onto the running job, which read the memory first."""
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, _sess = _fake_driver(single_row=None)
+    erased: list[Any] = []
+    monkeypatch.setattr("app.services.forget.engine.forget_available", lambda: True)
+    monkeypatch.setattr(
+        "app.services.forget.engine.forget_permanently",
+        lambda subjects, requested_by: erased.append([s.id for s in subjects]) or {},
+    )
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", side_effect=[_TURNS, _TURNS[:1]]),
+        patch("core.agents.session_summary.summarize_session", new_callable=AsyncMock, return_value=_SUMMARY),
+        patch("app.services.ingestion.ingest_content",
+              return_value={"status": "success", "artifact_id": "art:new"}),
+    ):
+        result = await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+    assert result.metadata["skipped"] == "inputs_changed" and erased == [["art:new"]]
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_be_read_erases_nothing(monkeypatch):
+    """None is "could not read": a stale summary is not taken for one with nothing left."""
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, _sess = _fake_driver(single_row={"ids": ["art:old"], "stale": True})
+    forget = MagicMock()
+    monkeypatch.setattr("app.services.forget.engine.forget_permanently", forget)
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", return_value=None),
+        pytest.raises(RuntimeError),
+    ):
+        await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+    forget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_summary_keeps_the_stale_one(monkeypatch):
+    monkeypatch.setattr("config.features.ENABLE_SESSION_SUMMARIZATION", True)
+    driver, _sess = _fake_driver(single_row={"ids": ["art:old"], "stale": True})
+    forget = MagicMock()
+    monkeypatch.setattr("app.services.forget.engine.forget_permanently", forget)
+    with (
+        patch("app.deps.get_neo4j", return_value=driver),
+        patch("app.deps.get_chroma", return_value=MagicMock()),
+        patch("app.processor.jobs.session_summary._fetch_session_turns", return_value=_TURNS),
+        patch("core.agents.session_summary.summarize_session", new_callable=AsyncMock, return_value=None),
+    ):
+        result = await SessionSummaryJob(conversation_id="conv-1").run(_noop_progress)
+    assert result.metadata["skipped"] == "summary_empty"
+    forget.assert_not_called()
+
+
+def test_a_collection_that_cannot_be_read_is_not_an_empty_one():
+    from app.processor.jobs.session_summary import _fetch_session_turns
+
+    broken = MagicMock()
+    broken.get_or_create_collection.side_effect = RuntimeError("chroma down")
+    assert _fetch_session_turns(broken, "conv-1") is None
+    assert _fetch_session_turns(None, "conv-1") is None

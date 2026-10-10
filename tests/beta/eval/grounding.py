@@ -29,8 +29,10 @@ RAG_SYSTEM_PREAMBLE = KB_CONTEXT_SENTINEL + "\n" + (
     'time-sensitive values (prices, versions, schedules), treat the documents as '
     "point-in-time records — qualify with the document's date if shown, otherwise present "
     'the value as a recorded (possibly outdated) value, never as current; suggest '
-    'checking a live source when currency matters. When documents conflict about the same '
-    "fact, trust the most recently dated one. (4) If the documents don't cover the "
+    'checking a live source when currency matters. When a document shows earlier versions '
+    'in a <history> block, answer from its current value and mention an earlier one when it '
+    'matters to the question ("this is Y; it used to be X"); otherwise, when documents '
+    "conflict about the same fact, trust the most recently dated one. (4) If the documents don't cover the "
     'question, say so plainly, then answer from general knowledge if you can, labeled as '
     'such. A clear "your knowledge base doesn\'t cover this" is better than a guess. (5) '
     'For analytical questions — counting or combining facts across documents, date '
@@ -76,7 +78,19 @@ def format_document(source: dict[str, Any]) -> str:
     if len(created) >= 10 and created[4] == "-" and created[7] == "-" and created[:4].isdigit():
         attrs.append(f'date="{created[:10]}"')
     attr_str = (" " + " ".join(attrs)) if attrs else ""
-    return f"<document{attr_str}>\n{source.get('content', '')}\n</document>"
+    return f"<document{attr_str}>\n{source.get('content', '')}{history_block(source.get('history'))}\n</document>"
+
+
+def history_block(history: list[dict[str, Any]] | None) -> str:
+    """Earlier versions of a result, as the client renders them (``historyBlock``)."""
+    if not history:
+        return ""
+    lines = []
+    for entry in history:
+        until = str(entry.get("valid_to") or "")
+        date = until[:10] if len(until) >= 10 and until[4] == "-" and until[7] == "-" else "unknown"
+        lines.append(f"- until {date}: {entry.get('value', '')}")
+    return "\n<history>\n" + "\n".join(lines) + "\n</history>"
 
 
 def grounded_turn(sources: list[dict[str, Any]]) -> tuple[str | None, list[str]]:

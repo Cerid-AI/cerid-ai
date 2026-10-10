@@ -384,6 +384,7 @@ def get_entity(driver: Any, slug: str) -> dict[str, Any] | None:
             artifacts_result = session.run(
                 """
                 MATCH (a:Artifact)-[m:MENTIONS]->(e:Entity {canonical_id: $slug})
+                WHERE coalesce(a.archived, false) = false
                 RETURN
                     a.id                              AS artifact_id,
                     a.title                           AS title,

@@ -504,6 +504,15 @@ export interface KBQueryResult {
   starred?: boolean
   evergreen?: boolean
   retrieval_count?: number
+  /** Earlier versions of what this result says, newest first (forget phase 5). */
+  history?: HistoryEntry[]
+}
+
+/** One earlier version: what it said and when it was in force. */
+export interface HistoryEntry {
+  value: string
+  valid_from: string
+  valid_to: string
 }
 
 export interface MemoryRecallResult {
@@ -522,6 +531,8 @@ export interface MemoryRecallResult {
   /** How the forget engine names this memory: a verified memory is a "memory",
    *  any other is the "artifact" it was stored as. */
   forget_kind?: "artifact" | "memory"
+  /** Earlier versions of this memory, newest first. */
+  history?: HistoryEntry[]
 }
 
 export interface ExternalSourceResult {

@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.lineage.current import AS_OF_DESCRIPTION, AS_OF_PATTERN
+
 
 class _SDKBase(BaseModel):
     """Base for all SDK response models — allows extra fields for forward compat."""
@@ -53,6 +55,7 @@ class SDKSearchRequest(BaseModel):
         default=False,
         description="Drop knowledge-pack chunks from retrieval (personal-first KB search).",
     )
+    as_of: str | None = Field(default=None, pattern=AS_OF_PATTERN, description=AS_OF_DESCRIPTION)
 
 
 class SDKSearchResponse(_SDKBase):
@@ -261,6 +264,7 @@ class SDKMemoryRecallRequest(BaseModel):
     query: str = Field(description="Query to recall memories against")
     top_k: int = Field(default=5, ge=1, le=50, description="Maximum memories to return")
     min_score: float = Field(default=0.4, ge=0.0, le=1.0, description="Minimum adjusted score")
+    as_of: str | None = Field(default=None, pattern=AS_OF_PATTERN, description=AS_OF_DESCRIPTION)
 
 
 class SDKMemoryRecallResponse(_SDKBase):

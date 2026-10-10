@@ -54,6 +54,12 @@ export interface QueryRequest {
   context_sources?: { kb?: boolean; memory?: boolean; external?: boolean } | null;
   rag_mode?: string | null;
   source_config?: Record<string, unknown> | null;
+  /**
+   * Answer as of this date (ISO date or datetime): the version of each memory or
+   * document in force then. Omitted, only current versions are returned, and a
+   * result with earlier versions carries `history`.
+   */
+  as_of?: string | null;
 }
 
 export interface HallucinationCheckRequest {
@@ -73,6 +79,12 @@ export interface MemoryRecallRequest {
   query: string;
   top_k?: number;
   min_score?: number;
+  /**
+   * Answer as of this date (ISO date or datetime): the version of each memory or
+   * document in force then. Omitted, only current versions are returned, and a
+   * result with earlier versions carries `history`.
+   */
+  as_of?: string | null;
 }
 
 export interface MemoryRecallResponse {
@@ -151,6 +163,12 @@ export interface SearchRequest {
    * content (personal-first retrieval). Defaults to false server-side.
    */
   exclude_packs?: boolean;
+  /**
+   * Answer as of this date (ISO date or datetime): the version of each memory or
+   * document in force then. Omitted, only current versions are returned, and a
+   * result with earlier versions carries `history`.
+   */
+  as_of?: string | null;
 }
 
 // ---------------------------------------------------------------------------

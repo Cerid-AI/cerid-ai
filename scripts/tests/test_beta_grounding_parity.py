@@ -69,3 +69,17 @@ def test_document_attributes_come_in_the_clients_order():
         "created_at": "2025-01-02T03:04:05Z", "content": "x",
     })
     assert re.findall(r' (\w+)="', rendered.splitlines()[0]) == client_order
+
+
+def test_history_renders_as_the_client_renders_it():
+    """A result with earlier versions carries them in a <history> block inside
+    its <document>, one "- until <date>: <value>" line each (kb-utils.ts historyBlock)."""
+    kb_utils = _ts("lib/kb-utils.ts")
+    assert "<history>" in kb_utils and "- until ${" in kb_utils
+    rendered = grounding.format_document({
+        "content": "Office is on the 9th floor",
+        "history": [{"value": "Office is on the 5th floor", "valid_from": "2025-06-01",
+                     "valid_to": "2026-05-01T00:00:00Z"}],
+    })
+    assert rendered == ("<document>\nOffice is on the 9th floor\n<history>\n"
+                        "- until 2026-05-01: Office is on the 5th floor\n</history>\n</document>")

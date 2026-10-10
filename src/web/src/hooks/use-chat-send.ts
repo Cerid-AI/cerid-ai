@@ -8,6 +8,7 @@ import { recommendModel } from "@/lib/model-router"
 import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
+import { detectAsOf } from "@/lib/as-of"
 import { RAG_SYSTEM_PREAMBLE } from "@/lib/rag-prompt"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
@@ -261,8 +262,12 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       // the send-time KB query's own envelope when one fires below.
       let effectiveDegradedReason = options.degradedReason ?? ""
       if (options.autoInject && !bypassKB) {
+        // An explicitly historical question ("what was it in 2023") retrieves
+        // what was in force then; the panel's results are current, so they
+        // never stand in for it.
+        const asOf = detectAsOf(content) ?? undefined
         const cacheWarm =
-          options.kbResults.length > 0 && options.kbResultsQuery === content
+          !asOf && options.kbResults.length > 0 && options.kbResultsQuery === content
         let freshResults: KBQueryResult[] = cacheWarm ? options.kbResults : []
         // Only hit the network when the panel has not already retrieved for
         // this text. Wave-0 Task 3: useOrchestratedQuery / useKBContext
@@ -282,12 +287,15 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           // knowledge base stay three different answers all the way to the
           // degraded-reason check below — collapsing them into `null` is what
           // let a KB outage render as "you have nothing about that".
+          // A historical question asks the KB directly with as_of: the shared
+          // retrieval (and its cache) answers for the present.
           const kbLeg: Promise<KBInjectOutcome> = (
-            options.retrieve
+            options.retrieve && !asOf
               ? options.retrieve(content)
               : queryKB(content, undefined, 5, undefined, {
                   signal: injectAbort.signal,
                   excludePacks: !options.includePacks,
+                  asOf,
                 })
           )
             .then((value) => ({ kind: "ok" as const, value }))
@@ -298,7 +306,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             ;[kbOutcome, freshMemories] = await Promise.all([
               Promise.race<KBInjectOutcome>([kbLeg, waitTimeout]),
               memoryOn
-                ? Promise.race([recallMemories(content, 3).catch(() => []), waitTimeout]).catch(() => [])
+                ? Promise.race([recallMemories(content, 3, undefined, asOf).catch(() => []), waitTimeout]).catch(() => [])
                 : Promise.resolve([]),
             ])
           } finally {

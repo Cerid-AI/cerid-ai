@@ -247,9 +247,10 @@ async def test_multi_domain_query_always_passes_tenant_in_where(
 
     assert collection.query_calls, "collection.query was never invoked"
     where = collection.query_calls[0]["where"]
-    # No caller filter → tenant clause + Phase-O.1 pending-exclude.
+    # No caller filter → tenant clause + Phase-O.1 pending-exclude, then the
+    # current-version clause (forget phase 5).
     assert where == {
-        "$and": [{"tenant_id": "alice"}, {"cerid_state": {"$ne": "pending"}}]
+        "$and": [{"tenant_id": "alice"}, {"cerid_state": {"$ne": "pending"}}, {"version_closed": {"$ne": 1}}]
     }, (
         f"vector-search where-clause does not enforce tenant scope: {where!r}"
     )
@@ -287,6 +288,7 @@ async def test_multi_domain_query_fuses_tenant_with_caller_filter(
             {"tenant_id": "alice"},
             {"filename": "report.pdf"},
             {"cerid_state": {"$ne": "pending"}},
+            {"version_closed": {"$ne": 1}},
         ]
     }, f"expected fused $and clause, got {where!r}"
 

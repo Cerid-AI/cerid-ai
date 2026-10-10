@@ -65,6 +65,7 @@ async def guarded_agent_query_full(
     response_text: str | None = None,
     enable_self_rag: bool | None = None,
     debug_timing: bool = False,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Policy-enforcing wrapper over ``agent_query_full``.
 
@@ -100,6 +101,7 @@ async def guarded_agent_query_full(
         response_text=response_text,
         enable_self_rag=enable_self_rag,
         budget_seconds=request_context.budget_seconds,
+        as_of=as_of,
     )
 
 
@@ -111,6 +113,7 @@ async def guarded_recall_memories(
     neo4j_driver: Any | None = None,
     top_k: int = 10,
     min_score: float | None = None,
+    as_of: str | None = None,
 ) -> list[dict]:
     """Policy-enforcing wrapper over ``recall_memories``.
 
@@ -129,4 +132,5 @@ async def guarded_recall_memories(
         neo4j_driver=neo4j_driver,
         top_k=top_k,
         min_score=min_score,
+        as_of=as_of,
     )

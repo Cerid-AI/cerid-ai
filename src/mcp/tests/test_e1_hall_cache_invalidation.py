@@ -55,6 +55,7 @@ def test_permanent_conversation_delete_clears_hall_cache(monkeypatch, tmp_path):
     isolate_forget(monkeypatch, tmp_path)
     monkeypatch.setattr(us, "_sync_dir", lambda: str(tmp_path))
     monkeypatch.setattr("app.services.content_lifecycle.remove_conversation_transcripts", lambda cid: [])
+    monkeypatch.setattr("app.services.content_lifecycle.conversation_transcript_artifact_ids", lambda cid: [])
     monkeypatch.setattr("app.deps.get_redis", lambda: fake)
     monkeypatch.setattr("app.deps.get_neo4j", lambda: MagicMock())
 

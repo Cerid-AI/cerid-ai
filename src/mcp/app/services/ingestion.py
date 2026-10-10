@@ -49,6 +49,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -60,7 +61,8 @@ from app.parsers import parse_file
 from app.services.storage_metrics import get_storage_report
 from core.context.identity import get_tenant_id
 from core.forget import registry as forget_registry
-from core.retrieval.artifact_rows import artifact_row_ids, remove_artifact_hype_rows
+from core.lineage.current import CURRENT_ONLY_WHERE, VERSION_CLOSED
+from core.retrieval.artifact_rows import remove_artifact_hype_rows
 from core.retrieval.chunk_ids import ChunkIdAssigner
 from core.utils import cache
 from core.utils.embeddings import embedding_stamp
@@ -483,6 +485,150 @@ def _check_duplicate(content_hashes: Sequence[str], domain: str) -> dict | None:
     return None
 
 
+def _note_source_path(artifact_id: str, source_path: str | None, filename: str | None) -> None:
+    """Identical content arriving from a path: an artifact with no path yet
+    adopts it, and one whose old path is gone has moved there. A second copy
+    of a file that still exists elsewhere changes nothing."""
+    if not source_path:
+        return
+    try:
+        node = graph.get_artifact_versions(get_neo4j(), artifact_id) or {}
+        known = str(node.get("source_path") or "")
+        # A file is moved only when its old folder can be read and the file is
+        # gone from it; an unmounted folder is not a move.
+        if known == source_path or (known and (os.path.exists(known) or not os.path.isdir(os.path.dirname(known)))):
+            return
+        props: dict[str, Any] = {"source_path": source_path}
+        if known and filename:
+            props["filename"] = filename
+            props["updated_at"] = utcnow_iso()
+        graph.set_artifact_properties(get_neo4j(), artifact_id, props)
+    except Exception as e:  # noqa: BLE001 — identity bookkeeping must not fail the ingest
+        log_swallowed_error("app.services.ingestion.source_path_note", e)
+
+
+def _current_version_rows(collection: Any, artifact_id: str) -> dict[str, dict[str, Any]]:
+    """The rows of an artifact's current version, by chunk id, with metadata."""
+    got = collection.get(
+        where={"$and": [{"artifact_id": artifact_id}, CURRENT_ONLY_WHERE]}, include=["metadatas"],
+    )
+    return {cid: dict(meta or {}) for cid, meta in zip(got.get("ids") or [], got.get("metadatas") or [])}
+
+
+def _open_version_meta(
+    artifact_id: str, version: int, current: dict[str, Any] | None, now: str,
+) -> dict[str, Any]:
+    """Version fields of a row in the current version. A passage the previous
+    version had keeps the time it became true."""
+    return {
+        "lineage_id": artifact_id,
+        "version": version,
+        "valid_from": str((current or {}).get("valid_from") or ("" if current is not None else now)),
+        "valid_to": "",
+        "superseded_by": "",
+        VERSION_CLOSED: 0,
+    }
+
+
+def _close_rows(
+    collection: Any, domain: str, artifact_id: str, version: int,
+    closing: list[str], current_rows: dict[str, dict[str, Any]], now: str,
+) -> None:
+    """Close the passages a new version dropped: they stay, answerable as of
+    their time and as history, and leave the keyword indexes, which serve
+    current text only."""
+    if not closing:
+        return
+    collection.update(ids=closing, metadatas=[
+        {**current_rows[cid], "lineage_id": artifact_id, "version": int(current_rows[cid].get("version") or version),
+         "valid_to": now, VERSION_CLOSED: 1}
+        for cid in closing
+    ])
+    try:
+        from core.retrieval.bm25 import remove_chunks as _bm25_remove
+        _bm25_remove(domain, closing)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.bm25_close_reingest", e)
+    try:
+        from core.retrieval.sparse_index import remove_chunks as _sparse_remove
+        _sparse_remove(domain, closing)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.sparse_close_reingest", e)
+
+
+def _replace_rows(collection: Any, domain: str, artifact_id: str, gone: list[str]) -> None:
+    collection.delete(ids=gone)
+    try:
+        from core.retrieval.artifact_rows import remove_chunk_hype_rows
+        remove_chunk_hype_rows(get_chroma(), collection.name, artifact_id, gone)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.hype_replace_reindex", e)
+    for name, module in (("bm25", "core.retrieval.bm25"), ("sparse", "core.retrieval.sparse_index")):
+        try:
+            import importlib
+            importlib.import_module(module).remove_chunks(domain, gone)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(f"app.services.ingestion.{name}_replace_reindex", e)
+
+
+def _record_document_version(prev: dict, artifact_id: str, version: int, content_hash: str, now: str) -> None:
+    """Note the new version on the node and erase what only versions past
+    ``DOCUMENT_VERSIONS_KEPT`` held, through the forget engine (a receipt, and
+    never a person's forget: ``requested_by`` is retention)."""
+    versions = _json_list_of_dicts(prev.get("versions"))
+    if not versions:
+        versions = [{"version": int(prev.get("version") or 1), "content_hash": prev.get("content_hash") or "",
+                     "valid_from": prev.get("ingested_at") or ""}]
+    versions.append({"version": version, "content_hash": content_hash, "valid_from": now})
+    kept = int(config.DOCUMENT_VERSIONS_KEPT or 0)
+    if kept > 0 and len(versions) > kept:
+        try:
+            _retire_versions(artifact_id, str(versions[-kept]["valid_from"]))
+        except Exception as e:  # noqa: BLE001 — retried at the next re-ingest
+            log_swallowed_error("app.services.ingestion.version_retention", e, context={"artifact_id": artifact_id})
+        versions = versions[-kept:]
+    graph.set_artifact_properties(get_neo4j(), artifact_id, {
+        "version": version, "versions": json.dumps(versions), "lineage_id": artifact_id,
+    })
+
+
+def _retire_versions(artifact_id: str, cutoff: str) -> int:
+    """Erase the closed passages that stopped being true before ``cutoff``,
+    the start of the oldest version kept."""
+    from core.lineage.current import parse_time
+
+    limit = parse_time(cutoff)
+    if limit is None:
+        return 0
+    node = graph.get_artifact_versions(get_neo4j(), artifact_id) or {}
+    collection = get_chroma().get_or_create_collection(name=config.collection_name(str(node.get("domain") or "")))
+    got = collection.get(where={"$and": [{"artifact_id": artifact_id}, {VERSION_CLOSED: 1}]}, include=["metadatas"])
+    old = [
+        cid for cid, meta in zip(got.get("ids") or [], got.get("metadatas") or [])
+        if (end := parse_time((meta or {}).get("valid_to"))) is not None and end <= limit
+    ]
+    if not old:
+        return 0
+    from app.services.forget import engine
+    from core.forget.registry import RETENTION, Subject
+
+    if engine.forget_available():
+        engine.forget_permanently([Subject("chunk", cid) for cid in old], requested_by=RETENTION)
+    else:
+        from app.services.content_lifecycle import remove_chunks
+        remove_chunks(artifact_id, old, str(node.get("domain") or ""))
+    logger.info("Retired %d passages of %s older than its kept versions", len(old), artifact_id[:8])
+    return len(old)
+
+
+def _json_list_of_dicts(raw: Any) -> list[dict[str, Any]]:
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return []
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
 def _drop_purged_chunks(
     records: list[dict[str, Any]], pre_metas: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -492,9 +638,18 @@ def _drop_purged_chunks(
     brings it back. ``pre_metas`` is index-aligned with ``records`` when set."""
     try:
         purged = forget_registry.purged_ids("chunk")
+        retired = forget_registry.get_registry().forgotten_only_by("chunk", forget_registry.VERSION_KEEPING)
     except Exception as exc:  # noqa: BLE001 — an unreadable registry must not block ingest
         log_swallowed_error("app.services.ingestion.purged_chunks", exc)
         return records, pre_metas
+    # A passage removed only by version keeping (its version aged out, or an
+    # update was undone) may come back in a new version: that cancels those
+    # forgets, never a person's.
+    for r in records:
+        if r["id"] in retired:
+            forget_registry.record_readd("chunk", r["id"], requested_by="ingest",
+                                         only_requested_by=forget_registry.VERSION_KEEPING)
+    purged = purged - retired
     if not purged:
         return records, pre_metas
     keep = [i for i, r in enumerate(records) if r["id"] not in purged and (r.get("parent_id") or "") not in purged]
@@ -552,16 +707,11 @@ def _reingest_artifact(
         if prior_folder:
             metadata = {**(metadata or {}), WATCHED_FOLDER_KEY: prior_folder}
 
-    # Delete old chunks from ChromaDB. The node lists only the retrievable
-    # chunks; the old parent chunks are found by artifact id, or a shorter new
-    # text leaves the old one's trailing parents answering queries.
-    try:
-        old_rows = list(dict.fromkeys(old_chunk_ids + artifact_row_ids(collection, artifact_id)))
-        if old_rows:
-            collection.delete(ids=old_rows)
-    except Exception as e:
-        log_swallowed_error('app.services.ingestion', e)
-        logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+    # The current version's rows (spec §7): passages the new text keeps stay as
+    # they are, the ones it drops are closed below rather than deleted, so the
+    # earlier version stays answerable "as of" its time and as history. The
+    # node lists only the retrievable chunks; parents are found by artifact id.
+    current_rows = _current_version_rows(collection, artifact_id)
     # HyPE questions were generated from the old text. force_reindex keeps the
     # same text, so its questions still hold.
     if content_changed:
@@ -569,27 +719,6 @@ def _reingest_artifact(
             remove_artifact_hype_rows(chroma, coll_name, artifact_id)
         except Exception as e:  # noqa: BLE001 — observability boundary
             log_swallowed_error("app.services.ingestion.hype_remove_reingest", e)
-    if old_chunk_ids:
-        # BM25 + sparse indexes dedup-skip known chunk_ids, so without an
-        # explicit removal they keep serving the PRE-edit text while ChromaDB
-        # now holds the new text — a silent corpus divergence that survives
-        # restarts (the JSONL keeps the first/old line). Drop the old chunks
-        # from both before the re-index below re-adds the fresh text.
-        try:
-            from core.retrieval.bm25 import remove_chunks as _bm25_remove
-            _bm25_remove(domain, old_chunk_ids)
-        except Exception as e:  # noqa: BLE001 — observability boundary
-            log_swallowed_error(
-                "app.services.ingestion.bm25_remove_reingest", e,
-            )
-        try:
-            from core.retrieval.sparse_index import remove_chunks as _sparse_remove
-            _sparse_remove(domain, old_chunk_ids)
-        except Exception as e:  # noqa: BLE001 — observability boundary
-            log_swallowed_error(
-                "app.services.ingestion.sparse_remove_reingest", e,
-            )
-
     # Create new chunks. Two paths mirror ingest_content: layout-aware
     # pre_chunked input (element chunkers) preserves structural granularity +
     # metadata; otherwise the token chunker with optional contextual enrichment.
@@ -684,6 +813,10 @@ def _reingest_artifact(
     chunk_records, pre_chunk_metadatas = _drop_purged_chunks(chunk_records, pre_chunk_metadatas)
     chunk_ids = [r["id"] for r in chunk_records]
     chunk_documents = [r["text"] for r in chunk_records]
+    now = base_meta["ingested_at"]
+    prior_version = int(prev.get("version") or 1)
+    version = prior_version + 1 if content_changed else prior_version
+    closing = [cid for cid in current_rows if cid not in set(chunk_ids)]
     if pre_chunk_metadatas:
         # Per-chunk structural metadata (column_headers, heading_path,
         # window_text, file:start_line:end_line) merges over base_meta —
@@ -710,6 +843,10 @@ def _reingest_artifact(
             }
             for i, rec in enumerate(chunk_records)
         ]
+    # Version fields: a passage the new text keeps keeps the time it became
+    # true; a new or returning one starts now.
+    for cid, meta in zip(chunk_ids, chunk_metadatas):
+        meta.update(_open_version_meta(artifact_id, version, current_rows.get(cid), now))
     # Encrypt the Chroma-bound metadata copy (currently just "summary") —
     # base_meta below stays plaintext for the Neo4j update further down.
     chunk_metadatas = [_encrypt_chroma_metadata(m) for m in chunk_metadatas]
@@ -724,6 +861,12 @@ def _reingest_artifact(
             documents=chunk_documents,
             metadatas=chunk_metadatas,
         )
+    if content_changed:
+        _close_rows(collection, domain, artifact_id, prior_version, closing, current_rows, now)
+    elif closing:
+        # The same text chunked differently is not a new version: the rows it
+        # no longer produces are replaced, not kept as history.
+        _replace_rows(collection, domain, artifact_id, closing)
 
     # AF-005 (CL-3): stage the re-ingested chunks 'pending' through the SAME
     # two-phase helper the fresh path uses, so a failed Neo4j update below leaves
@@ -812,6 +955,10 @@ def _reingest_artifact(
         # Neo4j committed — promote the staged chunks pending → committed so the
         # retrieval gate stops hiding them.
         _flip_chunks_committed(collection, chunk_ids)
+        if base_meta.get("source_path") and prev.get("source_path") != base_meta["source_path"]:
+            graph.set_artifact_properties(get_neo4j(), artifact_id, {"source_path": base_meta["source_path"]})
+        if content_changed:
+            _record_document_version(prev, artifact_id, version, content_hash, now)
         # Phase 4.3 — re-ingest hygiene. Only runs once the artifact's
         # content_hash/chunk_ids have actually landed in Neo4j (the
         # `else` only fires on success) — a failed update_artifact leaves
@@ -822,6 +969,8 @@ def _reingest_artifact(
         # (content_changed=False) and deliberately skips this — those
         # MENTIONS are still accurate for the (identical) new content.
         if content_changed:
+            from app.services.derived import mark_derived_stale
+            mark_derived_stale([artifact_id])  # before its mentions go: their pages read the old text
             try:
                 graph.remove_mentions_for_artifact(get_neo4j(), artifact_id)
             except Exception as e:  # noqa: BLE001 — observability boundary
@@ -969,8 +1118,14 @@ def ingest_content(
     force_reindex: bool = False,
     prior_hashes: Sequence[str] = (),
     on_forgotten: Literal["readd", "skip"] = "readd",
+    source_path: str | None = None,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
+
+    ``source_path`` is the file's full path, which identifies a document across
+    versions (spec §7). Only :func:`ingest_file`, which read the file, passes
+    it; a ``source_path`` in caller metadata is dropped, so no caller can name
+    another document's path and replace its text.
 
     ``prior_hashes`` are the content hashes earlier releases computed for this
     same input (``ingest_file`` passes the decoded-bytes hash for a PDF, DOCX,
@@ -1014,6 +1169,9 @@ def ingest_content(
     ingest never blocks on it.
     """
     _check_storage_backpressure()
+    metadata = {k: v for k, v in (metadata or {}).items() if k != "source_path"}
+    if source_path:
+        metadata["source_path"] = source_path
 
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -1037,6 +1195,7 @@ def ingest_content(
     # to _reingest_artifact (which owns idempotent old-chunk cleanup).
     existing = None if force_reindex else _check_duplicate((content_hash, *prior_hashes), domain)
     if existing:
+        _note_source_path(existing["id"], (metadata or {}).get("source_path"), (metadata or {}).get("filename"))
         fname = (metadata or {}).get("filename", "?")
         logger.info(
             f"Duplicate detected: '{fname}' matches "
@@ -1095,11 +1254,32 @@ def ingest_content(
             log_swallowed_error("app.services.ingestion.external_id_reingest", e)
             logger.warning(f"external_id re-ingest check failed (proceeding): {e}")
 
+    # Re-ingestion check by full source path (spec §7): a document's identity
+    # is where it lives, so two files sharing a name in different folders stay
+    # two documents. The basename check below covers only artifacts with no
+    # path (uploads, and files ingested before paths were kept).
+    _source_path = (metadata or {}).get("source_path")
+    if _source_path:
+        try:
+            prev = graph.find_artifact_by_source_path(get_neo4j(), _source_path, domain)
+            if prev and (force_reindex or prev["content_hash"] != content_hash):
+                return _reingest_artifact(
+                    prev, content, domain, metadata, content_hash,
+                    pre_chunked=pre_chunked,
+                )
+        except Exception as e:
+            log_swallowed_error("app.services.ingestion.source_path_reingest", e)
+            logger.warning(f"source_path re-ingest check failed (proceeding): {e}")
+
     # Re-ingestion check: same filename, different content
     fname = (metadata or {}).get("filename", "text_input")
     if fname != "text_input":
         try:
             prev = graph.find_artifact_by_filename(get_neo4j(), fname, domain)
+            # A caller that knows no path (an upload, an archive reindex, text
+            # from the SDK) still means the document of that name.
+            if prev is None and (not _source_path or force_reindex):
+                prev = graph.find_artifact_by_filename(get_neo4j(), fname, domain, any_path=True)
             if prev and (force_reindex or prev["content_hash"] != content_hash):
                 return _reingest_artifact(
                     prev, content, domain, metadata, content_hash,
@@ -1538,6 +1718,8 @@ def ingest_content(
             source_kind=base_meta.get("source_kind", ""),
         )
         artifact_created = True
+        if base_meta.get("source_path"):
+            graph.set_artifact_properties(driver, artifact_id, {"source_path": base_meta["source_path"]})
         # Phase O.1 — commit: flip Chroma chunks from pending → committed.
         # Non-fatal if this flip fails; IngestRecoveryJob will forward-commit.
         _flip_chunks_committed(collection, chunk_ids)
@@ -2151,6 +2333,7 @@ async def ingest_file(
     """
     validate_file_path(file_path)
     filename = Path(file_path).name
+    source_path = os.path.abspath(file_path)
 
     # Workstream E Phase 2b wire-in: when ENABLE_LAYOUT_AWARE_PARSING is on,
     # supported extensions (.csv, .md, .markdown, .py) route through
@@ -2269,6 +2452,7 @@ async def ingest_file(
         force_reindex=force_reindex,
         prior_hashes=prior_hashes,
         on_forgotten=on_forgotten,
+        source_path=source_path,
     )
     result["filename"] = filename
     result["categorize_mode"] = mode

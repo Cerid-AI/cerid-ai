@@ -10,24 +10,23 @@ Bi-temporal memory plan Phase C (C2) — the first (and only) writer of the
     (:Entity)-[:HAS_FACT]->(:Fact)-[:FACT_OBJECT]->(:Entity)   // FACT_OBJECT binary-only
     (:Artifact)-[:FACT]->(:Fact)                               // provenance
 
-Dedup identity is m0004's single-property Community-Edition key
-``uid = "{subject_id}|{fact_key}"``: a MERGE on ``uid`` collapses a re-extracted
-fact to one node, so ``count(DISTINCT f)`` is a symbolic (not LLM-trusted)
-count. ``fact_key`` already encodes the EVENT-vs-STATE split (event_date in the
-key for EVENT facts, absent for STATE) upstream in the derivation layer.
+Identity is m0004's single-property key ``uid``, and a node is one version: one
+source memory's assertion about one subject,
+``uid = "{subject_id}|{fact_key}|{source_artifact_id}"`` (spec §7, forget phase 5).
+Re-extracting the same memory collapses onto its own node; a newer memory never
+lands on the node an older one closed. ``fact_key`` encodes the EVENT-vs-STATE
+split (event_date in the key for EVENT facts, absent for STATE), and symbolic
+counts count distinct ``fact_key`` values (``fact_queries.count_facts``), so
+several memories asserting one event still count once.
 
 Bi-temporal stamps (the four-timestamp contract — see m0006 docstring):
-``created_at`` = now (system time); ``invalid_at`` = null (active belief);
-``valid_from`` = the memory's world-time start; ``valid_to`` = null (still true).
-Interval closure (moving ``valid_to``/``invalid_at``) is Phase D — this writer
-only opens intervals, and never re-opens one Phase-D closure already closed
-(no silent belief flip-back; ``write_facts``'s ``facts_matched_closed`` count
-is the telemetry signal for building re-assertion support later). Phase D
-also reconciles a merged entity's :Fact subject/object identity
-(``reconcile_fact_subjects``, called from
-``app.db.neo4j.entity.merge_entities``) — the entity-merge edge re-point
-moves HAS_FACT/FACT_OBJECT pointers only; this module's uid MERGE identity
-is what the reconciler fixes up to match.
+``created_at`` = now (system time); ``valid_from`` = the memory's world-time
+start; ``valid_to``/``invalid_at`` = null while the source memory is current.
+Closure follows the memory's lineage: writing a version's facts closes the
+STATE facts of the versions it superseded, and a fact whose source is already
+superseded is written closed. EVENT facts never close. ``reconcile_fact_subjects``
+(called from ``app.db.neo4j.entity.merge_entities``) rewrites a merged entity's
+uids to match.
 
 Orphan-safety (the zero-orphan :Fact health invariant,
 ``app/startup/invariants.py::_probe_fact_orphans``): the ``(:Fact)`` node and its
@@ -56,19 +55,22 @@ logger = logging.getLogger("ai-companion.graph.facts")
 FACT_WRITE_CHUNK_SIZE = 1000
 
 # Node + inbound HAS_FACT edge are MERGEd together so the zero-orphan invariant
-# holds mid-write. Provenance (:Artifact)-[:FACT]-> uses OPTIONAL MATCH so a
-# missing source artifact never aborts the row (the fact still gets its
-# HAS_FACT edge — orphan-safe). FACT_OBJECT is written only for binary facts.
+# holds mid-write. Each node is one version: one source memory's assertion
+# about one subject (uid ends in the source artifact id), carrying the memory
+# text as ``value`` and the memory's lineage. A row whose source memory no
+# longer exists writes nothing: the memory was forgotten after its extraction
+# was queued, and its text must not outlive it in a fact. FACT_OBJECT is
+# written only for binary facts.
 #
-# ON CREATE SET only: a re-asserted fact whose uid matches a node Phase-D
-# closure already CLOSED (invalid_at set) is NOT re-opened here — no silent
-# belief flip-back (re-assertion support is deferred until a versioning
-# design exists). The provenance edge still MERGEs for a closed match (the
-# artifact genuinely references the subject; only the belief state is
-# closed) — the RETURN splits facts_matched_closed out of facts_written so
-# callers can see how often this happens.
+# A fact whose source memory is already superseded (its extraction ran late)
+# is written closed at the time its memory stopped being true, so a late
+# extraction can never leave an old value current.
 _WRITE_FACTS_CYPHER = """
 UNWIND $rows AS row
+MATCH (a:Artifact {id: row.source_artifact_id})
+WITH row, a,
+     CASE WHEN a.superseded_by IS NOT NULL OR a.valid_to IS NOT NULL
+          THEN coalesce(a.valid_to, $now) END AS closed_at
 MERGE (subj:Entity {canonical_id: row.subject_id})
 MERGE (f:Fact {uid: row.uid})
   ON CREATE SET
@@ -78,16 +80,17 @@ MERGE (f:Fact {uid: row.uid})
     f.fact_key   = row.fact_key,
     f.event_date = row.event_date,
     f.valid_from = row.valid_from,
-    f.valid_to   = row.valid_to,
-    f.invalid_at = row.invalid_at,
+    f.valid_to   = closed_at,
+    f.invalid_at = CASE WHEN closed_at IS NULL THEN null ELSE $now END,
+    f.closed_by  = CASE WHEN closed_at IS NULL THEN null ELSE a.superseded_by END,
     f.created_at = row.created_at,
-    f.source     = row.source
+    f.source     = row.source,
+    f.source_artifact_id = row.source_artifact_id,
+    f.lineage_id = coalesce(a.lineage_id, a.id),
+    f.value      = row.value
 MERGE (subj)-[:HAS_FACT]->(f)
-WITH f, row
-OPTIONAL MATCH (a:Artifact {id: row.source_artifact_id})
-FOREACH (_ IN CASE WHEN a IS NULL THEN [] ELSE [1] END |
-  MERGE (a)-[:FACT]->(f)
-)
+WITH f, row, a
+MERGE (a)-[:FACT]->(f)
 FOREACH (oid IN CASE WHEN row.object_id IS NULL OR row.object_id = '' THEN [] ELSE [row.object_id] END |
   MERGE (obj:Entity {canonical_id: oid})
   MERGE (f)-[:FACT_OBJECT]->(obj)
@@ -96,15 +99,32 @@ RETURN count(DISTINCT f) AS facts_written,
        count(DISTINCT CASE WHEN f.invalid_at IS NOT NULL THEN f END) AS facts_matched_closed
 """
 
+# Writing a version's facts is the step that knows the new value, so it closes
+# the STATE facts of every superseded version in the same lineage (spec §7:
+# never before the successor's value is known). ``closed_by`` names the version
+# that replaced the source, which is what promotion reopens on a forget.
+_CLOSE_PREDECESSOR_FACTS = """
+MATCH (b:Artifact {id: $aid})
+WHERE b.lineage_id IS NOT NULL AND b.superseded_by IS NULL AND b.valid_to IS NULL
+MATCH (p) WHERE (p:Artifact OR p:Memory) AND p.lineage_id = b.lineage_id AND p.id <> b.id
+  AND (p.superseded_by IS NOT NULL OR p.valid_to IS NOT NULL)
+MATCH (f:Fact {source_artifact_id: p.id})
+WHERE f.valid_to IS NULL AND f.predicate IN $state
+SET f.valid_to = coalesce(p.valid_to, $now), f.invalid_at = $now, f.closed_by = p.superseded_by
+RETURN count(f) AS closed
+"""
+
+FACT_VALUE_MAX = 500
+
 
 def _build_rows(
-    facts: Sequence[DerivedFact], *, source_artifact_id: str, created_at: str
+    facts: Sequence[DerivedFact], *, source_artifact_id: str, created_at: str, value: str = "",
 ) -> list[dict]:
     """Materialise write rows, deduplicated by ``uid`` (identical facts collapse
     before the UNWIND — belt-and-braces with the DB-level MERGE dedup)."""
     by_uid: dict[str, dict] = {}
     for fact in facts:
-        uid = fact_uid(fact.subject_id, fact.fact_key)
+        uid = fact_uid(fact.subject_id, fact.fact_key, source_artifact_id)
         # First writer wins per uid within a batch; the DB MERGE is idempotent
         # regardless, so this only trims the payload.
         by_uid.setdefault(
@@ -117,11 +137,10 @@ def _build_rows(
                 "fact_key": fact.fact_key,
                 "event_date": fact.event_date,
                 "valid_from": fact.valid_from,
-                "valid_to": None,      # open interval (still true)
-                "invalid_at": None,    # active belief
                 "created_at": created_at,
                 "source": fact.source,
                 "source_artifact_id": source_artifact_id,
+                "value": value[:FACT_VALUE_MAX],
             },
         )
     return list(by_uid.values())
@@ -132,49 +151,57 @@ def write_facts(
     facts: Sequence[DerivedFact],
     *,
     source_artifact_id: str,
+    value: str = "",
     chunk_size: int = FACT_WRITE_CHUNK_SIZE,
 ) -> dict[str, int]:
-    """MERGE ``facts`` as bi-temporal ``(:Fact)`` nodes for one source artifact.
+    """MERGE ``facts`` as bi-temporal ``(:Fact)`` versions for one source
+    memory, then close the STATE facts of the versions it superseded.
 
     Idempotent: re-running with the same facts collapses to the same nodes via
-    the ``uid`` MERGE and leaves any Phase-D interval closure untouched (only
-    ``ON CREATE`` sets the stamps) — a closed fact stays closed; nothing here
-    re-opens an interval Phase-D closure code set. Returns
-    ``{"facts_written", "facts_matched_closed", "chunks"}``: ``facts_matched_
-    closed`` counts the subset of touched facts that were already-closed
-    nodes this batch matched (not created) — the telemetry signal for
-    building re-assertion/belief-flip-back support later, not an error
-    condition. Lets store exceptions propagate — the caller (the
+    the ``uid`` MERGE (only ``ON CREATE`` sets the stamps). Returns
+    ``{"facts_written", "facts_matched_closed", "facts_closed", "chunks"}``;
+    ``facts_matched_closed`` counts facts written closed because their source
+    was already superseded. Lets store exceptions propagate — the caller (the
     entity-extraction job's fact step) wraps this in ``log_swallowed_error`` so a
     fact-write failure never loses the already-successful entity extraction.
     """
-    rows = _build_rows(
-        facts, source_artifact_id=source_artifact_id, created_at=utcnow_iso()
-    )
-    if not rows:
-        return {"facts_written": 0, "facts_matched_closed": 0, "chunks": 0}
-
+    now = utcnow_iso()
+    rows = _build_rows(facts, source_artifact_id=source_artifact_id, created_at=now, value=value)
     written = 0
     matched_closed = 0
     chunks = 0
     with driver.session() as session:
         for start in range(0, len(rows), chunk_size):
             batch = rows[start : start + chunk_size]
-            row = session.run(_WRITE_FACTS_CYPHER, rows=batch).single()
+            row = session.run(_WRITE_FACTS_CYPHER, rows=batch, now=now).single()
             if row is not None:
                 written += int(row["facts_written"])
                 matched_closed += int(row["facts_matched_closed"])
             chunks += 1
+    closed = close_superseded_facts(driver, source_artifact_id)
 
     logger.debug(
-        "facts_written artifact=%s facts=%d matched_closed=%d chunks=%d",
-        source_artifact_id, written, matched_closed, chunks,
+        "facts_written artifact=%s facts=%d matched_closed=%d closed=%d chunks=%d",
+        source_artifact_id, written, matched_closed, closed, chunks,
     )
     return {
         "facts_written": written,
         "facts_matched_closed": matched_closed,
+        "facts_closed": closed,
         "chunks": chunks,
     }
+
+
+def close_superseded_facts(driver, artifact_id: str) -> int:
+    """Close the open STATE facts of the versions ``artifact_id`` superseded.
+    Run when a version's facts are written, including when it yields none."""
+    from core.lineage.writer import state_predicates
+
+    with driver.session() as session:
+        row = session.run(
+            _CLOSE_PREDECESSOR_FACTS, aid=artifact_id, state=state_predicates(), now=utcnow_iso(),
+        ).single()
+    return int(row["closed"]) if row is not None else 0
 
 
 # ===========================================================================
@@ -185,7 +212,7 @@ def write_facts(
 # onto the survivor (edge-only — see the comment there); it does not touch the
 # :Fact node's own denormalised subject_id/object_id/uid properties, because
 # that is this writer's dedup contract (m0004's uid = "{subject_id}|
-# {fact_key}"). This is that contract's other half: called once per loser,
+# {fact_key}|{source_artifact_id}"). This is that contract's other half: called once per loser,
 # right after its edge re-point loop drains, so a merged entity's facts land
 # back under the SAME uid MERGE identity write_facts uses going forward.
 
@@ -206,7 +233,8 @@ def _reconcile_chunk_size(chunk_size: int | None) -> int:
 # LIMIT, so a row only reaches the SET once its target uid is confirmed free.
 _RECONCILE_SUBJECT_NO_COLLISION = """
 MATCH (f:Fact) WHERE f.subject_id IN $loser_ids
-WITH f, $survivor_id + '|' + f.fact_key AS new_uid
+WITH f, $survivor_id + '|' + f.fact_key
+     + CASE WHEN coalesce(f.source_artifact_id, '') = '' THEN '' ELSE '|' + f.source_artifact_id END AS new_uid
 OPTIONAL MATCH (g:Fact {uid: new_uid})
 WITH f, new_uid WHERE g IS NULL
 WITH f, new_uid LIMIT $limit
@@ -223,7 +251,8 @@ RETURN count(*) AS processed
 # revision.
 _RECONCILE_SUBJECT_COLLISION_FOLD = """
 MATCH (f:Fact) WHERE f.subject_id IN $loser_ids
-WITH f, $survivor_id + '|' + f.fact_key AS new_uid
+WITH f, $survivor_id + '|' + f.fact_key
+     + CASE WHEN coalesce(f.source_artifact_id, '') = '' THEN '' ELSE '|' + f.source_artifact_id END AS new_uid
 MATCH (g:Fact {uid: new_uid})
 WITH f, g LIMIT $limit
 SET g.valid_from = CASE

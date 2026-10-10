@@ -22,6 +22,7 @@ from app.deps import get_chroma, get_graph_store, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 from app.services.private_mode import private_blocks, saves_blocked
 from config.features import require_feature
+from core.lineage.current import AS_OF_DESCRIPTION, AS_OF_PATTERN
 from core.utils.swallowed import log_swallowed_error
 
 
@@ -156,6 +157,7 @@ class AgentQueryRequest(BaseModel):
     )
     rag_mode: str = Field("manual", description="Retrieval mode: manual | smart | custom_smart")
     source_config: dict | None = Field(None, description="Source weights/toggles for custom_smart mode")
+    as_of: str | None = Field(None, pattern=AS_OF_PATTERN, description=AS_OF_DESCRIPTION)
 
 
 class AgentQueryResponse(BaseModel):
@@ -470,7 +472,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         _mem = "1" if _cs.get("memory", True) is not False else "0"
         _kb = "1" if _cs.get("kb", True) is not False else "0"
         _ext = "1" if _cs.get("external", True) is not False else "0"
-        _c1_scoped = bool(req.metadata_filter) or bool(req.exclude_packs)
+        _c1_scoped = bool(req.metadata_filter) or bool(req.exclude_packs) or bool(req.as_of)
         if req.metadata_filter:
             import json as _json
             _mf = _json.dumps(req.metadata_filter, sort_keys=True, default=str)
@@ -525,6 +527,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 domain_record_types=domain_record_types,
                 model=req.model,
                 exclude_packs=req.exclude_packs,
+                as_of=req.as_of,
                 # E1 CR-009: the smart branch previously dropped these three
                 # (the manual branch forwarded them), so a document-scoped or
                 # skip_cache/budget-overridden request silently searched the
@@ -545,6 +548,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 redis_client=get_redis(),
                 model=req.model,
                 budget_seconds=req.budget_seconds,
+                as_of=req.as_of,
             )
         else:
             # Manual mode → the canonical full agentic-retrieval path. The KB
@@ -571,6 +575,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 skip_cache=req.skip_cache,
                 metadata_filter=req.metadata_filter,
                 exclude_packs=req.exclude_packs,
+                as_of=req.as_of,
                 kb_enabled=_cs.get("kb", True) is not False,
                 external_augmentation=_cs.get("external", True),
                 response_text=req.response_text,
@@ -1100,6 +1105,7 @@ class MemoryRecallRequest(BaseModel):
     query: str
     top_k: int = 5
     min_score: float = 0.4
+    as_of: str | None = Field(None, pattern=AS_OF_PATTERN, description=AS_OF_DESCRIPTION)
 
 
 class MemoryRecallResponse(BaseModel):
@@ -1139,6 +1145,7 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
             chroma_client=get_chroma(),
             neo4j_driver=get_neo4j(),
             top_k=req.top_k,
+            as_of=req.as_of,
         )
         filtered = [
             r for r in (results or [])

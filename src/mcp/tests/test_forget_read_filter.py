@@ -124,3 +124,51 @@ async def test_verification_never_cites_a_forgotten_memory(reg):
     assert [r["artifact_id"] for r in await _query_memories("limit", chroma)] == ["m1", "m2"]
     _forget(reg, "artifact", "m1")
     assert [r["artifact_id"] for r in await _query_memories("limit", chroma)] == ["m2"]
+
+
+# ---- the version rule (spec §7) ----
+
+def _versions():
+    return [
+        {"chunk_id": "old_1", "artifact_id": "old", "valid_from": "2025-01-01", "valid_to": "2026-05-01",
+         "superseded_by": "new"},
+        {"chunk_id": "new_1", "artifact_id": "new", "valid_from": "2026-05-01", "valid_to": ""},
+        {"chunk_id": "plain_1", "artifact_id": "plain", "ingested_at": "2026-07-01T00:00:00+00:00"},
+        {"chunk_id": "community:7", "artifact_id": "community:7"},
+    ]
+
+
+def test_visible_returns_current_versions_and_rows_without_history(monkeypatch):
+    from core.forget.read_filter import visible
+
+    monkeypatch.setattr("core.forget.read_filter.forgotten_ids", lambda kind: frozenset())
+    assert [r["chunk_id"] for r in visible(_versions())] == ["new_1", "plain_1", "community:7"]
+
+
+def test_visible_as_of_returns_what_was_in_force(monkeypatch):
+    from core.forget.read_filter import visible
+
+    monkeypatch.setattr("core.forget.read_filter.forgotten_ids", lambda kind: frozenset())
+    # a row with no valid_from has no lower bound: when it was ingested says nothing about when it was true
+    assert [r["chunk_id"] for r in visible(_versions(), as_of="2026-03-01")] == ["old_1", "plain_1", "community:7"]
+    # a date-only as_of covers the whole day
+    assert [r["chunk_id"] for r in visible(_versions(), as_of="2026-05-01")] == ["new_1", "plain_1", "community:7"]
+
+
+def test_as_of_compares_instants_not_strings():
+    from core.lineage.current import normalize_as_of, valid_at
+
+    row = {"valid_from": "2026-05-01T05:00:00+00:00", "valid_to": "2026-05-02T00:00:00Z"}
+    assert valid_at(row, normalize_as_of("2026-05-01 06:00"))            # space separator, naive = UTC
+    assert not valid_at(row, normalize_as_of("2026-05-01T06:00:00+02:00"))  # 04:00 UTC, before it started
+    assert valid_at(row, normalize_as_of("2026-05-01T23:00:00-00:30"))    # 23:30 UTC, still in force
+    assert not valid_at(row, normalize_as_of("2026-05-02T00:00:00+00:00"))  # Z and +00:00 are the same instant
+    assert not valid_at({"valid_to": "not a date"}, normalize_as_of("2026-05-01"))  # unreadable end counts as closed
+
+
+def test_visible_still_drops_forgotten_versions(monkeypatch):
+    from core.forget.read_filter import visible
+
+    monkeypatch.setattr("core.forget.read_filter.forgotten_ids",
+                        lambda kind: frozenset({"old"}) if kind == "artifact" else frozenset())
+    assert "old_1" not in [r["chunk_id"] for r in visible(_versions(), as_of="2026-03-01")]

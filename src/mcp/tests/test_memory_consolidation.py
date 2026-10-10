@@ -13,7 +13,6 @@ from core.agents.memory_consolidation import (
     SIMILARITY_THRESHOLD,
     MemoryAction,
     classify_memory,
-    mark_superseded,
 )
 
 # ---------------------------------------------------------------------------
@@ -266,34 +265,39 @@ class TestClassifyMemoryMultipleCandidates:
         assert "art-2" not in prompt_text
 
 
-# ---------------------------------------------------------------------------
-# mark_superseded
-# ---------------------------------------------------------------------------
+class TestCandidatesAreCurrentVersions:
+    """A version already superseded is history, never a candidate to replace
+    again: replacing it twice is how lineages forked before phase 5."""
 
-class TestMarkSuperseded:
-    """Tests for Neo4j supersession marking."""
+    @pytest.mark.asyncio
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    async def test_superseded_rows_are_skipped(self, mock_llm, mock_chroma):
+        client, collection = mock_chroma
+        collection.query.return_value = {
+            "ids": [["old_1", "cur_1"]],
+            "documents": [["User prefers dark mode", "User prefers light mode"]],
+            "metadatas": [[
+                {"artifact_id": "art-old", "valid_to": "2026-05-01", "superseded_by": "art-cur"},
+                {"artifact_id": "art-cur", "valid_to": ""},
+            ]],
+            "distances": [[0.05, 0.06]],
+        }
+        mock_llm.return_value = '{"action":"UPDATE","target_id":"art-old","reason":"x"}'
+        result = await classify_memory("User prefers sepia", chroma_client=client)
+        prompt_text = mock_llm.call_args[0][0][0]["content"]
+        assert "art-old" not in prompt_text and "art-cur" in prompt_text
+        assert result.target_id == "art-cur"  # the invented target falls back to a current one
 
-    def test_marks_old_artifact(self, mock_neo4j):
-        driver, session = mock_neo4j
-        mark_superseded(driver, "art-old", "art-new")
-        session.run.assert_called_once()
-        cypher = session.run.call_args[0][0]
-        assert "superseded_by" in cypher
-        assert "SUPERSEDES" in cypher
-
-    def test_neo4j_failure_logs_warning(self, mock_neo4j):
-        driver, session = mock_neo4j
-        session.run.side_effect = RuntimeError("Neo4j down")
-        # Should not raise — logs warning instead
-        mark_superseded(driver, "art-old", "art-new")
-
-    def test_passes_correct_ids(self, mock_neo4j):
-        driver, session = mock_neo4j
-        mark_superseded(driver, "old-123", "new-456")
-        kwargs = session.run.call_args[1]
-        assert kwargs["old_id"] == "old-123"
-        assert kwargs["new_id"] == "new-456"
-        assert "now" in kwargs
+    @pytest.mark.asyncio
+    async def test_only_superseded_rows_means_add(self, mock_chroma):
+        client, collection = mock_chroma
+        collection.query.return_value = {
+            "ids": [["old_1"]], "documents": [["User prefers dark mode"]],
+            "metadatas": [[{"artifact_id": "art-old", "superseded_by": "art-cur"}]],
+            "distances": [[0.05]],
+        }
+        result = await classify_memory("User prefers sepia", chroma_client=client)
+        assert result.action == "ADD"
 
 
 # ---------------------------------------------------------------------------
@@ -373,12 +377,15 @@ class TestMemoryConsolidationIntegration:
         "enable_memory_consolidation": True,
     })
     @patch("core.agents.memory_consolidation.classify_memory", new_callable=AsyncMock)
-    @patch("core.agents.memory_consolidation.mark_superseded")
+    @patch("core.lineage.writer.supersede")
     async def test_update_stores_and_marks_superseded(
         self, mock_mark, mock_classify, mock_extract, monkeypatch,
         mock_chroma, mock_neo4j,
     ):
-        """UPDATE should store new memory and mark old one superseded."""
+        """UPDATE stores the new memory and supersedes the old one through the
+        lineage writer, closing it at the new memory's valid_from."""
+        from core.lineage.writer import SupersedeResult
+        mock_mark.return_value = SupersedeResult(True, lineage_id="art-old", version=2)
         monkeypatch.setattr("core.agents.memory.config.ENABLE_MEMORY_EXTRACTION", True)
         mock_extract.return_value = [
             {"content": "updated pref", "memory_type": "preference", "summary": "pref update"},
@@ -397,7 +404,9 @@ class TestMemoryConsolidationIntegration:
         )
         assert result["memories_stored"] == 1
         assert result["results"][0]["consolidation_action"] == "UPDATE"
-        mock_mark.assert_called_once_with(mock_neo4j[0], "art-old", "art-new")
+        mock_mark.assert_called_once()
+        assert mock_mark.call_args.args == (mock_neo4j[0], mock_chroma[0], "art-old", "art-new")
+        assert "valid_to" in mock_mark.call_args.kwargs
 
     @pytest.mark.asyncio
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)

@@ -4,13 +4,12 @@
 """Phase F (F2) — validity-vs-ranking precedence contract for recall_memories.
 
 The rule (plan F2): validity filters ADMISSIBILITY first; ranking boosts order
-the SURVIVING set. Concretely, the Step 3.6 interval-admission filter runs BEFORE
-the Step 4 score sort, so a CLOSED candidate is dropped even when it is the
-single highest-ranked candidate — no ordering or boost can resurrect a candidate
+the SURVIVING set. Concretely, the shared read filter (Step 3.5) runs BEFORE the
+Step 4 score sort, so a CLOSED candidate is dropped even when it is the single
+highest-ranked candidate — no ordering or boost can resurrect a candidate
 validity already removed. These tests pin that ordering by making the closed
 candidate the top-ranked one (smallest vector distance → highest score) and
-asserting it is gone with the filter on, while the surviving open candidates stay
-ordered by score.
+asserting it is gone, while the surviving open candidates stay ordered by score.
 """
 from __future__ import annotations
 
@@ -57,11 +56,10 @@ def _chroma_ranked() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_top_ranked_closed_candidate_is_dropped_before_ordering(monkeypatch) -> None:
-    # Admission (Step 3.6) runs BEFORE the score sort (Step 4): the closed
+async def test_top_ranked_closed_candidate_is_dropped_before_ordering() -> None:
+    # Admission (Step 3.5) runs BEFORE the score sort (Step 4): the closed
     # candidate is the highest-scored, yet the filter removes it — ordering never
     # gets a chance to resurrect it.
-    monkeypatch.setattr("config.features.ENABLE_FACT_INVALIDATION_FILTER", True)
     with patch("core.utils.nli.nli_score", return_value=_HIGH_ENTAILMENT):
         results = await recall_memories("q", _chroma_ranked(), None, top_k=10)
     ordered = [m["memory_id"] for m in results]
@@ -70,12 +68,12 @@ async def test_top_ranked_closed_candidate_is_dropped_before_ordering(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_closed_candidate_ranks_first_when_filter_off() -> None:
-    # Control: with the filter OFF the closed candidate is admitted and, being the
-    # highest-scored, sorts to #1 — proving it really is the top rank the filter
-    # overrides above (admissibility precedes ranking, not the reverse).
+async def test_closed_candidate_ranks_first_when_it_was_in_force() -> None:
+    # Control: asked as of a time inside its interval the closed candidate is
+    # admitted and, being the highest-scored, sorts to #1 — proving it really is
+    # the top rank the filter overrides above (admissibility precedes ranking).
     with patch("core.utils.nli.nli_score", return_value=_HIGH_ENTAILMENT):
-        results = await recall_memories("q", _chroma_ranked(), None, top_k=10)
+        results = await recall_memories("q", _chroma_ranked(), None, top_k=10, as_of="2026-03-01")
     ordered = [m["memory_id"] for m in results]
     assert ordered[0] == "closed"                          # top-ranked when admitted
     assert set(ordered) == {"closed", "open_hi", "open_lo"}

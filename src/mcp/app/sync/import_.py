@@ -25,6 +25,10 @@ from app.sync._helpers import (
     DOMAINS_JSONL,
     ENTITIES_JSONL,
     ENTITY_EDGES_JSONL,
+    FACT_PROPS,
+    FACTS_JSONL,
+    IDENTITY_PROPS,
+    LINEAGE_PROPS,
     MEMORIES_JSONL,
     MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
@@ -34,6 +38,7 @@ from app.sync._helpers import (
     _ensure_dir,
     _iter_jsonl,
     _v2_collections_base,
+    without_wiki_page,
 )
 from app.sync.conflicts import (
     ConflictStrategy,
@@ -43,6 +48,8 @@ from app.sync.conflicts import (
 )
 from app.sync.user_state import read_conversations, write_conversation
 from core.forget import registry as forget_registry
+from core.lineage.current import VERSION_CLOSED
+from core.retrieval.chunk_ids import chunk_artifact_id
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
@@ -136,6 +143,7 @@ def import_neo4j(
     artifacts_conflict = 0
     artifacts_skipped_forgotten = 0
     relationships_merged = 0
+    applied_ids: list[str] = []
 
     # --- Conflict Detection ---
     skip_ids: set[str] = set()  # artifact IDs to skip due to conflict resolution
@@ -259,6 +267,8 @@ def import_neo4j(
                         recategorized_at=row.get("recategorized_at"),
                         updated_at=row.get("updated_at") or remote_ingested_at,
                     )
+                    _apply_lineage(session, artifact_id, row)
+                    applied_ids.append(str(artifact_id))
                     artifacts_created += 1
 
                 elif should_update:
@@ -296,6 +306,8 @@ def import_neo4j(
                         recategorized_at=row.get("recategorized_at"),
                         updated_at=row.get("updated_at") or remote_ingested_at,
                     )
+                    _apply_lineage(session, artifact_id, row)
+                    applied_ids.append(str(artifact_id))
                     artifacts_updated += 1
 
                 else:
@@ -357,6 +369,7 @@ def import_neo4j(
         "artifacts_skipped": artifacts_skipped,
         "artifacts_conflict": artifacts_conflict,
         "artifacts_skipped_forgotten": artifacts_skipped_forgotten,
+        "applied_ids": applied_ids,
         "conflicts": [
             {"artifact_id": c.artifact_id, "resolution": c.resolution}
             for c in conflict_records
@@ -365,14 +378,46 @@ def import_neo4j(
     }
 
 
+def _apply_lineage(session: Any, artifact_id: str, row: dict[str, Any]) -> None:
+    """Carry a version's lineage over with the artifact (spec §7), absent
+    values included: a version reopened there has no ``valid_to``, and loses
+    it here. A node with no lineage there (a machine that predates lineages,
+    or a document never re-ingested) leaves this one's alone."""
+    props = {p: row.get(p) for p in LINEAGE_PROPS} if row.get("lineage_id") else {}
+    props.update({p: row[p] for p in IDENTITY_PROPS if row.get(p) is not None})
+    if props:
+        session.run("MATCH (a:Artifact {id: $id}) SET a += $props", id=artifact_id, props=props)
+
+
+def _with_lineage_cleared(props: dict[str, Any]) -> dict[str, Any]:
+    """A memory exported with its lineage: lineage fields it lacks are absent
+    there, so they are cleared here (``SET +=`` with null removes them)."""
+    if not props.get("lineage_id"):
+        return props
+    return {**dict.fromkeys(LINEAGE_PROPS), **props}
+
+
+#: What a version change moves on a passage this machine already holds; its
+#: text, owner and tenant never change (chunk ids are content-addressed).
+_ROW_VERSION_KEYS = (*LINEAGE_PROPS, VERSION_CLOSED)
+
+
 def import_chroma(
     chroma_url: str | None = None,
     sync_dir: str | None = None,
     force: bool = False,
+    update_artifacts: set[str] | None = None,
 ) -> dict[str, Any]:
     """
     Merge ChromaDB chunks from sync JSONL files into the local ChromaDB instance.
+
+    A row this machine already holds is skipped, except when its artifact was
+    just taken from the other machine (``update_artifacts``): then its version
+    fields are taken, so a version the other machine closed or reopened is
+    closed or reopened here too. Only the version fields move, and only on a
+    row whose id names that artifact: text, owner and tenant never change.
     """
+    update_artifacts = update_artifacts or set()
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()
     chroma_dir = Path(sync_dir) / CHROMA_SUBDIR
@@ -384,6 +429,7 @@ def import_chroma(
     failed_domains: dict[str, str] = {}
     total_added = 0
     total_skipped = 0
+    total_updated = 0
 
     for domain in config.DOMAINS:
         coll_name = config.collection_name(domain)
@@ -396,6 +442,7 @@ def import_chroma(
 
         added = 0
         skipped = 0
+        updated = 0
 
         try:
             _chroma_ensure_collection(chroma_url, coll_name)
@@ -414,6 +461,28 @@ def import_chroma(
             batch_docs: list[str] = []
             batch_metas: list[dict] = []
             batch_embs: list[list[float]] = []
+            update_ids: list[str] = []
+            update_metas: list[dict] = []
+
+            def _flush_updates() -> None:
+                nonlocal updated
+                if not update_ids:
+                    return
+                try:
+                    resp = httpx.post(
+                        f"{_v2_collections_base(chroma_url)}/{collection_id}/update",
+                        json={"ids": update_ids, "metadatas": update_metas},
+                        timeout=120.0,
+                    )
+                    resp.raise_for_status()
+                    updated += len(update_ids)
+                except Exception as exc:
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error('app.sync.import_.chroma_update', exc)
+                    failed_domains[domain] = str(exc)
+                finally:
+                    update_ids.clear()
+                    update_metas.clear()
 
             def _flush_batch() -> int:
                 nonlocal added
@@ -452,6 +521,17 @@ def import_chroma(
                     continue
 
                 if chunk_id in existing_ids:
+                    meta = row.get("metadata") or {}
+                    owner = str(meta.get("artifact_id") or "")
+                    if (
+                        owner in update_artifacts and chunk_artifact_id(str(chunk_id)) == owner
+                        and not _is_forgotten_chunk(str(chunk_id), meta)
+                    ):
+                        update_ids.append(chunk_id)
+                        update_metas.append({k: meta[k] for k in _ROW_VERSION_KEYS if k in meta})
+                        if len(update_ids) >= CHROMA_BATCH_SIZE:
+                            _flush_updates()
+                        continue
                     skipped += 1
                     continue
 
@@ -481,18 +561,20 @@ def import_chroma(
                     _flush_batch()
 
             _flush_batch()
+            _flush_updates()
 
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('app.sync.import_', exc)
             logger.error("ChromaDB import failed for domain '%s': %s", domain, exc)
             failed_domains[domain] = str(exc)
-            domain_stats[domain] = {"added": added, "skipped": skipped, "error": str(exc)}
+            domain_stats[domain] = {"added": added, "skipped": skipped, "updated": updated, "error": str(exc)}
             continue
 
-        domain_stats[domain] = {"added": added, "skipped": skipped}
+        domain_stats[domain] = {"added": added, "skipped": skipped, "updated": updated}
         total_added += added
         total_skipped += skipped
+        total_updated += updated
         logger.info(
             "ChromaDB import domain '%s': %d added, %d skipped", domain, added, skipped
         )
@@ -510,6 +592,7 @@ def import_chroma(
         "domains": domain_stats,
         "total_added": total_added,
         "total_skipped": total_skipped,
+        "total_updated": total_updated,
         "failed_domains": failed_domains,
     }
 
@@ -734,10 +817,15 @@ def import_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
                 if forget_registry.is_forgotten("memory", str(memory_id)):
                     continue
                 try:
+                    # The newer side wins, as for artifacts: a version this
+                    # machine superseded since must not be reopened by an older export.
                     session.run(
-                        "MERGE (m:Memory {id: $id}) SET m += $props",
+                        "MERGE (m:Memory {id: $id}) WITH m "
+                        "WHERE m.updated_at IS NULL OR $updated IS NULL OR $updated >= m.updated_at "
+                        "SET m += $props",
                         id=memory_id,
-                        props=props,
+                        props=_with_lineage_cleared(props),
+                        updated=props.get("updated_at"),
                     )
                     memories_merged += 1
                 except Exception as exc:
@@ -797,6 +885,66 @@ def import_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
     return {"memories_merged": memories_merged, "edges_merged": edges_merged}
 
 
+_IMPORT_FACT = """
+MERGE (f:Fact {uid: $uid})
+SET f += $props
+WITH f
+UNWIND (CASE WHEN size($subjects) = 0 THEN [null] ELSE $subjects END) AS sid
+FOREACH (_ IN CASE WHEN sid IS NULL THEN [] ELSE [1] END |
+  MERGE (s:Entity {canonical_id: sid})
+  MERGE (s)-[:HAS_FACT]->(f)
+)
+WITH DISTINCT f
+OPTIONAL MATCH (a:Artifact {id: $source})
+FOREACH (_ IN CASE WHEN a IS NULL THEN [] ELSE [1] END | MERGE (a)-[:FACT]->(f))
+WITH f
+UNWIND (CASE WHEN size($objects) = 0 THEN [null] ELSE $objects END) AS oid
+FOREACH (_ IN CASE WHEN oid IS NULL THEN [] ELSE [1] END |
+  MERGE (o:Entity {canonical_id: oid})
+  MERGE (f)-[:FACT_OBJECT]->(o)
+)
+"""
+
+
+_FACT_CLOSURE = ("valid_to", "invalid_at", "closed_by")
+
+
+def import_facts(driver, sync_dir: str | None = None, applied: set[str] | None = None) -> dict[str, Any]:
+    """Merge :Fact versions from {sync_dir}/neo4j/facts.jsonl. A fact whose
+    source memory is forgotten, or not on this machine, is skipped: a fact holds
+    its memory's text and goes where the memory goes. Only facts of artifacts
+    this import took from the other machine (``applied``, the newer side by
+    ``updated_at``) are written, so a fact never disagrees with its version; a
+    closure the row lacks is cleared, so a fact reopened there reopens here.
+    Idempotent by uid."""
+    sync_dir = sync_dir or _default_sync_dir()
+    path = str(Path(sync_dir) / NEO4J_SUBDIR / FACTS_JSONL)
+    merged = skipped = 0
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(path):
+                raw = dict(row.get("props") or {})
+                uid, source = raw.get("uid"), str(raw.get("source_artifact_id") or "")
+                props = {**dict.fromkeys(_FACT_CLOSURE), **{k: raw[k] for k in FACT_PROPS if k in raw}}
+                if not uid or not source or source not in (applied or set()) or _is_forgotten_artifact(source):
+                    skipped += 1
+                    continue
+                if session.run("MATCH (a:Artifact {id: $id}) RETURN count(a) AS n", id=source).single()["n"] == 0:
+                    skipped += 1
+                    continue
+                session.run(
+                    _IMPORT_FACT, uid=uid, props=props, source=source,
+                    subjects=[s for s in row.get("subjects") or [] if s],
+                    objects=[o for o in row.get("objects") or [] if o],
+                )
+                merged += 1
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_.facts', exc)
+        return {"error": str(exc), "facts_merged": merged, "facts_skipped": skipped}
+    return {"facts_merged": merged, "facts_skipped": skipped}
+
+
 def import_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
     """
     Merge :Entity nodes and their direct MENTIONS provenance edges (from
@@ -830,7 +978,7 @@ def import_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
                     session.run(
                         "MERGE (e:Entity {canonical_id: $canonical_id}) SET e += $props",
                         canonical_id=canonical_id,
-                        props=props,
+                        props=without_wiki_page(props),
                     )
                     entities_merged += 1
                 except Exception as exc:
@@ -963,7 +1111,10 @@ def import_all(
         driver, sync_dir=sync_dir, force=force,
         conflict_strategy=conflict_strategy, last_sync_at=last_sync_at,
     )
-    chroma_result = import_chroma(chroma_url=chroma_url, sync_dir=sync_dir, force=force)
+    applied = set(neo4j_result.pop("applied_ids", []) or [])
+    chroma_result = import_chroma(
+        chroma_url=chroma_url, sync_dir=sync_dir, force=force, update_artifacts=applied,
+    )
     bm25_result = import_bm25(sync_dir=sync_dir)
 
     # Memories/entities depend on Artifacts already being imported above
@@ -971,6 +1122,7 @@ def import_all(
     # cross-surface dependency.
     memories_result = import_memories(driver, sync_dir=sync_dir)
     entities_result = import_entities(driver, sync_dir=sync_dir)
+    facts_result = import_facts(driver, sync_dir=sync_dir, applied=applied)
     conversations_result = import_conversations(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_added": 0, "skipped": True}
@@ -1039,14 +1191,25 @@ def import_all(
         from core.utils.swallowed import log_swallowed_error
         log_swallowed_error('app.sync.import_.chunk_id_migration', exc)
 
+    # Another machine may still export memories and facts without lineages.
+    lineage_result: dict[str, Any] = {}
+    try:
+        from app.services.lineage_migration import migrate_lineages
+        lineage_result = migrate_lineages(neo4j=driver)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_.lineage_migration', exc)
+
     logger.info("Full import complete from %s", sync_dir)
     return {
         "chunk_ids_rekeyed": rekey_result,
+        "lineages": lineage_result,
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
         "memories": memories_result,
         "entities": entities_result,
+        "facts": facts_result,
         "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,

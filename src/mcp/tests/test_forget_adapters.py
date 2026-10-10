@@ -41,9 +41,12 @@ def test_transcripts_hide_archives_only_chat_artifacts_with_the_forget_reason():
         {"artifact_id": "a1", "filename": "chat_c1_20261007"},
     ])
     with patch("app.deps.get_chroma", return_value=chroma), \
-         patch("app.services.content_lifecycle.hide_content") as hide:
+         patch("app.services.content_lifecycle.hide_content") as hide, \
+         patch("app.services.derived.mark_derived_stale") as mark:
         TranscriptsAdapter().hide(S, "fg_x")
     hide.assert_called_once_with("a1", extra_props={"archived_reason": "forget:fg_x"}, only_if_visible=True)
+    # transcripts are extracted like any document: their pages go before them
+    assert list(mark.call_args.args[0]) == ["a1"] and mark.call_args.kwargs == {"forget": "trash"}
 
 
 def test_transcripts_restore_clears_only_this_forgets_archive():
@@ -171,30 +174,45 @@ M = Subject("memory", "11111111-2222-3333-4444-555555555555")
 
 def test_artifact_hide_and_restore_use_the_lifecycle_coordinator_with_the_forget_reason():
     with patch("app.services.content_lifecycle.hide_content") as hide, \
-         patch("app.services.content_lifecycle.unhide_content") as unhide:
+         patch("app.services.content_lifecycle.unhide_content") as unhide, \
+         patch("app.services.forget.adapters._restoring", return_value=frozenset({A.id})), \
+         patch("app.services.forget.adapters.settle", return_value="prev") as settle, \
+         patch("app.services.derived.mark_derived_stale") as mark:
         ArtifactAdapter().hide(A, "fg_x")
         ArtifactAdapter().restore(A, "fg_x")
     hide.assert_called_once_with(A.id, extra_props={"archived_reason": "forget:fg_x"}, only_if_visible=True)
     unhide.assert_called_once_with(A.id, reason="forget:fg_x")
+    # the lineage is recomputed each time: the version before it is current while it is in the Trash
+    assert settle.call_args_list[0].args == (A.id,)
+    assert settle.call_args_list[1].kwargs == {"restoring": frozenset({A.id})}
+    # what was written from it, or from the version now current, is refreshed; a forget at once
+    assert mark.call_args_list[0].args == ([A.id, "prev"],) and mark.call_args_list[0].kwargs == {"forget": "trash"}
+    assert mark.call_args_list[1].args == ([A.id, "prev"],) and mark.call_args_list[1].kwargs == {}
 
 
-def test_artifact_purge_sweeps_sole_source_facts_and_unsupersedes_before_removing():
+def test_artifact_purge_sweeps_facts_removes_then_settles_the_lineage():
     session = _Session({"[:FACT]->(f:Fact)": {"n": 2}})
     order: list[str] = []
     removal = MagicMock(found=True)
 
     def remove(aid):
         order.append(f"remove:{aid}")
-        assert len(session.queries) == 2, "facts and supersession must be handled while the edges still exist"
+        assert len(session.queries) == 1, "facts must be swept while the edges still exist"
         return removal
 
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
+         patch("core.lineage.writer.lineage_of", return_value="lin-1"), \
+         patch("app.services.forget.adapters.settle",
+               side_effect=lambda aid, lineage_id: order.append(f"settle:{aid}:{lineage_id}")), \
+         patch("app.services.derived.mark_derived_stale",
+               side_effect=lambda ids, forget: order.append(f"stale:{','.join(ids)}:{forget}")), \
          patch("app.services.content_lifecycle.remove_content", side_effect=remove):
         result = ArtifactAdapter().purge(A)
-    fact_q, unsup_q = session.queries[0][0], session.queries[1][0]
+    fact_q = session.queries[0][0]
     assert "NOT EXISTS" in fact_q and "DETACH DELETE f" in fact_q
-    assert "superseded_by: $aid" in unsup_q and "REMOVE old.superseded_by, old.valid_until" in unsup_q
-    assert order == [f"remove:{A.id}"]
+    assert "(f:Fact {source_artifact_id: $aid})" in fact_q  # found by source even without the edge
+    # the lineage is read, and what was written from it marked stale, before the node and its edges go
+    assert order == [f"stale:{A.id}:erase", f"remove:{A.id}", f"settle:{A.id}:lin-1"]
     assert result.removed == 3 and result.detail == {"facts": 2}
 
 
@@ -203,11 +221,13 @@ def test_verified_memory_hide_marks_the_node_and_drops_the_recall_document():
     coll = MagicMock()
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
          patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.forget.adapters.settle") as settle, \
          patch("app.services.content_lifecycle.invalidate_caches"):
         VerifiedMemoryAdapter().hide(M, "fg_x")
     query, params = session.queries[0]
     assert "m.status = 'forgotten'" in query and params == {"mid": M.id, "fid": "fg_x"}
     coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
+    settle.assert_called_once_with(M.id)
 
 
 def test_verified_memory_restore_rebuilds_the_document_from_the_node_text():
@@ -215,6 +235,8 @@ def test_verified_memory_restore_rebuilds_the_document_from_the_node_text():
     coll = MagicMock()
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
          patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("app.services.forget.adapters._restoring", return_value=frozenset()), \
+         patch("app.services.forget.adapters.settle"), \
          patch("app.services.content_lifecycle.invalidate_caches"):
         VerifiedMemoryAdapter().restore(M, "fg_x")
     assert "forget_id: $fid" in session.queries[0][0]
@@ -241,6 +263,8 @@ def test_verified_memory_purge_deletes_document_and_node():
     coll = MagicMock()
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
          patch("app.services.forget.adapters._verified_collection", return_value=coll), \
+         patch("core.lineage.writer.lineage_of", return_value=""), \
+         patch("app.services.forget.adapters.settle"), \
          patch("app.services.content_lifecycle.invalidate_caches"):
         result = VerifiedMemoryAdapter().purge(M)
     coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
@@ -280,3 +304,31 @@ def test_verified_memory_restore_rebuilds_the_document_before_reactivating_the_n
         except RuntimeError:
             pass
     assert not any("SET m.status = 'active'" in q for q, _ in session.queries)
+
+
+def test_only_a_retention_purge_leaves_pages_alone(tmp_path, monkeypatch):
+    """A person's forget of an earlier version may still be in an unrefreshed page."""
+    from app.services.forget import adapters
+    from core.forget.registry import RETENTION, Entry
+    from tests.helpers.forget import isolate_forget
+
+    reg = isolate_forget(monkeypatch, tmp_path)
+    reg.append([
+        Entry("fg_r", Subject("chunk", "a_old"), "trashed", "2026-10-01T00:00:00Z", "m1", RETENTION),
+        Entry("fg_p", Subject("chunk", "a_earlier"), "trashed", "2026-10-01T00:00:00Z", "m1", "ui"),
+    ])
+    assert adapters._feeds_pages("a_old") is False
+    assert adapters._feeds_pages("a_earlier") is True
+
+
+def test_a_marking_failure_never_leaves_transcripts_readable():
+    """The engine retries a hide that raised; the transcripts must be hidden already."""
+    import pytest
+
+    chroma = _chroma_with([{"artifact_id": "a1", "filename": "chat_c1_20261007"}])
+    with patch("app.deps.get_chroma", return_value=chroma), \
+         patch("app.services.content_lifecycle.hide_content") as hide, \
+         patch("app.services.derived.mark_derived_stale", side_effect=RuntimeError("neo4j down")):
+        with pytest.raises(RuntimeError):
+            TranscriptsAdapter().hide(S, "fg_x")
+    hide.assert_called_once()

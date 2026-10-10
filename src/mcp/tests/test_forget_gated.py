@@ -117,6 +117,22 @@ def test_a_restricted_product_forgets_nothing_outside_its_domains(sdk, env, subj
     assert env["redis"].keys("cerid:forget:confirm:*") == []
 
 
+def test_a_restricted_product_is_refused_versions_the_preview_adds(sdk, env, monkeypatch):
+    """A memory's earlier versions ride on the token; a product may not reach
+    one through it that it could not have asked for (here a verified memory)."""
+    def with_history(subjects):
+        out = _preview(subjects)
+        out["groups"].append({"key": "earlier_versions", "default": "checked",
+                              "items": [{"kind": "memory", "id": "11111111-2222-3333-4444-555555555555",
+                                         "label": "older"}]})
+        return out
+
+    monkeypatch.setattr("app.services.forget.preview.preview_items", with_history)
+    resp = _preview_sdk(sdk, [{"kind": "artifact", "id": FIN}])
+    assert resp.status_code == 403, resp.text
+    assert env["redis"].keys("cerid:forget:confirm:*") == []
+
+
 def test_a_passage_in_the_products_domain_is_allowed(sdk, env, monkeypatch):
     monkeypatch.setattr("app.services.forget.preview.passage_ids", lambda ids: ids)
     resp = _preview_sdk(sdk, [{"kind": "chunk", "id": f"{FIN}_0123456789abcdef"}])

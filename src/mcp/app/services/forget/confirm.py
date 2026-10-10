@@ -13,6 +13,7 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,15 +64,22 @@ def _put_back(redis: Any, token: str, confirmed: Confirmed, caller: str) -> None
     redis.set(f"{_PREFIX}{token}", json.dumps(value), ex=TTL_SECONDS)
 
 
-def preview_for_token(redis: Any, subjects: list[Subject], mode: str, caller: str) -> dict[str, Any]:
+def preview_for_token(
+    redis: Any, subjects: list[Subject], mode: str, caller: str,
+    *, may_forget: Callable[[list[Subject]], None] | None = None,
+) -> dict[str, Any]:
     """The selection preview, plus a token for exactly the items it lists.
     Items already forgotten or gone are not listed and not covered; with
-    nothing listed there is no token."""
+    nothing listed there is no token. ``may_forget`` sees everything listed,
+    including what the preview added (a memory's earlier versions), and raises
+    to refuse before a token exists."""
     from app.services.forget.preview import preview_items
     from app.services.forget.subjects import resolve_passages
 
     preview = preview_items(resolve_passages(subjects))
     shown = [Subject(i["kind"], i["id"]) for g in preview["groups"] for i in g["items"]]
+    if may_forget is not None:
+        may_forget(shown)
     token = issue(redis, shown, mode, caller) if shown else ""
     return {**preview, "mode": mode, "confirm_token": token, "expires_in": TTL_SECONDS if token else 0}
 

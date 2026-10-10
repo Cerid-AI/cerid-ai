@@ -1500,6 +1500,10 @@ TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jso
 # Forget engine (docs/superpowers/specs/2026-10-07-forget-engine-design.md): trashed
 # subjects older than this many days are purged by the daily maintenance job; 0 = never.
 FORGET_TRASH_DAYS = int(os.getenv("FORGET_TRASH_DAYS", "30"))
+# Document versions (forget phase 5, spec §7): a re-ingested document keeps this
+# many versions; passages only older versions held are erased through the forget
+# engine, with a receipt. 0 keeps every version.
+DOCUMENT_VERSIONS_KEPT = int(os.getenv("DOCUMENT_VERSIONS_KEPT", "5"))
 # Settings that depend on what this machine has installed. Kept out of the
 # sync directory, which is shared between machines.
 HOST_SETTINGS_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "host_settings.json")

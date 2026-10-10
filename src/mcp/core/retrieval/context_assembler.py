@@ -15,6 +15,7 @@ import logging
 import re
 from typing import Any
 
+from core.lineage.history import history_note
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
 
@@ -156,7 +157,8 @@ def intelligent_assemble(
     for idx in selected_indices:
         r = results[idx]
         header = f"[Source: {r.get('filename', 'unknown')} | Domain: {r.get('domain', 'unknown')}]"
-        parts.append(f"{header}\n{r.get('content', '')}")
+        note = history_note(r)
+        parts.append(f"{header}\n{r.get('content', '')}" + (f"\n{note}" if note else ""))
         sources.append(r)
 
     covered_count = sum(1 for c in facets_covered if c)

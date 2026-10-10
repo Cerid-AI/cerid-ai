@@ -1022,6 +1022,8 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
                 redis_client=get_redis(),
                 neo4j_driver=get_neo4j(),
                 graph_store=get_graph_store(),
+                skip_cache=bool(req.as_of),
+                as_of=req.as_of,
             )
     except PoolTimeout as exc:
         raise HTTPException(
@@ -1059,6 +1061,7 @@ async def sdk_memory_recall(req: SDKMemoryRecallRequest, request: Request):
             chroma_client=get_chroma(),
             neo4j_driver=get_neo4j(),
             top_k=req.top_k,
+            as_of=req.as_of,
         )
     except Exception as exc:  # noqa: BLE001 — empty recall, not 500
         log_swallowed_error("app.routers.sdk.memory_recall", exc)
@@ -1208,6 +1211,7 @@ async def sdk_forget_preview(req: SDKForgetPreviewRequest, request: Request):
     await asyncio.to_thread(_ensure_may_forget, request, subjects)
     result = await asyncio.to_thread(
         confirm.preview_for_token, get_redis(), subjects, req.mode, _forget_caller(request),
+        may_forget=lambda shown: _ensure_may_forget(request, shown),
     )
     return SDKForgetPreviewResponse(**result)
 

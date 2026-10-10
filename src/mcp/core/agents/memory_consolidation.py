@@ -24,12 +24,12 @@ import httpx
 
 import config
 from core.context.identity import with_tenant_scope
+from core.lineage.current import CANDIDATE_OVERFETCH, is_current
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.swallowed import log_swallowed_error
-from core.utils.time import utcnow_iso
 from errors import RetrievalError
 
 # Per-stage LLM budget (Workstream A Phase 1.2). Mirrors the bound in
@@ -59,6 +59,7 @@ logger = logging.getLogger("ai-companion.memory_consolidation")
 
 # Similarity threshold for candidate retrieval — below this, treat as new info
 SIMILARITY_THRESHOLD = 0.85
+_CANDIDATES = 3
 
 # ---------------------------------------------------------------------------
 # Failure callback (Phase O.2 — memory consolidation preservation gate)
@@ -118,7 +119,7 @@ async def classify_memory(
         collection = chroma_client.get_collection(name=coll_name)
         results = collection.query(
             query_texts=[new_content],
-            n_results=3,
+            n_results=_CANDIDATES * CANDIDATE_OVERFETCH,
             include=["documents", "metadatas", "distances"],
             where=with_tenant_scope({"memory_type": memory_type} if memory_type else None),
         )
@@ -132,8 +133,8 @@ async def classify_memory(
         for i, chunk_id in enumerate(results["ids"][0]):
             distance = results["distances"][0][i] if results["distances"] else 1.0
             similarity = l2_distance_to_relevance(distance)
-            if similarity >= SIMILARITY_THRESHOLD:
-                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+            metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+            if similarity >= SIMILARITY_THRESHOLD and is_current(metadata):
                 candidates.append({
                     "id": chunk_id,
                     "content": results["documents"][0][i],
@@ -142,6 +143,7 @@ async def classify_memory(
                     "metadata": metadata,
                 })
 
+    candidates = candidates[:_CANDIDATES]
     if not candidates:
         return MemoryAction(action="ADD", reason="no similar existing memories found")
 
@@ -219,46 +221,3 @@ async def _llm_classify(
         logger.warning("Memory consolidation LLM call failed: %s", e)
         _fire_failure_callback(f"llm_call_failed:{type(e).__name__}")
         return MemoryAction(action="ADD", reason=f"LLM call failed: {e}")
-
-
-def mark_superseded(
-    neo4j_driver: Any,
-    old_artifact_id: str,
-    new_artifact_id: str,
-) -> bool:
-    """Mark an existing memory artifact as superseded by a newer one.
-
-    Returns True only when both artifacts were found and the SUPERSEDES edge
-    exists afterwards.
-    """
-    try:
-        with neo4j_driver.session() as session:
-            record = session.run(
-                "MATCH (old:Artifact {id: $old_id}) "
-                "SET old.superseded_by = $new_id, "
-                "    old.valid_until = $now "
-                "WITH old "
-                "MATCH (new:Artifact {id: $new_id}) "
-                "MERGE (new)-[:SUPERSEDES]->(old) "
-                "RETURN count(*) AS n",
-                old_id=old_artifact_id,
-                new_id=new_artifact_id,
-                now=utcnow_iso(),
-            ).single()
-        applied = bool(record) and int(record["n"]) > 0
-    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-        logger.warning(
-            "Failed to mark superseded: %s -> %s: %s",
-            old_artifact_id, new_artifact_id, e,
-        )
-        return False
-    if applied:
-        logger.info(
-            "Memory %s superseded by %s", old_artifact_id, new_artifact_id,
-        )
-    else:
-        logger.warning(
-            "Supersession matched nothing: %s -> %s",
-            old_artifact_id, new_artifact_id,
-        )
-    return applied

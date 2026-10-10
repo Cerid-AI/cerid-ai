@@ -238,28 +238,75 @@ def set_artifact_properties(
     return len(clean)
 
 
+# What a re-ingest needs to know about the artifact it updates, including its
+# version history (forget phase 5, spec §7).
+_REINGEST_FIELDS = (
+    "RETURN a.id AS id, a.content_hash AS content_hash, a.chunk_ids AS chunk_ids, "
+    "a.version AS version, a.versions AS versions, a.ingested_at AS ingested_at, "
+    "a.source_path AS source_path"
+)
+
+
+def _reingest_record(record: Any) -> dict[str, Any] | None:
+    if not record:
+        return None
+    return {k: record[k] for k in (
+        "id", "content_hash", "chunk_ids", "version", "versions", "ingested_at", "source_path",
+    )}
+
+
+def get_artifact_versions(driver, artifact_id: str) -> dict[str, Any] | None:
+    """What version bookkeeping needs about an artifact (forget phase 5): its
+    domain, current content hash, version history and source path."""
+    with driver.session() as session:
+        record = session.run(
+            "MATCH (a:Artifact {id: $id}) "
+            "OPTIONAL MATCH (a)-[:BELONGS_TO]->(d:Domain) "
+            "RETURN a.id AS id, coalesce(d.name, a.domain) AS domain, a.content_hash AS content_hash, "
+            "a.version AS version, a.versions AS versions, a.source_path AS source_path, "
+            "a.chunk_ids AS chunk_ids LIMIT 1",
+            id=artifact_id,
+        ).single()
+    return dict(record) if record else None
+
+
 def find_artifact_by_filename(
     driver,
     filename: str,
     domain: str,
+    *,
+    any_path: bool = False,
 ) -> dict[str, Any] | None:
-    """Find an existing artifact by filename and domain."""
+    """Find an existing artifact by filename and domain, among artifacts with no
+    source path: a file known by its full path is matched by that path
+    (:func:`find_artifact_by_source_path`), so two files that share a name in
+    different folders stay two documents. ``any_path`` matches any artifact of
+    that name, for a caller that knows no path."""
+    path_clause = "" if any_path else "WHERE a.source_path IS NULL OR a.source_path = '' "
     with driver.session() as session:
         result = session.run(
             "MATCH (a:Artifact {filename: $filename, domain: $domain}) "
-            "RETURN a.id AS id, a.content_hash AS content_hash, "
-            "a.chunk_ids AS chunk_ids",
+            + path_clause
+            + _REINGEST_FIELDS + " ORDER BY a.ingested_at ASC LIMIT 1",
             filename=filename,
             domain=domain,
         )
-        record = result.single()
-        if not record:
-            return None
-        return {
-            "id": record["id"],
-            "content_hash": record["content_hash"],
-            "chunk_ids": record["chunk_ids"],
-        }
+        return _reingest_record(result.single())
+
+
+def find_artifact_by_source_path(driver, source_path: str, domain: str) -> dict[str, Any] | None:
+    """Find the artifact a file at ``source_path`` was ingested as (spec §7:
+    a document's identity is its source, never its basename alone)."""
+    if not source_path:
+        return None
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (a:Artifact {source_path: $source_path, domain: $domain}) "
+            + _REINGEST_FIELDS + " ORDER BY a.ingested_at ASC LIMIT 1",
+            source_path=source_path,
+            domain=domain,
+        )
+        return _reingest_record(result.single())
 
 
 def find_artifact_by_external_id(
@@ -284,20 +331,11 @@ def find_artifact_by_external_id(
     with driver.session() as session:
         result = session.run(
             "MATCH (a:Artifact {source_kind: $source_kind, external_id: $external_id}) "
-            "RETURN a.id AS id, a.content_hash AS content_hash, "
-            "a.chunk_ids AS chunk_ids "
-            "ORDER BY a.ingested_at ASC LIMIT 1",
+            + _REINGEST_FIELDS + " ORDER BY a.ingested_at ASC LIMIT 1",
             source_kind=source_kind or "",
             external_id=external_id,
         )
-        record = result.single()
-        if not record:
-            return None
-        return {
-            "id": record["id"],
-            "content_hash": record["content_hash"],
-            "chunk_ids": record["chunk_ids"],
-        }
+        return _reingest_record(result.single())
 
 
 def update_artifact(
@@ -902,53 +940,6 @@ def delete_artifacts_by_domain(driver, domain: str) -> dict[str, Any]:
         )
     logger.info("Deleted %d artifacts (%d chunks) from domain %s", deleted, chunks, domain)
     return {"deleted": deleted, "chunks": chunks}
-
-
-def get_active_memories(
-    driver,
-    domain: str = "conversations",
-    memory_type: str | None = None,
-    limit: int = 100,
-) -> list[dict[str, Any]]:
-    """Fetch memories that have NOT been superseded.
-
-    Filters on ``superseded_by IS NULL`` to exclude stale/replaced entries.
-    Optionally filter by memory_type metadata.
-    """
-    conditions = [
-        "d.name = $domain",
-        "a.superseded_by IS NULL",
-    ]
-    params: dict[str, Any] = {"domain": domain, "limit": limit}
-
-    if memory_type:
-        conditions.append("a.memory_type = $memory_type")
-        params["memory_type"] = memory_type
-
-    where_clause = " AND ".join(conditions)
-
-    query = (
-        f"MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
-        f"WHERE {where_clause} "
-        "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, "
-        "a.memory_type AS memory_type, a.valid_from AS valid_from, "
-        "a.ingested_at AS ingested_at "
-        "ORDER BY a.ingested_at DESC LIMIT $limit"
-    )
-
-    with driver.session() as session:
-        result = session.run(query, **params)
-        return [
-            {
-                "id": record["id"],
-                "filename": record["filename"],
-                "summary": record["summary"],
-                "memory_type": record["memory_type"],
-                "valid_from": record["valid_from"],
-                "ingested_at": record["ingested_at"],
-            }
-            for record in result
-        ]
 
 
 def recategorize_artifact(

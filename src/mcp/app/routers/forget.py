@@ -196,6 +196,69 @@ def forget(req: ForgetRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=412, detail=str(exc)) from exc
 
 
+class UndoUpdateRequest(BaseModel):
+    kind: Literal["artifact", "memory"]
+    id: str = Field(min_length=1, max_length=200)
+
+
+class UndoUpdateResponse(BaseModel):
+    forget_id: str
+    kind: str
+    id: str
+    version: int | None = None
+    reopened: int | None = None
+    trashed: int | None = None
+
+
+@router.post("/undo-update", response_model=UndoUpdateResponse)
+def undo_update(req: UndoUpdateRequest) -> dict[str, Any]:
+    """Undo the last update of a memory or document (spec §7): the previous
+    version becomes current again and the newer one goes to the Trash."""
+    from app.services.lineage_undo import NothingToUndo
+    from app.services.lineage_undo import undo_update as undo
+
+    try:
+        parse_subjects([{"kind": req.kind, "id": req.id}])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return undo(req.kind, req.id)
+    except NothingToUndo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except engine.ForgetUnavailable as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
+
+
+class EarlierVersionsRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=200)
+    mode: Literal["trash", "permanent"] = "trash"
+
+
+class EarlierVersionsResponse(BaseModel):
+    forget_id: str
+    state: str
+    passages: int
+
+
+@router.post("/earlier-versions", response_model=EarlierVersionsResponse)
+def forget_earlier_versions(req: EarlierVersionsRequest, request: Request) -> dict[str, Any]:
+    """Forget a document's earlier versions and keep the current one: an edit
+    keeps the old text as history, and this removes it."""
+    from app.services.lineage_undo import NothingToUndo
+    from app.services.lineage_undo import forget_earlier_versions as forget_earlier
+
+    try:
+        parse_subjects([{"kind": "artifact", "id": req.id}])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return forget_earlier(req.id, req.mode, user_id=_user_id(request))
+    except NothingToUndo as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except engine.ForgetUnavailable as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
+
+
 @router.post("/{forget_id}/restore", response_model=RestoreResponse)
 def restore(forget_id: str) -> dict[str, int]:
     try:
