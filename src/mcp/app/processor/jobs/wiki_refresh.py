@@ -43,6 +43,7 @@ from core.agents.summary_quality import (
     is_insufficient_summary,
     is_wrong_entity_summary,
 )
+from core.lineage.current import CURRENT_ONLY_WHERE
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -125,6 +126,32 @@ Excerpts:
 
 Summary (2–3 paragraphs):
 """
+
+
+def _forgotten_now() -> tuple[frozenset[str], frozenset[str]]:
+    from core.forget.registry import forgotten_ids
+
+    return forgotten_ids("artifact"), forgotten_ids("chunk")
+
+
+def _forgotten_since(before: tuple[frozenset[str], frozenset[str]], artifact_ids: list[str]) -> bool:
+    from core.retrieval.chunk_ids import chunk_artifact_id
+
+    artifacts, chunks = _forgotten_now()
+    sources = set(artifact_ids)
+    return bool((artifacts - before[0]) & sources) or any(
+        chunk_artifact_id(c) in sources for c in chunks - before[1]
+    )
+
+
+def _clear_page(driver: Any, slug: str) -> None:
+    """Take a page down until the sweep writes it again from what is left."""
+    with driver.session() as session:
+        session.run(
+            "MATCH (e:Entity {canonical_id: $slug}) "
+            "SET e.summary = null, e.summary_updated_at = null, e.summary_refresh_due = true",
+            slug=slug,
+        )
 
 
 class WikiRefreshJob(BaseJob):
@@ -333,6 +360,7 @@ class WikiRefreshJob(BaseJob):
         chroma_client = get_chroma()
 
         # --- 0.3: Fetch entity + source text ---------------------------------
+        forgotten_before = _forgotten_now()
         entity_raw = await asyncio.to_thread(get_entity, driver, self._entity_slug)
         if entity_raw is None:
             logger.warning("wiki_refresh.entity_not_found slug=%s", self._entity_slug)
@@ -458,6 +486,11 @@ class WikiRefreshJob(BaseJob):
         await asyncio.to_thread(
             write_entity_summary, driver, self._entity_slug, summary_text, now_iso
         )
+        # A source forgotten while this ran: its text may be in what was just
+        # written, and the forget's own refresh collapsed onto this job.
+        if _forgotten_since(forgotten_before, artifact_ids):
+            await asyncio.to_thread(_clear_page, driver, self._entity_slug)
+            return {"skipped": "forgotten_during_refresh", "artifacts_used": len(artifact_ids)}
 
         await progress_cb(0.9)
 
@@ -558,7 +591,11 @@ class WikiRefreshJob(BaseJob):
         collection when entity-scoped chunks are not found.
         """
         from config.taxonomy import DOMAINS, collection_name  # type: ignore[import]
+        from core.forget.read_filter import visible
+        from core.forget.registry import forgotten_ids
 
+        gone_artifacts = forgotten_ids("artifact")
+        artifact_ids = [a for a in artifact_ids if a not in gone_artifacts]
         seen_ids: set[str] = set()
         texts: list[str] = []
 
@@ -576,13 +613,20 @@ class WikiRefreshJob(BaseJob):
                 continue
             try:
                 res = coll.get(
-                    where={"artifact_id": {"$in": artifact_ids[:10]}},
-                    include=["documents"],
+                    # A wiki page describes the present: no closed versions.
+                    where={"$and": [{"artifact_id": {"$in": artifact_ids[:10]}}, CURRENT_ONLY_WHERE]},
+                    include=["documents", "metadatas"],
                     limit=remaining,
                 )
-                for doc_id, doc in zip(
-                    res.get("ids", []), res.get("documents", []) or []
-                ):
+                # The shared read filter: no forgotten passage, nor a child of one.
+                rows = visible([
+                    {**(meta or {}), "chunk_id": cid, "document": doc}
+                    for cid, doc, meta in zip(
+                        res.get("ids", []) or [], res.get("documents", []) or [], res.get("metadatas", []) or [],
+                    )
+                ])
+                for row in rows:
+                    doc_id, doc = row["chunk_id"], row["document"]
                     if doc_id not in seen_ids and doc:
                         seen_ids.add(doc_id)
                         texts.append(doc)

@@ -13,4 +13,4 @@ responses carry the server's protocol version, and a differing major
 version raises ``ProtocolVersionError``. Bump both together."""
 from __future__ import annotations
 
-SDK_PROTOCOL_VERSION = "1.4.0"
+SDK_PROTOCOL_VERSION = "1.5.0"

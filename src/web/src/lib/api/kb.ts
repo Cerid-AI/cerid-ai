@@ -55,6 +55,9 @@ export interface QueryOpts {
   /** Per-request retrieval wall-clock budget (seconds). Typeahead must pass a
    *  small value — the server default is 20s and will occupy KB_POOL that long. */
   budgetSeconds?: number
+  /** Answer as of this ISO date: the version of each memory and document in
+   *  force then. Omitted for current knowledge. */
+  asOf?: string
 }
 
 export async function queryKB(
@@ -82,6 +85,7 @@ export async function queryKB(
       ...(opts?.excludePacks != null && { exclude_packs: opts.excludePacks }),
       ...(opts?.contextSources != null && { context_sources: opts.contextSources }),
       ...(opts?.budgetSeconds != null && { budget_seconds: opts.budgetSeconds }),
+      ...(opts?.asOf != null && { as_of: opts.asOf }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
@@ -130,11 +134,12 @@ export async function recallMemories(
   query: string,
   topK = 5,
   minScore = 0.4,
+  asOf?: string,
 ): Promise<MemoryRecallResult[]> {
   const res = await fetch(`${MCP_BASE}/agent/memory/recall`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ query, top_k: topK, min_score: minScore }),
+    body: JSON.stringify({ query, top_k: topK, min_score: minScore, ...(asOf != null && { as_of: asOf }) }),
   })
   if (!res.ok) throw new Error(await extractError(res, `Memory recall failed: ${res.status}`))
   return res.json()

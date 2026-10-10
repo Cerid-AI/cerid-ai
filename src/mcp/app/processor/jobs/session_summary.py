@@ -26,7 +26,10 @@ edge, mirroring the per-response path.
 
 Idempotent: a conversation already carrying a ``memory_scope=session_summary``
 artifact is skipped (queryable marker), and duplicate per-conversation enqueues
-collapse via ``enqueue_job_if_absent``.
+collapse via ``enqueue_job_if_absent``. A summary marked ``summary_stale``
+(a memory it summarized was superseded or forgotten, ``app.services.derived``)
+is written again from the current memories, and the earlier one is erased
+through the forget engine: it may hold text that was forgotten.
 
 Discovered automatically by ``build_default_registry()``.
 
@@ -175,15 +178,21 @@ class SessionSummaryJob(BaseJob):
         chroma_client = get_chroma()
         cid = self._conversation_id
 
-        # 1. Idempotency — a session-summary artifact already exists?
-        if await asyncio.to_thread(_summary_exists, driver, cid):
+        # 1. Idempotency — a session-summary artifact already exists, and
+        # nothing it summarized has changed since?
+        previous, stale = await asyncio.to_thread(_existing_summaries, driver, cid)
+        if previous and not stale:
             return {"skipped": "already_summarized"}
         await progress_cb(0.2)
 
         # 2. Fetch the session's turns (the per-response memories in Chroma).
         turns = await asyncio.to_thread(_fetch_session_turns, chroma_client, cid)
+        if turns is None:
+            # The store could not be read: nothing is known, so nothing is erased.
+            raise RuntimeError("session memories could not be read")
         if not turns:
-            return {"skipped": "no_memories"}
+            # Nothing of the conversation is current any more: no summary may stand.
+            return {"skipped": "no_memories", "retired": await asyncio.to_thread(_retire, previous)}
         turns_text = _assemble_turns_text(turns)
         session_date = _resolve_session_date(turns)
         await progress_cb(0.5)
@@ -198,6 +207,8 @@ class SessionSummaryJob(BaseJob):
             llm_caller=default_llm_caller,
         )
         if summary is None:
+            # The model gave nothing (or failed): a stale summary stays stale
+            # and the scan tries again. A forget already took its own summary.
             return {"skipped": "summary_empty", "memory_count": len(turns)}
         await progress_cb(0.8)
 
@@ -208,8 +219,16 @@ class SessionSummaryJob(BaseJob):
         if not artifact_id:
             return {"skipped": "ingest_failed", "memory_count": len(turns)}
 
-        # 5. Link provenance + stamp the queryable idempotency marker.
+        # 5. Link provenance + stamp the queryable idempotency marker, then
+        # erase the summaries this one replaces.
         await asyncio.to_thread(_link_and_mark, driver, artifact_id, cid)
+        retired = await asyncio.to_thread(_retire, [p for p in previous if p != artifact_id])
+        # A memory forgotten or superseded while this ran may be in what was
+        # just written; the forget's own refresh collapsed onto this job.
+        now = await asyncio.to_thread(_fetch_session_turns, chroma_client, cid)
+        if now is not None and {t["chunk_id"] for t in turns} - {t["chunk_id"] for t in now}:
+            await asyncio.to_thread(_retire, [artifact_id])
+            return {"skipped": "inputs_changed", "memory_count": len(turns), "retired": retired + 1}
         await progress_cb(1.0)
 
         logger.info(
@@ -222,6 +241,7 @@ class SessionSummaryJob(BaseJob):
             "summarized": True,
             "artifact_id": artifact_id,
             "memory_count": len(turns),
+            "retired": retired,
         }
 
 
@@ -231,32 +251,57 @@ class SessionSummaryJob(BaseJob):
 # ---------------------------------------------------------------------------
 
 
-def _summary_exists(driver: Any, conversation_id: str) -> bool:
-    """True when the conversation already carries a session-summary artifact."""
+def _existing_summaries(driver: Any, conversation_id: str) -> tuple[list[str], bool]:
+    """The conversation's session-summary artifacts not in the Trash, and
+    whether any is stale."""
     if driver is None:
-        return False
+        return [], False
     with driver.session() as session:
         row = session.run(
             "MATCH (a:Artifact)-[:EXTRACTED_FROM]->(c:Conversation {id: $cid}) "
-            "WHERE a.memory_scope = $scope "
-            "RETURN a.id AS id LIMIT 1",
+            "WHERE a.memory_scope = $scope AND coalesce(a.archived, false) = false "
+            "RETURN collect(a.id) AS ids, any(x IN collect(coalesce(a.summary_stale, false)) WHERE x) AS stale",
             cid=conversation_id,
             scope=_SESSION_SUMMARY_SCOPE,
         ).single()
-    return row is not None
+    if row is None:
+        return [], False
+    return [str(i) for i in row["ids"] or [] if i], bool(row["stale"])
 
 
-def _fetch_session_turns(chroma_client: Any, conversation_id: str) -> list[dict[str, Any]]:
+def _retire(summary_ids: list[str]) -> int:
+    """Erase summaries a newer one replaced, through the forget engine (a
+    receipt, ``requested_by: derived``). They are a cache of the memories,
+    not knowledge of their own, and may hold text that was forgotten."""
+    if not summary_ids:
+        return 0
+    from app.services.forget import engine
+    from core.forget.registry import DERIVED, Subject
+
+    if engine.forget_available():
+        engine.forget_permanently([Subject("artifact", sid) for sid in summary_ids], requested_by=DERIVED)
+    else:
+        from app.services.content_lifecycle import remove_content
+        for sid in summary_ids:
+            remove_content(sid)
+    logger.info("session_summary.retired %d earlier summaries", len(summary_ids))
+    return len(summary_ids)
+
+
+def _fetch_session_turns(chroma_client: Any, conversation_id: str) -> list[dict[str, Any]] | None:
     """Fetch the conversation's per-response memory chunks from Chroma.
 
     Production persists NO raw transcript (the /sdk memory-extract endpoint is
     per-response + stateless; the :Conversation node is id-only), so the durable
     per-conversation content is the extracted memories, which already carry
-    ``conversation_id`` in their Chroma metadata. Returns one dict per chunk
-    (``content``, ``created_at``, ``valid_from``), summary chunks excluded.
+    ``conversation_id`` in their Chroma metadata. Returns None when the store
+    could not be read, else one dict per chunk
+    (``content``, ``created_at``, ``valid_from``), summary chunks excluded, and
+    only current versions (spec §7): a superseded or forgotten memory is not
+    summarized.
     """
     if chroma_client is None:
-        return []
+        return None
     import config
 
     try:
@@ -267,14 +312,21 @@ def _fetch_session_turns(chroma_client: Any, conversation_id: str) -> list[dict[
             where={"conversation_id": {"$eq": conversation_id}},
             include=["documents", "metadatas"],
         )
-    except Exception:  # noqa: BLE001 — collection-missing / empty is a valid no-memories skip
-        return []
+    except Exception as exc:  # noqa: BLE001 — None is "could not read", never "no memories"
+        log_swallowed_error("processor.session_summary.fetch_turns", exc, context={"conversation_id": conversation_id})
+        return None
 
-    docs = list(res.get("documents", []) or [])
-    metas = list(res.get("metadatas", []) or [])
+    from core.forget.read_filter import visible
+
+    rows = visible([
+        {**(meta or {}), "chunk_id": cid, "document": doc}
+        for cid, doc, meta in zip(
+            res.get("ids", []) or [], res.get("documents", []) or [], res.get("metadatas", []) or [],
+        )
+    ])
     turns: list[dict[str, Any]] = []
-    for i, doc in enumerate(docs):
-        meta = metas[i] if i < len(metas) else {}
+    for meta in rows:
+        doc = meta["document"]
         if str(meta.get("memory_scope", "")) == _SESSION_SUMMARY_SCOPE:
             continue  # never fold a prior summary back into itself
         text = (doc or "").strip()
@@ -282,6 +334,7 @@ def _fetch_session_turns(chroma_client: Any, conversation_id: str) -> list[dict[
             continue
         turns.append(
             {
+                "chunk_id": str(meta["chunk_id"]),
                 "content": text,
                 "created_at": str(meta.get("created_at", "")),
                 "valid_from": str(meta.get("valid_from", "")),
@@ -365,7 +418,8 @@ def _link_and_mark(driver: Any, artifact_id: str, conversation_id: str) -> None:
             "MATCH (a:Artifact {id: $aid}) "
             "MERGE (c:Conversation {id: $cid}) "
             "MERGE (a)-[:EXTRACTED_FROM]->(c) "
-            "SET a.memory_scope = $scope",
+            "SET a.memory_scope = $scope "
+            "REMOVE a.summary_stale",
             aid=artifact_id,
             cid=conversation_id,
             scope=_SESSION_SUMMARY_SCOPE,

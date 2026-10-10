@@ -24,6 +24,9 @@ from app.sync._helpers import (
     DOMAINS_JSONL,
     ENTITIES_JSONL,
     ENTITY_EDGES_JSONL,
+    FACTS_JSONL,
+    IDENTITY_PROPS,
+    LINEAGE_PROPS,
     MEMORIES_JSONL,
     MEMORY_EDGES_JSONL,
     NEO4J_SUBDIR,
@@ -33,11 +36,14 @@ from app.sync._helpers import (
     _ensure_dir,
     _v2_collections_base,
     _write_jsonl,
+    without_wiki_page,
 )
 from app.sync.manifest import write_manifest
 from app.sync.user_state import read_conversations
 
 logger = logging.getLogger("ai-companion.sync")
+
+_LINEAGE_COLUMNS = ",\n                    ".join(f"a.{p} AS {p}" for p in LINEAGE_PROPS + IDENTITY_PROPS)
 
 
 def export_neo4j(
@@ -95,7 +101,8 @@ def export_neo4j(
                     a.ingested_at   AS ingested_at,
                     a.modified_at   AS modified_at,
                     a.recategorized_at AS recategorized_at,
-                    a.updated_at    AS updated_at
+                    a.updated_at    AS updated_at,
+                    {_LINEAGE_COLUMNS}
                 ORDER BY a.ingested_at ASC
                 """,
                 **params,
@@ -392,10 +399,41 @@ def export_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
     }
 
 
+def export_facts(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """Export :Fact versions with their subject and object entities to
+    {sync_dir}/neo4j/facts.jsonl. Each fact names its source memory
+    (``source_artifact_id``); the import attaches it there. Full export: facts
+    close and reopen as memories are superseded, so every run carries them all."""
+    sync_dir = sync_dir or _default_sync_dir()
+    out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
+    facts: list[dict[str, Any]] = []
+    try:
+        with driver.session() as session:
+            for record in session.run(
+                """
+                MATCH (f:Fact)
+                OPTIONAL MATCH (s:Entity)-[:HAS_FACT]->(f)
+                OPTIONAL MATCH (f)-[:FACT_OBJECT]->(o:Entity)
+                RETURN properties(f) AS props, collect(DISTINCT s.canonical_id) AS subjects,
+                       collect(DISTINCT o.canonical_id) AS objects
+                """
+            ):
+                facts.append(dict(record))
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.export.facts', exc)
+        logger.error("Fact export failed: %s", exc)
+        return {"error": str(exc), "facts": 0}
+    count = _write_jsonl(str(out_dir / FACTS_JSONL), facts)
+    logger.info("Fact export: %d facts → %s", count, out_dir)
+    return {"facts": count}
+
+
 def export_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
     """
-    Export :Entity nodes (which drive wiki pages — wiki pages themselves are
-    computed from entities at read time and are NOT exported) plus their
+    Export :Entity nodes (which drive wiki pages — the page fields, ``summary*``
+    and ``external_references``, are NOT exported: each machine writes its own
+    from its own sources) plus their
     direct MENTIONS provenance edges from Artifacts to
     {sync_dir}/neo4j/entities.jsonl and entity_edges.jsonl.
 
@@ -423,7 +461,9 @@ def export_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
                 """
             )
             for record in result:
-                entities.append(dict(record))
+                row = dict(record)
+                row["props"] = without_wiki_page(dict(row.get("props") or {}))
+                entities.append(row)
 
             result = session.run(
                 """
@@ -513,6 +553,7 @@ def export_all(
 
     memories_result = export_memories(driver, sync_dir=sync_dir)
     entities_result = export_entities(driver, sync_dir=sync_dir)
+    facts_result = export_facts(driver, sync_dir=sync_dir)
     conversations_result = export_conversations(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_exported": 0, "skipped": True}
@@ -545,6 +586,7 @@ def export_all(
         "bm25": bm25_result,
         "memories": memories_result,
         "entities": entities_result,
+        "facts": facts_result,
         "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,

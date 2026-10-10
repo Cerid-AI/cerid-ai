@@ -26,6 +26,7 @@ import httpx
 import config
 from config.constants import QUALITY_TIER_EXCELLENT, QUALITY_TIER_FAIR, QUALITY_TIER_GOOD
 from core.contracts.stores import ArtifactNode, GraphStore
+from core.lineage.current import is_current
 from core.utils.circuit_breaker import CircuitOpenError
 
 # call_llm import removed v0.93.8 — synopsis generation now routes
@@ -471,11 +472,11 @@ async def curate(
                     result = collection.get(
                         where={"artifact_id": artifact["id"]}, include=["documents", "metadatas"],
                     )
-                    rows = [
-                        ((meta or {}).get("chunk_index", 0), doc)
-                        for doc, meta in zip(result.get("documents") or [], result.get("metadatas") or [])
-                        if doc
-                    ]
+                    pairs = [(doc, meta or {}) for doc, meta in
+                             zip(result.get("documents") or [], result.get("metadatas") or []) if doc]
+                    # The document as it stands now, not an earlier version's chunk 0.
+                    pairs = [p for p in pairs if is_current(p[1])] or pairs
+                    rows = [(meta.get("chunk_index", 0), doc) for doc, meta in pairs]
                     if not rows:
                         continue
                     text = min(rows, key=lambda r: r[0])[1]

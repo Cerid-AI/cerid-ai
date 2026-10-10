@@ -27,7 +27,7 @@ the bi-temporal plan (C/D/E/F) cites for what these properties mean:
                   (superseded by a contradicting fact, or otherwise
                   invalidated). NULL while the fact is the current
                   belief. (m0004; unchanged — NOT renamed.) Mirrors
-                  core/agents/memory_consolidation.py mark_superseded:
+                  the lineage writer (core/lineage/writer.py):
                   code sets this, never the LLM.
     valid_from  — WORLD/valid time. When the fact BECAME true. Seeded
                   from the source memory's ``event_date`` (or ingestion

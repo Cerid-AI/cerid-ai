@@ -14,6 +14,7 @@ MIGRATIONS = [
     "app.db.neo4j.migrations.m0004_fact_nodes",
     "app.db.neo4j.migrations.m0005_tenant_scoping",
     "app.db.neo4j.migrations.m0006_fact_bitemporal",
+    "app.db.neo4j.migrations.m0007_lineage",
 ]
 
 

@@ -23,13 +23,14 @@ from fastapi.testclient import TestClient
 import config
 from app.services.request_policy import build_request_context
 from core.agents import query_agent
+from core.lineage.current import CURRENT_ONLY_WHERE
 
 CARD = {"record_type": "mail_financial_card", "source": "inbox_triage"}
 THREAD = {"record_type": "mail_thread", "source": "inbox_triage"}
 
 
 def _matches(meta: dict[str, Any], where: dict[str, Any] | None) -> bool:
-    """A small Chroma: equality, $in, $and."""
+    """A small Chroma: equality, $in, $ne (which keeps a row without the key), $and."""
     if not where:
         return True
     if "$and" in where:
@@ -37,6 +38,9 @@ def _matches(meta: dict[str, Any], where: dict[str, Any] | None) -> bool:
     for key, expected in where.items():
         if isinstance(expected, dict) and "$in" in expected:
             if meta.get(key) not in expected["$in"]:
+                return False
+        elif isinstance(expected, dict) and "$ne" in expected:
+            if key in meta and meta[key] == expected["$ne"]:
                 return False
         elif meta.get(key) != expected:
             return False
@@ -102,8 +106,11 @@ async def test_a_cerid_finance_query_returns_the_card_and_not_a_mail_thread():
     )
     ids = sorted(r["chunk_id"] for r in results)
     assert ids == ["card", "ledger"]
-    assert chroma.where_by_domain[config.collection_name("inbox")] == {"record_type": "mail_financial_card"}
-    assert chroma.where_by_domain[config.collection_name("finance")] is None
+    # every current-only query also leaves closed versions out (forget phase 5)
+    assert chroma.where_by_domain[config.collection_name("inbox")] == {"$and": [
+        {"record_type": "mail_financial_card"}, CURRENT_ONLY_WHERE,
+    ]}
+    assert chroma.where_by_domain[config.collection_name("finance")] == CURRENT_ONLY_WHERE
 
 
 @pytest.mark.asyncio
@@ -119,6 +126,7 @@ async def test_the_record_type_clause_is_fused_with_a_callers_filter():
     assert chroma.where_by_domain[config.collection_name("inbox")] == {"$and": [
         {"source": "inbox_triage"},
         {"record_type": {"$in": ["mail_financial_card", "mail_finance_pointer"]}},
+        CURRENT_ONLY_WHERE,
     ]}
 
 

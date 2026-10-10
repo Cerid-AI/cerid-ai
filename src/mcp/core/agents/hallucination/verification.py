@@ -52,7 +52,8 @@ from core.agents.hallucination.patterns import (
     memory_authority_boost,
 )
 from core.context.identity import with_tenant_scope
-from core.forget.read_filter import drop_forgotten
+from core.forget.read_filter import visible
+from core.lineage.current import version_fields
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import (
     TIME_SENSITIVE_VERDICT_TTL_S,
@@ -963,10 +964,12 @@ async def _query_memories(
                     "memory_type": metadata.get("memory_type", ""),
                     "memory_source": True,
                     "created_at": metadata.get("created_at") or metadata.get("ingested_at") or None,
+                    **version_fields(metadata),
                 })
         # This reads the memory rows directly, outside the retrieval pipeline,
-        # so it applies the forget filter itself.
-        return drop_forgotten(formatted)
+        # so it applies the shared read filter itself: nothing forgotten, and no
+        # memory a newer one has replaced cited as evidence.
+        return visible(formatted)
     except Exception as e:
         log_swallowed_error('core.agents.hallucination.verification', e)
         logger.debug("Memory query failed (non-blocking): %s", e)

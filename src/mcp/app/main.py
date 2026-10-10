@@ -637,6 +637,16 @@ async def lifespan(app: FastAPI):
         log_swallowed_error('app.main', e)
         logger.warning(f"DataSourceRegistry wiring failed (authoritative verify disabled): {e}")
 
+    # A supersede (core/lineage) refreshes what was derived from the versions
+    # it changed: wiki pages and session summaries (spec §7).
+    try:
+        from app.services.derived import mark_derived_stale
+        from core.lineage.writer import set_on_change
+        set_on_change(mark_derived_stale)
+    except Exception as e:
+        log_swallowed_error('app.main', e)
+        logger.warning(f"Derived-summary refresh wiring failed: {e}")
+
     # Wire the live Private Mode level into core/internal_llm via DI (same
     # pattern as above — core/ cannot import app.services.private_mode). Lets
     # _resolve_stage_provider honour an operator flipping Private Mode on at
@@ -1087,6 +1097,21 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_migrate_chunk_ids())
     except Exception as e:
         log_swallowed_error("app.main.chunk_id_migration_start", e)
+
+    # Give memories and facts written before lineages existed their lineages
+    # (spec §7). Recomputed from the graph, so it is a no-op once done.
+    try:
+        from app.services.lineage_migration import migrate_lineages
+
+        async def _migrate_lineages() -> None:
+            try:
+                await asyncio.to_thread(migrate_lineages)
+            except Exception as exc:  # noqa: BLE001 — retried at the next boot and after each sync import
+                log_swallowed_error("app.main.lineage_migration", exc)
+
+        asyncio.create_task(_migrate_lineages())
+    except Exception as e:
+        log_swallowed_error("app.main.lineage_migration_start", e)
 
     # Task 5: background refresh of the divergence-heavy run_invariants()
     # snapshot. It used to run inline on every /health rebuild (1,317/day,

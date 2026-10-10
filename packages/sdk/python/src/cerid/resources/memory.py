@@ -76,10 +76,12 @@ class MemoryResource:
         *,
         top_k: int = 5,
         min_score: float = 0.4,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> MemoryRecallResponse:
-        """Salience-aware memory recall."""
-        body = self._client._build_json(query=query, top_k=top_k, min_score=min_score)
+        """Salience-aware memory recall: the current version of each memory, or
+        the one in force at ``as_of`` (an ISO date or datetime)."""
+        body = self._client._build_json(query=query, top_k=top_k, min_score=min_score, as_of=as_of)
         resp = self._http.post(
             self._client._url("/memory/recall"),
             json=body,
@@ -142,10 +144,12 @@ class AsyncMemoryResource:
         *,
         top_k: int = 5,
         min_score: float = 0.4,
+        as_of: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> MemoryRecallResponse:
-        """Salience-aware memory recall."""
-        body = self._client._build_json(query=query, top_k=top_k, min_score=min_score)
+        """Salience-aware memory recall: the current version of each memory, or
+        the one in force at ``as_of`` (an ISO date or datetime)."""
+        body = self._client._build_json(query=query, top_k=top_k, min_score=min_score, as_of=as_of)
         resp = await self._http.post(
             self._client._url("/memory/recall"),
             json=body,

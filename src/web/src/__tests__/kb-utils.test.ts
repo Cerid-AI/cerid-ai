@@ -328,3 +328,33 @@ describe("selectDocsWithinBudget", () => {
     expect(fullSelected).toHaveLength(1)
   })
 })
+
+describe("history in prompt blocks (forget phase 5)", () => {
+  it("renders earlier versions inside a document, newest first", async () => {
+    const { formatChunkWithHeader } = await import("@/lib/kb-utils")
+    const block = formatChunkWithHeader({
+      content: "Office is on the 9th floor", relevance: 0.9, artifact_id: "a", filename: "f.md",
+      domain: "general", chunk_index: 0, collection: "c", ingested_at: "",
+      history: [
+        { value: "5th floor", valid_from: "2025-06-01", valid_to: "2026-05-01T00:00:00Z" },
+        { value: "3rd floor", valid_from: "2025-01-01", valid_to: "" },
+      ],
+    })
+    expect(block.endsWith("Office is on the 9th floor\n<history>\n- until 2026-05-01: 5th floor\n- until unknown: 3rd floor\n</history>\n</document>")).toBe(true)
+  })
+
+  it("adds nothing when there is no history, and carries a memory's history", async () => {
+    const { formatChunkWithHeader, formatMemoryForInjection, memoryToKBResult } = await import("@/lib/kb-utils")
+    const plain = formatChunkWithHeader({
+      content: "x", relevance: 0.5, artifact_id: "a", filename: "f", domain: "d", chunk_index: 0, collection: "c", ingested_at: "",
+    })
+    expect(plain).not.toContain("<history>")
+    const memory = {
+      content: "prefers tea", summary: "Prefers tea", relevance: 0.8, memory_type: "preference", age_days: 1,
+      memory_id: "m", source_authority: 1, base_similarity: 0.8, access_count: 0, source_type: "memory" as const,
+      history: [{ value: "Prefers coffee", valid_from: "2025-01-01", valid_to: "2026-01-01" }],
+    }
+    expect(formatMemoryForInjection(memory)).toContain("<history>\n- until 2026-01-01: Prefers coffee\n</history>")
+    expect(memoryToKBResult(memory).history).toEqual(memory.history)
+  })
+})

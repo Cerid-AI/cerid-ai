@@ -24,10 +24,14 @@ export interface PreviewItem extends ForgetSubject {
   domain?: string
   children?: number
   passages?: number
+  /** An earlier version of a memory being forgotten: its number in the history. */
+  version?: number
+  /** A document: how many versions it has. */
+  versions?: number
 }
 export type PreviewGroupKey =
   | "transcripts" | "memories" | "summary" | "verified_memories" | "cited_documents"
-  | "documents" | "passages" | "conversations"
+  | "documents" | "passages" | "conversations" | "earlier_versions"
 export interface PreviewGroup { key: PreviewGroupKey; default: "always" | "checked" | "unchecked"; items: PreviewItem[] }
 export interface ForgetPreview {
   /** The conversation previewed; null for a selection of items. */
@@ -150,6 +154,31 @@ export async function restoreForget(forgetId: string): Promise<{ restored: numbe
   if (res.status === 409) throw new ForgetConflictError(await extractError(res, "Erasing has started"))
   if (!res.ok) throw new Error(await extractError(res, "Restore failed"))
   return res.json()
+}
+
+export interface UndoUpdateResult {
+  forget_id: string
+  kind: "artifact" | "memory"
+  id: string
+  /** A document: the version now current, and how many passages came back
+   *  and how many went to the Trash. */
+  version?: number | null
+  reopened?: number | null
+  trashed?: number | null
+}
+
+/** Undo the last update of a document or memory: the previous version is
+ *  current again, and the newer one goes to the Trash. */
+export function undoUpdate(kind: "artifact" | "memory", id: string): Promise<UndoUpdateResult> {
+  return post("/forget/undo-update", { kind, id }, "Undo failed")
+}
+
+/** Forget a document's earlier versions and keep the current one. Editing a
+ *  document keeps the old text as history; this removes it. */
+export function forgetEarlierVersions(
+  id: string, mode: ForgetMode = "trash",
+): Promise<{ forget_id: string; state: string; passages: number }> {
+  return post("/forget/earlier-versions", { id, mode }, "Forget failed")
 }
 
 export function emptyTrash(): Promise<{ purged: string[] }> {

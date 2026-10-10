@@ -82,7 +82,7 @@ class FakeMemoryGraph:
         rows = list(self.memories)
         if "m.status" in query:
             rows = [m for m in rows if (m.get("status") or "active") == "active"]
-        if "SUPERSEDES" in query:
+        if "m.superseded_by IS NULL" in query:
             rows = [m for m in rows if not m.get("superseded")]
         if "$memory_type" in query and "m.memory_type = $memory_type" in query:
             rows = [m for m in rows if m.get("memory_type") == params["memory_type"]]

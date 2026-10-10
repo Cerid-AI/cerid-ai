@@ -375,6 +375,17 @@ export function ArtifactCard({ result, relevanceAmong, isSelected, onSelect, onI
           </p>
         ) : null)}
 
+        {/* Earlier versions: what this said before it was updated */}
+        {!compact && result.history && result.history.length > 0 && (
+          <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+            <span className="font-medium">Earlier</span>
+            {result.history[0].valid_to ? ` (until ${result.history[0].valid_to.slice(0, 10)})` : ""}
+            {": "}
+            <span className={cn(!expanded && "line-clamp-1")}>{result.history[0].value}</span>
+            {result.history.length > 1 && ` · ${result.history.length - 1} older`}
+          </p>
+        )}
+
         {/* Expanded view: metadata, keywords, quality breakdown */}
         {!compact && expanded && (
           <div className="mt-3 space-y-2 border-t pt-3 transition-all duration-200">

@@ -27,6 +27,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from core.lineage.current import is_current
 from core.processor.cost import CostEstimate
 from core.processor.job import BaseJob, JobResult, ProgressCallback
 from core.processor.priority import Priority
@@ -288,11 +289,13 @@ class EntityExtractionJob(BaseJob):
             where={"artifact_id": {"$eq": artifact_id}},
             include=["documents", "metadatas"],
         )
-        return (
-            list(res.get("ids", [])),
-            list(res.get("documents", []) or []),
-            list(res.get("metadatas", []) or []),
-        )
+        rows = list(zip(res.get("ids", []) or [], res.get("documents", []) or [], res.get("metadatas", []) or []))
+        # A document's earlier versions stay as closed rows (forget phase 5);
+        # mentions come from the text in force. A superseded memory has only
+        # closed rows, and is read whole so its facts are written closed.
+        current = [r for r in rows if is_current(r[2])]
+        rows = current or rows
+        return [r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +347,7 @@ def _derive_and_write_facts(
         return {}
 
     try:
-        from app.db.neo4j.facts import write_facts
+        from app.db.neo4j.facts import close_superseded_facts, write_facts
         from core.agents.fact_derivation import derive_facts
 
         facts = derive_facts(
@@ -358,8 +361,8 @@ def _derive_and_write_facts(
             memory_source_type=meta.get("memory_source_type"),
         )
         if not facts:
-            return {"facts_written": 0}
-        return write_facts(driver, facts, source_artifact_id=artifact_id)
+            return {"facts_written": 0, "facts_closed": close_superseded_facts(driver, artifact_id)}
+        return write_facts(driver, facts, source_artifact_id=artifact_id, value=content)
     except Exception as exc:  # noqa: BLE001 — fact write is best-effort; never lose the entity extraction
         log_swallowed_error(
             "processor.entity_extraction.fact_write",

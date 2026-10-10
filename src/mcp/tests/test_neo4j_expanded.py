@@ -315,11 +315,13 @@ class TestCreateArtifactRetriesOnDeadlock:
 class TestFindArtifactByFilename:
     def test_found(self):
         driver, session = _mock_driver()
-        record = _mock_record(id="art-1", content_hash="abc123", chunk_ids='["c1"]')
+        record = _mock_record(id="art-1", content_hash="abc123", chunk_ids='["c1"]', version=2,
+                              versions="[]", ingested_at="2026-01-01", source_path=None)
         session.run.return_value.single.return_value = record
 
         result = find_artifact_by_filename(driver, "test.py", "coding")
-        assert result == {"id": "art-1", "content_hash": "abc123", "chunk_ids": '["c1"]'}
+        assert result == {"id": "art-1", "content_hash": "abc123", "chunk_ids": '["c1"]', "version": 2,
+                          "versions": "[]", "ingested_at": "2026-01-01", "source_path": None}
 
     def test_not_found(self):
         driver, session = _mock_driver()

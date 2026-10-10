@@ -57,8 +57,9 @@ def _fact_count(session: Any, aids: list[str]) -> int:
     if not aids:
         return 0
     rec = session.run(
-        "MATCH (a:Artifact)-[:FACT]->(f:Fact) WHERE a.id IN $aids "
-        "AND NOT EXISTS { MATCH (o:Artifact)-[:FACT]->(f) WHERE NOT o.id IN $aids } "
+        "CALL { MATCH (f:Fact) WHERE f.source_artifact_id IN $aids RETURN f "
+        "UNION MATCH (a:Artifact)-[:FACT]->(f:Fact) WHERE a.id IN $aids "
+        "AND NOT EXISTS { MATCH (o:Artifact)-[:FACT]->(f) WHERE NOT o.id IN $aids } RETURN f } "
         "RETURN count(DISTINCT f) AS n",
         aids=aids,
     ).single()
@@ -255,7 +256,8 @@ def preview_items(subjects: list[Any]) -> dict[str, Any]:
         docs = [dict(r) for r in session.run(
             "UNWIND $ids AS i MATCH (a:Artifact {id: i}) "
             "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, a.domain AS domain, "
-            "a.chunk_ids AS chunk_ids, coalesce(a.chunk_count, 0) AS chunk_count",
+            "a.chunk_ids AS chunk_ids, coalesce(a.chunk_count, 0) AS chunk_count, "
+            "coalesce(a.version, 1) AS version",
             ids=artifacts,
         )]
         # A document with every listed passage selected, but not the document itself.
@@ -271,6 +273,10 @@ def preview_items(subjects: list[Any]) -> dict[str, Any]:
         }
         verified = _verified(session, memories)
         facts = _fact_count(session, [d["id"] for d in docs])
+        earlier = [
+            v for v in _earlier_versions(session, [d["id"] for d in docs if _is_memory_artifact(d)] + memories)
+            if _live(v["kind"], v["id"])
+        ]
 
     used_by = _citations_by_artifact({d["id"] for d in docs})
     notes: list[str] = []
@@ -289,7 +295,7 @@ def preview_items(subjects: list[Any]) -> dict[str, Any]:
             {"key": "documents", "default": "checked", "items": [
                 {"kind": "artifact", "id": d["id"], "label": _label(d.get("filename"), d["id"]),
                  "domain": str(d.get("domain") or ""), "passages": int(d.get("chunk_count") or 0),
-                 "used_by": used_by.get(d["id"], 0)}
+                 "used_by": used_by.get(d["id"], 0), "versions": int(d.get("version") or 1)}
                 for d in docs if not _is_memory_artifact(d)
             ]},
             {"key": "passages", "default": "checked", "items": [
@@ -303,12 +309,47 @@ def preview_items(subjects: list[Any]) -> dict[str, Any]:
             ] + [
                 {"kind": "memory", "id": v["id"], "label": _label(v.get("text"), v["id"])} for v in verified
             ]},
+            {"key": "earlier_versions", "default": "checked", "items": [
+                {"kind": v["kind"], "id": v["id"], "label": _label(v.get("text"), v["id"]),
+                 "version": int(v.get("version") or 0)}
+                for v in earlier
+            ]},
             {"key": "conversations", "default": "checked", "items": _conversation_items(subjects)},
         ],
         "derived_facts": facts,
-        "notes": notes,
+        "notes": notes + ([EARLIER_VERSIONS_NOTE] if earlier else [])
+        + ([DOCUMENT_VERSIONS_NOTE] if any(int(d.get("version") or 1) > 1 and not _is_memory_artifact(d)
+                                          for d in docs) else []),
         "out_of_reach": list(OUT_OF_REACH_NOTES),
     }
+
+
+EARLIER_VERSIONS_NOTE = (
+    "A memory keeps its earlier versions as history. Leave them checked to forget the whole history; "
+    "uncheck them to forget only the current version, and the newest earlier version becomes current again."
+)
+
+
+DOCUMENT_VERSIONS_NOTE = (
+    "Forgetting a document forgets every version of it. To go back to the previous version instead, "
+    "use Undo last update."
+)
+
+
+def _earlier_versions(session: Any, ids: list[str]) -> list[dict[str, Any]]:
+    """The other versions in the lineages of ``ids``, newest first (spec §7:
+    forgetting an item with history forgets the whole lineage by default)."""
+    if not ids:
+        return []
+    rows = session.run(
+        "UNWIND $ids AS i MATCH (a) WHERE a.id = i AND (a:Artifact OR a:Memory) AND a.lineage_id IS NOT NULL "
+        "MATCH (n) WHERE (n:Artifact OR n:Memory) AND n.lineage_id = a.lineage_id AND NOT n.id IN $ids "
+        "RETURN DISTINCT n.id AS id, CASE WHEN n:Memory THEN 'memory' ELSE 'artifact' END AS kind, "
+        "coalesce(n.summary, n.text, n.filename, n.id) AS text, n.version AS version "
+        "ORDER BY version DESC",
+        ids=ids,
+    )
+    return [dict(r) for r in rows]
 
 
 def _is_memory_artifact(doc: dict[str, Any]) -> bool:

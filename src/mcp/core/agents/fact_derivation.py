@@ -135,10 +135,13 @@ def build_fact_key(
     return _KEY_SEP.join(parts)
 
 
-def fact_uid(subject_id: str, fact_key: str) -> str:
-    """Graph-level MERGE key ``"{subject_id}|{fact_key}"`` (m0004's
-    single-property Community-Edition dedup identity)."""
-    return f"{subject_id}{_KEY_SEP}{fact_key}"
+def fact_uid(subject_id: str, fact_key: str, source_artifact_id: str = "") -> str:
+    """Graph-level MERGE key (m0004's single-property identity). A fact is one
+    version per source memory, ``"{subject_id}|{fact_key}|{source_artifact_id}"``,
+    so a newer memory's fact never lands on the node an older one closed (spec
+    §7). Without a source it is the pre-version key ``"{subject_id}|{fact_key}"``."""
+    base = f"{subject_id}{_KEY_SEP}{fact_key}"
+    return f"{base}{_KEY_SEP}{source_artifact_id}" if source_artifact_id else base
 
 
 def resolve_fact_source(memory_source_type: str | None) -> str:

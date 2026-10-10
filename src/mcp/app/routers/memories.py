@@ -130,7 +130,7 @@ def _verified_memory_queries(
     """
     conditions = [
         "coalesce(m.status, 'active') = 'active'",
-        "NOT (m)<-[:SUPERSEDES]-(:Memory)",
+        "m.superseded_by IS NULL",
     ]
     if memory_type:
         conditions.append("m.memory_type = $memory_type")
@@ -306,6 +306,14 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 # DELETE /memories/{memory_id} — delete a memory
 # ---------------------------------------------------------------------------
 
+def _require_admin(request: Request | None, action: str) -> None:
+    """Memories are shared knowledge-base data: in multi-user mode only an admin
+    may forget them or rewrite their history."""
+    state = getattr(request, "state", None)
+    if config.CERID_MULTI_USER and not (getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"):
+        raise HTTPException(status_code=403, detail=f"{action} needs an admin in multi-user mode")
+
+
 @router.delete("/memories/{memory_id}", response_model=DeleteMemoryResponse)
 async def delete_memory(
     memory_id: str,
@@ -316,9 +324,7 @@ async def delete_memory(
     Memories are shared knowledge-base data and this is a permanent forget, so
     in multi-user mode only an admin may do it (the forget routes' rule).
     """
-    state = getattr(request, "state", None)
-    if config.CERID_MULTI_USER and not (getattr(state, "is_admin", False) or getattr(state, "role", "") == "admin"):
-        raise HTTPException(status_code=403, detail="Deleting a memory needs an admin in multi-user mode")
+    _require_admin(request, "Deleting a memory")
     try:
         driver = get_neo4j()
 
@@ -352,9 +358,17 @@ async def delete_memory(
             filename = ""
 
         # One deletion path (spec §6.1): the engine removes every store's rows,
-        # the facts only this memory sourced, and records a receipt.
+        # the facts only this memory sourced, and records a receipt. A memory
+        # with history goes with every earlier version (spec §7).
+        from core.lineage.writer import lineage_versions
+
+        versions = await asyncio.to_thread(lineage_versions, driver, memory_id)
+        subjects = [subject] + [
+            Subject("memory" if v["label"] == "Memory" else "artifact", v["id"])
+            for v in versions if v["id"] != memory_id
+        ]
         try:
-            await asyncio.to_thread(forget_engine.forget_permanently, [subject], requested_by="memories")
+            await asyncio.to_thread(forget_engine.forget_permanently, subjects, requested_by="memories")
         except forget_engine.ForgetUnavailable as exc:
             raise HTTPException(status_code=412, detail=str(exc)) from exc
 
@@ -385,7 +399,10 @@ async def delete_memory(
 # ---------------------------------------------------------------------------
 
 @router.post("/memories/dedup", response_model=MemoryDedupResponse)
-async def dedup_memories(req: MemoryDedupRequest | None = None):
+async def dedup_memories(
+    req: MemoryDedupRequest | None = None,
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
     """Find (and with ``confirm=true`` merge) near-duplicate memories.
 
     Write-time consolidation misses rephrasings of the same fluctuating
@@ -395,6 +412,8 @@ async def dedup_memories(req: MemoryDedupRequest | None = None):
     newest, which recall already filters out. Dry-run by default.
     """
     apply = bool(req and req.confirm)
+    if apply:
+        _require_admin(request, "Merging duplicate memories")
     try:
         from core.agents.memory_dedup import find_duplicate_groups
 
@@ -413,13 +432,25 @@ async def dedup_memories(req: MemoryDedupRequest | None = None):
 
         superseded = 0
         if apply and groups:
-            from core.agents.memory_consolidation import mark_superseded
+            from core.lineage.writer import supersede
 
+            chroma = get_chroma()
             for group in groups:
                 keeper = group[0]
                 for dup in group[1:]:
-                    if mark_superseded(driver, str(dup["id"]), str(keeper["id"])):
+                    try:
+                        result = supersede(
+                            driver, chroma, str(dup["id"]), str(keeper["id"]),
+                            valid_to=str(keeper.get("created_at") or ""),
+                        )
+                    except Exception as exc:  # noqa: BLE001 — one failed pair must not hide the others
+                        from core.utils.swallowed import log_swallowed_error
+                        log_swallowed_error("app.routers.memories.dedup_supersede", exc)
+                        continue
+                    if result.ok:
                         superseded += 1
+                    else:
+                        logger.warning("dedup: %s not superseded: %s", dup["id"], result.reason)
 
         return {
             "dry_run": not apply,

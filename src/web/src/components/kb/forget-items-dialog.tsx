@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -14,13 +14,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { previewForgetItems } from "@/lib/api"
+import { forgetEarlierVersions, previewForgetItems, undoUpdate } from "@/lib/api"
 import type { ForgetMode, ForgetSubject, PreviewGroup, PreviewItem } from "@/lib/api"
 
 const HEADINGS: Partial<Record<PreviewGroup["key"], string>> = {
   documents: "Documents",
   passages: "Passages",
   memories: "Memories",
+  earlier_versions: "Earlier versions",
   conversations: "Conversations",
 }
 
@@ -30,6 +31,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function itemNote(group: PreviewGroup, item: PreviewItem): string | null {
   if (group.key === "documents") {
     const parts = [plural(item.passages ?? 0, "passage")]
+    if ((item.versions ?? 1) > 1) parts.push(plural(item.versions ?? 1, "version"))
     if (item.used_by) parts.push(`cited by ${plural(item.used_by, "conversation")}`)
     return parts.join(" · ")
   }
@@ -38,6 +40,7 @@ function itemNote(group: PreviewGroup, item: PreviewItem): string | null {
     const children = item.children ? `includes ${plural(item.children, "smaller passage")}` : null
     return [from, children].filter(Boolean).join(" · ") || null
   }
+  if (group.key === "earlier_versions" && item.version) return `Version ${item.version}`
   return null
 }
 
@@ -62,6 +65,26 @@ export function ForgetItemsDialog({ subjects, open, onOpenChange, onConfirm }: F
     retry: false,
   })
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set())
+  const queryClient = useQueryClient()
+  // Undo this update (spec §7): the previous version comes back and the newer
+  // passages go to the Trash. It is offered beside a document with history,
+  // as the alternative to forgetting every version.
+  const undo = useMutation({
+    mutationFn: (artifactId: string) => undoUpdate("artifact", artifactId),
+    onSuccess: () => {
+      void preview.refetch()
+      void queryClient.invalidateQueries()
+    },
+  })
+  // An edit keeps the old text as history; this moves it to the Trash and
+  // keeps the current version.
+  const forgetEarlier = useMutation({
+    mutationFn: (artifactId: string) => forgetEarlierVersions(artifactId, "trash"),
+    onSuccess: () => {
+      void preview.refetch()
+      void queryClient.invalidateQueries()
+    },
+  })
 
   const state = preview.isError
     ? ({ status: "error" } as const)
@@ -136,6 +159,28 @@ export function ForgetItemsDialog({ subjects, open, onOpenChange, onConfirm }: F
                         <div className="min-w-0">
                           <label htmlFor={id} className="block break-words text-sm">{item.label}</label>
                           {note && <p className="text-xs text-muted-foreground">{note}</p>}
+                          {group.key === "documents" && (item.versions ?? 1) > 1 && (
+                            <div className="flex gap-3">
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="h-auto p-0 text-xs"
+                                disabled={undo.isPending || forgetEarlier.isPending}
+                                onClick={() => undo.mutate(item.id)}
+                              >
+                                Undo last update
+                              </Button>
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="h-auto p-0 text-xs"
+                                disabled={undo.isPending || forgetEarlier.isPending}
+                                onClick={() => forgetEarlier.mutate(item.id)}
+                              >
+                                Forget earlier versions
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </li>
                     )
@@ -151,6 +196,22 @@ export function ForgetItemsDialog({ subjects, open, onOpenChange, onConfirm }: F
             {(state.preview.notes ?? []).map((note) => (
               <p key={note} className="text-xs text-muted-foreground">{note}</p>
             ))}
+            {undo.isSuccess && (
+              <p role="status" className="text-xs text-muted-foreground">
+                Version {undo.data.version ?? "?"} is current again; the newer passages are in the Trash.
+              </p>
+            )}
+            {undo.isError && (
+              <p role="alert" className="text-xs text-destructive">Couldn't undo the last update.</p>
+            )}
+            {forgetEarlier.isSuccess && (
+              <p role="status" className="text-xs text-muted-foreground">
+                {plural(forgetEarlier.data.passages, "earlier passage")} moved to the Trash; the current version stays.
+              </p>
+            )}
+            {forgetEarlier.isError && (
+              <p role="alert" className="text-xs text-destructive">Couldn't forget the earlier versions.</p>
+            )}
           </div>
         )}
 

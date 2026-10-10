@@ -347,14 +347,14 @@ const GET_CASES: GetCase[] = [
     label: "system.health",
     path: "/sdk/v1/health",
     method: "get",
-    responseFixture: { status: "healthy", version: "1.4.0", services: {}, features: {} },
+    responseFixture: { status: "healthy", version: "1.5.0", services: {}, features: {} },
     invoke: (c) => c.system.health(),
   },
   {
     label: "system.settings",
     path: "/sdk/v1/settings",
     method: "get",
-    responseFixture: { version: "1.4.0", tier: "community", features: {} },
+    responseFixture: { version: "1.5.0", tier: "community", features: {} },
     invoke: (c) => c.system.settings(),
   },
   {

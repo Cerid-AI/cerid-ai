@@ -349,7 +349,11 @@ def test_purge_artifact_without_a_sync_dir_removes_directly(monkeypatch):
 
     monkeypatch.setattr("config.SYNC_DIR", "")
     with patch("app.services.content_lifecycle.remove_content") as remove, \
+         patch("core.lineage.writer.lineage_of", return_value="lin-1"), \
+         patch("app.services.forget.adapters.settle") as settle, \
+         patch("app.deps.get_neo4j"), \
          patch.object(engine, "forget_permanently") as forget:
         engine.purge_artifact("a" * 64, requested_by="sdk")
     remove.assert_called_once_with("a" * 64)
+    settle.assert_called_once_with("a" * 64, lineage_id="lin-1")  # its earlier version, if any, is current again
     forget.assert_not_called()

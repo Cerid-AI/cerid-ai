@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import config
+from core.forget import registry as forget_registry
 from core.forget.registry import Subject
+from core.retrieval.chunk_ids import chunk_artifact_id
 
 
 @dataclass
@@ -38,16 +40,40 @@ def _reason(forget_id: str) -> str:
     return f"forget:{forget_id}"
 
 
+# A fact is one version per source memory and holds that memory's text, so it
+# goes with its source whether or not the provenance edge survived; a fact from
+# before versions, shared by several memories, goes with the last of them.
 _FACT_SWEEP = (
-    "MATCH (a:Artifact {id: $aid})-[:FACT]->(f:Fact) "
-    "WHERE NOT EXISTS { MATCH (o:Artifact)-[:FACT]->(f) WHERE o.id <> $aid } "
-    "WITH collect(f) AS fs, count(f) AS n FOREACH (f IN fs | DETACH DELETE f) RETURN n"
+    "CALL { MATCH (f:Fact {source_artifact_id: $aid}) RETURN f "
+    "UNION MATCH (:Artifact {id: $aid})-[:FACT]->(f:Fact) "
+    "WHERE NOT EXISTS { MATCH (o:Artifact)-[:FACT]->(f) WHERE o.id <> $aid } RETURN f } "
+    "WITH collect(DISTINCT f) AS fs FOREACH (f IN fs | DETACH DELETE f) RETURN size(fs) AS n"
 )
-# Forgetting the newer of a superseded pair makes the older current again (spec §7).
-_UNSUPERSEDE = (
-    "MATCH (old:Artifact {superseded_by: $aid}) "
-    "REMOVE old.superseded_by, old.valid_until RETURN count(old) AS n"
-)
+def settle(version_id: str, *, lineage_id: str = "", restoring: frozenset[str] = frozenset()) -> str:
+    """Recompute the lineage of ``version_id`` after a forget, restore or purge
+    (spec §7): forgetting only the current version makes the one before it
+    current, and the rest follows from which versions are forgotten. Versions
+    being restored by the same forget count as back already. Returns the
+    lineage's current version, or "" when it has no lineage."""
+    from app.deps import get_chroma, get_neo4j
+    from core.lineage.writer import lineage_of, settle_lineage
+
+    driver = get_neo4j()
+    lineage = lineage_id or lineage_of(driver, version_id)
+    if not lineage:
+        return ""
+
+    def forgotten(vid: str) -> bool:
+        if vid in restoring:
+            return False
+        return forget_registry.is_forgotten("artifact", vid) or forget_registry.is_forgotten("memory", vid)
+
+    return settle_lineage(driver, get_chroma(), lineage, forgotten=forgotten)
+
+
+def _restoring(forget_id: str) -> frozenset[str]:
+    reg = forget_registry.get_registry()
+    return frozenset(e.subject.id for e in reg.forget_entries(forget_id) if e.state == "trashed")
 
 
 class ArtifactAdapter:
@@ -59,19 +85,29 @@ class ArtifactAdapter:
 
     def hide(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import hide_content
+        from app.services.derived import mark_derived_stale
         hide_content(subject.id, extra_props={"archived_reason": _reason(forget_id)}, only_if_visible=True)
+        current = settle(subject.id)
+        mark_derived_stale([subject.id, current], forget="trash")
 
     def restore(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import unhide_content
+        from app.services.derived import mark_derived_stale
         unhide_content(subject.id, reason=_reason(forget_id))
+        current = settle(subject.id, restoring=_restoring(forget_id))
+        mark_derived_stale([subject.id, current])
 
     def purge(self, subject: Subject) -> PurgeResult:
         from app.deps import get_neo4j
         from app.services.content_lifecycle import remove_content
+        from app.services.derived import mark_derived_stale
+        from core.lineage.writer import lineage_of
+        lineage = lineage_of(get_neo4j(), subject.id)
         with get_neo4j().session() as session:
             facts = session.run(_FACT_SWEEP, aid=subject.id).single()
-            session.run(_UNSUPERSEDE, aid=subject.id)
+        mark_derived_stale([subject.id], forget="erase")  # before the purge takes its edges
         result = remove_content(subject.id)
+        settle(subject.id, lineage_id=lineage)
         n_facts = int(facts["n"]) if facts else 0
         return PurgeResult(removed=(1 if result.found else 0) + n_facts, detail={"facts": n_facts})
 
@@ -86,6 +122,15 @@ def _remove_ids(raw: Any, gone: set[str]) -> list[str] | None:
     return kept if len(kept) != len(ids) else None
 
 
+def _feeds_pages(chunk_id: str) -> bool:
+    """Whether forgetting a passage must take down what was written from it.
+    Every forget a person makes does, earlier versions included: a passage
+    closed by a later version may still be in a page that has not been
+    rewritten since. Retention's purges of old versions do not: nobody asked
+    for that text to go, and a page refresh would only cost a person's edits."""
+    return chunk_id not in forget_registry.get_registry().forgotten_only_by("chunk", forget_registry.RETENTION)
+
+
 class ChunkAdapter:
     """One passage of a document. Hiding is the read filter's job (every
     retrieval path drops a forgotten chunk and the children of a forgotten
@@ -98,20 +143,28 @@ class ChunkAdapter:
 
     def hide(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import invalidate_caches
+        from app.services.derived import mark_derived_stale
         invalidate_caches(trigger=f"forget.hide_chunk:{subject.id}")
+        if _feeds_pages(subject.id):
+            mark_derived_stale([chunk_artifact_id(subject.id)], forget="trash")
 
     def restore(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import invalidate_caches
+        from app.services.derived import mark_derived_stale
         invalidate_caches(trigger=f"forget.restore_chunk:{subject.id}")
+        if _feeds_pages(subject.id):
+            mark_derived_stale([chunk_artifact_id(subject.id)])
 
     def purge(self, subject: Subject) -> PurgeResult:
         from app.deps import get_chroma, get_neo4j
         from app.services.content_lifecycle import remove_chunks
-        from core.retrieval.chunk_ids import chunk_artifact_id
 
         artifact_id = chunk_artifact_id(subject.id)
         if not artifact_id:
             return PurgeResult()
+        if _feeds_pages(subject.id):
+            from app.services.derived import mark_derived_stale
+            mark_derived_stale([artifact_id], forget="erase")  # before the purge takes its mentions
         driver = get_neo4j()
         with driver.session() as session:
             node = session.run(
@@ -208,6 +261,7 @@ class VerifiedMemoryAdapter:
                 mid=subject.id, fid=forget_id,
             )
         _verified_collection().delete(ids=[f"verified_memory_{subject.id}"])
+        settle(subject.id)
         invalidate_caches(trigger=f"forget.hide_verified_memory:{subject.id}")
 
     def restore(self, subject: Subject, forget_id: str) -> None:
@@ -217,7 +271,9 @@ class VerifiedMemoryAdapter:
         from app.services.content_lifecycle import invalidate_caches
         with get_neo4j().session() as session:
             rec = session.run(
-                "MATCH (m:Memory {id: $mid, forget_id: $fid}) RETURN m.text AS text",
+                "MATCH (m:Memory {id: $mid, forget_id: $fid}) RETURN m.text AS text, "
+                "m.lineage_id AS lineage_id, m.version AS version, m.valid_to AS valid_to, "
+                "m.superseded_by AS superseded_by",
                 mid=subject.id, fid=forget_id,
             ).single()
         if not rec or not rec["text"]:
@@ -236,6 +292,9 @@ class VerifiedMemoryAdapter:
                 "filename": f"verified_fact_{subject.id[:8]}",
                 "ingested_at": now_iso,
                 "decay_anchor": now_iso,
+                **({"lineage_id": rec.get("lineage_id"), "version": int(rec.get("version") or 1),
+                    "valid_to": rec.get("valid_to") or "", "superseded_by": rec.get("superseded_by") or ""}
+                   if rec.get("lineage_id") else {}),
             }],
         )
         with get_neo4j().session() as session:
@@ -243,10 +302,16 @@ class VerifiedMemoryAdapter:
                 "MATCH (m:Memory {id: $mid, forget_id: $fid}) SET m.status = 'active' REMOVE m.forget_id",
                 mid=subject.id, fid=forget_id,
             )
+        settle(subject.id, restoring=_restoring(forget_id))
         invalidate_caches(trigger=f"forget.restore_verified_memory:{subject.id}")
 
     def purge(self, subject: Subject) -> PurgeResult:
-        return PurgeResult(removed=1 if delete_verified_memory(subject.id) else 0)
+        from app.deps import get_neo4j
+        from core.lineage.writer import lineage_of
+        lineage = lineage_of(get_neo4j(), subject.id)
+        removed = delete_verified_memory(subject.id)
+        settle(subject.id, lineage_id=lineage)
+        return PurgeResult(removed=1 if removed else 0)
 
 
 class TranscriptsAdapter:
@@ -254,8 +319,13 @@ class TranscriptsAdapter:
 
     def hide(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import conversation_transcript_artifact_ids, hide_content
-        for aid in conversation_transcript_artifact_ids(subject.id):
+        from app.services.derived import mark_derived_stale
+        transcripts = conversation_transcript_artifact_ids(subject.id)
+        for aid in transcripts:
             hide_content(aid, extra_props={"archived_reason": _reason(forget_id)}, only_if_visible=True)
+        # Hidden first, so a marking failure (raised, retried) never leaves them readable;
+        # hiding keeps the edges that lead to their pages.
+        mark_derived_stale(transcripts, forget="trash")
 
     def restore(self, subject: Subject, forget_id: str) -> None:
         from app.services.content_lifecycle import conversation_transcript_artifact_ids, unhide_content
@@ -263,7 +333,9 @@ class TranscriptsAdapter:
             unhide_content(aid, reason=_reason(forget_id))
 
     def purge(self, subject: Subject) -> PurgeResult:
-        from app.services.content_lifecycle import remove_conversation_transcripts
+        from app.services.content_lifecycle import conversation_transcript_artifact_ids, remove_conversation_transcripts
+        from app.services.derived import mark_derived_stale
+        mark_derived_stale(conversation_transcript_artifact_ids(subject.id), forget="erase")
         results = remove_conversation_transcripts(subject.id)
         return PurgeResult(removed=sum(1 for r in results if r.found))
 

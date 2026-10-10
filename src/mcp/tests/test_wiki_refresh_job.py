@@ -748,3 +748,44 @@ class TestSweepOriginBypassesBothGates:
             live_result = await live_job.run(_noop_progress)
 
         assert live_result.metadata.get("outcome") != "deferred"
+
+
+def test_a_page_is_never_written_from_forgotten_text(monkeypatch):
+    """Forget phase 5 (spec §7): a page reads current, unforgotten passages only."""
+    from core.forget import registry as forget_registry
+    from tests.helpers.fake_chroma import FakeChromaClient, FakeChromaCollection
+
+    col = FakeChromaCollection("domain_general")
+    for cid, aid, meta in [
+        ("doc_1", "doc", {}),
+        ("doc_2", "doc", {}),
+        ("doc_old", "doc", {"version_closed": 1, "valid_to": "2026-01-01"}),
+        ("gone_1", "gone", {}),
+        ("doc_child", "doc", {"parent_chunk_id": "doc_2"}),  # a child of a forgotten passage
+    ]:
+        col.upsert(ids=[cid], documents=[f"text {cid}"], embeddings=[[1.0, 0.0]],
+                   metadatas=[{"artifact_id": aid, **meta}])
+    forgotten = {"artifact": frozenset({"gone"}), "chunk": frozenset({"doc_2"})}
+    monkeypatch.setattr(forget_registry, "forgotten_ids", lambda kind: forgotten.get(kind, frozenset()))
+    monkeypatch.setattr("core.forget.read_filter.forgotten_ids", lambda kind: forgotten.get(kind, frozenset()))
+    monkeypatch.setattr("config.taxonomy.DOMAINS", ["general"])
+    monkeypatch.setattr("config.taxonomy.collection_name", lambda domain: "domain_general")
+
+    client = FakeChromaClient([col])
+    client.get_collection = lambda name: col  # type: ignore[method-assign]
+    texts = WikiRefreshJob._fetch_entity_chunks(client, ["doc", "gone"], "entity")
+    assert texts == ["text doc_1"]
+
+
+def test_a_source_forgotten_during_a_refresh_takes_the_page_down(monkeypatch):
+    from app.processor.jobs import wiki_refresh as job_mod
+
+    state = {"artifact": frozenset(), "chunk": frozenset()}
+    monkeypatch.setattr("core.forget.registry.forgotten_ids", lambda kind: state[kind])
+    before = job_mod._forgotten_now()
+    assert not job_mod._forgotten_since(before, ["doc"])
+    state["chunk"] = frozenset({"doc_" + "0123456789abcdef"})
+    assert job_mod._forgotten_since(before, ["doc"])
+    assert not job_mod._forgotten_since(before, ["other"])
+    state["artifact"] = frozenset({"other"})
+    assert job_mod._forgotten_since(before, ["other"])

@@ -100,7 +100,8 @@ class TestDuplicateGroups:
 def client():
     from app.main import app
 
-    with patch("app.routers.memories.get_neo4j") as mock_neo4j:
+    with patch("app.routers.memories.get_neo4j") as mock_neo4j, \
+         patch("app.routers.memories.get_chroma"):
         driver = MagicMock()
         session = MagicMock()
         session.__enter__ = MagicMock(return_value=session)
@@ -115,9 +116,7 @@ def client():
 
 class TestDedupEndpoint:
     def test_dry_run_reports_without_marking(self, client):
-        with patch(
-            "core.agents.memory_consolidation.mark_superseded"
-        ) as mock_mark:
+        with patch("core.lineage.writer.supersede") as mock_mark:
             res = client.post("/memories/dedup", json={})
         assert res.status_code == 200
         data = res.json()
@@ -127,14 +126,14 @@ class TestDedupEndpoint:
         mock_mark.assert_not_called()
 
     def test_confirm_supersedes_older_duplicates(self, client):
-        with patch(
-            "core.agents.memory_consolidation.mark_superseded"
-        ) as mock_mark:
+        from core.lineage.writer import SupersedeResult
+
+        with patch("core.lineage.writer.supersede", return_value=SupersedeResult(True)) as mock_mark:
             res = client.post("/memories/dedup", json={"confirm": True})
         assert res.status_code == 200
         data = res.json()
         assert data["memories_superseded"] == 1
         mock_mark.assert_called_once()
-        _driver, old_id, new_id = mock_mark.call_args.args
+        _driver, _chroma, old_id, new_id = mock_mark.call_args.args
         assert old_id == "mem-old"
         assert new_id == "mem-new"

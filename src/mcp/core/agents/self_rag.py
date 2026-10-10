@@ -37,6 +37,7 @@ async def maybe_self_rag(
     redis_client: Any,
     model: str | None = None,
     budget_seconds: float | None = None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Apply Self-RAG enhancement when enabled AND a ``response_text`` is supplied
     to validate; return the result unchanged otherwise.
@@ -66,6 +67,7 @@ async def maybe_self_rag(
                     neo4j_driver=neo4j_driver,
                     redis_client=redis_client,
                     model=model,
+                    as_of=as_of,
                 ),
                 timeout=budget,
             )
@@ -86,6 +88,7 @@ async def self_rag_enhance(
     neo4j_driver: Any,
     redis_client: Any,
     model: str | None = None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Enhance retrieval results by validating claims and filling coverage gaps.
 
@@ -128,7 +131,7 @@ async def self_rag_enhance(
     # Step 2: Iterative refinement loop
     for iteration in range(max_iterations):
         # Check claim coverage against current results
-        last_assessments = await _assess_claims(claims, chroma_client, weak_threshold)
+        last_assessments = await _assess_claims(claims, chroma_client, weak_threshold, as_of=as_of)
 
         weak_claims = [a for a in last_assessments if not a["covered"]]
         if not weak_claims:
@@ -149,7 +152,7 @@ async def self_rag_enhance(
 
         # Targeted retrieval for each weak claim
         additional = await _retrieve_for_claims(
-            refined_queries, chroma_client, redis_client, neo4j_driver,
+            refined_queries, chroma_client, redis_client, neo4j_driver, as_of=as_of,
         )
         total_additional += len(additional)
 
@@ -222,6 +225,8 @@ async def _assess_claims(
     claims: list[str],
     chroma_client: Any,
     threshold: float,
+    *,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     """Check how well each claim is covered by the KB (lightweight, no reranking)."""
     from core.agents.query_agent import multi_domain_query  # retrieval-import-allowed: component of full; would recurse
@@ -236,6 +241,7 @@ async def _assess_claims(
                 domains=verification_domains,
                 top_k=3,
                 chroma_client=chroma_client,
+                as_of=as_of,
             )
             max_sim = max((r.get("relevance", 0.0) for r in results), default=0.0)
 
@@ -292,6 +298,8 @@ async def _retrieve_for_claims(
     chroma_client: Any,
     redis_client: Any,
     neo4j_driver: Any,
+    *,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run targeted agent_query for each refined query (no reranking for speed)."""
     from core.agents.query_agent import agent_query  # retrieval-import-allowed: component of full; would recurse
@@ -308,6 +316,7 @@ async def _retrieve_for_claims(
                 chroma_client=chroma_client,
                 redis_client=redis_client,
                 neo4j_driver=neo4j_driver,
+                as_of=as_of,
             )
             additional.extend(result.get("results", []))
         except Exception as e:

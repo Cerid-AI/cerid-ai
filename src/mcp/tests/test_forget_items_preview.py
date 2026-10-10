@@ -56,6 +56,11 @@ class Graph:
             return _Result([{"id": i, "text": "verified fact"} for i in p["ids"] if i == VERIFIED])
         if "[:FACT]->(f:Fact)" in query:
             return _Result([{"n": 2 if p["aids"] else 0}])
+        if "n.lineage_id = a.lineage_id" in query:
+            lineages = {self.nodes[i].get("lineage_id") for i in p["ids"] if i in self.nodes} - {None}
+            rows = [{"id": i, "kind": "artifact", "text": n.get("summary"), "version": n.get("version")}
+                    for i, n in self.nodes.items() if n.get("lineage_id") in lineages and i not in p["ids"]]
+            return _Result(sorted(rows, key=lambda r: -(r["version"] or 0)))
         raise AssertionError(query)
 
 
@@ -81,7 +86,7 @@ def env(tmp_path: Path, monkeypatch):
     })
     monkeypatch.setattr("app.deps.get_chroma", lambda: FakeChromaClient([col]))
     monkeypatch.setattr("app.deps.get_neo4j", lambda: graph)
-    return {"reg": reg, "passages": passages, "doc_chunk": doc_chunk}
+    return {"reg": reg, "passages": passages, "doc_chunk": doc_chunk, "graph": graph}
 
 
 def _groups(out: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -104,6 +109,45 @@ def test_groups_documents_passages_and_memories(env):
         ("artifact", "Prefers tea"), ("memory", "verified fact"),
     ]
     assert out["subject"] is None and out["derived_facts"] == 2 and out["notes"] == []
+
+
+def test_a_memory_with_history_lists_its_earlier_versions_checked(env, monkeypatch):
+    from app.services.forget.preview import EARLIER_VERSIONS_NOTE, preview_items
+
+    old, older = "a" * 64, "b" * 64
+    graph = env["graph"]
+    graph.nodes[MEM].update(lineage_id=older, version=3)
+    graph.nodes[old] = {"filename": "memory_fact_y", "summary": "Prefers coffee", "lineage_id": older, "version": 2}
+    graph.nodes[older] = {"filename": "memory_fact_z", "summary": "Prefers water", "lineage_id": older, "version": 1}
+    env["reg"].append([Entry("fg_1", Subject("artifact", older), "trashed", "2026-10-09T10:00:00Z", "m1", "ui")])
+
+    out = preview_items([Subject("artifact", MEM)])
+    group = next(g for g in out["groups"] if g["key"] == "earlier_versions")
+    assert group["default"] == "checked"
+    assert [(i["id"], i["label"], i["version"]) for i in group["items"]] == [(old, "Prefers coffee", 2)]
+    assert EARLIER_VERSIONS_NOTE in out["notes"]
+
+
+def test_a_document_with_versions_says_how_many_and_how_to_go_back(env):
+    from app.services.forget.preview import DOCUMENT_VERSIONS_NOTE, preview_items
+
+    env["graph"].nodes[DOC]["version"] = 3
+    out = preview_items([Subject("artifact", DOC)])
+    assert [i["versions"] for i in _groups(out)["documents"]] == [3]
+    assert DOCUMENT_VERSIONS_NOTE in out["notes"]
+
+
+def test_undo_update_refuses_what_has_no_earlier_version(env, client, monkeypatch):
+    from app.services import lineage_undo
+
+    def nothing(kind, item_id):
+        raise lineage_undo.NothingToUndo("this document has no earlier version")
+
+    monkeypatch.setattr(lineage_undo, "undo_update", nothing)
+    resp = client.post("/forget/undo-update", json={"kind": "artifact", "id": DOC})
+    assert resp.status_code == 409 and "no earlier version" in resp.json()["detail"]
+    assert client.post("/forget/undo-update", json={"kind": "artifact", "id": "../x"}).status_code == 422
+    assert client.post("/forget/undo-update", json={"kind": "conversation", "id": "c1"}).status_code == 422
 
 
 def test_a_passage_of_a_selected_document_folds_into_it(env):

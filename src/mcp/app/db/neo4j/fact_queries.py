@@ -4,8 +4,8 @@
 """Read-side queries for the bi-temporal :Fact layer (m0004/m0006).
 
 Bi-temporal memory plan Phase F (F1) — the first :Fact *reader* (the writer is
-``app/db/neo4j/facts.py``; the interval-closure writer is
-``core/agents/fact_invalidation.py``). Every query here implements the CANONICAL
+``app/db/neo4j/facts.py``, which also closes a superseded version's facts;
+the lineage writer is ``core/lineage/writer.py``). Every query here implements the CANONICAL
 four-timestamp query semantics documented in the m0006 migration docstring
 (``app/db/neo4j/migrations/m0006_fact_bitemporal.py``):
 
@@ -183,14 +183,14 @@ def count_facts(
     as_of: str | None = None,
     distinct: bool = True,
 ) -> int:
-    """Symbolic ``count(DISTINCT f)`` of ``subject_id``'s facts (m0006).
+    """Symbolic count of ``subject_id``'s distinct facts (m0006).
 
-    The payoff of the uid MERGE identity: because a re-extracted fact collapses
-    onto one node (``uid = "{subject_id}|{fact_key}"``), the node count is a
-    *symbolic* count, not an LLM-trusted one. For EVENT facts, ``fact_key``
-    embeds ``event_date``, so N occurrences on N distinct dates are N distinct
-    nodes — ``count(DISTINCT f)`` is the occurrence count. For STATE facts the
-    count is the number that satisfy the interval predicate.
+    A node is one version (one source memory's assertion), so several memories
+    asserting the same fact are several nodes with one ``fact_key``; counting
+    distinct ``fact_key`` values keeps the count symbolic, not LLM-trusted. For
+    EVENT facts, ``fact_key`` embeds ``event_date``, so N occurrences on N
+    distinct dates count N. For STATE facts the count is the number of
+    distinct keys that satisfy the interval predicate.
 
     ``predicate=None`` counts across all predicates for the subject; a slug
     scopes to one memory-type. ``as_of=None`` counts CURRENT facts (``invalid_at
@@ -208,7 +208,7 @@ def count_facts(
         parts.append(_PREDICATE_CLAUSE)
         params["predicate"] = predicate
     where = "\n  ".join(parts)
-    agg = "count(DISTINCT f)" if distinct else "count(f)"
+    agg = "count(DISTINCT f.fact_key)" if distinct else "count(f)"
     cypher = (
         f"MATCH (f:Fact {{subject_id: $subject_id}})\nWHERE {where}\nRETURN {agg} AS n"
     )

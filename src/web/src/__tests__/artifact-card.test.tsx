@@ -24,6 +24,21 @@ const makeResult = (overrides: Partial<KBQueryResult> = {}): KBQueryResult => ({
 })
 
 describe("ArtifactCard", () => {
+  it("shows what a result said before it was updated", () => {
+    render(
+      <ArtifactCard
+        result={makeResult({ history: [
+          { value: "Office is on the 5th floor", valid_from: "2025-06-01", valid_to: "2026-05-01T00:00:00Z" },
+          { value: "Office is on the 3rd floor", valid_from: "2025-01-01", valid_to: "2025-06-01" },
+        ] })}
+        isSelected={false} onSelect={vi.fn()} onInject={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("Office is on the 5th floor")).toBeInTheDocument()
+    expect(screen.getByText(/until 2026-05-01/)).toBeInTheDocument()
+    expect(screen.getByText(/1 older/)).toBeInTheDocument()
+  })
+
   it("renders filename and domain badge", () => {
     render(
       <ArtifactCard result={makeResult()} isSelected={false} onSelect={vi.fn()} onInject={vi.fn()} />,

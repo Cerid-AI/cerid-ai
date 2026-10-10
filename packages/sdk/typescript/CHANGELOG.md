@@ -4,10 +4,11 @@ Versioned independently of the Cerid AI product. `SDK_PROTOCOL_VERSION`
 tracks the `/sdk/v1/` wire contract; the package version tracks this
 client's release cadence.
 
-## [0.3.0] — Unreleased — protocol 1.4.0
+## [0.3.0] — Unreleased — protocol 1.5.0
 
 ### Added
 
+- `as_of` on `QueryRequest`, `SearchRequest` and `MemoryRecallRequest`: an ISO date or datetime returns the version of each memory and document in force then. Without it only current versions come back, and a result with earlier versions carries `history` (up to three `{value, valid_from, valid_to}`, newest first).
 - Forgetting with a confirmation step: `kb.forgetPreview(subjects, { mode })` and `kb.forgetExecute(confirmToken)`.
   A preview names what would be removed (documents, passages) and returns a
   single-use `confirm_token` bound to exactly that set and mode, valid 15

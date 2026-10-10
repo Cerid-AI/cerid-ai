@@ -242,6 +242,24 @@ class TestKBResource:
             call_args = client._http.post.call_args
             assert "/sdk/v1/query" in call_args[0][0]
 
+    def test_as_of_reaches_query_search_and_recall_only_when_given(self) -> None:
+        with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
+            client._http.post = MagicMock(side_effect=[
+                _mock_response(200, {"context": "", "sources": [], "confidence": 0.0, "domains_searched": [],
+                                     "total_results": 0, "token_budget_used": 0, "graph_results": 0,
+                                     "results": []}),
+                _mock_response(200, {"results": [], "total_results": 0, "confidence": 0.0}),
+                _mock_response(200, {"memories": [], "total": 0}),
+                _mock_response(200, {"results": [], "total_results": 0, "confidence": 0.0}),
+            ])
+            client.kb.query("which floor", as_of="2025-12-31")
+            client.kb.search("which floor", as_of="2025-12-31T10:00:00Z")
+            client.memory.recall("which floor", as_of="2025-12-31")
+            client.kb.search("which floor")
+            bodies = [c.kwargs["json"] for c in client._http.post.call_args_list]
+            assert [b.get("as_of") for b in bodies] == ["2025-12-31", "2025-12-31T10:00:00Z", "2025-12-31", None]
+            assert "as_of" not in bodies[3]
+
     def test_collections_sends_get(self) -> None:
         with CeridClient(base_url="http://localhost:8888", client_id="test") as client:
             mock_resp = _mock_response(200, {"collections": ["general", "code"], "total": 2})

@@ -297,7 +297,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.health(),
         HealthResponse,
-        {"status": "healthy", "version": "1.4.0", "services": {"chromadb": "connected"}},
+        {"status": "healthy", "version": "1.5.0", "services": {"chromadb": "connected"}},
     ),
     (
         "system.settings",
@@ -305,7 +305,7 @@ GET_CASES: list[GetCase] = [
         "get",
         lambda c: c.system.settings(),
         SettingsResponse,
-        {"version": "1.4.0", "tier": "community", "features": {}},
+        {"version": "1.5.0", "tier": "community", "features": {}},
     ),
     (
         "system.plugins",

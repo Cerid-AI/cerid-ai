@@ -196,6 +196,7 @@ async def orchestrated_query(
         top_k=memory_top_k,
         min_score=memory_min_score,
         timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
+        as_of=kwargs.get("as_of"),
     )) if _mem_on else None
 
     external_task = asyncio.create_task(_query_external_sources(
@@ -409,6 +410,7 @@ async def _recall_with_timeout(
     top_k: int,
     min_score: float,
     timeout_ms: int,
+    as_of: str | None = None,
 ) -> list[dict]:
     """Run memory recall with a hard timeout, returning empty on failure."""
     try:
@@ -421,6 +423,7 @@ async def _recall_with_timeout(
                 neo4j_driver=neo4j_driver,
                 top_k=top_k,
                 min_score=min_score,
+                as_of=as_of,
             ),
             timeout=timeout_ms / 1000.0,
         )

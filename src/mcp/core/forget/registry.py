@@ -100,6 +100,7 @@ class Registry:
         self._by_subject: dict[Subject, Entry] = {}
         self._all: list[Entry] = []
         self._live: dict[Subject, set[str]] = {}
+        self._live_by: dict[Subject, dict[str, str]] = {}
 
     def _files(self) -> list[tuple[Path, os.stat_result]]:
         if self._root is None or not self._root.is_dir():
@@ -151,17 +152,20 @@ class Registry:
         forgotten: dict[Subject, Entry] = {}
         other: dict[Subject, Entry] = {}
         live: dict[Subject, set[str]] = {}
+        live_by: dict[Subject, dict[str, str]] = {}
         for (subject, forget_id), entry in per_forget.items():
             bucket = forgotten if entry.state in FORGOTTEN_STATES else other
             if _wins(entry, bucket.get(subject)):
                 bucket[subject] = entry
             if entry.state in FORGOTTEN_STATES:
                 live.setdefault(subject, set()).add(forget_id)
+                live_by.setdefault(subject, {})[forget_id] = entry.requested_by
         by_subject: dict[Subject, Entry] = {**other, **forgotten}
         for subject, entry in readds.items():
             by_subject.setdefault(subject, entry)
         self._by_subject, self._all, self._signature = by_subject, everything, sig
         self._live = live
+        self._live_by = live_by
 
     def append(self, entries: list[Entry]) -> None:
         if self._root is None:
@@ -201,10 +205,26 @@ class Registry:
     def forgotten_ids(self, kind: str) -> frozenset[str]:
         return self.ids_in_states(kind, FORGOTTEN_STATES)
 
-    def record_readd(self, kind: str, id: str, *, requested_by: str, machine_id: str | None = None) -> bool:
-        """Cancel every live forget of a subject because its content was added again.
+    def forgotten_only_by(self, kind: str, requested_by: str | frozenset[str]) -> frozenset[str]:
+        """Ids of one kind whose every live forget was made by ``requested_by``
+        (one requester, or any of a set)."""
+        allowed = {requested_by} if isinstance(requested_by, str) else set(requested_by)
+        with self._lock:
+            self._refresh()
+            return frozenset(
+                s.id for s, by in self._live_by.items()
+                if s.kind == kind and by and all(v in allowed for v in by.values())
+            )
 
-        Returns ``False`` (and writes nothing) when the subject is not forgotten.
+    def record_readd(
+        self, kind: str, id: str, *, requested_by: str, machine_id: str | None = None,
+        only_requested_by: str | frozenset[str] | None = None,
+    ) -> bool:
+        """Cancel every live forget of a subject because its content was added again.
+        With ``only_requested_by``, cancel only the forgets made that way (a
+        passage that returns cancels a retention purge, never a person's forget).
+
+        Returns ``False`` (and writes nothing) when nothing was cancelled.
         """
         from core.utils.time import utcnow_iso
 
@@ -214,6 +234,12 @@ class Registry:
             if self._by_subject.get(subject) is None or self._by_subject[subject].state not in FORGOTTEN_STATES:
                 return False
             forget_ids = sorted(self._live.get(subject, set()) | {self._by_subject[subject].forget_id})
+            if only_requested_by is not None:
+                allowed = {only_requested_by} if isinstance(only_requested_by, str) else set(only_requested_by)
+                by = self._live_by.get(subject, {})
+                forget_ids = [f for f in forget_ids if by.get(f) in allowed]
+                if not forget_ids:
+                    return False
         now = utcnow_iso()
         self.append([
             Entry(fid, subject, "readded", now, machine_id or self._machine_id, requested_by) for fid in forget_ids
@@ -262,10 +288,24 @@ def purged_ids(kind: str) -> frozenset[str]:
     return get_registry().ids_in_states(kind, frozenset({"purged"}))
 
 
-def record_readd(kind: str, id: str, *, requested_by: str) -> bool:
+def record_readd(
+    kind: str, id: str, *, requested_by: str, only_requested_by: str | frozenset[str] | None = None,
+) -> bool:
     if not id:
         return False
-    return get_registry().record_readd(kind, id, requested_by=requested_by)
+    return get_registry().record_readd(kind, id, requested_by=requested_by, only_requested_by=only_requested_by)
+
+
+#: ``requested_by`` of a purge the document-version retention made, not a person.
+RETENTION = "retention"
+#: ``requested_by`` of an "undo this update", which trashes the newer version.
+UNDO = "undo"
+#: ``requested_by`` of a derived summary erased because a newer one, written
+#: from the current versions of its inputs, replaced it.
+DERIVED = "derived"
+#: Forgets made by Cerid's own version bookkeeping. A passage they removed may
+#: come back in a later version of its document; a person's forget never.
+VERSION_KEEPING = frozenset({RETENTION, UNDO})
 
 
 def reset_registry_for_tests() -> None:

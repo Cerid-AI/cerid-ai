@@ -355,34 +355,12 @@ ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = int(os.getenv("ADAPTIVE_RETRIEVAL_LIGHT_TOP_K",
 
 ENABLE_QUERY_DECOMPOSITION = os.getenv("ENABLE_QUERY_DECOMPOSITION", "true").lower() == "true"
 QUERY_DECOMPOSITION_MAX_SUBQUERIES = int(os.getenv("QUERY_DECOMPOSITION_MAX_SUBQUERIES", "4"))
-# Supersession-at-read: drop memories explicitly marked superseded by a newer
-# fact (the write path already sets ``superseded_by``; recall historically
-# ignored it and could surface stale values — the knowledge-update failure
-# mode). Correctness fix, default ON; reversible via env if a preservation
-# gate ever flags it.
-ENABLE_MEMORY_SUPERSESSION_FILTER = (
-    os.getenv("ENABLE_MEMORY_SUPERSESSION_FILTER", "true").lower() == "true"
-)
-# Invalidation-at-read for the bi-temporal :Fact layer (m0004/m0006 schema):
-# drop :Fact nodes whose `invalid_at` is set (CODE-closed, mirrors the
-# ENABLE_MEMORY_SUPERSESSION_FILTER read-time drop above) from query results.
-# Default OFF — no writer exists yet (bi-temporal memory plan Phase C), so
-# every :Fact node today is schema scaffolding with nothing to filter; this
-# flag exists so Phase D/E/F reader code can gate on it in advance (matches
-# the m0004 docstring's forward reference to "a future
-# ENABLE_FACT_INVALIDATION_FILTER"). Flip default only when the writer and
-# reader land together, mirroring how ENABLE_MEMORY_SUPERSESSION_FILTER
-# shipped default-ON as a correctness fix once its write path existed.
-ENABLE_FACT_INVALIDATION_FILTER = (
-    os.getenv("ENABLE_FACT_INVALIDATION_FILTER", "false").lower() == "true"
-)
 # Bi-temporal :Fact writer (bi-temporal memory plan Phase C): gates the
 # derive-facts + write-:Fact-nodes path in the entity-extraction job. Default
 # OFF — the writer creates graph nodes and amplifies writes, so it ships dark
-# and is flipped only once the write path is validated at scale (mirrors
-# ENABLE_FACT_INVALIDATION_FILTER's dark-until-ready discipline; the two flip
-# together with the Phase D/F reader). The C3 Chroma valid-interval metadata is
-# stamped unconditionally (cheap, additive) — only the graph WRITES gate here.
+# and is flipped only once the write path is validated at scale. The C3 Chroma
+# valid-interval metadata is stamped unconditionally (cheap, additive) — only
+# the graph WRITES gate here.
 ENABLE_FACT_WRITES = os.getenv("ENABLE_FACT_WRITES", "false").lower() == "true"
 # Symbolic :Fact counting at query time (bi-temporal memory plan Phase F): gates
 # the graph-backed count(DISTINCT :Fact) seam in
@@ -394,8 +372,8 @@ ENABLE_FACT_WRITES = os.getenv("ENABLE_FACT_WRITES", "false").lower() == "true"
 # the :Fact writer (ENABLE_FACT_WRITES) is only now beginning to accumulate
 # production facts, so the graph is empty-to-sparse; the seam ships dark and is
 # flipped once the readers are validated against a populated graph (mirrors
-# ENABLE_FACT_INVALIDATION_FILTER / ENABLE_FACT_WRITES dark-until-ready
-# discipline). Flag OFF is byte-identical to the pre-Phase-F text-only count.
+# ENABLE_FACT_WRITES's dark-until-ready discipline). Flag OFF is byte-identical
+# to the pre-Phase-F text-only count.
 ENABLE_FACT_SYMBOLIC_COUNT = (
     os.getenv("ENABLE_FACT_SYMBOLIC_COUNT", "false").lower() == "true"
 )

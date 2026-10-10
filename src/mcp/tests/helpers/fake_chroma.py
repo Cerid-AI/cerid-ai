@@ -193,7 +193,7 @@ class FakeChromaCollection:
         else:
             rows = list(range(len(self._ids)))
             if where:
-                rows = [j for j in rows if all(self._meta[j].get(k) == v for k, v in where.items())]
+                rows = [j for j in rows if _where_matches(self._meta[j], where)]
             rows = rows[offset:]
             if limit is not None:
                 rows = rows[:limit]
@@ -238,6 +238,29 @@ class FakeChromaCollection:
     def metadata_of(self, cid: str) -> dict[str, Any]:
         """Test accessor: the stored metadata for one id."""
         return dict(self._meta[self._ids.index(cid)])
+
+
+def _where_matches(meta: dict[str, Any], where: dict[str, Any]) -> bool:
+    """Chroma's ``where``: ``$and`` of clauses, each key a plain value,
+    ``$eq``, ``$in`` or ``$ne``. Like Chroma, ``$ne`` keeps a row without the key."""
+    if "$and" in where:
+        return all(_where_matches(meta, clause) for clause in where["$and"])
+    for key, cond in where.items():
+        if isinstance(cond, dict) and "$ne" in cond:
+            if key in meta and meta[key] == cond["$ne"]:
+                return False
+        elif not _matches(meta.get(key), cond):
+            return False
+    return True
+
+
+def _matches(value: Any, cond: Any) -> bool:
+    """Chroma's ``where`` for one key: a plain value, ``{"$eq": v}`` or ``{"$in": [...]}``."""
+    if isinstance(cond, dict) and "$in" in cond:
+        return value in cond["$in"]
+    if isinstance(cond, dict) and "$eq" in cond:
+        return value == cond["$eq"]
+    return value == cond
 
 
 class FakeChromaClient:

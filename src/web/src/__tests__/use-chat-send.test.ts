@@ -156,6 +156,63 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(callOpts.excludePacks).toBe(true)
   })
 
+  it("asks for what was in force then when the question is explicitly historical", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const opts = makeOptions({
+      autoInject: true,
+      // the panel already holds current results for this text; a historical question must not reuse them
+      kbResults: [makeKBResult()],
+      kbResultsQuery: "What was my salary in 2023?",
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("What was my salary in 2023?")
+    })
+    expect(mockQueryKB.mock.calls[0][4].asOf).toBe("2023-12-31")
+    expect(mockRecallMemories.mock.calls[0][3]).toBe("2023-12-31")
+  })
+
+  it("asks the KB directly for a historical question instead of the shared retrieval", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+    const retrieve = vi.fn().mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, retrieve })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("Where did I live in June 2021?")
+    })
+    expect(retrieve).not.toHaveBeenCalled()
+    expect(mockQueryKB.mock.calls[0][4].asOf).toBe("2021-06-30")
+  })
+
+  it("keeps the shared retrieval for an ordinary question", async () => {
+    const retrieve = vi.fn().mockResolvedValue({ results: [] })
+    const opts = makeOptions({ autoInject: true, retrieve })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("Where do I live?")
+    })
+    expect(retrieve).toHaveBeenCalledWith("Where do I live?")
+    expect(mockQueryKB).not.toHaveBeenCalled()
+  })
+
+  it("puts a result's earlier versions into its <document> block", async () => {
+    mockQueryKB.mockResolvedValue({
+      results: [makeKBResult({
+        content: "Office is on the 9th floor",
+        history: [{ value: "Office is on the 5th floor", valid_from: "2025-06-01", valid_to: "2026-05-01T00:00:00Z" }],
+      })],
+    })
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0 })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => {
+      await result.current.handleSend("which floor is the office on")
+    })
+    const system = sentMessages(opts._sendSpy).find((m) => m.role === "system")
+    expect(system?.content).toContain("Office is on the 9th floor\n<history>\n- until 2026-05-01: Office is on the 5th floor\n</history>\n</document>")
+    expect(system?.content).toContain("answer from its current value")
+    expect(mockQueryKB.mock.calls[0][4].asOf).toBeUndefined()
+  })
+
   it("does not exclude packs when includePacks is ON (default)", async () => {
     mockQueryKB.mockResolvedValue({ results: [] })
     const opts = makeOptions({ autoInject: true, includePacks: true })

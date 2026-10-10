@@ -41,7 +41,7 @@ Intended :Fact properties (the writer's contract):
   event_date  — ISO-8601 date the fact is ABOUT (nullable; EVENT facts)
   invalid_at  — ISO-8601 timestamp the fact was superseded, or null while
                 active (bi-temporal; CODE sets it, never the LLM —
-                mirrors core/agents/memory_consolidation.py mark_superseded).
+                mirrors the lineage writer, core/lineage/writer.py).
   created_at  — ISO-8601 write time.
 
 Preservation invariant for the future writer (add as a /health check
@@ -74,7 +74,7 @@ FOR (f:Fact) ON (f.subject_id)
 
 # invalid_at index: read-time active-fact filter
 # (`WHERE f.invalid_at IS NULL`), mirroring the supersession read filter
-# on :Artifact. Gated in app code by a future ENABLE_FACT_INVALIDATION_FILTER.
+# on :Artifact. Read through app/db/neo4j/fact_queries.py's current/as-of predicates.
 _FACT_INVALID_AT_INDEX = """
 CREATE INDEX fact_invalid_at_idx IF NOT EXISTS
 FOR (f:Fact) ON (f.invalid_at)
