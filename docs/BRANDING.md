@@ -99,9 +99,9 @@ Source images in `~/Dropbox/cerid-sync/Graphics and branding/`:
 | `eK2nQ.jpg` | Hero tagline banner | Marketing features |
 | `HT7YS.jpg` | 6-feature icon grid | Cropped into badges |
 | `K56Cs.jpg` | 4-feature icon set | Cropped into badges |
-| `kr4QB.jpg` | Cerid Vault app icon | Marketing pricing |
-| `57mYS.jpg` | Cerid Core app icon | Marketing pricing |
-| `5c1SK.jpg` | CERID PRO wordmark | Marketing pricing |
+| `kr4QB.jpg` | Cerid Vault app icon | Retired pricing artwork |
+| `57mYS.jpg` | Cerid Core app icon | Retired pricing artwork |
+| `5c1SK.jpg` | CERID PRO wordmark | Retired pricing artwork |
 | `sHzTK.jpg` | 3D shield with rivets | Marketing security |
 | `umLv0.jpg` | Secure Intelligence banner | Marketing security |
 | `pOXvI.jpg` | Privacy-First graphic | Marketing privacy |

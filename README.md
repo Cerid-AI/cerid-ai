@@ -10,9 +10,9 @@ A privacy-first, local-first workspace that unifies your code, finance, projects
 [![npm @cerid-ai/sdk](https://img.shields.io/npm/v/@cerid-ai/sdk?label=npm%20%40cerid-ai%2Fsdk)](https://www.npmjs.com/package/@cerid-ai/sdk)
 [![PyPI cerid-sdk](https://img.shields.io/pypi/v/cerid-sdk?label=pypi%20cerid-sdk)](https://pypi.org/project/cerid-sdk/)
 
-[Docs](docs/) · [Website](https://cerid.ai) · [**Product demo**](https://cerid.ai/#demo) · [Pricing](https://cerid.ai/pricing) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
+[Docs](docs/) · [Website](https://cerid.ai) · [**Tour**](https://cerid.ai/#demo) · [Contact](https://cerid.ai/contact) · [Releases](https://github.com/Cerid-AI/cerid-ai/releases)
 
-**[90s product tour](https://cerid.ai/#demo)** · [30s sizzle](https://cerid.ai/cerid-30s-demo.mp4) — live UI: claim verification, Constellation explore, wiki, TrustScore.
+**[90s tour](https://cerid.ai/#demo)** — live UI: claim verification, Constellation explore, wiki, TrustScore.
 
 <p align="center"><a href="https://cerid.ai/#demo"><img src="https://cerid.ai/demo-poster.jpg" alt="Cerid AI chat with live claim verification: each claim in the answer is checked against the knowledge base and marked verified, partial or refuted" width="900"></a></p>
 <p align="center"><em>Chat with live claim verification. Frame from the product tour.</em></p>
@@ -81,14 +81,17 @@ Knowledge stores stay on your machine. Only the LLM calls you choose leave (or n
 
 ---
 
-## Core vs Pro
+## The public offering
 
-Everything above is **Cerid Core** — free, self-hosted, no account, no telemetry,
-no seat limits, nothing that expires. It is a complete product on its own.
+This repository is the offering. You run it yourself. [cerid.ai](https://cerid.ai)
+does not sell a subscription, a trial, or a license key. A note about the work,
+including an offer to acquire the intellectual property, goes to
+[hello@cerid.ai](mailto:hello@cerid.ai).
 
-**Cerid Pro** ($15/mo · $144/yr) adds the surfaces that reach outside your own
-disk: the connectors that pull your mail, calendars and meetings in, plus the
-retrieval and analysis layers built on top of them.
+The code still groups surfaces into Core and Pro. Core is the knowledge
+companion: no account, no telemetry, no seat limit, nothing that expires.
+Pro is the set of connectors and analysis layers in the same tree, the ones
+that reach outside your own disk. Those gates are not a price list.
 
 | | Core | Pro |
 |---|---|---|
@@ -102,14 +105,12 @@ retrieval and analysis layers built on top of them.
 | AI inbox triage, metamorphic verification | — | ✓ |
 
 Full flag-by-flag breakdown: [`docs/TIER_MATRIX.md`](docs/TIER_MATRIX.md).
-**Cerid Vault** (enterprise: multi-user, SSO, audit logging, SLA) —
-[vault@cerid.ai](mailto:vault@cerid.ai).
+Multi-user, SSO, and audit logging are in the tree as well. They are not a
+separate offer, and there is no sales desk.
 
-**Try Pro free for 14 days — no credit card.** Settings → Plan & Billing →
-*Start 14-day free trial*. To buy, see [cerid.ai/pricing](https://cerid.ai/pricing)
-and paste the key you receive into that same pane. Upgrading never needs a
-reinstall, and if you stop paying, Core keeps working — nothing you built is
-locked away.
+The running app can still start a local trial or accept a key that was issued
+earlier. The site does not sell either. Nothing you already built is locked
+away if a trial ends.
 
 ---
 

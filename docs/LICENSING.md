@@ -1,40 +1,47 @@
-# Licensing, trials, and activation
+# Licensing and activation
 
-How to try Cerid Pro, how to buy it, and how entitlement is decided at runtime.
+How this public offering is licensed, and how a running install decides its tier.
+[cerid.ai](https://cerid.ai) does not sell a subscription and does not issue a
+license key. A note about the work, including an offer to acquire the
+intellectual property, goes to [hello@cerid.ai](mailto:hello@cerid.ai).
+Security reports stay at [security@cerid.ai](mailto:security@cerid.ai).
+
 For the flag-by-flag feature split see [`TIER_MATRIX.md`](TIER_MATRIX.md); for
 the source licenses that govern each directory see
 [`../CONTRIBUTING.md`](../CONTRIBUTING.md#license).
 
 ## Tiers
 
-| Tier | Price | What it is |
-|------|-------|-----------|
-| **Core** | Free | The whole self-hosted product: all four knowledge surfaces, 12 agents, 62 MCP tools, local + web sources, the local LLM pipeline, and both SDKs. No account, no telemetry, no seat limit, no expiry. |
-| **Pro** | $15/mo · $144/yr | Adds everything that reaches outside your own disk — cloud and Apple connectors, Meeting Capture, custom Smart RAG, advanced analytics, daily digest, inbox triage, metamorphic verification. |
-| **Vault** | Contact | Enterprise: multi-user with tenant isolation, SSO/SAML, audit logging, SLA and deployment support. <vault@cerid.ai> |
+The tiers are gates in the code, not prices.
 
-## Try Pro free for 14 days
+| Tier | What it covers |
+|------|----------------|
+| **Core** | The self-hosted knowledge companion: all four knowledge surfaces, 12 agents, 62 MCP tools, local + web sources, the local LLM pipeline, and both SDKs. No account, no telemetry, no seat limit, no expiry. |
+| **Pro** | The wider surfaces in the same repository: cloud and Apple connectors, Meeting Capture, custom Smart RAG, advanced analytics, daily digest, inbox triage, metamorphic verification. |
+| **Enterprise** | Multi-user surfaces that exist in the code: tenant isolation, SSO/SAML, audit logging. Not a separate offer. |
 
-**Settings → Plan & Billing → Start 14-day free trial.** No credit card, no
-account, no data leaves the machine — the server grants the trial to itself and
-it expires locally. One trial per installation.
+## What the site does not do
 
-When it ends the server drops back to Core. Nothing is deleted: sources you
-connected during the trial stop syncing, and the knowledge they already
-produced stays in your knowledge base.
+There is no checkout and no new key minted on cerid.ai.
+[cerid.ai/pricing](https://cerid.ai/pricing) is a contact page, not a plan picker.
+[cerid.ai/contact](https://cerid.ai/contact) is the same note.
 
-## Buy and activate
+## What the app still does
 
-1. Pick a plan at [cerid.ai/pricing](https://cerid.ai/pricing).
-2. Checkout is hosted on cerid.ai. A self-hosted Cerid server never contacts a
-   payment provider and never sees card data.
-3. You get an Ed25519-signed license key (also shown on the post-purchase page
-   and in your receipt email).
-4. **Settings → Plan & Billing**, paste the key, choose **Activate**.
+The running app can still start a one-time local 14-day Pro trial from
+**Settings → Plan & Billing**, and it can still accept an Ed25519 key that was
+issued earlier. The server grants the trial to itself. One trial per
+installation. No data leaves the machine for either step, and a self-hosted
+server never contacts a payment provider.
 
-Validation is offline: the key carries its own tier and expiry, so activation
-works on an air-gapped host and no license server is ever contacted. Upgrading
-needs no reinstall and no restart.
+When a trial ends the server drops back to the baseline tier. Nothing is
+deleted: sources you connected during the trial stop syncing, and the knowledge
+they already produced stays in your knowledge base.
+
+Paste a key that was already issued under **Settings → Plan & Billing** and
+choose **Activate**. Validation is offline: the key carries its own tier and
+expiry, so activation works on an air-gapped host and no license server is
+ever contacted. It needs no reinstall and no restart.
 
 ## How keys are verified
 
@@ -76,23 +83,22 @@ the tier, never lower it:
 | Activated license key | Settings → Plan & Billing | Grants the key's tier until the key's embedded expiry. |
 
 So an operator who pins `CERID_TIER=enterprise` on an air-gapped box keeps
-Enterprise even while a Pro trial is running, and a customer whose key lapses
+Enterprise even while a Pro trial is running, and an install whose key lapses
 returns to whatever the operator configured rather than being knocked to Core.
 
 Entitlement is re-derived at every startup, so an activated license survives a
 container restart. If it did not, `FEATURE_TIER` would fall back to the env
-value on each boot and paid features would silently disappear.
+value on each boot and gated features would silently disappear.
 
 ### `CERID_TIER` for operators
 
 The variable exists for deployments where interactive activation is impractical
-— air-gapped installs, enterprise images, CI. It is not the intended purchase
-path, and setting it does not grant a license to the plugin trees, whose own
-terms are in [`../plugins/LICENSE`](../plugins/LICENSE) (BUSL-1.1).
+— air-gapped installs, CI. Setting it does not grant a license to the plugin
+trees, whose own terms are in [`../plugins/LICENSE`](../plugins/LICENSE) (BUSL-1.1).
 
-Using it to enable paid features without a license puts the server in the
+Using it to raise the tier without a key puts the server in the
 **unlicensed-Pro** state. Nothing is blocked, degraded, or time-limited — but
-the server stops pretending it is licensed:
+the server stops pretending a key is present:
 
 - a non-dismissible notice on the Pro settings panes, and an **Unlicensed**
   marker in the status bar. The status bar renders on every screen, but it
@@ -104,14 +110,13 @@ the server stops pretending it is licensed:
   artifacts such as the daily digest.
 
 All of it clears the moment you activate a key or start the free trial. A
-licensed customer who *also* pins `CERID_TIER` is reported as licensed — the
+install that holds a key and also pins `CERID_TIER` is reported as licensed — the
 key wins — and a server mid-trial is reported as trialing, not unlicensed.
 
 Cerid is source-available, so a determined reader can always change what runs
 on their own machine. There is no phone-home, no seat enforcement, and no
-attempt at DRM. Pro exists because the connectors and the hosted issuance
-behind them cost real money to build and keep working; paying for it is what
-keeps Core free and maintained.
+attempt at DRM. The gates stay so the surfaces remain distinguishable. They
+are not a checkout.
 
 ## Endpoints
 

@@ -182,19 +182,19 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     out.append("")
     out.append("## Tiers")
     out.append("")
-    out.append("| Tier | License | Audience | Price |")
-    out.append("|------|---------|----------|-------|")
+    out.append("| Tier | License | Audience | Offering |")
+    out.append("|------|---------|----------|----------|")
     out.append(
-        "| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, "
-        "researchers, personal use | Free |"
+        "| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Anyone who runs it | "
+        "The public offering |"
     )
     out.append(
-        "| **Cerid Pro** | BUSL-1.1 | Business and power users | "
-        "$15/mo · $144/yr |"
+        "| **Cerid Pro** | BUSL-1.1 | Same install, wider surfaces | "
+        "In the repository, not sold |"
     )
     out.append(
-        "| **Cerid Enterprise** | Commercial | Regulated and large "
-        "organizations | Contact |"
+        "| **Cerid Enterprise** | In the tree | Multi-user surfaces in the code | "
+        "Not a separate offer |"
     )
     out.append("")
     out.append("## Feature Matrix")

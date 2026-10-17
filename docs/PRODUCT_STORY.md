@@ -1,6 +1,6 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-10-08 (walked against the code at 1.0.10: the five primitives, the TrustScore's six components and targets, and the brief cadence hold. Corrected: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, the internal release-driver link is gone from this public document, and forgetting is named alongside accumulating).
+> **Last reviewed:** 2026-10-16 (public offering: this repository is what is offered, and cerid.ai does not sell a subscription. The five primitives, the TrustScore's six components and targets, and the brief cadence are unchanged. Still true from the 2026-10-08 walk: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, and forgetting is named alongside accumulating).
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.
@@ -13,6 +13,10 @@ Cerid is the only personal knowledge companion that **accumulates verified
 understanding** as you feed it — with every contradiction in your corpus,
 every entity Cerid has learned about, every concept it synthesizes —
 visible to you on a page you can read.
+
+This repository is the public offering. You run it yourself. cerid.ai does
+not sell a subscription and does not issue a license key. A note about the
+work goes to hello@cerid.ai.
 
 Self-hosted. Privacy-first. Your data stores stay local; what leaves the
 machine is only what you send to your chosen LLM provider — chat/query
@@ -140,16 +144,17 @@ shows its updating state in real time.
 - **Contradiction log** is the historical record of how understanding shifted.
 - **Background Processor** is the engine that keeps all of the above current.
 
-That is one product, not five features.
+That is one offering, not five features.
 
 ## What Cerid is not
 
 - A queryable RAG-as-a-service. (It is a companion you live with.)
 - A visual agent builder. (That's Dify's strength; Cerid's strength is
   verification depth.)
-- A hosted SaaS. (Self-host is the product. Privacy is the moat.)
+- A hosted SaaS. (Self-host is the offering.)
+- A store. (No subscription, no trial for sale, and no license key from the site.)
 - A marketing site with a chat widget. (The widget exists, but it's a
-  surface, not the product.)
+  surface, not the offering.)
 
 ## How features earn their place
 

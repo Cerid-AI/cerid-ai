@@ -1,6 +1,8 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-10-02 (1.0.9 shipped. Status authority: the release notes
+> **Last updated:** 2026-10-16. The public offering is this repository, run on
+> your own machine. A checkout, a subscription, and a price are not the plan.
+> Prior update 2026-10-02 (1.0.9 shipped). Status authority: the release notes
 > in [CHANGELOG.md](../CHANGELOG.md) and the 2026-09 Studio audit's remediation plan.
 > Prior: the 2026-09-02 readiness audit; the 2026-08-05 v1 GA audit,
 > [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md)).
@@ -35,26 +37,28 @@
 
 ## What this roadmap is
 
-The product is feature-complete. The work that remains is **commercial hardening** —
-making it possible to *sell and manage* Cerid Pro, making the Pro feature surface
-*truthful and regression-locked*, and making the release *operationally ready* — followed
-by validation and launch. It is organized as three tracks.
+The repository is a public, self-hosted offering. The feature surface is what
+the software contains, and it is not changing to match a price. A checkout, a
+subscription, and a sales desk are not the plan. Unshipped commerce items below
+are closed. They are not a backlog.
 
-- **Track 1 — Commercial GA** (primary near-term driver): Pro sale, Pro management, and
-  Pro/billing hardening. This is the critical path to dropping the `-rc` suffix.
-- **Track 2 — Validation & launch:** soak window, observability go-live, and the
-  go-to-market items that gate the public release.
-- **Track 3 — Post-GA / v1.1:** deferred enhancements that don't block the first
-  commercial release.
+The page is the historical plan the releases were cut from, in three tracks.
+
+- **Track 1 — The feature surface:** what shipped, including the gates. The
+  commerce items that never finished are marked closed.
+- **Track 2 — Validation:** soak and observability. The old go-to-market price
+  is not work to do.
+- **Track 3 — Later:** enhancements that are still about the software. A
+  subscription UI and a team price are not among them.
 
 Priority legend: **P0** blocker · **P1** high · **P2** medium · **P3** low.
 
 ---
 
-## Track 1 — Commercial GA
+## Track 1 — The feature surface
 
-The Pro tier's *features* are largely built and gated; this track makes the *commerce
-around them* production-grade and the *gating* trustworthy end-to-end.
+The Pro surfaces are built and gated. That gating stays. The commerce that was
+meant to sit around it does not.
 
 ### P0 — Pro feature truth-up & gating lock-in — ✅ Landed (2026-06-01)
 Make the tier system tell the truth and hold it against regression.
@@ -72,15 +76,21 @@ the Pro settings pane renders live from the capabilities API.*
 - Drive the Pro settings pane from the live capabilities API rather than a hand-maintained
   list, so the UI never lies about what a tier unlocks.
 
-### P0 — Pro subscription self-service
-Let a customer buy *and* manage their subscription without operator intervention.
+### P0 — Pro subscription self-service — closed, not the offering
+cerid.ai does not sell a subscription. Left unfinished on purpose.
+The notes below are the old plan, not work to do.
+
+Let someone buy *and* manage a subscription without operator intervention.
 - **Stripe Customer Portal** integration for GA: customers update payment method, view and
   download invoices, and cancel or change plan from a hosted, PCI-offloaded surface.
 - Enrich subscription status (renewal date, trial end, plan, cancellation state) so the
   app answers basic billing questions without a support ticket.
 - (A fully native, on-brand management UI is a v1.1 follow-on — see Track 3.)
 
-### P0 — License lifecycle & operator administration
+### P0 — License lifecycle & operator administration — closed, not the offering
+The site does not issue a license key. The app can still verify a key that was
+issued earlier. Left unfinished as a business process.
+
 Make licenses safe to issue, revoke, and audit.
 - Operator tooling to issue licenses (trials, B2B, sales overrides), revoke with hard
   enforcement (chargeback/fraud), refund, and audit the full lifecycle.
@@ -94,7 +104,8 @@ Calendar, and Photos — see [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md). 
 behind its feature gate and TCC/Full-Disk-Access consent; iMessage content honors
 Private Mode (Level 2+) at query time.
 
-### P0 — Stripe live-mode hardening & billing observability
+### P0 — Stripe live-mode hardening & billing observability — closed, not the offering
+The marketing site no longer takes a card, and the webhook aimed at it is disabled.
 - Document and validate all billing/licensing configuration; pin the Stripe API version.
 - Webhook idempotency hardened and proven; checkout protected against double-submit.
 - Billing-path error monitoring + payment-failure alerting.
@@ -150,11 +161,12 @@ Make the differentiator real and measured before GA, not just described.
   linkage, contradiction surfacing) and make the concept-pages activate/close decision.
 - **Observability go-live:** production frontend error-monitoring DSN provisioned; alert
   thresholds configured (error rate, p99 latency, health-degradation).
-- **Go-to-market (business-gated):** pricing page (`$15/mo · $144/yr · 14-day trial`),
-  60–90s demo video (Constellation hero), Apple App Store / TestFlight submission.
-  (Shipped from this bullet: the `v1.0.0` tag, 2026-08-07; launch comms drafted
-  2026-08-09 — posting still pending.)
-  **Demo video (v4, 2026-08-16):** 90s + 30s live-product sizzle on [cerid.ai/#demo](https://cerid.ai/#demo)
+- **Public page:** the price and the trial are not the offering. cerid.ai is the
+  public page, and notes go to hello@cerid.ai. The 90s tour on
+  [cerid.ai/#demo](https://cerid.ai/#demo) stays. Apple App Store / TestFlight
+  submission is not the plan.
+  (Shipped from the old bullet: the `v1.0.0` tag, 2026-08-07.)
+  **Tour (v4, 2026-08-16):** 90s tour and a 30s cut on [cerid.ai/#demo](https://cerid.ai/#demo)
   — verify/refute, snappy Constellation explore, wiki, TrustScore, feature cards.
   Hosted from `cerid-ai-marketing/public/`; rebuild via local `docs/assets/demo-video/` pipeline.
 
@@ -162,8 +174,7 @@ Make the differentiator real and measured before GA, not just described.
 
 ## Track 3 — Post-GA / v1.1
 
-- Native, on-brand subscription-management UI (first-party, replacing the hosted portal
-  deep-link).
+- A subscription-management UI is not the offering. The site does not sell a subscription.
 - First-party plugin marketplace.
 - SSO / SAML and advanced audit logging (Enterprise tier — currently scaffolded).
 - NLI GPU path (upstream inference dependency).
@@ -186,18 +197,17 @@ Make the differentiator real and measured before GA, not just described.
 - **Pro depth:** an "always-fresh knowledge" staleness/provenance dashboard; a scheduled
   "knowledge health" verification report; multi-modal capture (audio/video transcription,
   image OCR); and a governance/audit layer for teams.
-- **Packaging:** a team tier and usage-based pricing for the API-backend audience, alongside
-  the existing solo Pro.
+- **Packaging:** a team tier and usage-based pricing are not the offering.
 
 ---
 
 ## Tiers
 
-| Tier | License | Audience | Price |
+| Tier | License | Audience | Offering |
 |---|---|---|---|
-| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, researchers, personal use | Free |
-| **Cerid Pro** | BUSL-1.1 | Business and power users | $15/mo · $144/yr |
-| **Cerid Enterprise** | Commercial | Regulated and large organizations | Contact |
+| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Anyone who runs it | The public offering |
+| **Cerid Pro** | BUSL-1.1 | Same install, wider surfaces | In the repository, not sold |
+| **Cerid Enterprise** | In the tree | Multi-user surfaces in the code | Not a separate offer |
 
 The full feature/tier breakdown lives in
 [`docs/TIER_MATRIX.md`](TIER_MATRIX.md). Released work is tracked in

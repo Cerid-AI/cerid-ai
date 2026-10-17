@@ -6,11 +6,11 @@
 
 ## Tiers
 
-| Tier | License | Audience | Price |
-|------|---------|----------|-------|
-| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, researchers, personal use | Free |
-| **Cerid Pro** | BUSL-1.1 | Business and power users | $15/mo · $144/yr |
-| **Cerid Enterprise** | Commercial | Regulated and large organizations | Contact |
+| Tier | License | Audience | Offering |
+|------|---------|----------|----------|
+| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Anyone who runs it | The public offering |
+| **Cerid Pro** | BUSL-1.1 | Same install, wider surfaces | In the repository, not sold |
+| **Cerid Enterprise** | In the tree | Multi-user surfaces in the code | Not a separate offer |
 
 ## Feature Matrix
 

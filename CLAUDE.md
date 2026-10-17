@@ -1,6 +1,6 @@
-# CLAUDE.md - Cerid AI (Open Source)
+# CLAUDE.md - Cerid AI (public repository)
 
-Estate direction: `~/dotfiles/docs/estate-direction.md`. This repo is the shelf excerpt. It is not a product roadmap.
+Estate direction: `~/dotfiles/docs/estate-direction.md`. This repo is the public offering: the software a person runs on their own machine. It is not a store and not a product roadmap. cerid.ai does not sell a subscription or issue a license key. A note about the work goes to hello@cerid.ai.
 
 ## Project Overview
 

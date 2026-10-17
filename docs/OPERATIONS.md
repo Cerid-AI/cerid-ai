@@ -169,9 +169,9 @@ Latency (P50/P95), LLM cost, NDCG retrieval quality, cache hit rate, verificatio
 
 ---
 
-## Pro Upgrade Path
+## Pro surfaces
 
-Pro features (audio transcription, OCR, vision, metamorphic verification, visual workflows) can be activated via **Settings > Pro tab** using a license key or Stripe checkout. The upgrade flow is self-serve within the running application — no external portal required.
+Pro surfaces (audio transcription, OCR, vision, metamorphic verification, visual workflows) stay behind the tier gates in this repository. The running app can still accept a previously issued license key, or start its local trial, from Settings. cerid.ai does not host a checkout.
 
 ---
 
