@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-08-09 (v1.0.1 — tool count remeasured 2026-10-09: 62 MCP tools, 67 with the optional trading module, registered via the `app/tool_registry.py` decorator pattern; schema-fidelity CI gate; per-tool audit log + metrics + Sentry tag; SSE staleness eviction; `POST /mcp/call-sync` direct-HTTP fallback; `_warnings` envelope; `/health.invariants.mcp` rollups.)
+> **Last refresh:** 2026-10-17 (product 1.0.10. 62 MCP tools in this repository, pinned by name in `src/mcp/tests/test_mcp_tool_schema_fidelity.py`. The trading module is not included. Registered via the `app/tool_registry.py` decorator pattern.)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 
@@ -8,7 +8,7 @@
 
 Cerid AI is a **self-hosted, privacy-first Personal AI Knowledge Companion.** It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when `CERID_ENCRYPTION_KEY` is set.
 
-Core capabilities inventory lives in [`docs/PRESERVATION.md`](PRESERVATION.md) (§ "Invariants"). The preservation harness guards those capabilities across every consolidation sprint.
+`docs/PRESERVATION.md` is not in this repository. The preservation harness is the integration tests in `src/mcp/tests/integration/` (marker `preservation`). It guards those capabilities across every consolidation sprint.
 
 ## Services
 
@@ -43,14 +43,14 @@ React GUI talks to MCP directly (CORS `*`). Chat + smart-router traffic routes t
 ## Directory structure
 
 ```
-cerid-ai-internal/
+cerid-ai/
 ├── CLAUDE.md                # Agent directives (under 150 lines post-Sprint H)
 ├── docker-compose.yml       # Unified root compose
 ├── .env.age / .env.example  # Encrypted secrets / template
 ├── Makefile                 # lock-python, install-hooks, deps-check, preservation-check
 ├── scripts/                 # start-cerid.sh, validate-env.sh, sync-repos.py, gen_*
-├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md, SYNC_PROTOCOL.md,
-│                            # PRESERVATION.md, CONVENTIONS.md, ROUTER_REGISTRY.md
+├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md, CONVENTIONS.md,
+│                            # PRODUCT_STORY.md, TIER_MATRIX.md, EVAL_BASELINES_PUBLIC.md
 ├── plugins/                 # BUSL-1.1 pro-tier plugins
 ├── plugins-premium/         # proprietary premium tier — NOT distributed;
 │                            # absent from the public repository by design
@@ -78,7 +78,7 @@ cerid-ai-internal/
 │   │   ├── main.py          # FastAPI entry + lifespan
 │   │   ├── tools.py         # Legacy MCP tool dispatcher; most tools register via
 │   │   │                    # @register_tool in tool_registry.py + mcp_tools/
-│   │   │                    # (62 tools; 67 with the optional trading module)
+│   │   │                    # (62 tools in this repository; trading tools are not included)
 │   │   └── internal_modules.py  # /health.invariants.internal_modules flags
 │   ├── config/              # settings.py, taxonomy.py, features.py, providers.py
 │   ├── routers/             # billing.py ONLY (internal-only; whole dir stripped from public)
@@ -287,15 +287,13 @@ Served by `/`, `/health`, and `/openapi.json`. Single source of truth: `pyprojec
 |---|---|
 | What does `/agent/query` return? | [`docs/API_REFERENCE.md`](API_REFERENCE.md); preservation I2 |
 | What's the canonical claim shape? | `src/mcp/core/agents/hallucination/models.py` |
-| How do I add a new route? | Write in `src/mcp/app/routers/`; regenerate `docs/ROUTER_REGISTRY.md` |
+| How do I add a new route? | Write in `src/mcp/app/routers/`. The generated router registry is not committed here |
 | Where does internal code live? | `*_internal.py` files listed in `.sync-manifest.yaml` |
-| How does the sync work? | [`docs/SYNC_PROTOCOL.md`](SYNC_PROTOCOL.md) |
-| What must not break? | [`docs/PRESERVATION.md`](PRESERVATION.md) I1-I8 |
+| How does the sync work? | [`docs/CONVENTIONS.md`](CONVENTIONS.md) § Cross-repo sync, and `scripts/sync-repos.py` |
+| What must not break? | `src/mcp/tests/integration/` (marker `preservation`) |
 | What are the project conventions? | [`docs/CONVENTIONS.md`](CONVENTIONS.md) |
-| What's resolved / shipped? | [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) |
-| Current sprint work? | `tasks/todo.md` |
+| What's resolved / shipped? | [`CHANGELOG.md`](../CHANGELOG.md) |
 | Sidebar pane shape + redirect map? | [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md) |
-| Atlas + Constellation perf budgets? | [`docs/PERF_BUDGETS.md`](PERF_BUDGETS.md) |
 | Visualization endpoints? | `/graph/decomposition`, `/graph/map` (`?layout=`), `/graph/domains`, `/graph/neighborhood`, `/graph/timeline/strata`, `/graph/tour/generate`, `/atlas/views/*` |
 | How are entity domains assigned? | § Domain backbone (below); `DeriveDomainsJob`, `GET /graph/domains` |
 | How do connectors work? | `core/ingest/sources/base.py` + `core/ingest/sources/registry.py`; one connector module per `kind` under `core/ingest/sources/connectors/` |
@@ -534,7 +532,7 @@ and `purgeSpotlight` had one call site, a button in Settings.
 
 The sweep distinguishes three states, not two. A capabilities response that
 cannot be read is `skipped`, never folded into either answer: read as
-"entitled" it leaves a lapsed customer's knowledge base searchable forever;
+"entitled" it leaves the knowledge base of an install whose entitlement has lapsed searchable forever;
 read as "unentitled" a backend that is merely still booting wipes a working
 index on every launch.
 
@@ -546,8 +544,8 @@ BUSL-1.1 Pro plugins, so the wrong path leads somewhere real and empty
 rather than to an obvious error.
 
 The three Xcode-required native targets (App Intents, Share
-Extension, Quick Look) are deferred — see
-`docs/PHASE_G_DEFERRED.md`.
+Extension, Quick Look) are deferred. The deferral write-up is not in
+this repository.
 
 ### Calendar stitching fallback chain
 
@@ -575,8 +573,7 @@ checks classify it as `ok` / `suspicious` / `likely_hallucinated`.
 Registered via the existing `set_metamorphic_handler` stub
 interface in `app/agents/hallucination/metamorphic.py`.
 
-See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
-Phase D-H cumulative metrics and per-phase shipping log.
+The phase ledger is not a separate document in this repository. Released work is in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Knowledge architecture (Cerid v1.0 Phases K1-K6)
 
@@ -696,7 +693,4 @@ Diagnostics → Analytics via `KnowledgePanel`. Preservation
 invariants (`tests/test_knowledge_architecture_invariants.py`)
 gate the wiring against regression.
 
-See [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md) for the
-Phase K1-K6 cumulative metrics and the
-`tasks/2026-05-22-knowledge-architecture-redesign.md` design doc
-for the strategic rationale.
+The phase ledger and the knowledge-architecture design doc are not in this repository. Released work is in [`CHANGELOG.md`](../CHANGELOG.md).

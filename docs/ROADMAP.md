@@ -1,37 +1,35 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-10-16. The public offering is this repository, run on
+> **Last updated:** 2026-10-17. The public offering is this repository, run on
 > your own machine. A checkout, a subscription, and a price are not the plan.
-> Prior update 2026-10-02 (1.0.9 shipped). Status authority: the release notes
-> in [CHANGELOG.md](../CHANGELOG.md) and the 2026-09 Studio audit's remediation plan.
-> Prior: the 2026-09-02 readiness audit; the 2026-08-05 v1 GA audit,
-> [`docs/superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md`](superpowers/specs/2026-08-05-v1-ga-audit-and-remediation.md)).
-> **Shipped:** `v1.0.9-desktop` 2026-10-02 (the desktop app may write to a 1.0.8+
-> server again) on top of `v1.0.8` the same day (the Studio audit release: grounding
-> from the first message, consumer domain isolation, "verified" needs a source,
-> the MLX server for Apple silicon with an installer), signed + notarized (macOS
-> universal DMG + Windows installer), Latest on the public repo where the updater
-> polls. Earlier: `v1.0.7` 2026-09-21 (web augmentation keeps knowledge-base rows),
-> `v1.0.6` 2026-09-13, `v1.0.5` 2026-09-10 (product readiness), `v1.0.4`
-> 2026-09-08 (performance, environment profiles), `v1.0.3` 2026-08-30, `v1.0.2`
-> 2026-08-15, `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop` was WITHDRAWN
-> 2026-08-16 — its binaries could not launch; the tag remains, the release does not.
-> SDKs live on PyPI (`cerid-sdk`) + npm (`@cerid-ai/sdk`); the registries still
-> serve 0.1.1 while the tree is at 0.2.1 (wire 1.3.0), publish pending.
+> Product version in this tree: 1.0.10 (`pyproject.toml`). Latest published
+> desktop release: [`v1.0.10-desktop`](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.10-desktop)
+> (2026-10-07). Prior desktop release `v1.0.9-desktop` 2026-10-02 (the desktop
+> app may write to a 1.0.8+ server again), on top of `v1.0.8` the same day (the
+> Studio audit release: grounding from the first message, consumer domain
+> isolation, "verified" needs a source, the MLX server for Apple silicon with an
+> installer), signed + notarized. Earlier: `v1.0.7` 2026-09-21, `v1.0.6`
+> 2026-09-13, `v1.0.5` 2026-09-10, `v1.0.4` 2026-09-08, `v1.0.3` 2026-08-30,
+> `v1.0.2` 2026-08-15, `v1.0.0` + `v1.0.1` 2026-08-07. `v1.0.1-desktop` was
+> WITHDRAWN 2026-08-16 — its binaries could not launch; the tag remains, the
+> release does not.
+> SDKs: this tree is `cerid-sdk` and `@cerid-ai/sdk` 0.3.0, wire protocol 1.5.0.
+> PyPI serves 0.3.0. npm still serves 0.2.2.
 > Forward focus: the Studio audit's remaining waves (W5, gates that cannot fail;
 > W6/W7), Sentry go-live, multi-user, and CI coverage for the widget/SDK bundles.
-> **Currently shipped:** Atlas (decomposition icicle) + Constellation cartographic map,
-> Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings redesign
-> (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra timeline / FOLIO
-> wiki / STRATA atlas), Apple ecosystem baseline, meeting-capture runtime, cloud
-> connectors, Swift CLI helpers, metamorphic verification, Custom Smart RAG, AI inbox
-> triage, daily digest, advanced analytics, Tour, the Knowledge
-> Architecture program, Pro billing/checkout + license activation. 60 MCP tools (55 with
-> trading disabled), 8,000+ Python / 2,700+ frontend / 250+ preservation-marked tests
-> (snapshots drift — re-derive before quoting). Full ledger:
-> [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md).
-> **Shipped releases:** [CHANGELOG.md](../CHANGELOG.md) and the
-> [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
+> **In the tree:** Atlas (decomposition icicle) + Constellation cartographic map,
+> Subjects/Sources/Settings consolidation (4-pane), the registry-driven Settings
+> redesign (SEXTANT) and the Subjects UX cycles (TRELLIS domain backbone / Tephra
+> timeline / FOLIO wiki / STRATA atlas), Apple ecosystem baseline, meeting-capture
+> runtime, cloud connectors, Swift CLI helpers, metamorphic verification, Custom
+> Smart RAG, AI inbox triage, daily digest, advanced analytics, Tour, the
+> Knowledge Architecture program, and local activation of a key that was already
+> issued. A checkout is not among them. 62 MCP tools. The trading module is not
+> in this repository. Test counts drift — re-derive before quoting.
+> Status authority: [CHANGELOG.md](../CHANGELOG.md) and the
+> [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page. The
+> 2026-09 Studio audit, the 2026-09-02 readiness audit, and the 2026-08-05 v1 GA
+> audit are prior context. Their spec files are not in this repository.
 
 ---
 
@@ -100,7 +98,7 @@ Make licenses safe to issue, revoke, and audit.
 
 ### P1 — Complete the Pro Apple connector suite — ✅ Landed (Phase D)
 Apple Mail, iMessage, and Reminders readers shipped in Phase D alongside Apple Notes,
-Calendar, and Photos — see [`docs/COMPLETED_PHASES.md`](COMPLETED_PHASES.md). Each is
+Calendar, and Photos — see [CHANGELOG.md](../CHANGELOG.md). Each is
 behind its feature gate and TCC/Full-Disk-Access consent; iMessage content honors
 Private Mode (Level 2+) at query time.
 
@@ -134,9 +132,10 @@ below shipped and are canary-validated; the "Cerid as a backend" guide is publis
 Make the differentiator real and measured before GA, not just described.
 
 > **Status 2026-06-13:** largely landed. Artifact-level fusion + low-confidence
-> signals + the NLI-faithfulness benchmark shipped 2026-06-05 (see
-> `docs/GA_CHECKLIST.md`, `docs/NLI_FAITHFULNESS_BENCHMARK.md`). The **RAG Quality
-> Program** (Slices 1–7, 2026-06-12/13 — see `docs/COMPLETED_PHASES.md`) advanced
+> signals + the NLI-faithfulness benchmark shipped 2026-06-05. The benchmark
+> write-up and the phase ledger are not separate documents in this repository.
+> The **RAG Quality Program** (Slices 1–7, 2026-06-12/13 — see
+> [CHANGELOG.md](../CHANGELOG.md)) advanced
 > this P0 further: salience-weighted taxonomy, personal-first pack ranking,
 > stale-evidence verification, provenance end-to-end, with retrieval recall
 > validated at 1.0 (no regression) at Eval Checkpoint 2. Surface routing is live
@@ -168,7 +167,7 @@ Make the differentiator real and measured before GA, not just described.
   (Shipped from the old bullet: the `v1.0.0` tag, 2026-08-07.)
   **Tour (v4, 2026-08-16):** 90s tour and a 30s cut on [cerid.ai/#demo](https://cerid.ai/#demo)
   — verify/refute, snappy Constellation explore, wiki, TrustScore, feature cards.
-  Hosted from `cerid-ai-marketing/public/`; rebuild via local `docs/assets/demo-video/` pipeline.
+  The marketing site hosts it. This repository does not carry the video pipeline.
 
 ---
 

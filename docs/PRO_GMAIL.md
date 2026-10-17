@@ -118,7 +118,7 @@ container's persistent volume and survives restarts. Repeat this when you
 revoke access in your Google account settings, when you turn inbox actions
 on (the router does not start that re-login), or when the OAuth consent
 screen is still in "Testing" — Google expires that refresh token after 7
-days. See `docs/RUNBOOK_PRO_CONNECTORS.md` §2.
+days. The connector runbook is not a separate document in this repository.
 
 ## Enable in Cerid
 

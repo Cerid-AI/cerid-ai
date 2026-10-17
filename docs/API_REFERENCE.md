@@ -159,7 +159,7 @@
 
 ### MCP Tools (62 total)
 
-62 tools ship by default (67 with the optional trading module: 23 legacy `MCP_TOOLS` + 39 `@register_tool` + 5 trading). The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. Representative core tools:
+62 tools ship in this repository: 23 legacy `MCP_TOOLS` plus 39 registered with `@register_tool`. The trading module is not included. The full, always-current list is exposed via the MCP handshake (`tools/list`) — tools register through `@register_tool` in `app/tool_registry.py` — so it is not enumerated exhaustively here. The names are pinned in `src/mcp/tests/test_mcp_tool_schema_fidelity.py` (`CORE_TOOL_NAMES`). Representative core tools:
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -184,14 +184,14 @@
 - `pkb_forget_search` → `pkb_forget_preview` → `pkb_forget_execute` — Find what matches a description of what to forget; preview a chosen set with a single-use confirm token (15 minutes); execute only what the token covers, once. Over MCP a forget only moves things to the Trash (an agent's forget stays restorable; erasing for good is the person's, in the app). Refused in multi-user mode, where MCP carries no caller role
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
-Versioned facade for external consumers — 17 endpoints. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
+Versioned facade for external consumers — 22 routes. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring. See [`docs/SDK_GUIDE.md`](SDK_GUIDE.md) for the full endpoint list; highlights:
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode`, `context_sources` and `source_config` — see [Source gates](#source-gates) below)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`; `summary` carries the same keys, `agreed` included)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `POST /sdk/v1/forget/preview` — What forgetting documents (`artifact`) or passages (`chunk`) would remove, and a single-use `confirm_token` for exactly that set, mode and consumer (15 minutes). A consumer limited to some domains may forget only within the domains it may write (403 otherwise, and for memory and conversation subjects). In multi-user mode both forget endpoints need an admin, and the token is bound to the signed-in user as well
 - `POST /sdk/v1/forget/execute` — `{confirm_token}`: runs the previewed forget once (409 for a spent, expired or foreign token; idempotent with an `Idempotency-Key`)
-- `GET /sdk/v1/health` — Health check with `version`, `app_version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model). `version` is the `/sdk/v1` **wire contract** version (e.g. `1.3.0`); `app_version` is the application build (e.g. `1.0.7`) — they are different numbers.
+- `GET /sdk/v1/health` — Health check with `version`, `app_version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model). `version` is the `/sdk/v1` **wire contract** version (currently `1.5.0`); `app_version` is the application build (currently `1.0.10`) — they are different numbers.
 
 **External-client backend support.** `/sdk/v1/ingest` and `/sdk/v1/query` accept **client-defined domains** without pre-registering the domain itself — an unknown domain inside the consumer's grant degrades to empty results, never a 400. The grant is the consumer's `allowed_domains` in `CONSUMER_REGISTRY` (keyed by `X-Client-ID`); a domain outside it returns **403** `consumer_domain_restricted`, and a consumer that is not in the registry is granted `general` only. `/sdk/v1/ingest` accepts a `metadata` object (arbitrary provenance, stored + retrievable; `tags` preserved alongside). `/sdk/v1/llm/complete` accepts custom `task_type` values (unknown → safe internal routing). See [`SDK_GUIDE.md` § Using Cerid as a backend](SDK_GUIDE.md).
 
@@ -578,9 +578,7 @@ make deps-check
 - `Makefile` — Convenience targets
 - `scripts/hooks/pre-commit` — Blocks commits when lock files are stale
 - `.github/dependabot.yml` — Weekly grouped PRs for pip, npm, actions, Docker
-- `docs/DEPENDENCY_COUPLING.md` — Cross-service version constraints
-
-**Cross-service version coupling:** See `docs/DEPENDENCY_COUPLING.md` for constraints (ChromaDB client/server, spaCy lib/model, Node version, Python version). CI enforces lock file sync via `lock-sync` job.
+**Cross-service version coupling:** ChromaDB client and server, the spaCy library and its model, Node, and Python have to move together. The coupling write-up is not a separate document in this repository. CI enforces lock file sync via the `lock-sync` job.
 
 ---
 
@@ -803,7 +801,7 @@ Levels 0-4 and what each withholds: [`docs/PRIVATE_MODE.md`](PRIVATE_MODE.md). N
 
 ### Knowledge Graph (Subjects panes)
 
-Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. See [`docs/ROUTER_REGISTRY.md`](ROUTER_REGISTRY.md) for the generated parameter/response detail.
+Backing data for the four Subjects visualization surfaces (Atlas / Constellation / Timeline / Wiki). All under the `/graph` prefix. The generated router registry is not committed in this repository.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

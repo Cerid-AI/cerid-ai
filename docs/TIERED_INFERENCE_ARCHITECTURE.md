@@ -457,13 +457,9 @@ The Settings > Essentials > Provider Status section gains a new **Inference Tier
 | ONNX in-process GPU | `Inference: ONNX (CoreML) — Optimal` with green indicator |
 | ONNX Docker CPU | `Inference: Docker CPU — Degraded (5-20x slower)` with red indicator |
 
-#### Chat Degradation Banner
+#### CPU-only notice
 
-When `tier == "cpu-degraded"`, the existing degradation banner system (from `DegradationManager`) shows:
-
-> "Running in CPU-only inference mode. Embedding and reranking operations are slower than usual. [Learn more](docs/TIERED_INFERENCE_ARCHITECTURE.md)"
-
-This banner appears once per session (dismissed via localStorage, 24h expiry matching wizard pattern).
+The setup step says: "CPU-only detected — inference will be slower. GPU acceleration available with Apple Silicon, NVIDIA, or AMD via Quenchforge." That sentence stays when the local throughput probe has not measured both rates (`src/web/src/components/setup/local-llm-step.tsx`).
 
 #### Health Endpoint
 

@@ -1,6 +1,6 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-10-16 (public offering: this repository is what is offered, and cerid.ai does not sell a subscription. The five primitives, the TrustScore's six components and targets, and the brief cadence are unchanged. Still true from the 2026-10-08 walk: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, and forgetting is named alongside accumulating).
+> **Last reviewed:** 2026-10-17 (public offering: this repository is what is offered, and cerid.ai does not sell a subscription. The five primitives, the TrustScore's six components and targets, and the brief cadence are unchanged. The published eval numbers are in `docs/EVAL_BASELINES_PUBLIC.md`. Still true from the 2026-10-08 walk: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, and forgetting is named alongside accumulating).
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.
@@ -58,15 +58,18 @@ posture as a number 0–100 with six disclosed components:
 - **Retrieval quality** (IR NDCG@10 vs baseline; re-measured on pushes
   that touch retrieval paths, with a weekly backstop)
 - **Memory recall** (LongMemEval harness runs recorded in
-  `docs/EVAL_BASELINES.md`, target ≥ 0.80)
+  [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md), target ≥ 0.80)
 - **Verification coverage** (rolling 7 d, ≥ 95 %)
 - **Preservation health** (last `main` CI, all gates passing)
 - **User agreement** (rolling 7 d of feedback ratings, target ≥ 0.80)
 
 The score is the straight mean of the normalized components. No learned
 weights. No proprietary formula. Honesty over cleverness. Hover discloses
-the components; click opens a modal with sparklines and explainers
-cross-linking to `docs/EVAL_BASELINES.md` and `docs/PRESERVATION.md`.
+the components; click opens a modal with sparklines and explainers.
+The app names `docs/EVAL_BASELINES.md` and `docs/PRESERVATION.md` on those
+links. Those two files are not in this repository. The published numbers are
+in [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md), and the
+preservation invariants are the tests in `src/mcp/tests/integration/`.
 
 The TrustScore is **not a verification gate** — it does not affect
 retrieval, generation, or any model decision. It is pure presentation,
@@ -173,7 +176,7 @@ their candidate task driver until the answers sharpen.
 
 ## Product demo (public)
 
-The marketing site hosts a live-product sizzle that mirrors this story:
+The tour on [cerid.ai/#demo](https://cerid.ai/#demo) is a 90s cut and a 30s cut of this story:
 
 - Claim verification with **refutation** (not only green checks)
 - Constellation explore & drill-down (not a static still)
@@ -181,12 +184,11 @@ The marketing site hosts a live-product sizzle that mirrors this story:
 - Disclosed TrustScore methodology
 - Local artifact stores + sources
 
-Watch: [cerid.ai/#demo](https://cerid.ai/#demo) (90s tour · 30s sizzle).  
-Rebuild pipeline lives under `docs/assets/demo-video/` in the monorepo working tree (local asset pipeline; not required to run Core).
+The marketing site hosts the tour. This repository does not carry the video pipeline.
 
 ## See also
 
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — layered system architecture
-- [`docs/PRESERVATION.md`](PRESERVATION.md) — capability invariants
-- [`docs/EVAL_BASELINES.md`](EVAL_BASELINES.md) — retrieval-quality regression ledger
+- `src/mcp/tests/integration/` — preservation invariants (marker `preservation`)
+- [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md) — published eval numbers
 - [`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md) — operator guide to the processor

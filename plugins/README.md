@@ -104,14 +104,14 @@ def register():
 Plugins are discovered from two locations at startup:
 
 1. `src/mcp/plugins/` -- in-tree plugins (scanned first)
-2. `plugins/` at the repository root -- external/commercial plugins
+2. `plugins/` at the repository root -- the BUSL-1.1 plugins (`plugins/LICENSE`)
 
 Set `CERID_PLUGIN_DIR` to load from a custom directory. Set `ENABLED_PLUGINS`
 to a comma-separated list of plugin names to restrict which plugins load.
 
 ## Tier System
 
-- `"community"` (default) -- loads on any tier, including the free core.
+- `"community"` (default) -- loads on any tier, including Core.
 - `"pro"` -- requires `CERID_TIER=pro` or `CERID_TIER=enterprise`.
 - `"enterprise"` -- requires `CERID_TIER=enterprise`.
 

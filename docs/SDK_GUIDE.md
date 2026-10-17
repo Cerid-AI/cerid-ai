@@ -5,9 +5,9 @@ survives internal refactoring of core paths. Current wire-protocol version:
 **1.5.0**. Client packages are `cerid-sdk`
 ([PyPI](https://pypi.org/project/cerid-sdk/)) and `@cerid-ai/sdk`
 ([npm](https://www.npmjs.com/package/@cerid-ai/sdk)), both **0.3.0** in this
-tree; the registries serve 0.2.2 until 0.3.0 is published, which is a separate
-step (`docs/SDK_PUBLISHING.md`). The SDK versions independently of the
-product. New in 1.5.0: `as_of` on query, search and memory recall, and history on
+tree. PyPI serves **0.3.0**. npm still serves **0.2.2**. Publishing the npm
+package is a separate step (`docs/SDK_PUBLISHING.md`). The SDK versions
+independently of the product. New in 1.5.0: `as_of` on query, search and memory recall, and history on
 results (see "Versions and history" below). New in 1.4.0: forgetting with a
 confirmation step (see "Forget" below).
 New in 1.3.0: the hallucination `summary` carries an integer
@@ -20,13 +20,14 @@ claims" in the Python quickstart below). Additive in 1.2.0:
 
 ## Overview
 
-The `/sdk/v1/` surface is 20 endpoints. The client libraries wrap **18** of
+The `/sdk/v1/` surface is 22 routes. The client libraries wrap **20** of
 them, covering knowledge-base operations, health monitoring, content ingestion
 (text / path / multipart / adapter-shaped), taxonomy, search, plugin discovery,
 smart-routed LLM completion, memory extraction with job polling, memory recall,
-consumer-scoped artifact delete, and server configuration. The remaining two —
-the webhook receiver and the voice-note upload — are HTTP-only by design; see
-the endpoint table. All JSON endpoints return typed responses defined by
+consumer-scoped artifact delete, a confirmed forget, and server configuration.
+The remaining two — the webhook receiver and the voice-note upload — are
+HTTP-only by design; see the endpoint table. All JSON endpoints return typed
+responses defined by
 Pydantic models in `src/mcp/app/models/sdk.py`.
 
 ## Authentication
@@ -86,7 +87,6 @@ pip install cerid-sdk
 
 ```python
 # The distribution is `cerid-sdk`; the import name is `cerid`.
-# Sibling products vendor 0.2.0 until PyPI publish.
 from cerid import CeridClient
 
 client = CeridClient(
@@ -307,12 +307,17 @@ freshly-created client domain.
 | 15 | GET | `/sdk/v1/plugins` | List loaded plugins with status and tier |
 | 16 | POST | `/sdk/v1/ingest/webhook/{token}` | Token-gated webhook receiver (provider payloads normalized via adapter recipes; returns 202) |
 | 17 | POST | `/sdk/v1/ingest/voice-note` | Voice-note transcribe + ingest |
+| 18 | POST | `/sdk/v1/memory/recall` | Recall memories. A result with earlier versions carries `history` |
+| 19 | POST | `/sdk/v1/ingest/upload` | Multipart file ingest |
+| 20 | DELETE | `/sdk/v1/artifacts/{artifact_id}` | Forget one artifact, scoped to the consumer |
+| 21 | POST | `/sdk/v1/forget/preview` | Preview a forget and return a single-use confirm token |
+| 22 | POST | `/sdk/v1/forget/execute` | Run the previewed forget once |
 
-Endpoints 1-15 are wrapped by both client libraries. **16 and 17 are
-HTTP-only**: the webhook is an inbound receiver an external service posts to
+The client libraries wrap every row except **16 and 17**, which are
+HTTP-only. The webhook is an inbound receiver an external service posts to
 (nothing for a client to call), and the voice-note route takes a multipart
 upload, which neither client library models. Call those two with a plain HTTP
-request.
+request. Rows 21 and 22 are also described under [Forget](#forget).
 
 ### Request/Response Examples
 

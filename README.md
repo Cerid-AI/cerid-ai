@@ -35,7 +35,7 @@ Open http://localhost:3000 — the React GUI is ready. Drop files into `~/cerid-
 
 **It's working when** the status bar shows green dots for ChromaDB, Neo4j, and Redis.
 
-Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.9](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.9-desktop).
+Prefer an app? Signed builds for macOS and Windows: [desktop release v1.0.10](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.10-desktop).
 
 ---
 
@@ -50,7 +50,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 | **Specialist agents**          | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v1.0.9)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v1.0.10)** | ✅ Preservation harness of integration invariants + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 
@@ -66,7 +66,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 - **Accumulating wiki** — entity pages that grow from your sources (not one-shot chat dumps)
 - **Disclosed TrustScore** — straight mean of measured components; methodology open in-product
 - **Specialist Agents** — Query, Triage, Hallucination Detection, Memory Extraction, Maintenance, Audit, and more
-- **55 MCP Tools** (60 with the optional trading module) — Full control via MCP protocol (`pkb_*` namespace)
+- **62 MCP tools** — full control via the MCP protocol (`pkb_*` namespace). The trading module is not in this repository.
 - **Memory System** — Automatically extracts facts, decisions, and preferences from conversations
 - **Tiered Inference** — Auto-detects Ollama (GPU/CPU), FastEmbed sidecar, or Docker CPU fallback
 - **Quenchforge AMD-GPU Routing** — Intel Mac + AMD discrete GPU operators get GPU acceleration for LLM chat, dense embeddings, cross-encoder reranking, AND ingest-time enrichment via per-workload env-driven routing (`INTERNAL_LLM_PROVIDER` / `EMBEDDINGS_PROVIDER` / `RERANK_PROVIDER`). See [`docs/AMD_GPU_MODEL_RECOMMENDATIONS.md`](docs/AMD_GPU_MODEL_RECOMMENDATIONS.md) for vetted GGUF picks by VRAM tier.
@@ -95,7 +95,7 @@ that reach outside your own disk. Those gates are not a price list.
 
 | | Core | Pro |
 |---|---|---|
-| Knowledge surfaces (wiki / vector / graph / memory), 12 agents, 55 MCP tools | ✓ | ✓ |
+| Knowledge surfaces (wiki / vector / graph / memory), 12 agents, 62 MCP tools | ✓ | ✓ |
 | Local + web sources: folders, RSS, bookmarks, webhooks, browser extension | ✓ | ✓ |
 | Local LLM pipeline (Ollama / quenchforge), hallucination detection, SDKs | ✓ | ✓ |
 | Cloud connectors — Gmail, Outlook, Google + Microsoft Calendar | — | ✓ |
@@ -152,12 +152,12 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 - `POST /agent/hallucination` — Verify any LLM response against your KB
 - `POST /agent/verify-stream` — Same verification, streamed as SSE with auto-persisted reports
 - `POST /agent/memory/extract` — Pull facts from conversation history
-- 55 MCP tools (`pkb_*`) for programmatic access
+- 62 MCP tools (`pkb_*`) for programmatic access
 
 ### Install the SDKs
 
 Typed client libraries for the stable `/sdk/v1/` API. SDKs version **independently**
-of the product release (product **v1.0.9** · clients **0.1.1** on both registries):
+of the product release (product **v1.0.10** · this tree **0.3.0** · PyPI **0.3.0** · npm **0.2.2**):
 
 | Client | Install | Registry |
 |--------|---------|----------|
@@ -171,9 +171,9 @@ See [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for quickstarts and [docs/SDK_PUBLISH
 ## What's new in v1.0
 
 - **Verified answers by default** — claim extraction + NLI entailment gating verifies LLM responses against your knowledge base, with source attribution and streaming verification reports.
-- **55 MCP tools** (60 with the optional trading module) plus a full MCP server, so Claude and other MCP-native clients drive Cerid directly.
+- **62 MCP tools** plus a full MCP server, so Claude and other MCP-native clients drive Cerid directly. The trading module is not in this repository.
 - **Four retrieval surfaces, one query path** — vector, BM25/sparse hybrid, knowledge graph, and a self-refreshing wiki, routed per query intent.
-- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.9 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.9-desktop); the release build verifies the signature, the notarization staple and Gatekeeper before it publishes.
+- **Signed & notarized desktop apps** — macOS universal DMG and Windows installer on the [v1.0.10 desktop release](https://github.com/Cerid-AI/cerid-ai/releases/tag/v1.0.10-desktop); the release build verifies the signature, the notarization staple and Gatekeeper before it publishes.
 - **Python + TypeScript SDKs live** — [`cerid-sdk` on PyPI](https://pypi.org/project/cerid-sdk/) and [`@cerid-ai/sdk` on npm](https://www.npmjs.com/package/@cerid-ai/sdk) against the stable `/sdk/v1/` contract.
 - **FSL-1.1-ALv2 source-available licensing** — the core converts to Apache-2.0 on each version's second anniversary; SDKs and client integrations stay Apache-2.0.
 

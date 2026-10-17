@@ -164,9 +164,14 @@ Releases published before the August 2026 license transition were, and remain, A
 
 ### Contributor license grant
 
-The copyright holder offers commercial exceptions to the FSL and may dual-license the
-software. That is only possible if the holder has the rights to relicense every line
-in the tree, which means inbound contributions need an explicit grant. So:
+The public site does not sell a subscription or a license key. A note about the
+work, including an offer to acquire the intellectual property, goes to
+hello@cerid.ai.
+
+The copyright holder may license the work on other terms, including a transfer
+of the intellectual property. That is only possible if the holder has the rights
+to relicense every line in the tree, which means inbound contributions need an
+explicit grant. So:
 
 **By submitting a contribution to this repository — a pull request, a patch, a code
 suggestion in an issue, or any other form — you agree to the following.**

@@ -63,5 +63,5 @@ service-specific knowledge needed.
 
 Replace the `FIELD_MAPPINGS` dict and `_make_payload` function to match
 the JSON shape your service produces, then post to the same endpoint.
-See `docs/INTEGRATION_GUIDE.md` in the Cerid repo for worked examples
-(Readwise, Pocket, Instapaper, Raindrop).
+The adapter-shaped ingest route is `POST /sdk/v1/ingest/external`
+(`docs/SDK_GUIDE.md`). Point `field_mappings` at the JSON your service sends.
