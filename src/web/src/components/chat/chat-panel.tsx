@@ -12,6 +12,7 @@ import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Z
 import { CreditBanner } from "./credit-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
+import { ChatConfirmLink } from "./chat-confirm-link"
 import { ChatInput } from "./chat-input"
 import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
@@ -957,6 +958,9 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
         onConfirm={handleChatFileUpload}
         onCancel={() => setPendingChatFiles([])}
       />
+
+      {/* Candidates this chat proposed, for the operator to confirm on the Deck. */}
+      <ChatConfirmLink conversationId={active.id} streaming={isStreaming} />
 
       {/* Input */}
       <ChatInput
