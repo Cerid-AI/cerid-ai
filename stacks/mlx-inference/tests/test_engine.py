@@ -65,6 +65,11 @@ class HarmonyTokenizer:
     def decode(self, tokens, **_):
         return self.enc.decode(list(tokens))
 
+    # mlx-lm >= 0.32 inspects this method's signature when it wraps a tokenizer.
+    # Harmony prompts are rendered by openai-harmony, so it is never called.
+    def apply_chat_template(self, messages, **_):
+        raise NotImplementedError("harmony prompts are rendered by openai-harmony")
+
 
 def tiny_model(model_type: str, vocab_size: int, seed: int):
     import mlx.core as mx
