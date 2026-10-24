@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
       - run: pip install import-linter
@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
       - run: pip install -r src/mcp/requirements.txt -r src/mcp/requirements-dev.txt
       - run: cd src/mcp && python -m mypy . --config-file ../../pyproject.toml
@@ -192,7 +192,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
       - if: needs.changes.outputs.mcp == 'true'
@@ -345,7 +345,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
       - name: Python SDK contract tests
@@ -421,7 +421,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"  # public pins 3.11 (see .sync-manifest.yaml); canonical is 3.12
+          python-version: "3.12"
           cache: pip
       - name: Python license scan (pip-licenses)
         # Resolves licences from the LOCK via PyPI metadata rather than
@@ -542,7 +542,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Every required gate ran and passed
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
