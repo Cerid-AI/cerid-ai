@@ -6,7 +6,7 @@
     },
     "contextplus": {
       "command": "npx",
-      "args": ["-y", "contextplus"],
+      "args": ["-y", "contextplus@1.0.8"],
       "env": {
         "OLLAMA_EMBED_MODEL": "jina-embeddings-v2-base-code",
         "OLLAMA_CHAT_MODEL": "llama3.1-8b",
