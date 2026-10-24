@@ -26,11 +26,13 @@ export interface PreviewItem extends ForgetSubject {
   passages?: number
   /** An earlier version of a memory being forgotten: its number in the history. */
   version?: number
+  /** A chat upload the knowledge base already held before the chat. */
+  existing?: boolean
   /** A document: how many versions it has. */
   versions?: number
 }
 export type PreviewGroupKey =
-  | "transcripts" | "memories" | "summary" | "verified_memories" | "cited_documents"
+  | "transcripts" | "memories" | "summary" | "verified_memories" | "uploads" | "cited_documents"
   | "documents" | "passages" | "conversations" | "earlier_versions"
 export interface PreviewGroup { key: PreviewGroupKey; default: "always" | "checked" | "unchecked"; items: PreviewItem[] }
 export interface ForgetPreview {

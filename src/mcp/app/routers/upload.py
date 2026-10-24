@@ -35,6 +35,36 @@ logger = logging.getLogger("ai-companion.upload")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
+def _link_to_conversation(result: dict[str, Any], conversation_id: str) -> None:
+    """Record that this file came in through a chat (forget spec §6.6). Content
+    the knowledge base already held is linked as ``existing``. A conversation
+    that is forgotten, or an id that is not one, links nothing; the upload
+    itself has already succeeded and stands. Under Private Mode nothing is
+    linked."""
+    from app.db import neo4j as graph
+    from app.deps import get_neo4j
+    from app.services.private_mode import saves_blocked
+    from app.sync.user_state import validate_conversation_id
+    from core.forget import registry as forget_registry
+
+    if saves_blocked():
+        return  # Private Mode: nothing durable is written about a conversation
+    artifact_id = str(result.get("artifact_id") or "")
+    status = str(result.get("status") or "")
+    if not artifact_id or status not in ("success", "duplicate", "updated"):
+        return
+    try:
+        validate_conversation_id(conversation_id)
+    except ValueError:
+        return
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return
+    try:
+        graph.link_upload(get_neo4j(), artifact_id, conversation_id, existing=status != "success")
+    except Exception as exc:  # noqa: BLE001 — provenance must not fail a stored upload
+        log_swallowed_error("app.routers.upload.link_conversation", exc, context={"artifact_id": artifact_id})
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/upload")  # response-model-allowed: dynamic response (shape varies)
@@ -60,6 +90,11 @@ async def upload_file_endpoint(
         description="Quick capture: persist with a provisional domain and minimal "
                     "metadata, return at once, and enrich (categorise, title) in a "
                     "background job that updates the artifact in place.",
+    ),
+    conversation_id: str = Query(
+        "",
+        description="The chat the file was dropped in, if any. Links the file to that "
+                    "conversation so deleting the chat can offer to forget it too.",
     ),
 ):
     """Accept a multipart file upload, validate it, and ingest into the knowledge base.
@@ -246,9 +281,14 @@ async def upload_file_endpoint(
                 )
                 result["enrichment"] = "unavailable"
 
+        if conversation_id:
+            await asyncio.to_thread(_link_to_conversation, result, conversation_id)
+
         # Archive mode: copy the file to archive/{domain}/ for Dropbox sync
         if config.STORAGE_MODE == "archive" and tmp_path:
-            _archive_file(tmp_path, file.filename, result.get("domain", domain))
+            archived = _archive_file(tmp_path, file.filename, result.get("domain", domain))
+            if archived is not None:
+                await asyncio.to_thread(_record_archived_source, result, archived)
 
         return result
 
@@ -329,8 +369,37 @@ async def list_archive_files(
     }
 
 
-def _archive_file(tmp_path: str, original_filename: str, domain: str) -> None:
-    """Copy an uploaded file to archive/{domain}/ for persistent storage."""
+def _record_archived_source(result: dict[str, Any], archived: Path) -> None:
+    """Record the archived copy as the artifact's ``source_path``, the property
+    ``/admin/kb/reindex`` re-reads a document from. An upload that created or
+    replaced the artifact's text points it at this copy; a duplicate adopts it
+    only when the artifact records no live source of its own."""
+    from app.db.neo4j.artifacts import set_artifact_properties
+    from app.deps import get_neo4j
+    from app.services.ingestion import note_source_path
+
+    artifact_id = str(result.get("artifact_id") or "")
+    status = str(result.get("status") or "")
+    source_path = os.path.abspath(archived)
+    if not artifact_id:
+        return
+    if status == "duplicate":
+        note_source_path(artifact_id, source_path, None)
+        return
+    if status not in ("success", "updated"):
+        return
+    try:
+        set_artifact_properties(get_neo4j(), artifact_id, {"source_path": source_path})
+    except Exception as exc:  # noqa: BLE001 — the upload is stored; only reindex loses its source
+        log_swallowed_error(
+            "app.routers.upload.record_source_path", exc, context={"artifact_id": artifact_id},
+        )
+
+
+def _archive_file(tmp_path: str, original_filename: str, domain: str) -> Path | None:
+    """Copy an uploaded file to archive/{domain}/ for persistent storage.
+
+    Returns the copy's path, or None when the copy failed."""
     archive_root = Path(config.ARCHIVE_PATH)
     dest_dir = archive_root / domain
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -351,3 +420,5 @@ def _archive_file(tmp_path: str, original_filename: str, domain: str) -> None:
         logger.info(f"Archived upload: {original_filename} -> {dest}")
     except OSError as e:
         logger.warning(f"Failed to archive {original_filename}: {e}")
+        return None
+    return dest

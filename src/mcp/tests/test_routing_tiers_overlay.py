@@ -32,26 +32,26 @@ class TestResolveTierIdReadPath:
         # Path points at a non-existent file → every id resolves to itself.
         missing = tmp_path / "routing_tiers.json"
         monkeypatch.setattr(sr.config, "ROUTING_TIERS_OVERLAY_PATH", str(missing))
-        assert sr._resolve_tier_id("openrouter/x-ai/grok-4.3:online") == "openrouter/x-ai/grok-4.3:online"
+        assert sr._resolve_tier_id("openrouter/x-ai/grok-4.7:online") == "openrouter/x-ai/grok-4.7:online"
         assert sr._load_tier_overlay() == {}
 
     def test_resolves_through_present_overlay(self, tmp_path, monkeypatch):
         overlay = {
-            "openrouter/anthropic/claude-sonnet-4.6": "openrouter/anthropic/claude-sonnet-4.7",
-            "openrouter/x-ai/grok-4.3:online": "openrouter/x-ai/grok-4.4:online",
+            "openrouter/anthropic/claude-sonnet-5.5": "openrouter/anthropic/claude-sonnet-5.6",
+            "openrouter/x-ai/grok-4.7:online": "openrouter/x-ai/grok-4.8:online",
         }
         path = tmp_path / "routing_tiers.json"
         path.write_text(json.dumps(overlay))
         monkeypatch.setattr(sr.config, "ROUTING_TIERS_OVERLAY_PATH", str(path))
 
         assert (
-            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-4.6")
-            == "openrouter/anthropic/claude-sonnet-4.7"
+            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-5.5")
+            == "openrouter/anthropic/claude-sonnet-5.6"
         )
         # Id not in the overlay → identity.
         assert (
-            sr._resolve_tier_id("openrouter/openai/gpt-4o")
-            == "openrouter/openai/gpt-4o"
+            sr._resolve_tier_id("openrouter/openai/gpt-6.1-sol")
+            == "openrouter/openai/gpt-6.1-sol"
         )
 
     def test_corrupt_overlay_falls_back_to_identity(self, tmp_path, monkeypatch):
@@ -61,8 +61,8 @@ class TestResolveTierIdReadPath:
 
         assert sr._load_tier_overlay() == {}
         assert (
-            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-4.6")
-            == "openrouter/anthropic/claude-sonnet-4.6"
+            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-5.5")
+            == "openrouter/anthropic/claude-sonnet-5.5"
         )
 
     def test_non_dict_overlay_falls_back_to_identity(self, tmp_path, monkeypatch):
@@ -115,19 +115,19 @@ class TestRefreshRoutingTiersOverlay:
         out = tmp_path / "routing_tiers.json"
         monkeypatch.setattr(models_mod, "_ROUTING_TIERS_OVERLAY_PATH", out)
 
-        # Catalog upgrades sonnet 4.6→4.7 and grok-4.3:online→4.4:online; the
+        # Catalog upgrades sonnet 4.6→4.7 and grok-4.7:online→4.4:online; the
         # rest of the tier ids have no in-family successor here, so they stay
         # out of the overlay (identity).
         catalog = [
-            "anthropic/claude-sonnet-4.7",
-            "x-ai/grok-4.4:online",
+            "anthropic/claude-sonnet-5.6",
+            "x-ai/grok-4.8",
         ]
         diff = models_mod._refresh_routing_tiers_overlay(catalog)
 
         persisted = json.loads(out.read_text())
         assert persisted == {
-            "openrouter/anthropic/claude-sonnet-4.6": "openrouter/anthropic/claude-sonnet-4.7",
-            "openrouter/x-ai/grok-4.3:online": "openrouter/x-ai/grok-4.4:online",
+            "openrouter/anthropic/claude-sonnet-5.5": "openrouter/anthropic/claude-sonnet-5.6",
+            "openrouter/x-ai/grok-4.7:online": "openrouter/x-ai/grok-4.8:online",
         }
         changed = {row["id"] for row in diff}
         assert changed == set(persisted.keys())
@@ -174,10 +174,10 @@ class TestRefreshRoutingTiersOverlay:
         monkeypatch.setattr(models_mod, "_ROUTING_TIERS_OVERLAY_PATH", out)
         monkeypatch.setattr(sr.config, "ROUTING_TIERS_OVERLAY_PATH", str(out))
 
-        models_mod._refresh_routing_tiers_overlay(["anthropic/claude-sonnet-4.7"])
+        models_mod._refresh_routing_tiers_overlay(["anthropic/claude-sonnet-5.6"])
         assert (
-            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-4.6")
-            == "openrouter/anthropic/claude-sonnet-4.7"
+            sr._resolve_tier_id("openrouter/anthropic/claude-sonnet-5.5")
+            == "openrouter/anthropic/claude-sonnet-5.6"
         )
 
 
@@ -196,7 +196,7 @@ class TestApplyLatestAssignmentsTierWiring:
                 "updates": [],  # no role changes
                 "resolved": {},
                 "catalog_size": 2,
-                "catalog_ids": ["anthropic/claude-sonnet-4.7", "x-ai/grok-4.4:online"],
+                "catalog_ids": ["anthropic/claude-sonnet-5.6", "x-ai/grok-4.8"],
             }
 
         monkeypatch.setattr(models_mod, "_compute_model_updates", _fake_compute)
@@ -207,5 +207,5 @@ class TestApplyLatestAssignmentsTierWiring:
         # The tier overlay was still written + reported.
         assert out.exists()
         tier_ids = {row["id"] for row in result["tier_updates"]}
-        assert "openrouter/anthropic/claude-sonnet-4.6" in tier_ids
-        assert "openrouter/x-ai/grok-4.3:online" in tier_ids
+        assert "openrouter/anthropic/claude-sonnet-5.5" in tier_ids
+        assert "openrouter/x-ai/grok-4.7:online" in tier_ids

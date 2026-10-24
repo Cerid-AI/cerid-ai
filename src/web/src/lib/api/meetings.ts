@@ -42,14 +42,6 @@ export async function uploadMeeting(file: File): Promise<{ job_id: string }> {
   return res.json()
 }
 
-export async function getMeetingJob(job_id: string): Promise<MeetingJob> {
-  const res = await fetch(`${MCP_BASE}/meetings/job/${job_id}`, {
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch job"))
-  return res.json()
-}
-
 export async function listMeetingJobs(): Promise<MeetingJob[]> {
   const res = await fetch(`${MCP_BASE}/meetings/jobs`, {
     headers: mcpHeaders(),

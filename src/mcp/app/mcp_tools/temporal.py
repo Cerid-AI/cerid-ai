@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,6 +24,7 @@ from app.tool_registry import (
     UpstreamUnavailableError,
     register_tool,
 )
+from core.utils.pii_patterns import PII_PATTERNS
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -391,20 +391,6 @@ async def pkb_revisit_due(
 # ============================================================ pkb_privacy_audit
 
 
-# PII regex patterns. Conservative — false-positives are acceptable
-# (operator reviews findings) but false-negatives expose data.
-_PII_PATTERNS = {
-    "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
-    "ssn_us": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "phone_us": re.compile(r"\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
-    "credit_card": re.compile(r"\b(?:\d[ -]*?){13,16}\b"),  # noqa: DUO138 — {13,16} cap bounds backtracking
-    "api_key_generic": re.compile(r"\b(sk-|pk-|api[_-]?key[=:]?\s*)[A-Za-z0-9_-]{20,}\b"),
-    "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    "private_key_pem": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"),
-    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
-}
-
-
 # Chroma caps the id list per ``get``; scan in batches so a 500-artifact
 # sample with large documents still issues a bounded number of round-trips.
 _PRIVACY_AUDIT_CHUNK_BATCH = 200
@@ -559,11 +545,11 @@ async def pkb_privacy_audit(
         raise InvalidParamsError(f"Invalid domain {domain!r}")
     max_artifacts = max(1, min(int(max_artifacts), 5000))
 
-    pattern_subset = list(patterns or _PII_PATTERNS.keys())
-    bad = set(pattern_subset) - set(_PII_PATTERNS.keys())
+    pattern_subset = list(patterns or PII_PATTERNS.keys())
+    bad = set(pattern_subset) - set(PII_PATTERNS.keys())
     if bad:
         raise InvalidParamsError(
-            f"Unknown pattern(s): {sorted(bad)!r}. Valid: {sorted(_PII_PATTERNS.keys())}"
+            f"Unknown pattern(s): {sorted(bad)!r}. Valid: {sorted(PII_PATTERNS.keys())}"
         )
 
     from app.db import neo4j as graph
@@ -600,7 +586,7 @@ async def pkb_privacy_audit(
             if not corpus:
                 continue
             for pname in pattern_subset:
-                matches = _PII_PATTERNS[pname].findall(corpus)
+                matches = PII_PATTERNS[pname].findall(corpus)
                 if not matches:
                     continue
                 # Redact the sample to first 30 chars so finding output

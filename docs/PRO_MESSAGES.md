@@ -1,5 +1,7 @@
 # Messages (iMessage / SMS) connector
 
+> Connector notes. The product tier around them is historical. Stamps use domain `messages`.
+
 ## What this connector does
 
 The Messages connector reads your local `chat.db` and ingests the

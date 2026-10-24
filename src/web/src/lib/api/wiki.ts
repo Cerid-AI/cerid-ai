@@ -329,35 +329,6 @@ export async function fetchVaultsList(): Promise<WatchedFolder[]> {
   return folders.filter((f) => Boolean(f.is_vault))
 }
 
-/**
- * GET /wiki/contradictions
- *
- * Used by both the entity detail page (entity_slug filter) and the
- * standalone contradictions view. Export so callers can reuse.
- */
-export async function fetchContradictions({
-  entity_slug,
-  since,
-  limit = 100,
-}: {
-  entity_slug?: string
-  since?: string
-  limit?: number
-} = {}): Promise<ContradictionFinding[]> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (entity_slug) params.set("entity_slug", entity_slug)
-  if (since) params.set("since", since)
-
-  const res = await fetch(`${MCP_BASE}/wiki/contradictions?${params.toString()}`, {
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) {
-    throw new Error(`Contradictions fetch failed (${res.status})`)
-  }
-  const rows = (await res.json()) as Record<string, unknown>[]
-  return rows.map(normalizeContradiction)
-}
-
 function normalizeWikiLogEntry(raw: Record<string, unknown>): WikiLogEntry {
   return {
     log_id: String(raw.log_id ?? ""),

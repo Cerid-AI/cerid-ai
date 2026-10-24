@@ -1,5 +1,7 @@
 # SDK Publishing Runbook — `cerid-sdk`
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 Operator runbook for cutting releases of the two `cerid-sdk` client
 packages: the Python SDK at
 [`packages/sdk/python/`](../packages/sdk/python/) (→ PyPI) and the

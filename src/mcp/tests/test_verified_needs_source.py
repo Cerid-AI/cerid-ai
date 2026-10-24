@@ -227,7 +227,7 @@ class TestStreamingSummary:
         assert saved["verified"] == 0
         assert saved["total"] == 2
 
-        from core.agents.hallucination.streaming import REDIS_HALLUCINATION_PREFIX
+        from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX
 
         report = json.loads(redis.saved[f"{REDIS_HALLUCINATION_PREFIX}cid-src"])
         assert report["summary"]["verified"] == 0
@@ -354,7 +354,7 @@ def _assert_buckets_sum_to_total(summary: dict) -> None:
 
 
 def _stored_report(redis: _FakeRedis, cid: str = "cid-src") -> dict:
-    from core.agents.hallucination.streaming import REDIS_HALLUCINATION_PREFIX
+    from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX
 
     return json.loads(redis.saved[f"{REDIS_HALLUCINATION_PREFIX}{cid}"])
 

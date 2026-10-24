@@ -466,12 +466,13 @@ class OutlookConnector:
             "categories": json.dumps(message.categories),
             "importance": message.importance,
             "content_hash": content_hash,
+            "sub_category": "outlook",
         }
 
         try:
             result = ingest_content(
                 content=content,
-                domain="general",
+                domain="mail",
                 metadata=metadata,
             )
             logger.info(

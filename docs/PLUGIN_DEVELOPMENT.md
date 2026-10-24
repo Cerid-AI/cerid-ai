@@ -229,4 +229,4 @@ Community plugins are distributed as directories. To share a plugin:
 3. Users clone or copy the directory into `plugins/`.
 
 No centralized registry exists. Plugins load from the local filesystem only.
-For a plugin that should stay behind the Pro or enterprise gate, set `"tier": "pro"` or `"enterprise"` in the manifest.
+For commercial plugins, set `"tier": "pro"` or `"enterprise"` in the manifest.

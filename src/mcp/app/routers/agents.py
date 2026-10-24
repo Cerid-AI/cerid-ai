@@ -223,6 +223,13 @@ class HallucinationCheckRequest(BaseModel):
     model: str | None = None
     user_query: str | None = None
     expert_mode: bool = False
+    source_artifact_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "KB artifact IDs the answer was generated from. A claim verified "
+            "against one of them is labelled circular_source (KB verified)."
+        ),
+    )
     mode: HallucinationMode = Field(
         default=HallucinationMode.THOROUGH,
         description=(
@@ -394,6 +401,8 @@ def _scoped_context_sources(
     *,
     strict_domains: bool,
     requested_strict: bool,
+    allowed_domains: list[str] | None = None,
+    allow_external: bool = True,
 ) -> dict | None:
     """The context sources a query held strictly to named domains may use.
 
@@ -405,14 +414,32 @@ def _scoped_context_sources(
     Memory is the owner's data, so any strict scope turns it off unless
     ``conversations`` is one of the domains named. The web is nobody's data: it
     goes off only when the REQUEST asked for the strict scope. A consumer that
-    is strict by registration still gets web augmentation on a thin corpus.
+    is strict by registration still gets web augmentation on a thin corpus,
+    unless its registry entry sets ``allow_external`` false. That flag is how
+    the named suite consumers stay inside the lane. The preservation harness
+    and ``_default`` leave it on.
+
+    The scope is the domains named inside the consumer's wall, or the wall when
+    none are named. ``cerid-finance`` asking without ``domains``, or naming
+    ``conversations`` from outside its wall, was handed the owner's memories.
+
+    When ``allow_external`` stays true and the query is not strict, the same
+    dict object is returned. A false flag copies the dict so the caller's
+    mapping is not mutated.
     """
-    if not (strict_domains and domains):
-        return context_sources
+    if not strict_domains or not (domains or allowed_domains is not None):
+        if allow_external:
+            return context_sources
+        scoped = dict(context_sources or {})
+        scoped["external"] = False
+        return scoped
+    scope = list(domains or allowed_domains or [])
+    if allowed_domains is not None:
+        scope = [d for d in scope if d in allowed_domains]
     scoped = dict(context_sources or {})
-    if "conversations" not in domains:
+    if "conversations" not in scope:
         scoped["memory"] = False
-    if requested_strict:
+    if requested_strict or not allow_external:
         scoped["external"] = False
     return scoped
 
@@ -467,6 +494,8 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             req.domains,
             strict_domains=scope_strict,
             requested_strict=bool(req.strict_domains),
+            allowed_domains=allowed_domains,
+            allow_external=consumer.get("allow_external", True),
         )
         _cs = req.context_sources or {}
         _mem = "1" if _cs.get("memory", True) is not False else "0"
@@ -536,6 +565,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 skip_cache=req.skip_cache,
                 metadata_filter=req.metadata_filter,
                 budget_seconds=req.budget_seconds,
+                memory_strict=scope_strict,
             )
             # Smart mode shares Self-RAG with the manual path (agent_query_full).
             # E1 CR-032: low_confidence stamp removed (write-only; no production readers).
@@ -586,6 +616,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 # only kb/external were read, so a user who toggled Memory off
                 # still had recalled personal memories enter their answer.
                 memory_enabled=_cs.get("memory", True) is not False,
+                memory_strict=scope_strict,
             )
 
         # Envelope invariant (preservation I2): every /agent/query response
@@ -629,9 +660,13 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         # them after the load transient passes. Also never cache an empty-source
         # result — a transient miss would otherwise poison every matching query
         # for the full TTL (AF-101; mirrors the semantic cache's guard at
-        # core/retrieval/semantic_cache.py:293).
+        # core/retrieval/semantic_cache.py:293) — unless it is empty because the
+        # cross-encoder rejected every row it retrieved: that is the answer, and
+        # recomputing it put a repeat query at 655 ms. An ingest evicts it.
         degraded = isinstance(result, dict) and (
-            bool(result.get("budget_exceeded")) or not result.get("sources")
+            bool(result.get("budget_exceeded"))
+            or bool(result.get("domains_failed"))
+            or (not result.get("sources") and not result.get("rerank_rejected"))
         )
         if not has_context and not req.skip_cache and not degraded and not _c1_scoped:
             # Task 7: record the domains the result actually touched so a
@@ -738,7 +773,16 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
 
 @router.post("/agent/hallucination")  # response-model-allowed: dynamic response (shape varies)
 @require_feature("truth_audit")
-async def hallucination_check_endpoint(req: HallucinationCheckRequest):
+async def hallucination_check_endpoint(req: HallucinationCheckRequest, request: Request):
+    from app.services.request_policy import build_request_context
+    from core.agents.guarded_retrieval import verification_scope
+
+    ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+    with verification_scope(ctx):
+        return await _hallucination_check(req)
+
+
+async def _hallucination_check(req: HallucinationCheckRequest):
     try:
         # Fast mode bypasses the cross-model NLI pipeline entirely — the
         # handler runs claim extraction (the unique value this endpoint
@@ -802,6 +846,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             expert_mode=req.expert_mode,
             create_memory_fn=_verified_memory_fn(create_memory_node),
             persist_report=persist_report,
+            source_artifact_ids=req.source_artifact_ids or None,
         )
         result["mode"] = "thorough"
 
@@ -857,10 +902,10 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
 
 @router.get("/agent/hallucination/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
 @require_feature("truth_audit")
-async def hallucination_report_endpoint(conversation_id: str):
+async def hallucination_report_endpoint(conversation_id: str, message_id: str = ""):
     try:
         from core.agents.hallucination import get_hallucination_report
-        report = get_hallucination_report(get_redis(), conversation_id)
+        report = get_hallucination_report(get_redis(), conversation_id, message_id)
         if not report:
             raise HTTPException(status_code=404, detail="No hallucination report found")
         return report
@@ -875,6 +920,10 @@ class ClaimFeedbackRequest(BaseModel):
     conversation_id: str
     claim_index: int
     correct: bool
+    message_id: str = Field(
+        "", max_length=128, pattern=r"^[A-Za-z0-9_\-]*$",
+        description="The assistant message the report verifies; reports are kept per message.",
+    )
 
 
 @router.post("/agent/hallucination/feedback", response_model=ClaimFeedbackEndpointResponse)
@@ -883,14 +932,14 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
         from core.agents.hallucination import (
-            REDIS_HALLUCINATION_PREFIX,
             REDIS_HALLUCINATION_TTL,
             get_hallucination_report,
+            report_key,
         )
         from core.utils.cache import log_claim_feedback
 
         redis = get_redis()
-        report = get_hallucination_report(redis, req.conversation_id)
+        report = get_hallucination_report(redis, req.conversation_id, req.message_id)
         if not report:
             raise HTTPException(status_code=404, detail="No hallucination report found")
 
@@ -903,7 +952,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
 
         # Write the updated report back only while the key still exists: a purge
         # landing between the read above and this write must not re-create it.
-        key = f"{REDIS_HALLUCINATION_PREFIX}{req.conversation_id}"
+        key = report_key(req.conversation_id, req.message_id)
         redis.set(key, json.dumps(report), ex=REDIS_HALLUCINATION_TTL, xx=True)
 
         # Log feedback for analytics
@@ -1131,16 +1180,19 @@ class MemoryRecallResponse(BaseModel):
         description="Recalled memories scored by relevance + salience decay",
     )
     total: int = Field(default=0, ge=0, description="Number of memories returned (after min_score filter)")
+    degraded: bool = Field(default=False, description="True when recall failed and the empty list is not a real answer")
 
 
 @router.post("/agent/memory/recall", response_model=MemoryRecallResponse)
-async def memory_recall_endpoint(req: MemoryRecallRequest):
+async def memory_recall_endpoint(req: MemoryRecallRequest, request: Request):
     """Recall memories relevant to a query."""
+    from app.services.request_policy import build_request_context
+    from core.agents.guarded_retrieval import guarded_recall_memories
+    from core.agents.request_context import ConsumerScopeRestricted
+
     try:
-        from app.services.request_policy import build_request_context
-        from core.agents.guarded_retrieval import guarded_recall_memories
         results = await guarded_recall_memories(
-            request_context=build_request_context(),
+            request_context=build_request_context(client_id=request.headers.get("x-client-id", "gui")),
             query=req.query,
             chroma_client=get_chroma(),
             neo4j_driver=get_neo4j(),
@@ -1152,11 +1204,16 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
             if r.get("adjusted_score", r.get("score", 0)) >= req.min_score
         ]
         return MemoryRecallResponse(memories=filtered, total=len(filtered))
+    except ConsumerScopeRestricted:
+        raise HTTPException(
+            status_code=403,
+            detail={"retrieval_reason": "consumer_domain_restricted", "retrieval_skipped": True},
+        ) from None
     except Exception as e:
         log_swallowed_error('app.routers.agents', e)
         logger.error(f"Memory recall error: {e}")
-        # Graceful degradation — empty recall, not 500. Still object-shaped.
-        return MemoryRecallResponse(memories=[], total=0)
+        # Still object-shaped, and says the empty list is a failure, not "nothing recalled".
+        return MemoryRecallResponse(memories=[], total=0, degraded=True)
 
 
 class VerifyStreamRequest(BaseModel):
@@ -1182,6 +1239,10 @@ class VerifyStreamRequest(BaseModel):
             "hall:{cid} report at this index, not replace it (E1 CR-019)."
         ),
     )
+    message_id: str = Field(
+        "", max_length=128, pattern=r"^[A-Za-z0-9_\-]*$",
+        description="The assistant message the report verifies; reports are kept per message.",
+    )
 
 
 _STREAM_END = object()  # Sentinel for generator exhaustion
@@ -1204,7 +1265,7 @@ async def _safe_anext(gen):  # type: ignore[no-untyped-def]
 
 @router.post("/agent/verify-stream")
 @require_feature("truth_audit")
-async def verify_stream_endpoint(req: VerifyStreamRequest):
+async def verify_stream_endpoint(req: VerifyStreamRequest, request: Request):
     """SSE endpoint for streaming truth verification of an LLM response.
 
     Includes keepalive heartbeats (SSE comments) every 15s during long
@@ -1212,7 +1273,17 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
     closing idle connections prematurely.
     """
 
+    from app.services.request_policy import build_request_context
+    from core.agents.guarded_retrieval import verification_scope
+
+    verify_ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
+
     async def event_generator():
+        with verification_scope(verify_ctx):
+            async for chunk in _verify_events():
+                yield chunk
+
+    async def _verify_events():
         event_count = 0
         keepalive_count = 0
         try:
@@ -1248,6 +1319,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 uncertain: int,
                 total: int,
                 agreed: int | None = None,
+                message_id: str = "",
             ) -> None:
                 _save_report(
                     get_neo4j(),
@@ -1259,6 +1331,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     unverified=unverified,
                     uncertain=uncertain,
                     total=total,
+                    message_id=message_id,
                 )
 
             gen = verify_response_streaming(
@@ -1277,6 +1350,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 save_report_fn=_save_report_fn,
                 persist_report=persist_report,
                 merge_claim_index=req.single_claim_index,
+                message_id=req.message_id,
             )
 
             # Read events with a keepalive timeout — if no event arrives
@@ -1380,6 +1454,10 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
 
 class SaveVerificationRequest(BaseModel):
     conversation_id: str
+    message_id: str = Field(
+        "", max_length=128, pattern=r"^[A-Za-z0-9_\-]*$",
+        description="The assistant message the report verifies; reports are kept per message.",
+    )
     claims: list[dict]
     overall_score: float = Field(ge=0.0, le=1.0)
     verified: int = 0
@@ -1415,6 +1493,7 @@ async def save_verification_report(req: SaveVerificationRequest):
             unverified=req.unverified,
             uncertain=req.uncertain,
             total=req.total,
+            message_id=req.message_id,
         )
         return {"status": "saved" if report_id else "skipped", "report_id": report_id}
     except Exception as e:
@@ -1422,14 +1501,51 @@ async def save_verification_report(req: SaveVerificationRequest):
         raise HTTPException(status_code=500, detail="Internal error processing request")
 
 
+@router.get("/verification/{conversation_id}/reports")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
+async def list_verification_reports(conversation_id: str):
+    """Every saved report of a conversation, keyed by the message it verified
+    (forget spec §6.2: reports live once, here, not inside saved conversations).
+    A forgotten conversation has none."""
+    from app.db.neo4j.artifacts import list_verification_reports as _list
+
+    try:
+        return {"reports": await asyncio.to_thread(_list, get_neo4j(), conversation_id)}
+    except Exception as e:
+        logger.error("Failed to list verification reports: %s", e)
+        raise HTTPException(status_code=500, detail="Internal error processing request")
+
+
+class StoreReportsRequest(BaseModel):
+    reports: dict[str, dict[str, Any]] = Field(default_factory=dict, max_length=200)
+
+
+@router.post("/verification/{conversation_id}/reports")  # response-model-allowed: dynamic response (shape varies)
+@require_feature("truth_audit")
+async def store_verification_reports(conversation_id: str, req: StoreReportsRequest):
+    """Take the reports a client kept inside a conversation before reports were
+    stored once (§6.2). Returns the message ids now held; the client drops
+    those copies and keeps the rest to try again. Private Mode stores none."""
+    from app.services.verification_reports import store_reports
+
+    if saves_blocked():
+        return {"stored": []}
+    try:
+        return {"stored": await asyncio.to_thread(store_reports, conversation_id, req.reports)}
+    except Exception as e:
+        logger.error("Failed to store verification reports: %s", e)
+        raise HTTPException(status_code=500, detail="Internal error processing request")
+
+
 @router.get("/verification/{conversation_id}")  # response-model-allowed: dynamic response (shape varies)
 @require_feature("truth_audit")
-async def get_verification_report(conversation_id: str):
-    """Retrieve a saved verification report by conversation ID."""
+async def get_verification_report(conversation_id: str, message_id: str | None = None):
+    """Retrieve a saved verification report: the given message's, or the
+    conversation's latest when no message is named."""
     from app.db.neo4j.artifacts import get_verification_report as _get
 
     try:
-        report = _get(get_neo4j(), conversation_id)
+        report = _get(get_neo4j(), conversation_id, message_id)
         if report is None:
             raise HTTPException(status_code=404, detail="No verification report found")
         return report

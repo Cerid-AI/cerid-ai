@@ -10,8 +10,8 @@ automatic); classifier failure proceeds untagged.
 
 5.2 — ``ai_categorize`` samples head+middle+tail of the document, reports a
 confidence that demotes low-confidence domains to general + ``needs-review``,
-and accepts the new ``trading`` (finance) / ``career`` (personal)
-sub_categories.
+and accepts ``career`` as a personal sub-category. Trading is its own
+domain, so a classifier guess of ``trading`` is not a sub-category.
 """
 
 from __future__ import annotations
@@ -65,22 +65,24 @@ class TestEnrichmentSeam:
     ):
         mock_meta.return_value = {"summary": "s"}
         mock_cat.return_value = {
-            "suggested_domain": "finance", "sub_category": "trading",
-            "tags": ["Earnings", "q3-report"], "keywords": [], "summary": "s",
+            "suggested_domain": "finance", "sub_category": "career",
+            "tags": ["Learning", "q3-report"], "keywords": [], "summary": "s",
         }
         _mock_stores(mock_chroma, mock_neo4j, mock_redis)
         _prep_graph(mock_graph)
 
         from app.services.ingestion import ingest_content
 
-        ingest_content("a quarterly earnings note", domain="general")
+        ingest_content("a quarterly earnings note", domain="personal")
 
         mock_cat.assert_called_once()
         kw = _create_artifact_kwargs(mock_graph)
         assert kw is not None, "create_artifact was not reached"
-        assert kw["sub_category"] == "trading"
-        assert sorted(json.loads(kw["tags_json"])) == ["earnings", "q3-report"]
-        assert kw["domain"] == "general"  # never moved
+        assert kw["sub_category"] == "career"
+        # The shelf is recorded as a tag. A vocabulary tag stays canonical
+        # and a free-form tag is kept.
+        assert sorted(json.loads(kw["tags_json"])) == ["career", "learning", "q3-report"]
+        assert kw["domain"] == "personal"  # never moved
 
     def test_enrich_false_skips_classifier(
         self, mock_cat, mock_meta, mock_chroma, mock_neo4j, mock_redis, mock_graph,
@@ -128,15 +130,15 @@ class TestEnrichmentSeam:
 
         ingest_content(
             "already tagged",
-            domain="general",
-            metadata={"tags_json": json.dumps(["manual-tag"]), "sub_category": "preset"},
+            domain="personal",
+            metadata={"tags_json": json.dumps(["manual-tag"]), "sub_category": "career"},
         )
 
         mock_cat.assert_not_called()
         kw = _create_artifact_kwargs(mock_graph)
         assert kw is not None
-        assert json.loads(kw["tags_json"]) == ["manual-tag"]
-        assert kw["sub_category"] == "preset"
+        assert json.loads(kw["tags_json"]) == ["manual-tag", "career"]
+        assert kw["sub_category"] == "career"
 
     def test_classifier_failure_proceeds_untagged(
         self, mock_cat, mock_meta, mock_chroma, mock_neo4j, mock_redis, mock_graph,

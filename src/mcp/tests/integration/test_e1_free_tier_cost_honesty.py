@@ -70,7 +70,7 @@ async def _route_moderate_high(monkeypatch: pytest.MonkeyPatch):
 def _assert_honest_paid(decision) -> None:
     """The FREE tier dispatches the paid llama-3.3 slug — so it must report
     a paid provider + the real cost, never openrouter_free/0.0 (CR-027)."""
-    assert "llama-3.3" in decision.model.lower(), "still the llama-3.3 slug"
+    assert decision.model == smart_router.FREE_MODELS["llama-3.3"], "the free-tier slot"
     assert decision.provider == "openrouter_paid", (
         f"paid dispatch must report a paid provider, got {decision.provider!r}"
     )

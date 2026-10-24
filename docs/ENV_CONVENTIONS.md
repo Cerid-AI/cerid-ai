@@ -7,7 +7,7 @@
 
 1. **App-level config** uses `CERID_` prefix: `CERID_STORAGE_MODE`, `CERID_SYNC_DIR`
 2. **External service URLs** use the service name: `NEO4J_URI`, `REDIS_URL`, `CHROMA_URL`, `QUENCHFORGE_URL`
-3. **Feature toggles** use `ENABLE_` prefix (no `CERID_`): `ENABLE_HALLUCINATION_CHECK`, `ENABLE_MODEL_ROUTER`
+3. **Feature toggles** use `ENABLE_` prefix (no `CERID_`): `ENABLE_HALLUCINATION_CHECK`, `ENABLE_SELF_RAG`
 4. **Cron schedules** use `SCHEDULE_` prefix: `SCHEDULE_RECTIFY`, `SCHEDULE_SYNC_EXPORT`
 5. **Tuning parameters** are bare descriptive names: `HYBRID_VECTOR_WEIGHT`, `HALLUCINATION_THRESHOLD`
 6. **Secrets** are bare service names: `NEO4J_PASSWORD`, `OPENROUTER_API_KEY`, `CERID_API_KEY`
@@ -95,8 +95,7 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `ENABLE_FEEDBACK_LOOP` | `false` | Conversation feedback loop |
 | `ENABLE_HALLUCINATION_CHECK` | `true` | Hallucination detection |
 | `ENABLE_MEMORY_EXTRACTION` | `true` | Memory extraction from conversations |
-| `ENABLE_MODEL_ROUTER` | `false` | Automatic model routing |
-| `ENABLE_ENCRYPTION` | `false` | Settings-panel display flag only — does not gate encryption (see "Encryption" below) |
+| `SMART_ROUTING_ENABLED` | `true` | Automatic model routing. Not an `ENABLE_` variable: Settings shows it as the `enable_model_router` toggle, which writes this setting (`ENABLE_MODEL_ROUTER` is read from no environment variable) |
 | `ENABLE_EXTERNAL_VERIFICATION` | `true` | Cross-model claim verification |
 | `ENABLE_AUTO_INJECT` | `false` | Auto-inject high-confidence KB results |
 
@@ -220,7 +219,6 @@ flag (`scripts/cerid-sync.py import --conflict-strategy local_wins`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_ENCRYPTION` | `false` | Settings-panel display flag only — does not gate any encryption code path |
 | `CERID_ENCRYPTION_KEY` | *(empty)* | Fernet key; when set, encrypts per-user API keys, the user-state sync files (`CERID_ENCRYPT_SYNC` — settings/preferences/conversations only, not the KB export bundle), and the Chroma chunk `summary` field. An unusable key with encryption requested fails startup. Full KB at-rest protection requires volume/disk encryption — see [`OPERATIONS.md`](OPERATIONS.md#field-level-encryption). |
 
 ### Memory (optional)
@@ -234,6 +232,6 @@ flag (`scripts/cerid-sync.py import --conflict-strategy local_wins`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_MODEL_ROUTER` | `false` | Automatic model routing |
-| `MODEL_AUTO_UPDATE_ENABLED` | `true` | Auto-adopt the latest in-family model per role from the OpenRouter catalog (gates the `model_auto_update` scheduled job) |
+| `SMART_ROUTING_ENABLED` | `true` | Automatic model routing. Not an `ENABLE_` variable: Settings shows it as the `enable_model_router` toggle, which writes this setting (`ENABLE_MODEL_ROUTER` is read from no environment variable) |
+| `MODEL_AUTO_UPDATE_ENABLED` | `false` | Weekly OpenRouter auto-latest. Off unless set. A weight shipping is not a reason to move the corpus. Gates the `model_auto_update` scheduled job. |
 | `COST_SENSITIVITY` | `medium` | Cost sensitivity level: low, medium, high |

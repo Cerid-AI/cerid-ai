@@ -58,6 +58,7 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
+from app.services.ingest_ontology import OntologyError, apply_ontology
 from app.services.storage_metrics import get_storage_report
 from core.context.identity import get_tenant_id
 from core.forget import registry as forget_registry
@@ -100,7 +101,7 @@ PENDING_STATE_FILTER: dict[str, Any] = {"cerid_state": {"$ne": "pending"}}
 #: ``resolve_pending_artifacts``; ``created`` / ``updated`` are coerced
 #: into ``created_at`` / ``updated_at`` Artifact columns explicitly.
 _FRONTMATTER_KEYS_HANDLED_ELSEWHERE: frozenset[str] = frozenset(
-    {"tags", "aliases", "created", "updated"},
+    {"tags", "aliases", "created", "updated", "title"},
 )
 
 
@@ -151,8 +152,8 @@ def _frontmatter_to_artifact_props(
       the caller-supplied ISO-coerced overrides (the frontmatter values
       may be ``datetime`` objects which Neo4j can store but we keep
       timestamps as strings for cross-store consistency).
-    * ``tags`` / ``aliases`` are skipped — they flow through other
-      paths (taxonomy + alias resolution).
+    * ``tags`` / ``aliases`` / ``title`` are skipped — they flow through
+      other paths (taxonomy, alias resolution, :func:`_document_title`).
     * Non-string non-primitive values (nested dicts) are skipped to
       stay within Neo4j's property-type matrix.
     """
@@ -243,6 +244,84 @@ def _coerce_chroma_meta(value: Any) -> Any:
     if isinstance(value, (list, dict, set, tuple)):
         return json.dumps(value if not isinstance(value, set) else sorted(value))
     return value
+
+
+def _with_header(header: str, text: str) -> str:
+    return f"{header}\n\n{text}" if header else text
+
+
+def _parse_frontmatter_json(fm_json: Any) -> dict[str, Any]:
+    if not fm_json:
+        return {}
+    try:
+        parsed = json.loads(fm_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        # The JSON came from our own Markdown parser, so a decode failure is a
+        # real bug (not user input).
+        logger.warning("frontmatter_json decode failed: %s", e)
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+_TITLE_QUOTES = {('"', '"'), ("'", "'"), ("\u201c", "\u201d"), ("\u2018", "\u2019")}
+# A title is a short label; the cap also bounds the cleanup loop on hostile input.
+_TITLE_MAX_CHARS = 300
+_QUOTED_MIN_LEN = 2
+
+
+def _strip_trailing_markup(title: str) -> str:
+    """Drop trailing ``¶`` marks and closing ATX ``#`` runs (only after
+    whitespace, so "C#" stays). A loop, not a nested-quantifier regex."""
+    while True:
+        title = title.rstrip()
+        if title.endswith("¶"):
+            title = title[:-1]
+            continue
+        hashes = len(title) - len(title.rstrip("#"))
+        if hashes and len(title) > hashes and title[-hashes - 1].isspace():
+            title = title[:-hashes]
+            continue
+        return title
+
+
+def _clean_title(raw: str) -> str:
+    title = _strip_trailing_markup(raw.strip()[:_TITLE_MAX_CHARS])
+    if len(title) >= _QUOTED_MIN_LEN and (title[0], title[-1]) in _TITLE_QUOTES:
+        title = _strip_trailing_markup(title[1:-1].strip())
+    return title
+
+
+def _document_title(frontmatter: dict[str, Any], chunk_metadatas: list[dict[str, Any]]) -> str:
+    """A layout document's own title: its frontmatter ``title``, else the first
+    ``#`` heading the Markdown parser found, else ``""``."""
+    candidates: list[Any] = [frontmatter.get("title")]
+    candidates += [m["headers"].get("h1") for m in chunk_metadatas if isinstance(m.get("headers"), dict)]
+    for raw in candidates:
+        if isinstance(raw, (str, int, float)) and not isinstance(raw, bool):
+            title = _clean_title(str(raw))
+            if title:
+                return title
+    return ""
+
+
+def _record_embeddings(records: list[dict[str, Any]]) -> dict[str, list[list[float]]]:
+    """Vectors for records that embed text other than what they store.
+
+    A layout chunk stores its source header (the keyword index, the reranker and
+    the answer read it) but embeds its document's title and body: the header's
+    filename boilerplate pulled short on-topic chunks away from their questions
+    (REFRESH 0.81 -> 0.68 cosine), while a body alone loses a document that never
+    names its subject (the KJ method guide). Returned as upsert kwargs; empty
+    lets Chroma embed the stored text, as for every other chunk.
+    """
+    if not any("embed_text" in r for r in records):
+        return {}
+    from core.utils.embeddings import get_embedding_function
+
+    ef = get_embedding_function()
+    if ef is None:
+        return {}
+    return {"embeddings": [[float(x) for x in v] for v in ef([r.get("embed_text", r["text"]) for r in records])]}
 
 
 def validate_file_path(file_path: str) -> Path:
@@ -485,7 +564,7 @@ def _check_duplicate(content_hashes: Sequence[str], domain: str) -> dict | None:
     return None
 
 
-def _note_source_path(artifact_id: str, source_path: str | None, filename: str | None) -> None:
+def note_source_path(artifact_id: str, source_path: str | None, filename: str | None) -> None:
     """Identical content arriving from a path: an artifact with no path yet
     adopts it, and one whose old path is gone has moved there. A second copy
     of a file that still exists elsewhere changes nothing."""
@@ -726,14 +805,24 @@ def _reingest_artifact(
     sub_cat = metadata.get("sub_category", "") if metadata else ""
     ctx_header = ""
     pre_chunk_metadatas: list[dict[str, Any]] = []
+    embed_bodies: list[str] | None = None
+    doc_title = ""
     _edge_marker_types = {"WikilinkEdge", "EmailThreadEdge"}
     if pre_chunked:
         text_pre_chunked = [
             c for c in pre_chunked
             if c.get("metadata", {}).get("element_type") not in _edge_marker_types
         ]
-        chunks = [c["text"] for c in text_pre_chunked]
+        chunks = [
+            _with_header(make_context_header(filename=filename, domain=domain, sub_category=sub_cat), c["text"])
+            for c in text_pre_chunked
+        ]
         pre_chunk_metadatas = [dict(c.get("metadata", {})) for c in text_pre_chunked]
+        doc_title = _document_title(
+            _parse_frontmatter_json(pre_chunk_metadatas[0].get("frontmatter_json")) if pre_chunk_metadatas else {},
+            pre_chunk_metadatas,
+        )
+        embed_bodies = [_with_header(doc_title, c["text"]) for c in text_pre_chunked]
     else:
         ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
         chunks = chunk_text(
@@ -785,13 +874,14 @@ def _reingest_artifact(
             pc_active = False
     if not chunk_records:
         chunk_id_for = ChunkIdAssigner(artifact_id)
-        for c in chunks:
+        for i, c in enumerate(chunks):
             chunk_records.append({
                 "id": chunk_id_for.assign("child", c),
                 "text": c,
                 "level": "child",
                 "parent_id": "",
                 "retrieve_eligible": True,
+                **({"embed_text": embed_bodies[i]} if embed_bodies else {}),
             })
 
     base_meta = {
@@ -860,6 +950,7 @@ def _reingest_artifact(
             ids=chunk_ids,
             documents=chunk_documents,
             metadatas=chunk_metadatas,
+            **_record_embeddings(chunk_records),
         )
     if content_changed:
         _close_rows(collection, domain, artifact_id, prior_version, closing, current_rows, now)
@@ -955,8 +1046,13 @@ def _reingest_artifact(
         # Neo4j committed — promote the staged chunks pending → committed so the
         # retrieval gate stops hiding them.
         _flip_chunks_committed(collection, chunk_ids)
+        changed_props: dict[str, Any] = {}
         if base_meta.get("source_path") and prev.get("source_path") != base_meta["source_path"]:
-            graph.set_artifact_properties(get_neo4j(), artifact_id, {"source_path": base_meta["source_path"]})
+            changed_props["source_path"] = base_meta["source_path"]
+        if doc_title:
+            changed_props["title"] = doc_title
+        if changed_props:
+            graph.set_artifact_properties(get_neo4j(), artifact_id, changed_props)
         if content_changed:
             _record_document_version(prev, artifact_id, version, content_hash, now)
         # Phase 4.3 — re-ingest hygiene. Only runs once the artifact's
@@ -1168,6 +1264,8 @@ def ingest_content(
     (Track B), never here. Classifier failure logs + proceeds untagged;
     ingest never blocks on it.
     """
+    if not config.corpus_domain(domain):
+        raise OntologyError(f"{domain} is not a corpus domain and cannot be ingested", allowed=[])
     _check_storage_backpressure()
     metadata = {k: v for k, v in (metadata or {}).items() if k != "source_path"}
     if source_path:
@@ -1195,7 +1293,7 @@ def ingest_content(
     # to _reingest_artifact (which owns idempotent old-chunk cleanup).
     existing = None if force_reindex else _check_duplicate((content_hash, *prior_hashes), domain)
     if existing:
-        _note_source_path(existing["id"], (metadata or {}).get("source_path"), (metadata or {}).get("filename"))
+        note_source_path(existing["id"], (metadata or {}).get("source_path"), (metadata or {}).get("filename"))
         fname = (metadata or {}).get("filename", "?")
         logger.info(
             f"Duplicate detected: '{fname}' matches "
@@ -1295,6 +1393,7 @@ def ingest_content(
     # each row / section / function as its own chunk with structural
     # metadata that downstream retrieval depends on.
     pre_chunk_metadatas: list[dict[str, Any]] = []
+    embed_bodies: list[str] | None = None
     # RAG Cycle C2.1 — pre-chunked input may contain zero-text
     # ``WikilinkEdge`` chunks alongside the real text chunks. Those are
     # metadata-only edge markers consumed by the post-create graph commit
@@ -1309,6 +1408,7 @@ def ingest_content(
     # ``tags`` merges into the Neo4j Tag taxonomy; reserved scalars +
     # ``cerid:*`` custom keys land as Artifact node properties.
     frontmatter: dict[str, Any] = {}
+    doc_title = ""
     # Zero-text, metadata-only edge markers. WikilinkEdge is consumed by the
     # graph-commit below; EmailThreadEdge is the email_strategy's analogue.
     # Neither must reach ChromaDB — an empty document pollutes retrieval
@@ -1323,7 +1423,15 @@ def ingest_content(
             c for c in pre_chunked
             if c.get("metadata", {}).get("element_type") == "WikilinkEdge"
         ]
-        chunks = [c["text"] for c in text_pre_chunked]
+        # Layout chunks store the same source header as token chunks: an element
+        # chunk never names its document, so a question naming it ("the KJ
+        # method") missed kj-method.md entirely (audit F125). They embed their
+        # document's title and body (see _record_embeddings).
+        ctx_header = make_context_header(
+            filename=(metadata or {}).get("filename", ""), domain=domain,
+            sub_category=(metadata or {}).get("sub_category", ""),
+        )
+        chunks = [_with_header(ctx_header, c["text"]) for c in text_pre_chunked]
         pre_chunk_metadatas = [
             dict(c.get("metadata", {})) for c in text_pre_chunked
         ]
@@ -1335,17 +1443,9 @@ def ingest_content(
         # "for downstream consumers (search filters etc.)", but no store-side
         # consumer ever read it back, so that copy was dead storage.
         if pre_chunk_metadatas:
-            fm_json = pre_chunk_metadatas[0].pop("frontmatter_json", None)
-            if fm_json:
-                try:
-                    parsed_fm = json.loads(fm_json)
-                    if isinstance(parsed_fm, dict):
-                        frontmatter = parsed_fm
-                except (json.JSONDecodeError, TypeError) as e:
-                    # Frontmatter JSON came from our own parser one
-                    # call frame up, so a decode failure here is a real
-                    # bug (not user input).  Surface at warn level.
-                    logger.warning("frontmatter_json decode failed: %s", e)
+            frontmatter = _parse_frontmatter_json(pre_chunk_metadatas[0].pop("frontmatter_json", None))
+        doc_title = _document_title(frontmatter, pre_chunk_metadatas)
+        embed_bodies = [_with_header(doc_title, c["text"]) for c in text_pre_chunked]
     else:
         fname_for_header = (metadata or {}).get("filename", "")
         sub_cat_for_header = (metadata or {}).get("sub_category", "")
@@ -1414,13 +1514,14 @@ def ingest_content(
             pc_active = False
     if not chunk_records:
         chunk_id_for = ChunkIdAssigner(artifact_id)
-        for c in chunks:
+        for i, c in enumerate(chunks):
             chunk_records.append({
                 "id": chunk_id_for.assign("child", c),
                 "text": c,
                 "level": "child",
                 "parent_id": "",
                 "retrieve_eligible": True,
+                **({"embed_text": embed_bodies[i]} if embed_bodies else {}),
             })
 
     ingested_at = utcnow_iso()
@@ -1518,6 +1619,14 @@ def ingest_content(
     # near_duplicate_of/near_duplicate_similarity stamp on the Chroma chunk
     # metadata itself, so it is not written here.
 
+    # A caller that already named a shelf via metadata.kind (Anneal) keeps
+    # it. Set the sub-category before enrichment so the classifier, which
+    # only knows TAXONOMY, cannot replace lesson/decision/run/conversation
+    # with a guess from another domain.
+    _kind = str(base_meta.get("kind") or "").strip().lower()
+    if _kind and not base_meta.get("sub_category") and _kind in config.sub_categories_for(domain):
+        base_meta["sub_category"] = _kind
+
     # Phase 5.1 — enrichment seam. Fill sub_category + tags via the classifier
     # when the caller supplied neither (memory / connector / digest /
     # text_input paths). Opt-out via enrich=False (triage already classified).
@@ -1551,6 +1660,16 @@ def ingest_content(
                 # domain intentionally NOT adopted (see docstring + note above).
             except Exception as exc:  # noqa: BLE001 — enrichment is best-effort; ingest never blocks on it
                 log_swallowed_error("app.services.ingestion.enrich", exc)
+
+    # The collection was already chosen from ``domain``. A caller metadata
+    # key of the same name cannot relabel the chunk. Sub-category and tags
+    # are then pulled onto the ontology that already exists (TAXONOMY,
+    # TAG_VOCABULARY, OPERATIONAL_ONTOLOGY). Strict rejection of a bad
+    # sub-category happens at the SDK, before this call; a best-effort
+    # classifier here is coerced, not failed. An existing ``content_hash``
+    # (Gmail and Outlook stamp their own message id) is left alone.
+    base_meta["domain"] = domain
+    apply_ontology(domain, base_meta, strict=False)
 
     # Phase O.1 — recovery correlation key: SHA-256(content + source_uri + tenant).
     # source_uri comes from metadata["filename"] if available.
@@ -1656,6 +1775,7 @@ def ingest_content(
         ids=chunk_ids,
         documents=chunk_documents,
         metadatas=chunk_metadatas,
+        **_record_embeddings(chunk_records),
     )
 
     # Phase O.1 — stage: mark all chunks as pending so the retrieval gate
@@ -1754,24 +1874,26 @@ def ingest_content(
         # filter by them.  ``tags`` was already merged into ``tags_json``
         # before create_artifact, so it doesn't need a second pass.
         # ``aliases`` is consumed by resolve_pending_artifacts below; we
-        # also stamp it on the Artifact for traceability.
-        if frontmatter:
-            extra_props = _frontmatter_to_artifact_props(
-                frontmatter,
-                created_override=base_meta.get("created_at"),
-                updated_override=base_meta.get("updated_at"),
-            )
-            if extra_props:
-                try:
-                    graph.set_artifact_properties(
-                        driver=driver,
-                        artifact_id=artifact_id,
-                        properties=extra_props,
-                    )
-                except Exception as e:  # noqa: BLE001 — observability boundary
-                    log_swallowed_error(
-                        "app.services.ingestion.frontmatter_props", e,
-                    )
+        # also stamp it on the Artifact for traceability. ``title`` is the
+        # cleaned document title the layout chunks embed, not the raw value.
+        extra_props = _frontmatter_to_artifact_props(
+            frontmatter,
+            created_override=base_meta.get("created_at"),
+            updated_override=base_meta.get("updated_at"),
+        ) if frontmatter else {}
+        if doc_title:
+            extra_props["title"] = doc_title
+        if extra_props:
+            try:
+                graph.set_artifact_properties(
+                    driver=driver,
+                    artifact_id=artifact_id,
+                    properties=extra_props,
+                )
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "app.services.ingestion.frontmatter_props", e,
+                )
 
         # Tephra Cycle-2 — authored_at coalesce writer.
         # Persist the best available authored timestamp so the Timeline axis
@@ -2293,6 +2415,18 @@ async def _ingest_email_attachments(
     return summaries
 
 
+def accepted_file_domain(domain: str) -> str:
+    """Keep a domain the ontology already knows. Anything else is general.
+
+    Operational corpora (``anneal_*``, ``trading``, ``boardroom_*``) are
+    deliberately absent from ``config.DOMAINS``. Treating "not in DOMAINS"
+    as unknown would file those corpora in the owner's general collection.
+    """
+    if domain and config.known_domain(domain):
+        return domain
+    return config.DEFAULT_DOMAIN
+
+
 async def ingest_file(
     file_path: str,
     domain: str = "",
@@ -2407,8 +2541,7 @@ async def ingest_file(
             sub_category = ai_result["sub_category"]
         if ai_result.get("tags") and not tags:
             tags = json.dumps(ai_result["tags"])
-    if not domain or domain not in config.DOMAINS:
-        domain = config.DEFAULT_DOMAIN
+    domain = accepted_file_domain(domain)
     meta["domain"] = domain
     meta["sub_category"] = sub_category or config.DEFAULT_SUB_CATEGORY
     # Normalize tags: accept JSON array string or comma-separated

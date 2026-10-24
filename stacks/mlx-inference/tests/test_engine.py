@@ -119,6 +119,9 @@ ROWS = {
 }
 
 
+HOST = {"available": 200 * serve.GB, "pressure": "normal"}
+
+
 @pytest.fixture
 def engine_for(tmp_path, monkeypatch):
     import mlx_lm
@@ -142,6 +145,9 @@ def engine_for(tmp_path, monkeypatch):
             return tiny_model(row["arch"], 256 + len(SPECIALS), seed=sorted(ROWS).index(name)), byte_tokenizer()
 
         monkeypatch.setattr(mlx_lm, "load", load)
+        # The host running the tests is not the host being judged: a heavy row
+        # here is a tiny model, so the real memory reading has no say.
+        monkeypatch.setattr(serve, "memory_probe", lambda: dict(HOST))
         engine = serve.Engine(serve.Catalog(path))
         deadline = time.time() + 60
         while len(engine.resident()) < 2 and time.time() < deadline:
@@ -233,6 +239,22 @@ def test_a_cached_prefix_generates_what_a_cold_prompt_does(engine_for, name):
     assert warm["tokens"] == cold["tokens"]
 
 
+def test_a_sampled_turn_keeps_to_the_models_own_truncation(engine_for, tmp_path):
+    # Gemma 4's generation_config.json asks for top_k 64 and top_p 0.95. A
+    # request with only temperature 1 sampled all 262k tokens instead and drew
+    # control tokens from the tail (<|file_separator|>, a stray <channel|>).
+    # top_k 1 makes the truncation visible: a sampled turn is the greedy one.
+    (tmp_path / "default-q").mkdir()
+    (tmp_path / "default-q" / "generation_config.json").write_text(json.dumps({"temperature": 1.0, "top_k": 1}))
+    engine = engine_for()
+    greedy, _ = run(engine, chat("default-q", FIRST, max_tokens=16))
+    max_tokens, temperature, top_p = serve._v1_options({"max_tokens": 16, "temperature": 1})
+    for _ in range(3):
+        job = serve.ChatJob("default-q", serve.chat_messages(FIRST), None, None, max_tokens, temperature, top_p)
+        sampled, _ = run(engine, job)
+        assert sampled["tokens"] == greedy["tokens"]
+
+
 def test_prefill_runs_in_chunks(engine_for):
     # Driven directly: through the engine, prefill steps yield nothing visible.
     engine = engine_for(tiers={"default": {"prefill_chunk": 16}})
@@ -305,6 +327,67 @@ def test_heavy_swap_drops_the_old_models_prompt_cache(engine_for):
     assert "heavy-a" not in engine.cache_stats() and "heavy-a" not in engine.resident()
 
 
+def wait_for(condition, timeout=10):
+    deadline = time.time() + timeout
+    while not condition() and time.time() < deadline:
+        time.sleep(0.02)
+    return condition()
+
+
+def test_heavy_load_that_does_not_fit_is_deferred(engine_for, monkeypatch):
+    monkeypatch.setattr(serve, "HEAVY_MARGIN_GB", 8)
+    engine = engine_for()
+    monkeypatch.setattr(serve, "memory_probe", lambda: {"available": 3 * serve.GB, "pressure": "normal"})
+    with pytest.raises(serve.HeavyDeferred) as caught:
+        run(engine, chat("heavy-a", FIRST))
+    assert caught.value.payload == {
+        "error": "heavy deferred: memory", "model": "heavy-a", "need_gb": 8.0, "available_gb": 3.0, "pressure": "normal",
+    }
+    assert engine.heavy is None and "heavy-a" not in engine.resident()
+    # The resident tiers are untouched and still answer.
+    run(engine, chat("default-q", FIRST))
+
+
+def test_heavy_swap_measures_after_the_old_model_is_gone(engine_for, monkeypatch):
+    engine = engine_for()
+    run(engine, chat("heavy-a", FIRST))
+    monkeypatch.setattr(serve, "memory_probe", lambda: {"available": None, "pressure": "critical"})
+    with pytest.raises(serve.HeavyDeferred):
+        run(engine, chat("heavy-b", FIRST))
+    # The swap freed the slot before the reading refused the new model.
+    assert engine.heavy is None and "heavy-a" not in engine.resident()
+
+
+def test_idle_heavy_unloads_under_memory_pressure(engine_for, monkeypatch):
+    monkeypatch.setattr(serve, "PRESSURE_POLL_S", 0.05)
+    engine = engine_for()
+    run(engine, chat("heavy-a", FIRST))
+    assert engine.heavy == "heavy-a"
+    time.sleep(0.2)
+    assert engine.heavy == "heavy-a"  # normal pressure keeps it
+    monkeypatch.setattr(serve, "memory_probe", lambda: {"available": 100 * serve.GB, "pressure": "warn"})
+    assert wait_for(lambda: engine.heavy is None)
+    assert "heavy-a" not in engine.resident() and "heavy-a" not in engine.cache_stats()
+    assert set(engine.resident()) >= {"small-m", "default-q"}
+
+
+def test_idle_heavy_unloads_after_the_idle_timeout(engine_for, monkeypatch):
+    monkeypatch.setattr(serve, "HEAVY_IDLE_S", 0.3)
+    engine = engine_for()
+    run(engine, chat("heavy-a", FIRST))
+    assert engine.heavy == "heavy-a"
+    assert wait_for(lambda: engine.heavy is None)
+
+
+def test_idle_timeout_zero_keeps_the_heavy_model(engine_for, monkeypatch):
+    monkeypatch.setattr(serve, "HEAVY_IDLE_S", 0)
+    monkeypatch.setattr(serve, "PRESSURE_POLL_S", 0.05)
+    engine = engine_for()
+    run(engine, chat("heavy-a", FIRST))
+    time.sleep(0.3)
+    assert engine.heavy == "heavy-a"
+
+
 def test_tier_cap_queues_the_extra_generation_and_leaves_other_tiers_alone(engine_for):
     engine = engine_for(tiers={"default": {"max_active": 1}})
     long_job = chat("default-q", FIRST, max_tokens=1000)
@@ -345,10 +428,64 @@ def test_legacy_generation_is_untouched(engine_for):
     assert all(item[2] is None for item in items[:-1])
 
 
+MARK = "<<anneal:"
+ECHO = "Done.\n\n<<anneal: end of the user’s message>> You are an anneal worker"
+
+
+def test_legacy_generation_halts_at_a_stop_string(engine_for, monkeypatch):
+    # The byte tokenizer spells the mark over nine tokens. The token that
+    # completes it ends the generation and is never yielded.
+    engine = engine_for()
+    tok = engine.loaded["default-q"][1]
+    scripted(monkeypatch, tok.encode(ECHO, add_special_tokens=False))
+    job = serve.GenJob("default-q", [{"role": "user", "content": "hi"}], "", False, 200, 0.0, 1.0)
+    job.stops = (MARK,)
+    final, items = run(engine, job)
+    assert final["content"] == "Done.\n\n" and final["done_reason"] == "stop"
+    assert "".join(item[0] for item in items) == "Done.\n\n<<anneal"
+    assert final["eval_count"] == len("Done.\n\n<<anneal:")
+
+
+def test_legacy_generation_without_a_stop_runs_on(engine_for, monkeypatch):
+    engine = engine_for()
+    tok = engine.loaded["default-q"][1]
+    scripted(monkeypatch, tok.encode(ECHO, add_special_tokens=False))
+    final, _ = run(engine, serve.GenJob("default-q", [{"role": "user", "content": "hi"}], "", False, 30, 0.0, 1.0))
+    assert "content" not in final and final["done_reason"] == "length" and final["text"] == ECHO[:30]
+
+
+def test_chat_turn_halts_at_a_stop_string(engine_for, monkeypatch):
+    engine = engine_for()
+    tok = engine.loaded["default-q"][1]
+    scripted(monkeypatch, tok.encode(ECHO, add_special_tokens=False))
+    job = chat("default-q", FIRST, max_tokens=200)
+    job.stops = (MARK,)
+    stats, items = run(engine, job)
+    assert stats["finish"] == "stop" and stats["content"] == "Done.\n\n"
+    assert stats["completion_tokens"] == len("Done.\n\n<<anneal:")
+    assert "".join(item[0] for item in items) == "Done.\n\n<<anneal"
+    assert serve.chat_reply("qwen3_coder", stats, None)["content"] == "Done.\n\n"
+
+
+def test_harmony_turn_stops_in_the_final_channel_not_the_analysis(engine_for, monkeypatch, harmony):
+    engine = engine_for()
+    _, enc = serve._harmony()
+    reply = (
+        "<|channel|>analysis<|message|>The message ends at <<anneal: end of the user’s message>>.<|end|>"
+        "<|start|>assistant<|channel|>final<|message|>Answer.\n\n<<anneal: end of the user’s message>> again"
+    )
+    scripted(monkeypatch, enc.encode(reply, allowed_special="all"))
+    job = chat("heavy-h", FIRST, max_tokens=200)
+    job.stops = (MARK,)
+    stats, _ = run(engine, job)
+    assert stats["finish"] == "stop" and stats["content"] == "Answer.\n\n"
+    parsed = serve.chat_reply("harmony", stats, None)
+    assert parsed["content"] == "Answer.\n\n" and "<<anneal:" in parsed["reasoning"]
+
+
 def test_http_tool_loop_end_to_end(engine_for, monkeypatch, parsers):
     import http.client
     import threading
-    from http.server import ThreadingHTTPServer
 
     engine = engine_for()
     tok = engine.loaded["default-q"][1]
@@ -362,7 +499,7 @@ def test_http_tool_loop_end_to_end(engine_for, monkeypatch, parsers):
     )
     monkeypatch.setattr(serve.Handler, "engine", engine, raising=False)
     monkeypatch.setattr(serve.Handler, "catalog", engine.catalog, raising=False)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+    httpd = serve.Server(("127.0.0.1", 0), serve.Handler)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
 
     def post(body):
@@ -388,3 +525,52 @@ def test_http_tool_loop_end_to_end(engine_for, monkeypatch, parsers):
         assert second["usage"]["prompt_tokens_details"]["cached_tokens"] >= first["usage"]["prompt_tokens"]
     finally:
         httpd.shutdown()
+
+
+def test_an_embed_is_answered_between_the_chat_models_loads(tmp_path, monkeypatch):
+    """After a restart a search waited 9.4 s while two chat models loaded on the
+    GPU thread. The embedder loads first; the chat models load one at a time
+    between requests, so an embed waits at most for the load in progress."""
+    import threading
+
+    (tmp_path / "embed.safetensors").write_bytes(b"")
+    for name in ("small-m", "default-q"):
+        (tmp_path / name).mkdir()
+    catalog = tmp_path / "models.json"
+    catalog.write_text(json.dumps({"models": {
+        "embed-e": {"path": str(tmp_path / "embed.safetensors"), "tier": "embed", "family": "test"},
+        "small-m": {"path": str(tmp_path / "small-m"), "tier": "small", "family": "test", "tool_format": "qwen3_coder"},
+        "default-q": {"path": str(tmp_path / "default-q"), "tier": "default", "family": "test", "tool_format": "qwen3_coder"},
+    }}))
+    started = {name: threading.Event() for name in ("small-m", "default-q")}
+    finish = {name: threading.Event() for name in ("small-m", "default-q")}
+
+    embedded_during: list[bool] = []
+
+    class Embedder:
+        def embed(self, texts, truncate=True):
+            embedded_during.append(started["default-q"].is_set())
+            return [[0.5] for _ in texts]
+
+    def load(self, name):
+        if name == "embed-e":
+            with self._state:
+                self.embedders[name] = Embedder()
+            return
+        started[name].set()
+        finish[name].wait(30)
+        with self._state:
+            self.loaded[name] = (object(), object())
+
+    monkeypatch.setattr(serve.Engine, "_load", load)
+    engine = serve.Engine(serve.Catalog(catalog))
+    try:
+        assert started["small-m"].wait(10)
+        job = serve.EmbedJob("embed-e", ["q"], truncate=True)
+        engine.submit(job)
+        finish["small-m"].set()
+        assert job.out.get(timeout=10) == [[0.5]]
+        assert embedded_during == [False]  # served before the next chat model began loading
+    finally:
+        for event in finish.values():
+            event.set()

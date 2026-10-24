@@ -27,9 +27,24 @@ class RetrievalDecision:
 
 
 # Patterns that indicate no KB retrieval needed
+# A greeting skips only when the whole message is greeting and filler: anchored
+# at both ends, so "hello world program in rust" still retrieves.
+_GREETING = r"(?:hi|hello|hey|thanks|thank you|bye|goodbye|ok|okay|good\s+(?:morning|afternoon|evening|night))"
+_GREETING_FILLER = (
+    r"(?:there|all|everyone|again|guys|folks|team|you|so much|very much|a lot"
+    r"|for (?:that|this|everything|the help|your help))"
+)
+
 _SKIP_PATTERNS = [
-    re.compile(r"^(hi|hello|hey|thanks|thank you|bye|goodbye|ok|okay)\b", re.IGNORECASE),
-    re.compile(r"^(can you|could you|please)\s+(rephrase|rewrite|summarize|explain)\s+(that|this|it|the above)", re.IGNORECASE),
+    re.compile(
+        rf"^{_GREETING}(?:[\s,]+(?:{_GREETING}|{_GREETING_FILLER}))*[\s.!?,]*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(can you|could you|please)\s+(rephrase|rewrite|summarize|explain)\s+(that|this|it|the above)"
+        r"(\s+(again|for me|please|more simply|in simpler terms|differently|more briefly))?\s*[.!?]*$",
+        re.IGNORECASE,
+    ),
     re.compile(r"^(what|who) are you\b", re.IGNORECASE),
     re.compile(r"^(yes|no|sure|nope|yep|nah)\s*[.!?]*$", re.IGNORECASE),
     re.compile(r"^(good|great|nice|cool|awesome|perfect|excellent)\s*[.!?]*$", re.IGNORECASE),
@@ -68,6 +83,11 @@ _TECHNICAL_TERMS = {
     "tensor", "thread", "token", "topology", "transformer",
     "vector", "virtualization", "zero-copy",
 }
+# Whole words only (plural allowed): a substring test matched "orm" in "format".
+_TECHNICAL_TERM_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(t) for t in sorted(_TECHNICAL_TERMS)) + r")(?:s|es)?\b",
+    re.IGNORECASE,
+)
 
 
 # Patterns that indicate complex retrieval needed
@@ -113,22 +133,18 @@ def classify_retrieval_need(query: str) -> RetrievalDecision:
     for pattern in _LIGHT_PATTERNS:
         if pattern.search(q):
             # Technical term upgrade: "What is the algorithm" → full
-            q_lower = q.lower()
-            for term in _TECHNICAL_TERMS:
-                if term in q_lower:
-                    return RetrievalDecision(
-                        action="full",
-                        top_k=10,
-                        reason="technical_term_upgrade",
-                    )
+            if _TECHNICAL_TERM_RE.search(q):
+                return RetrievalDecision(
+                    action="full",
+                    top_k=10,
+                    reason="technical_term_upgrade",
+                )
             return RetrievalDecision(
                 action="light",
                 top_k=ADAPTIVE_RETRIEVAL_LIGHT_TOP_K,
                 reason="simple_lookup",
             )
 
-    # Default: full retrieval for anything non-trivial
-    if word_count >= 3 or "?" in q:
-        return RetrievalDecision(action="full", top_k=10, reason="default_full")
-
-    return RetrievalDecision(action="light", top_k=ADAPTIVE_RETRIEVAL_LIGHT_TOP_K, reason="default_light")
+    # Default: full retrieval. Every query reaching here has 3+ words or a "?";
+    # shorter ones returned as short_keyword above.
+    return RetrievalDecision(action="full", top_k=10, reason="default_full")

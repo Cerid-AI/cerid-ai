@@ -1,5 +1,7 @@
 # Apple Photos connector
 
+> Connector notes. The product tier around them is historical. Photo bytes stay out of the corpus. No photos domain was added.
+
 ## What this connector does
 
 The Apple Photos connector reads **metadata** from your local Photos library

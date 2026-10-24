@@ -1,14 +1,16 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: FSL-1.1-ALv2
 
-"""LLM-summarised community descriptions for the GraphRAG global mode.
+"""LLM-summarised community descriptions.
 
 Workstream E Phase 4b.2. For each ``(:Community)`` produced by
 :mod:`app.db.neo4j.community_detection`, fetch the top-K entities by
 degree centrality, fetch one representative chunk per entity, and
 ask the LLM to summarise the community's shared theme. The summary
-is cached on ``Community.summary`` so the global retrieval mode
-(Phase 4b.3) can return summaries directly without re-LLM-ing.
+is cached on ``Community.summary``, where the graph views (Atlas labels,
+concept pages, the decomposition tree) read it. Retrieval does not: the
+global retrieval mode that injected summaries as results was retired
+2026-10-12 (audit F129).
 
 Layer note: lives in ``app/db/neo4j/`` — needs the chroma client
 to fetch representative chunks. Pure orchestration; no FastAPI.
@@ -373,7 +375,7 @@ def list_community_summaries(
     level: int = 0,
     only_with_summary: bool = True,
 ) -> list[dict[str, Any]]:
-    """Read-back helper used by the global retrieval mode + tests."""
+    """Read back the stored summaries for one level, largest community first."""
     cypher = "MATCH (c:Community {level: $level})"
     if only_with_summary:
         cypher += " WHERE c.summary IS NOT NULL"

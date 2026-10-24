@@ -60,11 +60,11 @@ class TestGetModel:
         assert result.startswith("openrouter/")
 
     def test_returns_specific_model(self):
-        assert get_model("chat", "advanced") == "openrouter/anthropic/claude-sonnet-4.6"
+        assert get_model("chat", "advanced") == "openrouter/anthropic/claude-sonnet-5.5"
 
     def test_fallback_for_nonexistent_role(self):
         result = get_model("nonexistent")
-        assert result == "openrouter/openai/gpt-4o-mini"
+        assert result == "openrouter/openai/gpt-6-luna"
 
     def test_fallback_for_nonexistent_key(self):
         """Unknown key within a valid role falls back to that role's default."""
@@ -84,9 +84,9 @@ class TestGetModel:
 
 class TestGetPricing:
     def test_fallback_pricing_known_model(self):
-        inp, out = get_pricing("openrouter/openai/gpt-4o-mini")
-        assert inp == 0.15
-        assert out == 0.60
+        inp, out = get_pricing("openrouter/openai/gpt-6-luna")
+        assert inp == 0.10
+        assert out == 0.50
 
     def test_unknown_model_returns_zero(self):
         inp, out = get_pricing("openrouter/unknown/model-xyz")
@@ -119,16 +119,16 @@ class TestValidateModels:
     @pytest.mark.asyncio
     async def test_identifies_valid_models(self):
         """validate_models marks models as valid when found in catalog."""
-        # Build a mock catalog with just gpt-4o-mini
+        # Build a mock catalog holding some of the active models
         mock_catalog = {
             "data": [
                 {
-                    "id": "openai/gpt-4o-mini",
+                    "id": "openai/gpt-6-luna",
                     "pricing": {"prompt": "0.00000015", "completion": "0.0000006"},
                 },
                 {
-                    "id": "anthropic/claude-sonnet-4.6",
-                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "id": "anthropic/claude-sonnet-5.5",
+                    "pricing": {"prompt": "0.000002", "completion": "0.00001"},
                 },
                 {
                     "id": "google/gemini-2.5-flash",
@@ -184,9 +184,9 @@ class TestValidateModels:
 
         mock_catalog = {
             "data": [
-                # Deliberately different from the fallback (0.15, 0.60) so a cache
+                # Deliberately different from the fallback (0.10, 0.50) so a cache
                 # hit is distinguishable from the fallback path.
-                {"id": "openai/gpt-4o-mini", "pricing": {"prompt": "0.0000005", "completion": "0.000002"}},
+                {"id": "openai/gpt-6-luna", "pricing": {"prompt": "0.0000005", "completion": "0.000002"}},
             ],
         }
         mock_response = MagicMock()
@@ -194,7 +194,7 @@ class TestValidateModels:
         mock_response.json.return_value = mock_catalog
         mock_response.raise_for_status = MagicMock()
 
-        mr._pricing_cache.pop("openrouter/openai/gpt-4o-mini", None)
+        mr._pricing_cache.pop("openrouter/openai/gpt-6-luna", None)
         with patch("utils.model_registry.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_response
@@ -204,5 +204,5 @@ class TestValidateModels:
 
             await mr.validate_models()
 
-        # Live per-1M price from the catalog, not the (0.15, 0.60) fallback.
-        assert mr.get_pricing("openrouter/openai/gpt-4o-mini") == (0.5, 2.0)
+        # Live per-1M price from the catalog, not the (0.10, 0.50) fallback.
+        assert mr.get_pricing("openrouter/openai/gpt-6-luna") == (0.5, 2.0)

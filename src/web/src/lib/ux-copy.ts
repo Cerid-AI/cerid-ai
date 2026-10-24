@@ -24,6 +24,27 @@ export const UX_COPY = {
     /** Short form label for the "verified" band — used in badges. */
     verified: (n: number) => `Verified by ${n} source${n === 1 ? "" : "s"}`,
 
+    /** Badge label for a claim verified against a document the answer was drawn from. */
+    kbVerified: (n: number) => `KB verified · ${n} source${n === 1 ? "" : "s"}`,
+
+    /** Badge label for a claim verified against a source the answer was not drawn from. */
+    independentlyVerified: (n: number) =>
+      `Independently verified · ${n} source${n === 1 ? "" : "s"}`,
+
+    kbVerifiedShort: "KB verified",
+    independentlyVerifiedShort: "independently verified",
+
+    /** What "KB verified" means, for tooltips. */
+    kbVerifiedExplained:
+      "Supported by a document this answer was drawn from: the answer is faithful to your knowledge base. No separate source was checked.",
+
+    /** What "independently verified" means, for tooltips. */
+    independentlyVerifiedExplained:
+      "Supported by a source this answer was not drawn from: another document in your knowledge base, or the web.",
+
+    /** Split of a verified count, shown after it in the report summary. */
+    verifiedSplit: (kb: number, independent: number) => `${kb} KB, ${independent} independent`,
+
     /** Badge label when a second model agreed and no source backs the claim. */
     agreed: "Agreed",
 
@@ -67,6 +88,12 @@ export const UX_COPY = {
     /** aria-label for a verified badge: "Claim verified by 2 sources" */
     ariaVerified: (n: number) =>
       `Claim verified by ${n} source${n === 1 ? "" : "s"}`,
+
+    ariaKbVerified: (n: number) =>
+      `Claim verified by ${n} source${n === 1 ? "" : "s"} the answer was drawn from`,
+
+    ariaIndependentlyVerified: (n: number) =>
+      `Claim independently verified by ${n} source${n === 1 ? "" : "s"}`,
 
     /** aria-label for an agreed badge */
     ariaAgreed: "A second model agrees with this claim; no source",

@@ -133,6 +133,7 @@ vi.mock("@/hooks/use-chat-send", () => ({
 vi.mock("@/hooks/use-kb-context", () => ({
   useKBContext: () => ({
     results: [],
+    activeDomains: new Set(),
     injectedContext: [],
     clearInjected: vi.fn(),
     injectResult: vi.fn(),
@@ -140,7 +141,7 @@ vi.mock("@/hooks/use-kb-context", () => ({
   }),
 }))
 vi.mock("@/hooks/use-orchestrated-query", () => ({
-  useOrchestratedQuery: () => ({ results: [], degradedReason: null, sourceBreakdown: null }),
+  useOrchestratedQuery: () => ({ results: [], activeDomains: new Set(), degradedReason: null, sourceBreakdown: null }),
 }))
 vi.mock("@/hooks/use-context-sources", () => ({
   useContextSources: () => ({ sources: [], toggleSource: vi.fn() }),

@@ -57,7 +57,15 @@ def wire_query_surfaces() -> bool:
             page = await get_entity_page(driver, slug)
             if page is None or not page.summary:
                 return None
-            return {"content": page.summary, "title": page.name, "slug": page.slug}
+            # The domains the page was compiled from, so a scoped query can
+            # refuse a page built from rows it may not read.
+            domains = sorted(page.domain_mix) if page.domain_mix else (
+                [page.primary_domain] if page.primary_domain else []
+            )
+            return {
+                "content": page.summary, "title": page.name, "slug": page.slug,
+                "domains": domains, "primary_domain": page.primary_domain,
+            }
 
         set_wiki_page_fetcher(_fetch_wiki_page)
         return True

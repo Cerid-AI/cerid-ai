@@ -28,11 +28,10 @@ PROVIDER_REGISTRY: dict[str, dict] = {
         "test_endpoint": "/models",
         "requires_api_key": True,
         "models": [
-            "openrouter/openai/gpt-4o-mini",
-            "openrouter/anthropic/claude-sonnet-4.6",
-            "openrouter/google/gemini-3.1-flash-lite",
-            "openrouter/x-ai/grok-4.3",
-            "openrouter/x-ai/grok-4.20",
+            "openrouter/openai/gpt-6-luna",
+            "openrouter/anthropic/claude-sonnet-5.5",
+            "openrouter/google/gemini-3.5-flash-lite",
+            "openrouter/x-ai/grok-4.7",
         ],
     },
     "openai": {

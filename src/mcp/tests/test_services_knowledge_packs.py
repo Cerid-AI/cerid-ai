@@ -10,9 +10,12 @@ no chromadb, no Neo4j.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
+import os
+import shutil
 import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -853,3 +856,95 @@ def test_enqueue_install_job_persists_payload():
     # The enqueued job must round-trip through the introspection helper —
     # the registry endpoint's "installing" flag depends on this.
     assert active_install_jobs(redis_client=r) == {"pack-x": job_id}
+
+
+# ── Staging lifecycle ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_install_pack_removes_a_stale_staging_dir_before_downloading(tmp_path):
+    """A staging dir left by an earlier run is gone before the download writes.
+
+    On macOS the archive is a bind mount and writing over the stale tarball
+    there failed with EDEADLK, so the download stub refuses to overwrite."""
+    archive_path, _, manifest = _build_pack_archive(tmp_path)
+    staging_root = tmp_path / "staging"
+    stale = staging_root / f"{manifest.id}-{manifest.version}"
+    (stale / "extracted" / "content").mkdir(parents=True)
+    (stale / "pack.tar.gz").write_bytes(b"stale tarball")
+    (stale / "extracted" / "content" / "gone.md").write_text("from the last run")
+
+    async def _download(url: str, dest: Path) -> None:
+        if dest.exists():
+            raise OSError(errno.EDEADLK, "Resource deadlock avoided", str(dest))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(archive_path.read_bytes())
+
+    ingest, calls = _make_ingest_stub()
+    record = await install_pack(
+        manifest, state_path=tmp_path / "state.json", staging_root=staging_root,
+        download=_download, ingest=ingest,
+    )
+
+    assert len(record.artifact_ids) == 2
+    # Only this run's files were ingested, never the stale tree's.
+    assert sorted(Path(c["file_path"]).name for c in calls) == ["deep.md", "intro.md"]
+    assert not stale.exists()
+
+
+@pytest.mark.asyncio
+async def test_install_pack_removes_staging_after_a_failed_install(tmp_path):
+    archive_path, _, manifest = _build_pack_archive(tmp_path)
+    bad = PackManifest.from_dict({**manifest.to_dict(), "sha256": "0" * 64})
+    staging_root = tmp_path / "staging"
+
+    with pytest.raises(PackError):
+        await install_pack(
+            bad, state_path=tmp_path / "state.json", staging_root=staging_root,
+            download=_make_download_stub(archive_path), ingest=_make_ingest_stub()[0],
+        )
+
+    assert not (staging_root / f"{manifest.id}-{manifest.version}").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_staging_dir_that_cannot_be_removed_is_reported_not_ignored(tmp_path):
+    """A removal that fails is logged, and the next install names the stale
+    directory instead of failing later on the tarball inside it."""
+    archive_path, _, manifest = _build_pack_archive(tmp_path)
+    staging_root = tmp_path / "staging"
+    content_dir = staging_root / f"{manifest.id}-{manifest.version}" / "extracted" / "content"
+    ingest, _ = _make_ingest_stub()
+    locked: list[Path] = []
+    real_rmtree = shutil.rmtree
+
+    def _rmtree_refusing_locked(path, *args, onexc=None, **kwargs):
+        # A read-only directory is not a lock when the suite runs as root (the
+        # CI container does), so the refusal is made here instead: rmtree
+        # reports the locked directory through onexc and leaves the tree alone,
+        # which is what it does when an unlink is denied.
+        if locked and Path(path) in locked[0].parents:
+            if onexc is not None:
+                onexc(os.rmdir, str(locked[0]), PermissionError(errno.EACCES, "Permission denied"))
+            return
+        real_rmtree(path, *args, onexc=onexc, **kwargs)
+
+    async def _ingest_then_lock(file_path, domain, sub_category, tags, provenance):
+        locked[:] = [content_dir]
+        return await ingest(file_path, domain, sub_category, tags, provenance)
+
+    with patch("app.services.knowledge_packs.shutil.rmtree", _rmtree_refusing_locked), \
+            patch("app.services.knowledge_packs.log_swallowed_error") as logged:
+        await install_pack(
+            manifest, state_path=tmp_path / "state.json", staging_root=staging_root,
+            download=_make_download_stub(archive_path), ingest=_ingest_then_lock,
+        )
+        assert content_dir.exists()
+        assert "app.services.knowledge_packs.cleanup_staging" in [
+            c.args[0] for c in logged.call_args_list
+        ]
+
+        with pytest.raises(PackError, match="could not be removed"):
+            await install_pack(
+                manifest, state_path=tmp_path / "other-state.json", staging_root=staging_root,
+                download=_make_download_stub(archive_path), ingest=ingest,
+            )

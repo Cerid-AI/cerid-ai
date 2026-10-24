@@ -128,7 +128,7 @@ class FakeChromaBackend:
 class FakeChromaCollection:
     """In-memory double for a chromadb 1.5.9 ``Collection`` as the paging jobs
     use it (``get`` by ``ids``/``where``/``limit``/``offset``/``include``,
-    ``update``, ``upsert``, ``delete`` by ids).
+    ``update``, ``upsert``, ``delete`` by ids), plus a brute-force ``query``.
 
     Faithful behaviours:
 
@@ -204,6 +204,32 @@ class FakeChromaCollection:
             out["metadatas"] = [dict(self._meta[j]) for j in rows]
         if "embeddings" in include:
             out["embeddings"] = [np.array(self._embs[j]) for j in rows]
+        return out
+
+    def query(
+        self,
+        *,
+        query_texts: list[str] | None = None,
+        query_embeddings: list[list[float]] | None = None,
+        n_results: int = 10,
+        where: dict[str, Any] | None = None,
+        include: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Nearest rows by L2 distance among those ``where`` admits, one query."""
+        include = list(include) if include is not None else ["documents", "metadatas", "distances"]
+        if query_embeddings is None:
+            query_embeddings = self._embed(list(query_texts or []))
+        q = np.asarray(query_embeddings[0], dtype=float)
+        rows = [j for j in range(len(self._ids)) if not where or _where_matches(self._meta[j], where)]
+        dist = {j: float(np.linalg.norm(self._embs[j] - q)) for j in rows}
+        rows = sorted(rows, key=dist.__getitem__)[:n_results]
+        out: dict[str, Any] = {"ids": [[self._ids[j] for j in rows]]}
+        if "documents" in include:
+            out["documents"] = [[self._docs[j] for j in rows]]
+        if "metadatas" in include:
+            out["metadatas"] = [[dict(self._meta[j]) for j in rows]]
+        if "distances" in include:
+            out["distances"] = [[dist[j] for j in rows]]
         return out
 
     def update(

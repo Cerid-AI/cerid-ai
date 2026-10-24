@@ -95,7 +95,20 @@ _QUERY_PREFIX_MAP: dict[str, str] = {
 _PINNED_REVISIONS: dict[str, str] = {
     "Snowflake/snowflake-arctic-embed-m-v1.5":
         "e58a8f756156a1293d763f17e3aae643474e9b8a",  # pragma: allowlist secret
+    "nomic-ai/nomic-embed-text-v1.5":
+        "e9b6763023c676ca8431644204f50c2b100d9aab",  # pragma: allowlist secret
 }
+
+# Where the in-process leg must pool and truncate differently from the default
+# (mean pooling, 512 tokens) to land on the vectors an index already holds.
+# nomic-embed-text-v1.5 indexes are built by the local model server, which pools
+# on CLS and reads up to 2048 tokens (stacks/mlx-inference/nomic_bert.py, after
+# quenchforge's ``--pooling cls``). Against those vectors the fp32 ONNX export
+# scores 0.999 cosine with CLS pooling and 0.80-0.94 with mean pooling; the
+# int8 export scores 0.91-0.94 either way, so EMBEDDING_ONNX_FILENAME must stay
+# on onnx/model.onnx for it to stand in.
+_CLS_POOLED: frozenset[str] = frozenset({"nomic-ai/nomic-embed-text-v1.5"})
+_MAX_TOKENS: dict[str, int] = {"nomic-ai/nomic-embed-text-v1.5": 2048}
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +138,8 @@ class OnnxEmbeddingFunction:
         self._tokenizer: Tokenizer | None = None
         self._lock = threading.Lock()
         self._query_prefix = _QUERY_PREFIX_MAP.get(model_id, "")
+        self._cls_pooled = model_id in _CLS_POOLED
+        self._max_tokens = _MAX_TOKENS.get(model_id, 512)
 
     # -- lazy loading -------------------------------------------------------
 
@@ -162,7 +177,7 @@ class OnnxEmbeddingFunction:
                 providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
             )
             self._tokenizer = Tokenizer.from_file(tok_path)
-            self._tokenizer.enable_truncation(max_length=512)
+            self._tokenizer.enable_truncation(max_length=self._max_tokens)
             self._tokenizer.enable_padding()
 
             logger.info("Embedding model ready: %s (%d dims)", self._model_id, self._output_dim())
@@ -335,12 +350,15 @@ class OnnxEmbeddingFunction:
         outputs = session.run(None, feeds)
         hidden = outputs[0]  # (batch, seq_len, hidden_dim)
 
-        # Mean pooling over sequence length, weighted by attention mask
         if hidden.ndim == 3:
-            mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-            summed = (hidden * mask_expanded).sum(axis=1)
-            counts = mask_expanded.sum(axis=1).clip(min=1e-9)
-            embeddings = summed / counts
+            if self._cls_pooled:
+                embeddings = hidden[:, 0]
+            else:
+                # Mean pooling over sequence length, weighted by attention mask
+                mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+                summed = (hidden * mask_expanded).sum(axis=1)
+                counts = mask_expanded.sum(axis=1).clip(min=1e-9)
+                embeddings = summed / counts
         else:
             # Some models output (batch, hidden_dim) directly
             embeddings = hidden

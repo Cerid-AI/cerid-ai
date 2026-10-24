@@ -5,11 +5,14 @@ verification reports, the hall: cache and the feedback route all skip it."""
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX
 
 FORGOTTEN = "c-forgotten"
 LIVE = "c-live"
@@ -24,13 +27,22 @@ async def _noop_progress(_p):
     return None
 
 
-def test_feedback_ingest_job_skips_without_ingesting():
+def test_feedback_ingest_job_skips_without_ingesting(monkeypatch):
+    import fakeredis
+
+    from app.db.redis import turn_text
     from app.processor.jobs.feedback_ingest import FeedbackIngestJob
-    job = FeedbackIngestJob(user_message="q", assistant_response="a", model="m", conversation_id=FORGOTTEN)
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("app.deps.get_redis", lambda: redis)
+    key = turn_text.new_key(FORGOTTEN)
+    turn_text.put(redis, key, {"user_message": "q", "assistant_response": "a"})
+    job = FeedbackIngestJob(text_key=key, model="m", conversation_id=FORGOTTEN)
     with patch("app.services.ingestion.ingest_content") as ingest:
         result = asyncio.run(job.run(_noop_progress))
     ingest.assert_not_called()
     assert result.metadata == {"conversation_id": FORGOTTEN, "skipped": "forgotten"}
+    assert not redis.exists(key)  # and the turn it held goes with it
 
 
 def test_session_summary_job_skips(monkeypatch):
@@ -143,7 +155,7 @@ async def test_check_hallucinations_writes_hall_only_for_a_live_conversation(mon
         response_text=_RESPONSE, conversation_id=cid,
         chroma_client=MagicMock(), neo4j_driver=MagicMock(), redis_client=redis,
     )
-    hall = f"{streaming.REDIS_HALLUCINATION_PREFIX}{cid}"
+    hall = f"{REDIS_HALLUCINATION_PREFIX}{cid}"
     assert (hall in redis.setex_keys) is expect_write
 
 
@@ -157,8 +169,26 @@ async def test_verify_stream_writes_hall_only_for_a_live_conversation(monkeypatc
         chroma_client=MagicMock(), neo4j_driver=MagicMock(), redis_client=redis,
     ):
         pass
-    hall = f"{streaming.REDIS_HALLUCINATION_PREFIX}{cid}"
+    hall = f"{REDIS_HALLUCINATION_PREFIX}{cid}"
     assert (hall in redis.setex_keys) is expect_write
+
+
+async def test_a_message_s_report_is_kept_under_that_message(monkeypatch):
+    """Spec §6.2: a second message's verification no longer overwrites the first's."""
+    from core.agents.hallucination import streaming
+    _patch_pipeline(monkeypatch)
+    redis = _CaptureRedis()
+    saved: list[dict] = []
+    async for _event in streaming.verify_response_streaming(
+        response_text=_RESPONSE, conversation_id=LIVE,
+        chroma_client=MagicMock(), neo4j_driver=MagicMock(), redis_client=redis,
+        save_report_fn=lambda **kwargs: saved.append(kwargs), message_id="m-2",
+    ):
+        pass
+    from core.agents.hallucination.persistence import report_key
+    assert report_key(LIVE, "m-2") in redis.setex_keys
+    assert f"{REDIS_HALLUCINATION_PREFIX}{LIVE}" not in redis.setex_keys
+    assert saved and saved[0]["message_id"] == "m-2"
 
 
 async def test_verify_stream_reports_not_persisted_when_the_save_is_refused(monkeypatch):
@@ -255,7 +285,8 @@ async def test_hallucination_endpoint_does_not_claim_a_refused_auto_persist(monk
     monkeypatch.setattr("core.agents.hallucination.check_hallucinations", _check)
     from app.routers.agents import HallucinationCheckRequest, hallucination_check_endpoint
     result = await hallucination_check_endpoint(
-        HallucinationCheckRequest(response_text=_RESPONSE, conversation_id=FORGOTTEN)
+        HallucinationCheckRequest(response_text=_RESPONSE, conversation_id=FORGOTTEN),
+        SimpleNamespace(headers={}),
     )
     assert result["persisted"] is False
 
@@ -264,9 +295,10 @@ async def test_hallucination_endpoint_does_not_claim_a_refused_auto_persist(monk
 @pytest.mark.parametrize("cid, promoted", [(FORGOTTEN, 0), (LIVE, 1)])
 def test_verified_fact_promotion_creates_memories_only_for_a_live_conversation(cid, promoted):
     from core.agents.verified_memory import promote_verified_facts
+    session = MagicMock()
+    session.run.return_value.single.return_value = {"n": 0}  # no Memory holds this claim yet
     neo4j = MagicMock()
-    neo4j.session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-    neo4j.session.return_value.__exit__ = MagicMock(return_value=False)
+    neo4j.session.return_value.__enter__.return_value = session
     create = MagicMock(return_value="mem-1")
     claim = {
         "claim": "The Eiffel Tower is in Paris", "status": "verified", "similarity": 0.94,
@@ -362,7 +394,7 @@ async def test_claim_feedback_never_recreates_a_report_purged_after_it_was_read(
     monkeypatch.setattr("app.routers.agents.get_redis", lambda: redis)
     monkeypatch.setattr(
         "core.agents.hallucination.get_hallucination_report",
-        lambda r, cid: {"claims": [{"text": "secret claim"}], "model": "m"},
+        lambda r, cid, mid="": {"claims": [{"text": "secret claim"}], "model": "m"},
     )
     monkeypatch.setattr("core.utils.cache.log_claim_feedback", lambda *a, **k: None)
     from app.routers.agents import ClaimFeedbackRequest, claim_feedback_endpoint

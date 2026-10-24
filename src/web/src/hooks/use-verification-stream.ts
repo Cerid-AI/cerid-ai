@@ -103,6 +103,8 @@ export function useVerificationStream(
   expertMode?: boolean,
   /** KB artifact IDs injected into the LLM prompt (anti-circularity). */
   sourceArtifactIds?: string[],
+  /** The assistant message being verified; its report is kept under it. */
+  messageId?: string | null,
 ): UseVerificationStreamReturn {
   const [claims, setClaims] = useState<StreamingClaim[]>([])
   const [phase, setPhase] = useState<VerificationPhase>("idle")
@@ -123,6 +125,8 @@ export function useVerificationStream(
   useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
   const expertModeRef = useRef(expertMode)
   useEffect(() => { expertModeRef.current = expertMode }, [expertMode])
+  const messageIdRef = useRef(messageId)
+  useEffect(() => { messageIdRef.current = messageId }, [messageId])
   const sourceArtifactIdsRef = useRef(sourceArtifactIds)
   useEffect(() => { sourceArtifactIdsRef.current = sourceArtifactIds }, [sourceArtifactIds])
   // enabled is read via ref so that toggling verification mid-stream does NOT
@@ -203,7 +207,10 @@ export function useVerificationStream(
     // Seed the first log entry synchronously (elapsed = 0)
     setActivityLog([{ time: "00:00", message: "Extracting claims...", type: "info" }])
 
-    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current, sourceArtifactIdsRef.current)
+    const { response, abort } = streamVerification(
+      text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current,
+      sourceArtifactIdsRef.current, messageIdRef.current ?? undefined,
+    )
     abortRef.current = abort
 
     let cancelled = false

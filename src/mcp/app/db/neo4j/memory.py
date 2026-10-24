@@ -79,20 +79,20 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
     now = utcnow_iso()
 
     with driver.session() as session:
+        # MERGE: a caller may pass a content-derived id (a verified claim is one
+        # memory wherever it is promoted); a second promotion finds it.
         session.run(
-            "CREATE (m:Memory {"
-            "  id: $id,"
-            "  text: $text,"
-            "  source: $source,"
-            "  memory_type: $memory_type,"
-            "  confidence: $confidence,"
-            "  access_count: 0,"
-            "  base_score: $base_score,"
-            "  created_at: $now,"
-            "  last_accessed_at: $now,"
-            "  decay_anchor: $now,"
-            "  status: 'active'"
-            "})",
+            "MERGE (m:Memory {id: $id}) ON CREATE SET"
+            "  m.text = $text,"
+            "  m.source = $source,"
+            "  m.memory_type = $memory_type,"
+            "  m.confidence = $confidence,"
+            "  m.access_count = 0,"
+            "  m.base_score = $base_score,"
+            "  m.created_at = $now,"
+            "  m.last_accessed_at = $now,"
+            "  m.decay_anchor = $now,"
+            "  m.status = 'active'",
             id=memory_id,
             text=text,
             source=source,
@@ -108,7 +108,8 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
             session.run(
                 "MATCH (m:Memory {id: $mid}) "
                 "MERGE (c:Conversation {id: $cid}) "
-                "MERGE (m)-[:EXTRACTED_FROM]->(c)",
+                "MERGE (m)-[:EXTRACTED_FROM]->(c) "
+                "SET m.conversation_id = coalesce(m.conversation_id, $cid)",
                 mid=memory_id,
                 cid=conversation_id,
             )

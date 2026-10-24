@@ -374,8 +374,8 @@ describe("ModelSelect — routing-provider gating", () => {
   // most rows as a false-positive). A model absent from the advertised list but
   // present in the live catalog must NOT be badged.
   it("does NOT badge 'Unavailable' from the hand-maintained provider list — only the live catalog decides", async () => {
-    const absentFromRegistry = "openrouter/openai/o3-mini"  // in catalog, not advertised
-    const delisted = "openrouter/x-ai/grok-4.5"             // absent from live catalog
+    const absentFromRegistry = "openrouter/openai/gpt-6-luna-pro"  // in catalog, not advertised
+    const delisted = "openrouter/x-ai/grok-4.7"                    // absent from live catalog
     const liveIds = MODELS.map((m) => m.id).filter((id) => id !== delisted)
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       if (url.includes("/models/catalog")) {
@@ -409,7 +409,7 @@ describe("ModelSelect — routing-provider gating", () => {
     })
     expect(within(delistedRow).getByText(/unavailable/i)).toBeInTheDocument()
     // The registry-absent-but-catalog-present model must carry no false badge.
-    const target = options.find((o) => o.textContent?.includes("o3-mini"))!
+    const target = options.find((o) => o.textContent?.includes("Luna Pro"))!
     expect(target).not.toHaveAttribute("data-disabled")
     expect(within(target).queryByText(/unavailable/i)).not.toBeInTheDocument()
   })
@@ -440,7 +440,7 @@ describe("ModelSelect — routing-provider gating", () => {
   // E1 CR-004: a model absent from the live /models/catalog (e.g. delisted) is
   // disabled + "Unavailable" so a stale hardcoded catalog entry can't be picked.
   it("disables a model absent from the live /models/catalog", async () => {
-    const delistedId = "openrouter/x-ai/grok-4.5"
+    const delistedId = "openrouter/x-ai/grok-4.7"
     const liveIds = MODELS.map((m) => m.id).filter((id) => id !== delistedId)
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       if (url.includes("/models/catalog")) {
@@ -470,7 +470,7 @@ describe("ModelSelect — routing-provider gating", () => {
     })
     expect(within(target!).getByText(/unavailable/i)).toBeInTheDocument()
     // A model present in the catalog stays enabled.
-    const ok = options.find((o) => o.textContent?.includes("GPT-4o Mini"))
+    const ok = options.find((o) => o.textContent?.includes("Claude Haiku"))
     expect(ok).not.toHaveAttribute("data-disabled")
   })
 })

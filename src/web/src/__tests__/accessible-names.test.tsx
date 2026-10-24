@@ -55,7 +55,9 @@ describe("chat model picker", () => {
     render(wrap(<ModelSelect value={MODELS[0].id} onChange={() => {}} />))
     await userEvent.click(screen.getByRole("combobox", { name: "Model" }))
     for (const m of MODELS) {
-      expect(screen.getByRole("option", { name: new RegExp(m.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) })).toBeInTheDocument()
+      // A label can be the start of another one ("GPT-6 Luna", "GPT-6 Luna Pro").
+      const named = screen.getAllByRole("option", { name: new RegExp(m.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) })
+      expect(named).toHaveLength(MODELS.filter((other) => other.label.includes(m.label)).length)
     }
   })
 })

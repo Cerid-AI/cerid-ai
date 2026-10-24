@@ -222,6 +222,19 @@ describe("SubjectsPane — Cycle 4 click contract", () => {
 // Saved-views badge (WB-21) — unknown count must never render as "0".
 // ---------------------------------------------------------------------------
 
+describe("SubjectsPane — saved views are offered only where they can be saved (F226)", () => {
+  it.each(["wiki", "communities"])("offers no saved-views list in %s mode", async (mode) => {
+    renderSubjects(`?mode=${mode}`)
+    await screen.findByTestId(mode === "wiki" ? "wiki-stub" : "communities-stub")
+    expect(screen.queryByRole("button", { name: /Saved views/ })).not.toBeInTheDocument()
+  })
+
+  it("offers it in atlas mode — the control", () => {
+    renderSubjects("?mode=atlas")
+    expect(screen.getByRole("button", { name: /Saved views/ })).toBeInTheDocument()
+  })
+})
+
 describe("SubjectsPane — saved-views badge", () => {
   it("shows the resolved count once the views query succeeds", async () => {
     mockListAtlasViews.mockResolvedValue([

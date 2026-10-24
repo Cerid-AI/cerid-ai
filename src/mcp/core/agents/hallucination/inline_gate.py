@@ -28,6 +28,7 @@ from typing import Any
 
 import config
 from core.agents.hallucination.enums import NLIUse
+from core.agents.hallucination.grounding_verifier import NLI_PREMISE_CHAR_LIMIT
 from core.utils.nli import nli_score_async
 from core.utils.swallowed import log_swallowed_error
 
@@ -38,9 +39,9 @@ logger = logging.getLogger("ai-companion.inline_gate")
 # NLI call, never a correctness problem.
 _SENTENCE_END = re.compile(r"[.!?](\s+|$)")
 
-# NLI premise cap — matches the KB-gate cap in verify_claim; DeBERTa truncates
-# at 512 tokens anyway, and the evidence lead carries the salient facts.
-_PREMISE_CAP = 512
+# NLI premise cap in characters — the same cap the KB gate in verify_claim uses.
+# A 512-char slice would sit ~4x under the model's own 512-token truncation.
+_PREMISE_CAP = NLI_PREMISE_CHAR_LIMIT
 
 
 async def inline_nli_gate(

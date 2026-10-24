@@ -20,6 +20,7 @@ import os
 
 import httpx
 
+from core.routing.egress import EgressRefused
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.llm_client import call_llm
 
@@ -160,7 +161,7 @@ async def _summarize_turns(turns: list[dict]) -> str:
             temperature=0.1,
             max_tokens=500,
         )
-    except (CircuitOpenError, httpx.HTTPStatusError, KeyError) as e:
+    except (CircuitOpenError, httpx.HTTPStatusError, KeyError, EgressRefused) as e:
         logger.warning("Context compression LLM call failed: %s", e)
         # Fallback: truncate middle turns to their first line
         lines = []

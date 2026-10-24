@@ -47,9 +47,3 @@ export interface TourHealth {
   max_stops: number
   default_duration_s: number
 }
-
-export async function fetchTourHealth(): Promise<TourHealth> {
-  const res = await fetch(mcpUrl(`${BASE}/health`).toString(), { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json() as Promise<TourHealth>
-}

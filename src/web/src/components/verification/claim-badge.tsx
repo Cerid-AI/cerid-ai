@@ -35,6 +35,7 @@ import type { ClaimVerificationFE, VerificationBand } from "@/components/verific
 import { deriveBand, sourceCount } from "@/components/verification/types"
 import { UX_COPY } from "@/lib/ux-copy"
 import { cn } from "@/lib/utils"
+import { verifiedBasis } from "@/lib/verification-utils"
 
 interface ClaimBadgeProps {
   claim: ClaimVerificationFE
@@ -95,6 +96,18 @@ export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {
   const n = sourceCount(claim)
   const styles = BAND_STYLES[band]
   const Icon = BAND_ICONS[band]
+  // A verified claim says what it rests on: a document the answer was drawn
+  // from (KB verified) or a source it was not (independently verified).
+  const basis = band === "verified" ? verifiedBasis(claim) : null
+  const label = basis === "kb"
+    ? UX_COPY.verification.kbVerified(n)
+    : basis === "independent" ? UX_COPY.verification.independentlyVerified(n) : styles.label(n)
+  const ariaLabel = basis === "kb"
+    ? UX_COPY.verification.ariaKbVerified(n)
+    : basis === "independent" ? UX_COPY.verification.ariaIndependentlyVerified(n) : styles.ariaLabel(n)
+  const explained = basis === "kb"
+    ? UX_COPY.verification.kbVerifiedExplained
+    : basis === "independent" ? UX_COPY.verification.independentlyVerifiedExplained : undefined
 
   return (
     <HoverCard openDelay={200} closeDelay={100}>
@@ -109,8 +122,10 @@ export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {
         <button
           type="button"
           className="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
-          aria-label={styles.ariaLabel(n)}
+          aria-label={ariaLabel}
+          title={explained}
           data-verification-band={band}
+          data-verified-basis={basis ?? undefined}
         >
           {/* Animation lives on the inner Badge (key=band remounts the
               Badge, not the outer <button>) so keyboard focus on the
@@ -128,7 +143,7 @@ export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {
               className={cn("h-3 w-3 shrink-0", styles.icon)}
               aria-hidden="true"
             />
-            {styles.label(n)}
+            {label}
           </Badge>
         </button>
       </HoverCardTrigger>

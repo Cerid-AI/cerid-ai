@@ -2513,8 +2513,9 @@ def start_scheduler() -> AsyncIOScheduler:
         )
 
     # Weekly auto-adoption of the latest in-family model per role from the
-    # OpenRouter catalog. Gated by MODEL_AUTO_UPDATE_ENABLED (default on).
-    if getattr(config, "MODEL_AUTO_UPDATE_ENABLED", True):
+    # OpenRouter catalog. Off unless MODEL_AUTO_UPDATE_ENABLED is set.
+    # A missing flag stays off, matching core.routing.model_catalog.
+    if getattr(config, "MODEL_AUTO_UPDATE_ENABLED", False):
         _scheduler.add_job(
             _run_model_auto_update,
             CronTrigger.from_crontab(

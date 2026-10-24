@@ -12,7 +12,7 @@ import httpx
 
 from app.reliability.url_safety import guard_or_log
 
-from .base import DataSource, DataSourceResult
+from .base import DataSource, DataSourceResult, result_guid
 
 logger = logging.getLogger("ai-companion.data_sources.custom")
 
@@ -92,32 +92,31 @@ class CustomApiSource(DataSource):
         # SSRF prevention: reject private/internal hosts before any network I/O
         if not guard_or_log(self.base_url, source_name="custom_source"):
             return []
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    f"{self.base_url}/search",
-                    headers=self._build_headers(),
-                    params=self._build_params(query),
-                )
-                resp.raise_for_status()
-                data = resp.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{self.base_url}/search",
+                headers=self._build_headers(),
+                params=self._build_params(query),
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-            raw_results = self._extract_results(data)
-            results = []
-            for item in raw_results[:10]:
-                title = item.get(self.result_title_field, "")
-                content = item.get(self.result_content_field, "")
-                if content:
-                    results.append(DataSourceResult(
-                        title=str(title),
-                        content=str(content),
-                        source_name=self.display_name,
-                        source_url=self.base_url,
-                    ))
-            return results
-        except (httpx.HTTPError, ValueError, KeyError) as e:
-            logger.warning(f"Custom API query failed ({self.display_name}): {e}")
-            return []
+        raw_results = self._extract_results(data)
+        results = []
+        for item in raw_results[:10]:
+            title = item.get(self.result_title_field, "")
+            content = item.get(self.result_content_field, "")
+            if content:
+                results.append(DataSourceResult(
+                    title=str(title),
+                    content=str(content),
+                    source_name=self.display_name,
+                    source_url=self.base_url,
+                    # base_url is the API every row came from, not this row's
+                    # address: identified by it, every row would be the same one.
+                    guid=result_guid(self.display_name, "", str(title), str(content)),
+                ))
+        return results
 
     async def test_connection(self) -> tuple[bool, str | None]:
         """Test connectivity to the custom API."""

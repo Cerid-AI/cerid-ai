@@ -16,9 +16,8 @@ appear together"). Leiden then partitions the graph maximising
 weighted modularity.
 
 Hierarchical levels: Leiden produces a tree of communities (level 0 =
-fine-grained, higher levels merge). All levels are materialised so
-:func:`core.agents.query_router` (Phase 4b.3) can pick the right
-granularity per query.
+fine-grained, higher levels merge). All levels are materialised for the
+graph views that walk the hierarchy.
 
 Layering: lives in ``app/db/neo4j/`` because it directly consumes
 the ``graphdatascience`` Python client + neo4j driver. Pure data-
@@ -82,7 +81,10 @@ def detect_communities(
             logger.warning("No entities in graph — skipping community detection")
             return {"skipped": "no_entities"}
 
-    gds = GraphDataScience.from_neo4j_driver(driver, database=neo4j_database)
+    # arrow=False: a driver-built client has no credentials for the Arrow
+    # server, so GDS falls back to Cypher anyway; this skips the discovery
+    # round-trip and its fallback warning.
+    gds = GraphDataScience(driver, database=neo4j_database, arrow=False)
     proj_name = _projection_name()
     stats: dict[str, Any] = {"projection": proj_name}
 
@@ -106,7 +108,7 @@ def detect_communities(
 
     try:
         # Native projection with explicit UNDIRECTED orientation.
-        graph, _ = gds.graph.project(
+        graph, _ = gds.graph.project.native(
             proj_name,
             "Entity",
             {
@@ -143,18 +145,18 @@ def detect_communities(
         # Run Leiden, write back communityId across all levels.
         result = gds.leiden.write(
             graph,
-            writeProperty="leiden_communityIds",  # list[long] — one per level
-            relationshipWeightProperty="weight",
-            includeIntermediateCommunities=True,
-            maxLevels=max_levels,
+            write_property="leiden_communityIds",  # list[long] — one per level
+            relationship_weight_property="weight",
+            include_intermediate_communities=True,
+            max_levels=max_levels,
         )
-        stats["modularity"] = float(result["modularity"])
-        stats["levels_produced"] = int(result.get("ranLevels", max_levels))
+        stats["modularity"] = float(result.modularity)
+        stats["levels_produced"] = int(result.ran_levels)
         graph.drop()
     finally:
         # Best-effort cleanup if anything above raised after projection.
         try:
-            if gds.graph.exists(proj_name)["exists"]:
+            if gds.graph.exists(proj_name):
                 gds.graph.drop(proj_name)
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
@@ -248,7 +250,7 @@ def detect_communities(
         # This used to test `community_id IS NULL` alone, on the stated theory
         # that "GDS projections include only nodes that participate in at least
         # one CO_MENTIONED edge, so Leiden never touches pure orphans". That is
-        # not what a native label projection does. gds.graph.project(name,
+        # not what a native label projection does. gds.graph.project.native(name,
         # "Entity", {...}) above projects EVERY Entity node, edges or not, so
         # Leiden hands each orphan its own singleton community and the
         # write-back loop stamps a real '{level}:{native}' id on it. The NULL

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -17,7 +18,14 @@ from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
 
 logger = logging.getLogger("ai-companion.data_sources")
 
-__all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry"]
+__all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry", "result_guid"]
+
+
+def result_guid(source_name: str, url: str, title: str, content: str) -> str:
+    """A stable identity for an external row: the source and its URL, or the
+    source, title and content when the row has no URL of its own."""
+    basis = (source_name, url) if url else (source_name, title, content)
+    return hashlib.sha256("\x1f".join(basis).encode()).hexdigest()
 
 
 class DataSourceResult:
@@ -31,6 +39,7 @@ class DataSourceResult:
         source_name: str = "",
         confidence: float = 0.8,
         metadata: dict[str, Any] | None = None,
+        guid: str = "",
     ):
         self.title = title
         self.content = content
@@ -40,9 +49,10 @@ class DataSourceResult:
         # Provider ids for inbox triage. Absent from to_dict so existing
         # result payloads keep their shape; callers read the attribute.
         self.metadata = dict(metadata or {})
+        self.guid = guid or result_guid(source_name, source_url, title, content)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"title": self.title, "content": self.content, "source_url": self.source_url, "source_name": self.source_name, "confidence": self.confidence}
+        return {"title": self.title, "content": self.content, "source_url": self.source_url, "source_name": self.source_name, "confidence": self.confidence, "guid": self.guid}
 
 
 class DataSource(ABC):
@@ -97,6 +107,17 @@ class DataSource(ABC):
         return bool(os.getenv(self.api_key_env_var))
 
 
+_FAILED = -1  # outcome marker: the call raised
+
+
+def _failure_label(exc: BaseException) -> str:
+    """The exception type and HTTP status, never its message: an httpx message
+    carries the request URL, and with it API keys sent as query parameters
+    (Wolfram's appid) and the user's query text."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return f"{type(exc).__name__} {status}" if status else type(exc).__name__
+
+
 class DataSourceRegistry:
     """Registry of all available data sources."""
 
@@ -107,6 +128,7 @@ class DataSourceRegistry:
     def __init__(self) -> None:
         self._sources: dict[str, DataSource] = {}
         self._outcomes: dict[str, deque[tuple[float, int]]] = {}
+        self._last_error: dict[str, str] = {}
 
     def register(self, source: DataSource) -> None:
         self._sources[source.name] = source
@@ -115,18 +137,24 @@ class DataSourceRegistry:
         history = self._outcomes.setdefault(name, deque(maxlen=self._OUTCOME_HISTORY))
         history.append((time.time(), result_count))
 
+    def _record_failure(self, name: str, exc: BaseException) -> None:
+        """A call that raised: kept apart from one that answered nothing."""
+        self._record_outcome(name, _FAILED)
+        self._last_error[name] = _failure_label(exc)
+
     def source_health(self, name: str) -> dict[str, Any]:
         """Did this source answer anything lately?
 
         ``degraded`` once the last ``DATA_SOURCE_DEAD_CALLS`` calls inside
-        ``DATA_SOURCE_DEAD_WINDOW_S`` all returned zero results; ``unknown``
-        until it has been asked at all. Sources swallow their own failures
-        and return ``[]``, so this is the only signal that separates a dead
-        source from one that is merely quiet.
+        ``DATA_SOURCE_DEAD_WINDOW_S`` all answered nothing or failed;
+        ``unknown`` until it has been asked at all. A source raises on a
+        transport or parse failure, so ``failed_calls`` and ``last_error``
+        separate a broken source from one that is merely quiet.
         """
         cutoff = time.time() - config.DATA_SOURCE_DEAD_WINDOW_S
         recent = [(ts, n) for ts, n in self._outcomes.get(name, ()) if ts >= cutoff]
-        zero = sum(1 for _, n in recent if n == 0)
+        failed = sum(1 for _, n in recent if n == _FAILED)
+        zero = sum(1 for _, n in recent if n <= 0)
         answered = [ts for ts, n in recent if n > 0]
         if not recent:
             status = "unknown"
@@ -137,7 +165,9 @@ class DataSourceRegistry:
         return {
             "status": status,
             "calls_in_window": len(recent),
-            "zero_result_calls": zero,
+            "zero_result_calls": zero - failed,
+            "failed_calls": failed,
+            "last_error": self._last_error.get(name) if failed else None,
             "last_results_at": (
                 datetime.fromtimestamp(max(answered), tz=timezone.utc).isoformat()
                 if answered else None
@@ -154,7 +184,16 @@ class DataSourceRegistry:
         return self._sources.get(name)
 
     def get_enabled_sources(self, domain: str | None = None) -> list[DataSource]:
-        """Get all enabled and configured sources, optionally filtered by domain."""
+        """Get all enabled and configured sources, optionally filtered by domain.
+
+        None while the egress rule refuses: every source sends the query to a
+        third party (Wikipedia, DuckDuckGo, a web search engine, an MCP connector
+        to Google or Microsoft), so under local-only none of them is usable.
+        """
+        from core.routing.egress import cloud_egress_refused
+
+        if cloud_egress_refused():
+            return []
         return [
             s for s in self._sources.values()
             if s.enabled and s.is_configured()
@@ -162,7 +201,7 @@ class DataSourceRegistry:
         ]
 
     def has_enabled_sources(self) -> bool:
-        return any(s.enabled and s.is_configured() for s in self._sources.values())
+        return bool(self.get_enabled_sources())
 
     async def query_all(
         self,
@@ -251,9 +290,9 @@ class DataSourceRegistry:
                 logger.warning("Data source %s circuit OPEN — skipping (breaker tripped)", source.name)
                 self._record_outcome(source.name, 0)
                 return []
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as exc:
                 logger.warning("Data source %s timed out after %.1fs", source.name, timeout)
-                self._record_outcome(source.name, 0)
+                self._record_failure(source.name, exc)
                 return []
 
         tasks = [_guarded_query(s) for s in sources]
@@ -285,8 +324,8 @@ class DataSourceRegistry:
                         r.confidence = max(0.0, min(1.0, r.confidence * source_weight))
                     merged.append(r.to_dict())
             else:
-                logger.warning("Data source %s query failed: %s", sources[i].name, result_or_exc)
-                self._record_outcome(sources[i].name, 0)
+                logger.warning("Data source %s query failed: %s", sources[i].name, _failure_label(result_or_exc))
+                self._record_failure(sources[i].name, result_or_exc)
         if weights:
             logger.debug("query_all: applied Custom Smart RAG weights to %d sources", len(weights))
         logger.info("query_all: merged %d results from %d sources", len(merged), len(sources))

@@ -210,12 +210,13 @@ class ChunkAdapter:
 
 
 def verified_memory_ids_for_conversation(conversation_id: str) -> list[str]:
-    """Verified memories linked to the conversation's report. A memory promoted
-    before its report was saved has no link and cannot be found this way."""
+    """Verified memories of the conversation: promoted from it (EXTRACTED_FROM,
+    written at promotion since §6.3) or linked to its report (VERIFIED_BY)."""
     from app.deps import get_neo4j
     with get_neo4j().session() as session:
         rows = session.run(
-            "MATCH (m:Memory)-[:VERIFIED_BY]->(:VerificationReport {conversation_id: $cid}) "
+            "CALL () { MATCH (m:Memory)-[:EXTRACTED_FROM]->(:Conversation {id: $cid}) RETURN m "
+            "UNION MATCH (m:Memory)-[:VERIFIED_BY]->(:VerificationReport {conversation_id: $cid}) RETURN m } "
             "RETURN DISTINCT m.id AS id",
             cid=conversation_id,
         )
@@ -227,13 +228,21 @@ def _verified_collection() -> Any:
     return get_chroma().get_or_create_collection(name=config.collection_name("conversations"))
 
 
+def _drop_verified_rows(memory_id: str) -> None:
+    """A verified memory's recall document, in either id form."""
+    from core.retrieval.artifact_rows import LEGACY_VERIFIED_MEMORY_PREFIX, artifact_row_ids
+
+    collection = _verified_collection()
+    collection.delete(ids=[f"{LEGACY_VERIFIED_MEMORY_PREFIX}{memory_id}", *artifact_row_ids(collection, memory_id)])
+
+
 def delete_verified_memory(memory_id: str) -> bool:
     """Delete one verified memory's recall document and node. These have no
     chunk ids to fan out from, so they bypass remove_content and bust the
     query caches here."""
     from app.deps import get_neo4j
     from app.services.content_lifecycle import invalidate_caches
-    _verified_collection().delete(ids=[f"verified_memory_{memory_id}"])
+    _drop_verified_rows(memory_id)
     with get_neo4j().session() as session:
         rec = session.run(
             "MATCH (m:Memory {id: $mid}) WITH collect(m) AS ms, count(m) AS n "
@@ -260,7 +269,7 @@ class VerifiedMemoryAdapter:
                 "SET m.status = 'forgotten', m.forget_id = $fid",
                 mid=subject.id, fid=forget_id,
             )
-        _verified_collection().delete(ids=[f"verified_memory_{subject.id}"])
+        _drop_verified_rows(subject.id)
         settle(subject.id)
         invalidate_caches(trigger=f"forget.hide_verified_memory:{subject.id}")
 
@@ -273,7 +282,7 @@ class VerifiedMemoryAdapter:
             rec = session.run(
                 "MATCH (m:Memory {id: $mid, forget_id: $fid}) RETURN m.text AS text, "
                 "m.lineage_id AS lineage_id, m.version AS version, m.valid_to AS valid_to, "
-                "m.superseded_by AS superseded_by",
+                "m.superseded_by AS superseded_by, m.conversation_id AS conversation_id",
                 mid=subject.id, fid=forget_id,
             ).single()
         if not rec or not rec["text"]:
@@ -281,13 +290,16 @@ class VerifiedMemoryAdapter:
         # The document first: if it fails, the node is still marked with this
         # forget, so a retried restore finds it again.
         now_iso = datetime.now(timezone.utc).isoformat()
+        from core.retrieval.artifact_rows import VERIFIED_MEMORY_SOURCE, verified_memory_row_id
+
         _verified_collection().upsert(
-            ids=[f"verified_memory_{subject.id}"],
+            ids=[verified_memory_row_id(subject.id, rec["text"])],
             documents=[rec["text"]],
             metadatas=[{
                 "artifact_id": subject.id,
+                **({"conversation_id": rec["conversation_id"]} if rec.get("conversation_id") else {}),
                 "memory_type": "empirical",
-                "memory_source_type": "verification",
+                "memory_source_type": VERIFIED_MEMORY_SOURCE,
                 "domain": "conversations",
                 "filename": f"verified_fact_{subject.id[:8]}",
                 "ingested_at": now_iso,
@@ -363,7 +375,9 @@ class VerificationReportGraphAdapter:
 
 class RedisKeysAdapter:
     """Conversation-keyed Redis keys: the hall: report, turn metrics, sentiment,
-    and the private-mode session flag (plus its membership in the L4 set)."""
+    the private-mode session flag (plus its membership in the L4 set), and the
+    words background jobs work on (``turn_text``: queued turns, SDK texts and
+    memory-extract results)."""
 
     name, kinds = "redis_conversation_keys", frozenset({"conversation"})
 
@@ -374,8 +388,9 @@ class RedisKeysAdapter:
         return None
 
     def purge(self, subject: Subject) -> PurgeResult:
+        from app.db.redis import turn_text
         from app.deps import get_redis
-        from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX
+        from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX, message_reports_prefix
         from core.utils.cache import REDIS_CONV_METRICS_PREFIX
 
         cid = subject.id
@@ -386,8 +401,14 @@ class RedisKeysAdapter:
             f"{REDIS_CONV_METRICS_PREFIX}{cid}:sentiment",
             f"cerid:private_mode:session:{cid}",
         ]
+        # Reports kept per message, under a hash of this conversation's id.
+        keys += [
+            key.decode() if isinstance(key, bytes) else str(key)
+            for key in redis.scan_iter(match=f"{message_reports_prefix(cid)}*", count=500)
+        ]
         removed = int(redis.delete(*keys) or 0)
         removed += int(redis.zrem("cerid:private_mode:l4_sessions", cid) or 0)
+        removed += turn_text.forget_conversation(redis, cid)
         return PurgeResult(removed=removed)
 
 
@@ -450,19 +471,20 @@ CLAIMS: dict[str, str] = {
     "chroma:conversations:chat_*": "transcripts",
     "neo4j:VerificationReport.conversation_id": "verification_report_graph",
     "redis:hall:{cid}": "redis_conversation_keys",
+    "redis:hall:msg:{sha256(cid)}:*": "redis_conversation_keys",  # reports kept per message
     "redis:conv:{cid}:metrics": "redis_conversation_keys",
     "redis:conv:{cid}:sentiment": "redis_conversation_keys",
     "redis:cerid:private_mode:session:{cid}": "redis_conversation_keys",
+    "redis:cerid:proc:text:{sha256(cid)}:*": "redis_conversation_keys",
     "sync:user/conversations/{cid}.json": "sync_file",
     "chroma:conversations:memory_*": "artifacts",
     "chroma:*:{artifact_id}_{h16}": "chunks",
     "chroma:conversations:session_summary_*": "artifacts",
-    "chroma:conversations:verified_memory_*": "verified_memories",
+    "chroma:conversations:verified_memory_*": "verified_memories",  # rows before §6.3; now {memory_id}_{h16}
     "neo4j:Conversation.id": "conversation_node",
     "neo4j:Memory (verified)": "verified_memories",
 }
 
 OUT_OF_REACH: dict[str, str] = {
-    "redis:cerid:proc:job:{jobid}": "job payloads expire after 14 days; queued jobs skip a forgotten conversation (write barrier); phase 6 stores references",
     "redis:ingest:log / verify:*": "analytics lists expire after 30 days",
 }

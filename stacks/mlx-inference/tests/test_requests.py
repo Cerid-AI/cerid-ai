@@ -270,7 +270,8 @@ def test_harmony_forced_call_comes_after_the_analysis(harmony):
 
 
 def test_v1_options():
-    assert serve._v1_options({}) == (serve.V1_DEFAULT_MAX_TOKENS, 0.0, 1.0)
+    # top_p None: the model's own (generation_config.json), not "no truncation".
+    assert serve._v1_options({}) == (serve.V1_DEFAULT_MAX_TOKENS, 0.0, None)
     assert serve._v1_options({"max_tokens": 10, "temperature": 0.7, "top_p": 0.9}) == (10, 0.7, 0.9)
     assert serve._v1_options({"max_completion_tokens": 12, "max_tokens": 10})[0] == 12
     for bad in ({"max_tokens": 0}, {"max_tokens": serve.V1_MAX_TOKENS + 1}, {"max_tokens": "10"}, {"temperature": "hot"}):

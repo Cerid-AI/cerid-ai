@@ -294,6 +294,20 @@ def find_artifact_by_filename(
         return _reingest_record(result.single())
 
 
+def link_upload(driver, artifact_id: str, conversation_id: str, *, existing: bool) -> None:
+    """A file uploaded in a chat (forget spec §6.6), so the chat's delete dialog
+    can offer it. An edge, not a property: artifacts are content-addressed, so
+    one file dropped in two chats is one artifact. ``existing`` marks content
+    the knowledge base already held before this upload; the dialog does not
+    check it by default."""
+    with driver.session() as session:
+        session.run(
+            "MATCH (a:Artifact {id: $aid}) MERGE (c:Conversation {id: $cid}) "
+            "MERGE (a)-[u:UPLOADED_IN]->(c) ON CREATE SET u.at = $now, u.existing = $existing",
+            aid=artifact_id, cid=conversation_id, now=utcnow_iso(), existing=existing,
+        )
+
+
 def find_artifact_by_source_path(driver, source_path: str, domain: str) -> dict[str, Any] | None:
     """Find the artifact a file at ``source_path`` was ingested as (spec §7:
     a document's identity is its source, never its basename alone)."""
@@ -307,6 +321,21 @@ def find_artifact_by_source_path(driver, source_path: str, domain: str) -> dict[
             domain=domain,
         )
         return _reingest_record(result.single())
+
+
+def get_source_paths(driver, artifact_ids: list[str]) -> dict[str, str]:
+    """``{artifact_id: source_path}`` for those of ``artifact_ids`` that record
+    the file they were ingested from."""
+    if not artifact_ids:
+        return {}
+    with driver.session() as session:
+        result = session.run(
+            "UNWIND $ids AS aid MATCH (a:Artifact {id: aid}) "
+            "WHERE coalesce(a.source_path, '') <> '' "
+            "RETURN a.id AS id, a.source_path AS source_path",
+            ids=artifact_ids,
+        )
+        return {record["id"]: record["source_path"] for record in result}
 
 
 def find_artifact_by_external_id(
@@ -977,6 +1006,113 @@ def recategorize_artifact(
 # Verification report persistence
 # ---------------------------------------------------------------------------
 
+#: What became of each cited source's edge (invariant S11-3). The report
+#: stores ``edge_status``: a JSON object of cited source id to one of these.
+EDGE_LINKED = "linked"
+#: The forget registry has the source trashed or purged: no edge, and an
+#: earlier one is removed.
+EDGE_UNVERIFIABLE = "unverifiable"
+#: No ``:Artifact`` or ``:Memory`` has the id and no forget of it is on record.
+EDGE_MISSING = "missing"
+#: The edge write raised; the next boot's backfill tries again.
+EDGE_FAILED = "failed"
+
+#: A report's stored ``edge_status`` and the sources it already has edges to:
+#: ``linked`` holds both EXTRACTED_FROM and VERIFIED, ``touched`` either.
+REPORT_EDGES_CYPHER = """
+MATCH (r:VerificationReport) WHERE elementId(r) = $rid
+OPTIONAL MATCH (r)-[e:EXTRACTED_FROM|VERIFIED]->(s) WHERE s:Artifact OR s:Memory
+WITH r, s.id AS sid, collect(DISTINCT type(e)) AS types
+RETURN r.edge_status AS edge_status,
+       collect(CASE WHEN size(types) = 2 THEN sid END) AS linked,
+       collect(sid) AS touched
+"""
+
+#: Links a verification report to the source a claim cites: a document
+#: (``:Artifact``) or a recalled memory (``:Memory``), both cited by node id.
+#: ``linked`` is 0 when the source does not exist.
+LINK_CITED_SOURCE_CYPHER = """
+MATCH (r:VerificationReport) WHERE elementId(r) = $rid
+CALL () {
+    MATCH (a:Artifact {id: $aid}) RETURN a AS src
+    UNION
+    MATCH (m:Memory {id: $aid}) RETURN m AS src
+}
+MERGE (r)-[:EXTRACTED_FROM]->(src)
+MERGE (r)-[:VERIFIED]->(src)
+RETURN count(src) AS linked
+"""
+
+UNLINK_CITED_SOURCE_CYPHER = """
+MATCH (r:VerificationReport)-[e:EXTRACTED_FROM|VERIFIED]->(s)
+WHERE elementId(r) = $rid AND s.id = $aid AND (s:Artifact OR s:Memory)
+DELETE e
+RETURN count(e) AS removed
+"""
+
+SET_EDGE_STATUS_CYPHER = """
+MATCH (r:VerificationReport) WHERE elementId(r) = $rid
+SET r.edge_status = $edge_status
+"""
+
+
+def forgotten_source_ids() -> frozenset[str]:
+    """Ids a claim may cite that the forget registry has trashed or purged.
+    The registry keeps an entry after a purge deletes the node, so this is
+    what tells a forgotten source from one that never existed."""
+    from core.forget import registry as forget_registry
+    return forget_registry.forgotten_ids("artifact") | forget_registry.forgotten_ids("memory")
+
+
+def link_cited_sources(
+    session: Any,
+    report_eid: str,
+    source_ids: set[str],
+    forgotten: frozenset[str],
+) -> dict[str, int]:
+    """Bring one report's source edges and ``edge_status`` in line with S11-3:
+    an edge to every cited source that exists and is not forgotten, none to a
+    forgotten one, and the outcome per source on the report. Idempotent: a
+    report already in line is read and left alone. Returns what it changed."""
+    row = session.run(REPORT_EDGES_CYPHER, rid=report_eid).single()
+    stored = row["edge_status"] if row else None
+    linked = set(row["linked"] or []) if row else set()
+    touched = set(row["touched"] or []) if row else set()
+    changes = {"edges_added": 0, "edges_removed": 0, "statuses_written": 0}
+    status: dict[str, str] = {}
+    for aid in sorted(source_ids):
+        try:
+            if aid in forgotten:
+                status[aid] = EDGE_UNVERIFIABLE
+                if aid in touched:
+                    rec = session.run(UNLINK_CITED_SOURCE_CYPHER, rid=report_eid, aid=aid).single()
+                    changes["edges_removed"] += int(rec["removed"]) if rec else 0
+            elif aid in linked:
+                status[aid] = EDGE_LINKED
+            else:
+                rec = session.run(LINK_CITED_SOURCE_CYPHER, rid=report_eid, aid=aid).single()
+                if rec and rec["linked"]:
+                    status[aid] = EDGE_LINKED
+                    changes["edges_added"] += 1
+                else:
+                    status[aid] = EDGE_MISSING
+        except Exception:
+            logger.exception("verification_report.edge_merge_failed", extra={"report": report_eid, "aid": aid})
+            sentry_sdk.capture_exception()
+            status[aid] = EDGE_FAILED
+            continue
+        if status[aid] != EDGE_LINKED:
+            logger.info(
+                "verification_report.cited_source_not_linked",
+                extra={"report": report_eid, "aid": aid, "edge_status": status[aid]},
+            )
+    edge_status = json.dumps(status, sort_keys=True)
+    if edge_status != stored:
+        session.run(SET_EDGE_STATUS_CYPHER, rid=report_eid, edge_status=edge_status)
+        changes["statuses_written"] = 1
+    return changes
+
+
 def save_verification_report(
     driver,
     conversation_id: str,
@@ -987,8 +1123,14 @@ def save_verification_report(
     uncertain: int = 0,
     total: int = 0,
     agreed: int | None = None,
+    message_id: str = "",
 ) -> str | None:
     """Persist a verification report with complete provenance.
+
+    A report belongs to the assistant message it verified: it is keyed by
+    ``(conversation_id, message_id)`` (forget spec §6.2), so a second message's
+    verification no longer overwrites the first one's. ``message_id`` is empty
+    for callers that verify a bare response.
 
     Returns the report id, or ``None`` when the conversation is forgotten: a
     verify still running when the user deleted the conversation must not
@@ -999,11 +1141,15 @@ def save_verification_report(
     back as ``None``: unknown, not zero.
 
     Writes:
-      * ``(:VerificationReport {conversation_id})`` with claims blob, scores,
+      * ``(:VerificationReport {conversation_id, message_id})`` with claims blob, scores,
         plus ``source_urls`` and ``verification_methods`` on the node so that
         external-verified claims retain provenance without an Artifact node.
-      * ``(r)-[:EXTRACTED_FROM]->(:Artifact)`` for every referenced artifact.
-      * ``(r)-[:VERIFIED]->(:Artifact)`` alias retained for backward compat.
+      * ``(r)-[:EXTRACTED_FROM]->(src)`` for every cited source that exists
+        and is not forgotten, where ``src`` is the ``:Artifact`` or ``:Memory``
+        the claim cites.
+      * ``(r)-[:VERIFIED]->(src)`` alias retained for backward compat.
+      * ``r.edge_status``: per cited source, ``linked`` or why not
+        (``link_cited_sources``).
 
     Claim normalization is delegated to
     ``core.agents.hallucination.models.ClaimVerification.from_legacy_dict``
@@ -1052,9 +1198,9 @@ def save_verification_report(
         artifact_ids.update(c.artifact_ids())
 
     with driver.session() as session:
-        session.run(
+        report = session.run(
             """
-            MERGE (r:VerificationReport {conversation_id: $cid})
+            MERGE (r:VerificationReport {conversation_id: $cid, message_id: $mid})
             SET r.id = $rid,
                 r.claims = $claims,
                 r.overall_score = $score,
@@ -1066,9 +1212,11 @@ def save_verification_report(
                 r.created_at = $now,
                 r.source_urls = $source_urls,
                 r.verification_methods = $verification_methods
+            RETURN elementId(r) AS eid
             """,
             rid=report_id,
             cid=conversation_id,
+            mid=message_id,
             claims=claims_json,
             score=overall_score,
             verified=verified,
@@ -1079,44 +1227,13 @@ def save_verification_report(
             now=utcnow_iso(),
             source_urls=sorted(source_urls),
             verification_methods=sorted(methods),
-        )
+        ).single()
 
-        from core.reliability.read_after_write import assert_created
-
-        for aid in artifact_ids:
-            try:
-                session.run(
-                    """
-                    MATCH (r:VerificationReport {conversation_id: $cid})
-                    MATCH (a:Artifact {id: $aid})
-                    MERGE (r)-[:EXTRACTED_FROM]->(a)
-                    MERGE (r)-[:VERIFIED]->(a)
-                    """,
-                    cid=conversation_id,
-                    aid=aid,
-                )
-            except Exception:
-                logger.exception(
-                    "verification_report.edge_merge_failed",
-                    extra={"conversation_id": conversation_id, "aid": aid},
-                )
-                sentry_sdk.capture_exception()
-                continue
-
-            # Read-after-write: if the MATCH-MATCH-MERGE pattern silently no-op'd
-            # because the Artifact didn't exist, the edges are never created.
-            # Catch that here rather than waiting for operators to notice
-            # zero VERIFIED rels in prod weeks later.
-            assert_created(
-                session,
-                check_cypher=(
-                    "MATCH (:VerificationReport {conversation_id: $cid})"
-                    "-[:VERIFIED]->(:Artifact {id: $aid}) "
-                    "RETURN count(*) > 0 AS exists"
-                ),
-                params={"cid": conversation_id, "aid": aid},
-                event_name="verification_report.verified_edge",
-            )
+        try:
+            link_cited_sources(session, report["eid"], artifact_ids, forgotten_source_ids())
+        except Exception as exc:  # noqa: BLE001 — the report is saved; the boot backfill (m0001) links it
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("app.db.neo4j.artifacts.save_verification_report.edges", exc)
 
     logger.info(
         "Saved verification report %s for conversation %s (%d artifacts, %d urls, methods=%s)",
@@ -1142,42 +1259,91 @@ def save_verification_report(
     return report_id
 
 
-def get_verification_report(driver, conversation_id: str) -> dict | None:
-    """Retrieve a saved verification report by conversation ID; none for a
-    forgotten conversation (its report is kept while it is in the trash)."""
+_REPORT_FIELDS = (
+    "r.id AS id, r.conversation_id AS conversation_id, coalesce(r.message_id, '') AS message_id, "
+    "r.claims AS claims, r.overall_score AS overall_score, r.verified AS verified, r.agreed AS agreed, "
+    "r.unverified AS unverified, r.uncertain AS uncertain, r.total AS total, r.created_at AS created_at, "
+    "r.edge_status AS edge_status"
+)
+
+
+def _report_row(record: Any) -> dict:
+    claims = []
+    try:
+        claims = json.loads(record["claims"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+    edge_status: dict = {}
+    try:
+        edge_status = json.loads(record.get("edge_status") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "report_id": record["id"],
+        "conversation_id": record["conversation_id"],
+        "message_id": record.get("message_id") or "",
+        "claims": claims,
+        "overall_score": record["overall_score"],
+        "verified": record["verified"],
+        "agreed": record["agreed"],
+        "unverified": record["unverified"],
+        "uncertain": record["uncertain"],
+        "total": record["total"],
+        "created_at": record["created_at"],
+        "edge_status": edge_status,
+    }
+
+
+def get_verification_report(driver, conversation_id: str, message_id: str | None = None) -> dict | None:
+    """Retrieve a saved verification report: the one for ``message_id``, or the
+    conversation's latest when it is None. None for a forgotten conversation
+    (its report is kept while it is in the trash)."""
     from core.forget import registry as forget_registry
     if forget_registry.is_forgotten("conversation", conversation_id):
         return None
     with driver.session() as session:
-        result = session.run(
-            "MATCH (r:VerificationReport {conversation_id: $cid}) "
-            "RETURN r.id AS id, r.conversation_id AS conversation_id, "
-            "       r.claims AS claims, r.overall_score AS overall_score, "
-            "       r.verified AS verified, r.agreed AS agreed, "
-            "       r.unverified AS unverified, "
-            "       r.uncertain AS uncertain, r.total AS total, "
-            "       r.created_at AS created_at",
-            cid=conversation_id,
-        )
-        record = result.single()
-        if not record:
-            return None
+        if message_id is None:
+            record = session.run(
+                f"MATCH (r:VerificationReport {{conversation_id: $cid}}) RETURN {_REPORT_FIELDS} "
+                "ORDER BY r.created_at DESC LIMIT 1",
+                cid=conversation_id,
+            ).single()
+        else:
+            record = session.run(
+                f"MATCH (r:VerificationReport {{conversation_id: $cid, message_id: $mid}}) RETURN {_REPORT_FIELDS}",
+                cid=conversation_id, mid=message_id,
+            ).single()
+    return _report_row(record) if record else None
 
-        claims = []
-        try:
-            claims = json.loads(record["claims"])
-        except (json.JSONDecodeError, TypeError):
-            pass
 
-        return {
-            "report_id": record["id"],
-            "conversation_id": record["conversation_id"],
-            "claims": claims,
-            "overall_score": record["overall_score"],
-            "verified": record["verified"],
-            "agreed": record["agreed"],
-            "unverified": record["unverified"],
-            "uncertain": record["uncertain"],
-            "total": record["total"],
-            "created_at": record["created_at"],
-        }
+def list_verification_reports(driver, conversation_id: str) -> dict[str, dict]:
+    """Every saved report of a conversation that belongs to a message, keyed by
+    message id, in the shape the web client renders. None of a forgotten one."""
+    from core.forget import registry as forget_registry
+    if forget_registry.is_forgotten("conversation", conversation_id):
+        return {}
+    with driver.session() as session:
+        rows = [
+            _report_row(r) for r in session.run(
+                f"MATCH (r:VerificationReport {{conversation_id: $cid}}) WHERE coalesce(r.message_id, '') <> '' "
+                f"RETURN {_REPORT_FIELDS}",
+                cid=conversation_id,
+            )
+        ]
+    return {row["message_id"]: client_report(row) for row in rows}
+
+
+def client_report(row: dict) -> dict:
+    """A stored report as the web client's HallucinationReport."""
+    summary = {k: row.get(k) or 0 for k in ("total", "verified", "unverified", "uncertain")}
+    if row.get("agreed") is not None:
+        summary["agreed"] = row["agreed"]
+    summary["skipped"] = sum(1 for c in row.get("claims") or [] if isinstance(c, dict) and c.get("status") == "skipped")
+    return {
+        "conversation_id": row["conversation_id"],
+        "message_id": row["message_id"],
+        "timestamp": row.get("created_at") or "",
+        "skipped": False,
+        "claims": row.get("claims") or [],
+        "summary": summary,
+    }

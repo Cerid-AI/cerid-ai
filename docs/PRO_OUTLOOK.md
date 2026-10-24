@@ -1,5 +1,7 @@
 # Pro Connector — Outlook
 
+> Connector notes. The product tier around them is historical. Mail lands in domain `mail`, sub-category `outlook`.
+
 ## What this connector does
 
 The Outlook Pro connector lets chat answers cite messages from your

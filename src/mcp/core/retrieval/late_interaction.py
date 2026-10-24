@@ -75,11 +75,18 @@ def late_interaction_rerank(
 ) -> list[dict[str, Any]]:
     """Apply late interaction scoring to top N results.
 
+    Every returned score is on the blended scale, so a later sort over the
+    whole list cannot interleave re-scored rows with rows still on the input
+    scale. A row that was not scored (past ``top_n``, no windows, or a failed
+    embed) blends with the lowest MaxSim any candidate earned, so on a
+    relevance-sorted input the tail keeps its own order and stays below every
+    row that was scored.
+
     Args:
         results: Ranked results from previous stages.
         query: Original query string.
         embed_fn: Callable that embeds a list of strings -> list of np.ndarray.
-        top_n: Number of top results to re-score (rest pass through).
+        top_n: Number of top results to embed and score.
         blend_weight: How much late interaction score influences final score.
 
     Returns:
@@ -109,7 +116,8 @@ def late_interaction_rerank(
         return results
 
     # Score each candidate
-    for r in candidates:
+    maxsims: dict[int, float] = {}
+    for i, r in enumerate(candidates):
         content = r.get("content", "")
         doc_windows = _sliding_windows(content)
         if not doc_windows:
@@ -122,11 +130,19 @@ def late_interaction_rerank(
             log_swallowed_error('core.retrieval.late_interaction', exc)
             continue
 
-        maxsim = compute_maxsim(query_embeddings, doc_embeddings)
+        maxsims[i] = compute_maxsim(query_embeddings, doc_embeddings)
+
+    if not maxsims:
+        return results
+
+    floor = min(maxsims.values())
+    for i, r in enumerate(results):
+        maxsim = maxsims.get(i)
         original_score = r.get("relevance", 0.0)
-        blended = (1.0 - weight) * original_score + weight * maxsim
+        blended = (1.0 - weight) * original_score + weight * (floor if maxsim is None else maxsim)
         r["relevance"] = round(blended, 4)
-        r["late_interaction_score"] = round(maxsim, 4)
+        if maxsim is not None:
+            r["late_interaction_score"] = round(maxsim, 4)
 
     # Re-sort candidates by blended score
     candidates.sort(key=lambda x: x.get("relevance", 0), reverse=True)

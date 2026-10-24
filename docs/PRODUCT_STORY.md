@@ -1,6 +1,8 @@
 # Cerid AI — Product Story
 
-> **Last reviewed:** 2026-10-17 (public offering: this repository is what is offered, and cerid.ai does not sell a subscription. The five primitives, the TrustScore's six components and targets, and the brief cadence are unchanged. The published eval numbers are in `docs/EVAL_BASELINES_PUBLIC.md`. Still true from the 2026-10-08 walk: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, and forgetting is named alongside accumulating).
+> Historical product narrative. The memory contract is [`MEMORY.md`](MEMORY.md): material accumulates, stays checked, and can be forgotten. The five headings below stay so the drift gate can see them.
+
+> **Last reviewed:** 2026-10-08 (walked against the code at 1.0.10: the five primitives, the TrustScore's six components and targets, and the brief cadence hold. Corrected: knowledge packs ship no pre-computed wiki snapshots, the local mode runs on whatever local server the host has, the job list lives under Settings → Diagnostics, the internal release-driver link is gone from this public document, and forgetting is named alongside accumulating).
 > **Canonical narrative.** Drift gate: `scripts/lint-product-story.py`
 > asserts this file exists, has a `## Last reviewed:` line within 90 days
 > of the most recent release tag, and references the five primitives.
@@ -13,10 +15,6 @@ Cerid is the only personal knowledge companion that **accumulates verified
 understanding** as you feed it — with every contradiction in your corpus,
 every entity Cerid has learned about, every concept it synthesizes —
 visible to you on a page you can read.
-
-This repository is the public offering. You run it yourself. cerid.ai does
-not sell a subscription and does not issue a license key. A note about the
-work goes to hello@cerid.ai.
 
 Self-hosted. Privacy-first. Your data stores stay local; what leaves the
 machine is only what you send to your chosen LLM provider — chat/query
@@ -58,18 +56,15 @@ posture as a number 0–100 with six disclosed components:
 - **Retrieval quality** (IR NDCG@10 vs baseline; re-measured on pushes
   that touch retrieval paths, with a weekly backstop)
 - **Memory recall** (LongMemEval harness runs recorded in
-  [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md), target ≥ 0.80)
+  `docs/EVAL_BASELINES.md`, target ≥ 0.80)
 - **Verification coverage** (rolling 7 d, ≥ 95 %)
 - **Preservation health** (last `main` CI, all gates passing)
 - **User agreement** (rolling 7 d of feedback ratings, target ≥ 0.80)
 
 The score is the straight mean of the normalized components. No learned
 weights. No proprietary formula. Honesty over cleverness. Hover discloses
-the components; click opens a modal with sparklines and explainers.
-The app names `docs/EVAL_BASELINES.md` and `docs/PRESERVATION.md` on those
-links. Those two files are not in this repository. The published numbers are
-in [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md), and the
-preservation invariants are the tests in `src/mcp/tests/integration/`.
+the components; click opens a modal with sparklines and explainers
+cross-linking to `docs/EVAL_BASELINES.md` and `docs/PRESERVATION.md`.
 
 The TrustScore is **not a verification gate** — it does not affect
 retrieval, generation, or any model decision. It is pure presentation,
@@ -147,17 +142,16 @@ shows its updating state in real time.
 - **Contradiction log** is the historical record of how understanding shifted.
 - **Background Processor** is the engine that keeps all of the above current.
 
-That is one offering, not five features.
+That is one product, not five features.
 
 ## What Cerid is not
 
 - A queryable RAG-as-a-service. (It is a companion you live with.)
 - A visual agent builder. (That's Dify's strength; Cerid's strength is
   verification depth.)
-- A hosted SaaS. (Self-host is the offering.)
-- A store. (No subscription, no trial for sale, and no license key from the site.)
+- A hosted SaaS. (Self-host is the product. Privacy is the moat.)
 - A marketing site with a chat widget. (The widget exists, but it's a
-  surface, not the offering.)
+  surface, not the product.)
 
 ## How features earn their place
 
@@ -176,7 +170,7 @@ their candidate task driver until the answers sharpen.
 
 ## Product demo (public)
 
-The tour on [cerid.ai/#demo](https://cerid.ai/#demo) is a 90s cut and a 30s cut of this story:
+The marketing site hosts a live-product sizzle that mirrors this story:
 
 - Claim verification with **refutation** (not only green checks)
 - Constellation explore & drill-down (not a static still)
@@ -184,11 +178,12 @@ The tour on [cerid.ai/#demo](https://cerid.ai/#demo) is a 90s cut and a 30s cut 
 - Disclosed TrustScore methodology
 - Local artifact stores + sources
 
-The marketing site hosts the tour. This repository does not carry the video pipeline.
+Watch: [cerid.ai/#demo](https://cerid.ai/#demo) (90s tour · 30s sizzle).  
+Rebuild pipeline lives under `docs/assets/demo-video/` in the monorepo working tree (local asset pipeline; not required to run Core).
 
 ## See also
 
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — layered system architecture
-- `src/mcp/tests/integration/` — preservation invariants (marker `preservation`)
-- [`docs/EVAL_BASELINES_PUBLIC.md`](EVAL_BASELINES_PUBLIC.md) — published eval numbers
+- [`docs/PRESERVATION.md`](PRESERVATION.md) — capability invariants
+- [`docs/EVAL_BASELINES.md`](EVAL_BASELINES.md) — retrieval-quality regression ledger
 - [`docs/BACKGROUND_JOBS.md`](BACKGROUND_JOBS.md) — operator guide to the processor

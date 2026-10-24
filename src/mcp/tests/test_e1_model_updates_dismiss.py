@@ -79,8 +79,8 @@ async def test_compute_stamps_stable_ids(monkeypatch):
 
     monkeypatch.setattr(m, "fetch_openrouter_catalog", _catalog)
     monkeypatch.setattr(m, "catalog_ids", lambda _c: ["new-model"])
-    monkeypatch.setattr(mc, "resolve_assignments", lambda cur, ids, hardware_profile="": {"classifier": "new-model"})
-    monkeypatch.setattr(m, "resolve_assignments", lambda cur, ids, hardware_profile="": {"classifier": "new-model"})
+    monkeypatch.setattr(mc, "resolve_assignments", lambda cur, ids, hardware_profile="", created=None: {"classifier": "new-model"})
+    monkeypatch.setattr(m, "resolve_assignments", lambda cur, ids, hardware_profile="", created=None: {"classifier": "new-model"})
 
     result = await m._compute_model_updates()
     assert result["updates"] == [

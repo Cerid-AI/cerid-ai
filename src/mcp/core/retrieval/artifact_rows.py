@@ -16,15 +16,44 @@ an ``artifact_id`` key of its own.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
+from core.retrieval.chunk_ids import ChunkIdAssigner
 from core.retrieval.hype_index import hype_collection_name
 from core.utils.swallowed import log_swallowed_error
 
-# The verified-claim promotion path writes one document per ``:Memory`` node at
-# this id, with ``artifact_id`` set to the memory id. It has no ``:Artifact``
-# node by design (see VerifiedMemoryAdapter in app/services/forget/adapters.py).
-VERIFIED_MEMORY_PREFIX = "verified_memory_"
+# A verified-claim memory is a ``:Memory`` node with one recall document whose
+# ``artifact_id`` is the memory id and whose id is ``{memory_id}_{h16}``, like
+# every other row (forget spec §6.3). It has no ``:Artifact`` node by design
+# (see VerifiedMemoryAdapter in app/services/forget/adapters.py). Documents
+# written before had the id ``verified_memory_{memory_id}``; that form survives
+# only in old sync exports and until the boot migration re-keys it.
+LEGACY_VERIFIED_MEMORY_PREFIX = "verified_memory_"
+VERIFIED_MEMORY_SOURCE = "verification"
+
+# A verified memory is a general-knowledge claim kept for verification, not
+# something the person told us, so general retrieval leaves it out unless the
+# caller names the conversations domain (ruling D3, F113). Every one carries
+# the marker, the legacy-id form included; ``$ne`` keeps rows without the key.
+NOT_VERIFIED_MEMORY_WHERE: dict[str, Any] = {"memory_source_type": {"$ne": VERIFIED_MEMORY_SOURCE}}
+
+
+def verified_memory_id(text: str) -> str:
+    """A verified memory's id, from its claim: the same claim promoted on two
+    machines is one memory, and a forgotten claim keeps its forgotten id."""
+    return hashlib.sha256(("verified_memory\0" + " ".join(text.split()).lower()).encode("utf-8")).hexdigest()
+
+
+def verified_memory_row_id(memory_id: str, text: str) -> str:
+    return ChunkIdAssigner(memory_id).assign(None, text)
+
+
+def is_verified_memory_row(row_id: str, meta: dict[str, Any] | None) -> bool:
+    """A verified memory's recall document, in either id form."""
+    return str(row_id).startswith(LEGACY_VERIFIED_MEMORY_PREFIX) or (
+        (meta or {}).get("memory_source_type") == VERIFIED_MEMORY_SOURCE
+    )
 
 
 def artifact_row_ids(collection: Any, artifact_id: str, *, key: str = "artifact_id") -> list[str]:

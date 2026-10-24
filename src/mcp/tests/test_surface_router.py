@@ -36,10 +36,32 @@ class TestRoutingFindingsFixed:
         intent, _, _ = classify_intent(query)
         assert intent == "relational", f"{query!r} → {intent}"
 
+    @pytest.mark.parametrize("query", [
+        "what is a neural network",
+        "what is a graph database",
+        "Which VLAN is assigned to IoT devices on my home network?",
+    ])
+    def test_graph_vocabulary_as_a_topic_is_not_relational(self, query):
+        # F68: a bare "network"/"graph" matched the relational pattern, and
+        # relational is checked before compiled_summary, so definitional
+        # questions about those topics went graph-first instead of wiki-first.
+        intent, _, _ = classify_intent(query)
+        assert intent != "relational", f"{query!r} → {intent}"
+
+    @pytest.mark.parametrize("query", [
+        "who are the neighbors of Acme Corp",
+        "which services are adjacent to the auth gateway",
+        "show the graph around OpenAI",
+    ])
+    def test_graph_vocabulary_in_a_relational_phrase_is_relational(self, query):
+        intent, _, _ = classify_intent(query)
+        assert intent == "relational", f"{query!r} → {intent}"
+
     def test_plain_what_is_still_compiled_summary(self):
         # The fixes must not over-capture: a plain definitional query is unchanged.
         assert classify_intent("what is photosynthesis")[0] == "compiled_summary"
         assert classify_intent("what is my budget")[0] == "compiled_summary"  # 'budget' not a personal noun
+        assert route("what is a neural network").primary == "wiki"
 
 # ---------------------------------------------------------------------------
 # Intent classification (regex pass)

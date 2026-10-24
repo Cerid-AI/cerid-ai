@@ -177,6 +177,31 @@ def _sparse_remove(ctx: _Ctx) -> int:
         return 0
 
 
+def _indexed_ids(module: Any, domain: str) -> set[str]:
+    """The chunk ids a bm25/sparse domain index holds (its maintained id set)."""
+    idx = module.get_index(domain)
+    id_set = getattr(idx, "_doc_id_set", None)
+    if id_set is None:
+        doc_ids = getattr(idx, "_doc_ids", None)
+        id_set = set(doc_ids) if doc_ids is not None else set()
+    return set(id_set)
+
+
+def clear_lexical_domain(domain: str, chunk_ids: list[str]) -> dict[str, int]:
+    """Drop every chunk of ``domain`` from the BM25 and SPLADE indexes: the ids
+    the vector store held plus any the lexical index holds on its own. Clearing a
+    domain dropped its Chroma collection and left this text searchable (audit F148)."""
+    removed: dict[str, int] = {}
+    for name, module in (("bm25", bm25), ("sparse", sparse_index)):
+        try:
+            ids = set(chunk_ids) | _indexed_ids(module, domain)
+            removed[name] = module.remove_chunks(domain, sorted(ids)) if ids else 0
+        except Exception as exc:  # noqa: BLE001 — one index failing must not stop the other
+            log_swallowed_error(f"content_lifecycle.clear_lexical_domain.{name}", exc)
+            removed[name] = 0
+    return removed
+
+
 def _lexical_residual(module: Any, ctx: _Ctx) -> int:
     """Count chunk_ids still indexed in a bm25/sparse domain index. Best-effort:
     reads the index's doc-id set (the public surface is add/remove/search, so a

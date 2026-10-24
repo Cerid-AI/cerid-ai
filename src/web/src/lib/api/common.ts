@@ -103,21 +103,3 @@ export interface ParsedError {
   isCreditExhausted: boolean
   isRateLimit: boolean
 }
-
-/** Parse CeridError structured response — handles both new and legacy error formats. */
-export async function parseStructuredError(res: Response, fallback: string): Promise<ParsedError> {
-  try {
-    const body = await res.json()
-    const code: string = body.error_code ?? ""
-    return {
-      message: body.message ?? body.detail ?? fallback,
-      error_code: code || undefined,
-      details: body.details ?? undefined,
-      isFeatureGate: code.startsWith("FEATURE_GATE_"),
-      isCreditExhausted: code.startsWith("PROVIDER_CREDIT_"),
-      isRateLimit: code.startsWith("PROVIDER_RATE_"),
-    }
-  } catch {
-    return { message: fallback, isFeatureGate: false, isCreditExhausted: false, isRateLimit: false }
-  }
-}

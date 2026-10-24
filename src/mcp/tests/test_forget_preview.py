@@ -17,8 +17,9 @@ VERIFIED = "11111111-2222-3333-4444-555555555555"
 
 
 class _Graph:
-    def __init__(self, derived, verified_ids, verified_rows, facts):
+    def __init__(self, derived, verified_ids, verified_rows, facts, uploads=()):
         self.derived, self.verified_ids, self.verified_rows, self.facts = derived, verified_ids, verified_rows, facts
+        self.uploads = list(uploads)
         self.fact_aids: list[str] = []
 
     def __enter__(self):
@@ -29,10 +30,12 @@ class _Graph:
 
     def run(self, query, **params):
         result = MagicMock()
-        if "-[:EXTRACTED_FROM]->(:Conversation {id: $cid})" in query:
-            rows = self.derived
-        elif "VERIFIED_BY" in query:
+        if "VERIFIED_BY" in query:
             rows = [{"id": i} for i in self.verified_ids]
+        elif "-[:EXTRACTED_FROM]->(:Conversation {id: $cid})" in query:
+            rows = self.derived
+        elif "-[u:UPLOADED_IN]->(:Conversation {id: $cid})" in query:
+            rows = self.uploads
         elif "m.id IN $ids" in query:
             rows = [r for r in self.verified_rows if r["id"] in params["ids"]]
         elif "[:FACT]->(f:Fact)" in query:
@@ -92,7 +95,7 @@ def test_preview_groups_derived_checked_and_cited_unchecked(world):
     pv = preview_conversation("c-1")
     assert pv["title"] == "Tax questions"
     assert [g["key"] for g in pv["groups"]] == [
-        "transcripts", "memories", "summary", "verified_memories", "cited_documents",
+        "transcripts", "memories", "summary", "verified_memories", "uploads", "cited_documents",
     ]
     assert _group(pv, "transcripts")["default"] == "always"
     memories = _group(pv, "memories")
@@ -166,3 +169,46 @@ def test_conversations_forgotten_together_do_not_share_with_each_other(world):
     pv = preview_conversation("c-1", forgetting=frozenset({"c-1", "c-2"}))
     shared = next(i for i in _group(pv, "memories")["items"] if i["id"] == MEM_SHARED)
     assert shared["shared_with"] == 0 and "default" not in shared
+
+
+def test_files_uploaded_in_the_chat_are_offered_and_leave_the_cited_group(world):
+    """Spec §6.6: a file dropped in the chat is offered, checked; one also
+    uploaded in another live chat, or already in the knowledge base before this
+    chat, is offered unchecked; an upload the chat also cited shows once."""
+    from app.services.forget.preview import preview_conversation
+
+    _reg, graph = world
+    fresh, shared, existing = "f" * 64, "s" * 64, "e" * 64
+    graph.uploads = [
+        {"id": fresh, "filename": "notes.pdf", "existing": False, "others": []},
+        {"id": shared, "filename": "plan.docx", "existing": False, "others": ["c-2"]},
+        {"id": existing, "filename": "old.txt", "existing": True, "others": []},
+        {"id": KB, "filename": "report.pdf", "existing": False, "others": []},
+    ]
+    preview = preview_conversation("c-1")
+    uploads = {i["id"]: i for i in _group(preview, "uploads")["items"]}
+    assert _group(preview, "uploads")["default"] == "checked"
+    assert "default" not in uploads[fresh]
+    assert uploads[shared]["default"] == "unchecked" and uploads[shared]["shared_with"] == 1
+    assert uploads[existing]["default"] == "unchecked" and uploads[existing]["existing"] is True
+    assert KB in uploads and KB not in {i["id"] for i in _group(preview, "cited_documents")["items"]}
+
+
+def test_a_forgotten_upload_is_not_offered_again(world):
+    from app.services.forget.preview import preview_conversation
+
+    reg, graph = world
+    gone = "g" * 64
+    graph.uploads = [{"id": gone, "filename": "x.pdf", "existing": False, "others": []}]
+    reg.append([Entry("fg_x", Subject("artifact", gone), "trashed", "2026-10-09T00:00:00Z", "m1", "ui")])
+    assert _group(preview_conversation("c-1"), "uploads")["items"] == []
+
+
+def test_a_verified_memory_another_chat_also_backs_is_offered_unchecked(world):
+    """One claim is one memory (§6.3), so another live chat may back it too."""
+    from app.services.forget.preview import preview_conversation
+
+    _reg, graph = world
+    graph.verified_rows = [{"id": VERIFIED, "text": "The 2025 limit is $23,500.", "others": ["c-1", "c-2"]}]
+    (item,) = _group(preview_conversation("c-1"), "verified_memories")["items"]
+    assert item["default"] == "unchecked" and item["shared_with"] == 1

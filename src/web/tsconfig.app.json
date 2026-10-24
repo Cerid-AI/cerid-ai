@@ -33,6 +33,7 @@
   // tsconfig.node.json (node types) instead of the browser-typed app project.
   "exclude": [
     "src/__tests__/docker-entrypoint.test.ts",
+    "src/__tests__/encryption-env-contract.test.ts",
     "src/__tests__/setup-response-contract.test.ts"
   ]
 }

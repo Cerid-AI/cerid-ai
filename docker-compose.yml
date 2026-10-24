@@ -195,7 +195,7 @@ services:
   rspamd:
     container_name: cerid-rspamd
     logging: *default-logging
-    image: rspamd/rspamd:4.2.1-0
+    image: rspamd/rspamd:4.2.2-0
     volumes:
       - ./stacks/rspamd/local.d:/etc/rspamd/local.d:ro
       - rspamd-data:/var/lib/rspamd
@@ -274,6 +274,11 @@ services:
       # a "cached" badge that vanished on the next --force-recreate. Named
       # volume so the download survives container recreates.
       - whisper-models:/home/cerid/.cerid/models/whisper
+      # The ONNX reranker and the in-process embedder fallback live in the
+      # HuggingFace cache. In the image layer they were lost on every rebuild,
+      # so the fallback embedder (~550 MB for nomic) had to download at the
+      # moment the model server stalled — too late to stand in for it.
+      - hf-cache:/home/cerid/.cache/huggingface
       # Read-only view of the Neo4j store files so /system/storage can
       # measure them; neo4j:community has no procedure that reports store
       # size without APOC Extended.
@@ -321,14 +326,14 @@ services:
       - CERID_BACKFILL_ENRICHMENT_ENABLED=${CERID_BACKFILL_ENRICHMENT_ENABLED:-false}
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
-      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Snowflake/snowflake-arctic-embed-m-v1.5}
       - SEMANTIC_CACHE_DIM=768
       - SENTRY_DSN=${SENTRY_DSN_MCP}
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
       - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
       - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
       - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-openrouter}
-      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-6-luna}
       # MCP SSE advertises this host:port in its `endpoint` event. The
       # default in app/routers/mcp_sse.py is the Docker-internal hostname
       # `ai-companion-mcp:8888`, which works container-to-container but
@@ -511,7 +516,7 @@ services:
     # (sha256:b36af7984b87191b595bc5301418ed6432c047668a4547ab531a7439b816fac3),
     # so this changes what is GUARANTEED, not what runs. Dependabot now watches
     # this directory and will propose the next one.
-    image: searxng/searxng:2026.9.16-f725cc793
+    image: searxng/searxng:2026.10.17-decdfa6f7
     profiles: ["searxng"]
     ports:
       - "127.0.0.1:${CERID_PORT_SEARXNG:-8080}:8080"
@@ -562,4 +567,5 @@ networks:
 volumes:
   ollama-data:
   whisper-models:
+  hf-cache:
   rspamd-data:

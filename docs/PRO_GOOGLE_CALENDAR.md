@@ -1,5 +1,7 @@
 # Pro Connector — Google Calendar
 
+> Connector notes. The product tier around them is historical. Stamps use `config/taxonomy.py` (domain `calendar`, sub_category from the event).
+
 ## What this connector does
 
 The Google Calendar Pro connector pulls events from your Google Calendar

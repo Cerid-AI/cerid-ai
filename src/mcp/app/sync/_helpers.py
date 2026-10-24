@@ -32,6 +32,9 @@ MEMORY_EDGES_JSONL = "memory_edges.jsonl"
 ENTITIES_JSONL = "entities.jsonl"
 ENTITY_EDGES_JSONL = "entity_edges.jsonl"
 FACTS_JSONL = "facts.jsonl"
+#: Artifact → Conversation provenance: memories (EXTRACTED_FROM) and chat uploads (UPLOADED_IN).
+CONVERSATION_EDGES_JSONL = "conversation_edges.jsonl"
+CONVERSATION_EDGE_TYPES = ("EXTRACTED_FROM", "UPLOADED_IN")
 
 #: A version's place in its lineage (forget phase 5, spec §7). Synced with
 #: every artifact so machines agree on which version is current; an absent

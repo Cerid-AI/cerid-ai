@@ -92,3 +92,41 @@ class TestDegradedEnvelopeCaching:
             )
         assert res.status_code == 200, res.text
         mock_set.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("rejected", "cached"), [(4, True), (0, False)])
+    async def test_an_empty_answer_is_cached_only_when_the_reranker_rejected_rows(
+        self, client, rejected, cached,
+    ):
+        """Nothing the cross-encoder accepted is an answer; an empty retrieval
+        with nothing rejected is still the transient miss AF-101 refuses."""
+        with (
+            patch(
+                "core.agents.query_agent.agent_query",
+                new=AsyncMock(return_value=_envelope(rerank_rejected=rejected)),
+            ),
+            patch("utils.query_cache.get_cached", return_value=None),
+            patch("utils.query_cache.set_cached") as mock_set,
+        ):
+            res = client.post("/agent/query", json={"query": "slo-warm-stable"})
+        assert res.status_code == 200, res.text
+        assert mock_set.called is cached
+
+    @pytest.mark.asyncio
+    async def test_an_answer_with_a_failed_domain_is_not_cached(self, client):
+        """A transient domain failure would otherwise be served for the TTL."""
+        with (
+            patch(
+                "core.agents.query_agent.agent_query",
+                new=AsyncMock(return_value=_envelope(
+                    sources=[{"artifact_id": "a1", "content": "x", "relevance": 0.9}],
+                    total_results=1, domains_failed=["finance"],
+                )),
+            ),
+            patch("utils.query_cache.get_cached", return_value=None),
+            patch("utils.query_cache.set_cached") as mock_set,
+        ):
+            res = client.post("/agent/query", json={"query": "anything", "use_reranking": False})
+        assert res.status_code == 200, res.text
+        mock_set.assert_not_called()
+

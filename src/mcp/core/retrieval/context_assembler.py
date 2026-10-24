@@ -7,6 +7,11 @@
 2. Greedy set-cover weighted by relevance
 3. Coherence padding with complementary chunks
 
+``max_chars`` bounds the whole returned context: each block is charged with its
+source header, history note and separator, not just its content. A block that
+does not fit the remaining budget is skipped and smaller ones are still
+considered, the same packing rule ``assemble_context`` follows.
+
 Returns coverage metadata (facets_total, facets_covered, coverage_ratio).
 """
 from __future__ import annotations
@@ -23,6 +28,8 @@ logger = logging.getLogger("ai-companion.context_assembler")
 
 # Minimum meaningful facet length
 _MIN_FACET_LENGTH = 8
+
+_BLOCK_SEPARATOR = "\n\n---\n\n"
 
 
 def extract_facets(query: str) -> list[str]:
@@ -71,6 +78,13 @@ def _facet_coverage(doc_terms_set: frozenset[str], facet_terms_set: frozenset[st
     return overlap / len(facet_terms_set)
 
 
+def _render_block(r: dict[str, Any]) -> str:
+    """The text one result contributes to the context."""
+    header = f"[Source: {r.get('filename', 'unknown')} | Domain: {r.get('domain', 'unknown')}]"
+    note = history_note(r)
+    return f"{header}\n{r.get('content', '')}" + (f"\n{note}" if note else "")
+
+
 def intelligent_assemble(
     results: list[dict[str, Any]],
     query: str,
@@ -96,6 +110,13 @@ def intelligent_assemble(
     char_count = 0
     remaining = set(range(len(results)))
 
+    # Charge each block as it will appear in the context: header, content,
+    # history note, and the separator joining it to the previous block.
+    blocks = [_render_block(r) for r in results]
+
+    def _cost(idx: int) -> int:
+        return len(blocks[idx]) + (len(_BLOCK_SEPARATOR) if selected_indices else 0)
+
     # Pass 1: Greedy set-cover — pick docs that cover uncovered facets
     for _ in range(len(results)):
         if not remaining or char_count >= max_chars:
@@ -105,8 +126,7 @@ def intelligent_assemble(
         best_score = -1.0
 
         for idx in remaining:
-            content_len = len(results[idx].get("content", ""))
-            if char_count + content_len > max_chars:
+            if char_count + _cost(idx) > max_chars:
                 continue
 
             # Score: weighted sum of uncovered facet coverage * relevance
@@ -126,9 +146,9 @@ def intelligent_assemble(
         if best_idx < 0:
             break
 
+        char_count += _cost(best_idx)
         selected_indices.append(best_idx)
         remaining.discard(best_idx)
-        char_count += len(results[best_idx].get("content", ""))
 
         # Update facet coverage
         for fi, ft in enumerate(facet_term_sets):
@@ -139,11 +159,11 @@ def intelligent_assemble(
 
     # Pass 2: Coherence padding — fill remaining budget with highest-relevance docs
     for idx in sorted(remaining, key=lambda i: results[i].get("relevance", 0), reverse=True):
-        content_len = len(results[idx].get("content", ""))
-        if char_count + content_len > max_chars:
+        cost = _cost(idx)
+        if char_count + cost > max_chars:
             continue
         selected_indices.append(idx)
-        char_count += content_len
+        char_count += cost
         # Update facet coverage
         for fi, ft in enumerate(facet_term_sets):
             if not facets_covered[fi]:
@@ -151,15 +171,7 @@ def intelligent_assemble(
                 if cov >= 0.3:
                     facets_covered[fi] = True
 
-    # Build context
-    parts: list[str] = []
-    sources: list[dict[str, Any]] = []
-    for idx in selected_indices:
-        r = results[idx]
-        header = f"[Source: {r.get('filename', 'unknown')} | Domain: {r.get('domain', 'unknown')}]"
-        note = history_note(r)
-        parts.append(f"{header}\n{r.get('content', '')}" + (f"\n{note}" if note else ""))
-        sources.append(r)
+    sources = [results[idx] for idx in selected_indices]
 
     covered_count = sum(1 for c in facets_covered if c)
     coverage_metadata = {
@@ -169,5 +181,5 @@ def intelligent_assemble(
         "facets": facets,
     }
 
-    context = "\n\n---\n\n".join(parts)
+    context = _BLOCK_SEPARATOR.join(blocks[idx] for idx in selected_indices)
     return context, sources, coverage_metadata

@@ -103,7 +103,38 @@ def _install(monkeypatch, *, level: int | None) -> tuple[_Spy, _Spy]:
     monkeypatch.setattr("core.agents.query_agent.agent_query_full", query_spy)
     monkeypatch.setattr("core.agents.query_agent.agent_query", query_spy)
     monkeypatch.setattr("core.agents.memory.recall_memories", recall_spy)
+    # Verification reads the KB through its own doors (the lightweight hybrid
+    # query, the user-memory lookup) and web search re-reads it through Self-RAG.
+    monkeypatch.setattr("core.agents.query_agent.lightweight_kb_query", recall_spy)
+    monkeypatch.setattr("core.agents.hallucination.verification._query_memories", recall_spy)
+    monkeypatch.setattr("core.agents.self_rag.self_rag_enhance", recall_spy)
     return query_spy, recall_spy
+
+
+_CLAIM = "The Eiffel Tower is 330 metres tall."
+
+
+def _cheap_verification(monkeypatch) -> None:
+    """One extracted claim, and no cloud: the verifier reaches its KB doors
+    (or does not) without a model or a network round-trip."""
+    async def one_claim(*_a, **_k):
+        return [_CLAIM], "test"
+
+    monkeypatch.setattr("core.agents.hallucination.streaming.extract_claims", one_claim)
+    monkeypatch.setattr("config.ALLOW_CLOUD_EGRESS_WHEN_LOCAL", False)
+
+
+def _one_web_result(monkeypatch) -> None:
+    class _Provider:
+        name = "fake"
+
+        async def search(self, query, max_results=5):
+            from utils.web_search import WebSearchResult
+
+            return [WebSearchResult(title="t", url="https://example.com", snippet="c", score=0.9)]
+
+    monkeypatch.setattr("utils.web_search.get_search_provider", lambda: _Provider())
+    monkeypatch.setattr("utils.web_search._check_rate_limit", lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +178,50 @@ async def _drive_a2a_recall(**_):
 async def _drive_memory_recall(**_):
     from app.routers.agents import MemoryRecallRequest, memory_recall_endpoint
 
-    await memory_recall_endpoint(MemoryRecallRequest(query="q"))
+    await memory_recall_endpoint(MemoryRecallRequest(query="q"), _FakeRequest())
+
+
+async def _drive_rest_verify(monkeypatch=None, **_):
+    _cheap_verification(monkeypatch)
+    from app.routers.agents import HallucinationCheckRequest, hallucination_check_endpoint
+
+    await hallucination_check_endpoint(
+        HallucinationCheckRequest(response_text=_CLAIM, conversation_id="c-l2", persist=False), _FakeRequest(),
+    )
+
+
+async def _drive_a2a_verify(monkeypatch=None, **_):
+    _cheap_verification(monkeypatch)
+    from app.routers.a2a import _execute_verification
+
+    await _execute_verification({"response_text": _CLAIM, "conversation_id": "c-l2"})
+
+
+async def _drive_mcp_verify(monkeypatch=None, **_):
+    _cheap_verification(monkeypatch)
+    from app.tools import _dispatch_raw
+
+    await _dispatch_raw("pkb_check_hallucinations", {"response_text": _CLAIM, "conversation_id": "c-l2"})
+
+
+async def _drive_a2a_web_search(monkeypatch=None, **_):
+    _one_web_result(monkeypatch)
+    from app.routers.a2a import _execute_web_search
+
+    await _execute_web_search({"query": "q"})
+
+
+async def _drive_mcp_web_search(monkeypatch=None, **_):
+    _one_web_result(monkeypatch)
+    from app.tools import _dispatch_raw
+
+    await _dispatch_raw("pkb_web_search", {"query": "q"})
+
+
+async def _drive_mcp_recall(**_):
+    from app.tools import _dispatch_raw
+
+    await _dispatch_raw("pkb_memory_recall", {"query": "q"})
 
 
 async def _drive_custom_agents(monkeypatch=None, **_):
@@ -168,6 +242,12 @@ _L2_DRIVERS = {
     "a2a_query": _drive_a2a_query,
     "a2a_recall": _drive_a2a_recall,
     "memory_recall": _drive_memory_recall,
+    "mcp_recall": _drive_mcp_recall,
+    "rest_verify": _drive_rest_verify,
+    "a2a_verify": _drive_a2a_verify,
+    "mcp_verify": _drive_mcp_verify,
+    "a2a_web_search": _drive_a2a_web_search,
+    "mcp_web_search": _drive_mcp_web_search,
     "custom_agents": _drive_custom_agents,
 }
 
@@ -182,10 +262,7 @@ _L2_DRIVERS = {
 # test is a live preservation gate — a regression that drops the gate on any
 # transport fails the merge.
 @pytest.mark.preservation
-@pytest.mark.parametrize(
-    "transport",
-    ["canonical", "legacy", "mcp", "a2a_query", "a2a_recall", "memory_recall", "custom_agents"],
-)
+@pytest.mark.parametrize("transport", sorted(_L2_DRIVERS))
 async def test_private_mode_l2_blocks_kb_on_every_transport(transport, monkeypatch):
     """At global Private-Mode L2 ("skip KB"), NO transport may reach KB
     retrieval — the web client applies this locally, and a direct API/MCP/A2A

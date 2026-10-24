@@ -15,7 +15,6 @@ const { ConversationGoneError } = vi.hoisted(() => {
 
 vi.mock("@/lib/api", () => ({
   syncConversation: vi.fn().mockResolvedValue(undefined),
-  syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
   fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),

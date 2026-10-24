@@ -190,13 +190,18 @@ async def parallel_retrieve(
         retrieve_fn: Async function(query, **kwargs) -> list[dict].
         **kwargs: Additional arguments passed to retrieve_fn.
 
-    Returns merged results with sub_query_source provenance tagging.
+    Returns merged results with sub_query_source provenance tagging. Raises
+    the first error when every sub-query failed: that is a failed retrieval,
+    not an empty knowledge base, and the caller answers the question whole.
     """
     if len(sub_queries) <= 1:
         return await retrieve_fn(sub_queries[0], **kwargs)
 
     tasks = [retrieve_fn(sq, **kwargs) for sq in sub_queries]
     all_results = await asyncio.gather(*tasks, return_exceptions=True)
+    failures = [r for r in all_results if isinstance(r, BaseException)]
+    if len(failures) == len(all_results):
+        raise failures[0]
 
     merged: list[dict[str, Any]] = []
     for i, result in enumerate(all_results):

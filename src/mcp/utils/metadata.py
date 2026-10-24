@@ -195,7 +195,7 @@ def _normalize_tags(tags: list[str], domain: str, max_freeform: int = 3) -> list
     """
     import difflib
 
-    vocab = [v.strip().lower() for v in config.TAG_VOCABULARY.get(domain, []) if v.strip()]
+    vocab = [v.strip().lower() for v in config.vocabulary_for(domain) if v.strip()]
     vocab_set = set(vocab)
 
     kept: list[str] = []

@@ -30,6 +30,7 @@ from pydantic import BaseModel
 import config
 from app.routers.models import DEFAULT_ASSIGNMENTS, _current_assignments
 from app.services.private_mode import strip_injected_context
+from core.routing.egress import EgressRefused
 from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.chat")
@@ -210,6 +211,10 @@ def _model_family(model_id: str) -> str:
 
 def _pick_fallback(failed_model: str) -> str | None:
     """Pick the first fallback model from a different provider family."""
+    from core.routing.egress import cloud_egress_refused
+
+    if cloud_egress_refused():
+        return None  # the pool is all cloud models
     failed_family = _model_family(failed_model)
     for candidate in CHAT_FALLBACK_POOL:
         if _model_family(candidate) != failed_family:
@@ -276,16 +281,13 @@ def _resolve_chat_dispatch(bare_model: str, openrouter_key: str) -> tuple[str, s
     daemon's OpenAI-compatible ``/v1/chat/completions`` so GUI chat works without
     OpenRouter (Tier A air-gap path). Otherwise: OpenRouter base + key.
     """
+    from core.routing.egress import require_cloud_egress
     from core.routing.provider_state import (
         byok_target,
         is_local_provider,
         local_backend_url,
         ollama_enabled,
     )
-
-    target = byok_target(bare_model)
-    if target is not None:
-        return target.base_url, target.api_key, target.model, target.wire
 
     send_model = bare_model.removeprefix("ollama/")
     local_ready = is_local_provider() or ollama_enabled()
@@ -294,7 +296,14 @@ def _resolve_chat_dispatch(bare_model: str, openrouter_key: str) -> tuple[str, s
         # Ollama + quenchforge expose OpenAI-compatible completions under /v1.
         return f"{base}/v1", "local", send_model, "openai"  # pragma: allowlist secret — Bearer sentinel, not a real key
 
-    return OPENROUTER_BASE, openrouter_key, bare_model, "openai"
+    require_cloud_egress(f"chat with {bare_model}")
+    target = byok_target(bare_model)
+    if target is not None:
+        return target.base_url, target.api_key, target.model, target.wire
+
+    from core.routing.model_catalog import current_model_id
+
+    return OPENROUTER_BASE, openrouter_key, current_model_id(bare_model), "openai"
 
 
 async def _resolve_api_key(request: Request) -> str:
@@ -988,6 +997,10 @@ async def _proxy_stream(
     except (asyncio.CancelledError, GeneratorExit):
         logger.info("chat proxy_stream cancelled — propagating")
         raise
+    except EgressRefused as exc:
+        err = json.dumps({"error": {"code": 403, "message": str(exc), "type": "egress_refused"}})
+        yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
+        return
     except Exception as exc:
         log_swallowed_error("app.routers.chat.stream", exc)
         friendly = f"Model provider connection failed ({type(exc).__name__}). Try again."

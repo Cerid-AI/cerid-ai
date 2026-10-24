@@ -1,5 +1,7 @@
 # Pro — Advanced Analytics
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 Settings → Diagnostics → Analytics surfaces four visualizations on top
 of the operational telemetry Cerid already collects. Two are visible
 at the community tier; two are Pro-tier.

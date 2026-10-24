@@ -3,14 +3,14 @@ pytest-asyncio
 httpx
 pytest-cov
 respx
-mypy>=2.3.1
+mypy>=2.4.0
 types-redis
 import-linter
 pytest-benchmark>=5.3.0,<6
 # Workstream E Phase 2b.5 — generates synthetic PDFs in test fixtures
 # (the runtime PDF parser is pdfplumber, already in requirements.txt;
 # reportlab only writes test files and never ships in production).
-reportlab>=4.5.1,<5
+reportlab>=5.0.1,<6
 # Phase 3a — in-process Redis fake for processor queue tests
 fakeredis>=2.36.2,<3
 # ReDoS audit (DUO138). The CI `security` job runs this, but nothing local did,

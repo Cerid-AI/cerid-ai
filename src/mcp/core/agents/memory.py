@@ -27,7 +27,7 @@ from core.context.identity import with_tenant_scope
 from core.forget.read_filter import visible
 from core.lineage.current import CANDIDATE_OVERFETCH, is_current_memory, version_fields
 from core.lineage.history import attach_history
-from core.retrieval.artifact_rows import VERIFIED_MEMORY_PREFIX
+from core.retrieval.artifact_rows import NOT_VERIFIED_MEMORY_WHERE, is_verified_memory_row
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
@@ -60,6 +60,19 @@ def set_entity_extraction_enqueue(fn: Callable[[str], None] | None) -> None:
     """
     global _entity_extraction_enqueue
     _entity_extraction_enqueue = fn
+
+
+# Stored preferences, decisions and project context are also offered to the
+# operator record as candidates. The build that has the record installs the
+# callback at startup; it receives memory_type, summary, content,
+# conversation_id and artifact_id. A refused or failed offer never loses the memory.
+OPERATOR_RECORD_TYPES = frozenset({"preference", "decision", "project_context"})
+_operator_record_propose: Callable[[dict[str, str]], None] | None = None
+
+
+def set_operator_record_propose(fn: Callable[[dict[str, str]], None] | None) -> None:
+    global _operator_record_propose
+    _operator_record_propose = fn
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -549,7 +562,8 @@ async def extract_and_store_memories(
                             session.run(
                                 "MATCH (m:Artifact {id: $memory_id}) "
                                 "MERGE (c:Conversation {id: $convo_id}) "
-                                "MERGE (m)-[:EXTRACTED_FROM]->(c)",
+                                "MERGE (m)-[:EXTRACTED_FROM]->(c) "
+                                "SET m.conversation_id = coalesce(m.conversation_id, $convo_id)",
                                 memory_id=new_artifact_id,
                                 convo_id=conversation_id,
                             )
@@ -569,6 +583,26 @@ async def extract_and_store_memories(
                     except Exception as exc:  # noqa: BLE001 — observability boundary
                         log_swallowed_error(
                             "core.agents.memory.entity_extraction_enqueue",
+                            exc,
+                            redis_client=redis_client,
+                        )
+
+                if (
+                    new_artifact_id
+                    and _operator_record_propose is not None
+                    and mem["memory_type"] in OPERATOR_RECORD_TYPES
+                ):
+                    try:
+                        await asyncio.to_thread(_operator_record_propose, {
+                            "memory_type": mem["memory_type"],
+                            "summary": mem["summary"],
+                            "content": effective_content,
+                            "conversation_id": conversation_id,
+                            "artifact_id": new_artifact_id,
+                        })
+                    except Exception as exc:  # noqa: BLE001 — the memory is stored; the candidate is optional
+                        log_swallowed_error(
+                            "core.agents.memory.operator_record_propose",
                             exc,
                             redis_client=redis_client,
                         )
@@ -893,8 +927,13 @@ async def recall_memories(
     top_k: int = 10,
     min_score: float | None = None,
     as_of: str | None = None,
+    include_verified: bool = False,
 ) -> list[dict]:
     """Context-aware memory retrieval with decay scoring.
+
+    Verified memories (general-knowledge claims promoted by verification) are
+    left out unless ``include_verified``: they answer unrelated questions at
+    0.7-0.9 and crowd out the person's own memories.
 
     1. Vector search for relevant memories
     2. Apply decay/reinforcement scoring to each result
@@ -919,7 +958,7 @@ async def recall_memories(
             query_texts=[query],
             n_results=top_k * 3,  # over-fetch to compensate for decay filtering
             include=["documents", "metadatas", "distances"],
-            where=with_tenant_scope(None),
+            where=with_tenant_scope(None if include_verified else dict(NOT_VERIFIED_MEMORY_WHERE)),
         )
     except Exception as e:
         log_swallowed_error('core.agents.memory', e)
@@ -1006,7 +1045,7 @@ async def recall_memories(
                 "chunk_id": chunk_id,
                 # How the forget engine names this memory: a verified memory
                 # is a :Memory node, any other is an artifact.
-                "forget_kind": "memory" if str(chunk_id).startswith(VERIFIED_MEMORY_PREFIX) else "artifact",
+                "forget_kind": "memory" if is_verified_memory_row(str(chunk_id), metadata) else "artifact",
                 "text": results["documents"][0][i] if results["documents"] else "",
                 "base_similarity": round(base_similarity, 4),
                 "adjusted_score": round(adjusted_score, 4),

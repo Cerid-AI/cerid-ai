@@ -97,10 +97,11 @@ class _FakeCollection:
 
     def query(
         self,
-        query_texts: list[str],
         n_results: int,
         include: list[str],
         where: dict[str, Any] | None = None,
+        query_texts: list[str] | None = None,
+        query_embeddings: list[list[float]] | None = None,
     ) -> dict[str, Any]:
         # Return child rows in deterministic insertion order, filtered by
         # where, capped to n_results.  Distance is monotonically increasing

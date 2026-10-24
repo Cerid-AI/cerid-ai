@@ -320,6 +320,15 @@ class TestCRAGQualityGate:
 # ===========================================================================
 
 
+def _driver_without_memories() -> MagicMock:
+    """A graph holding no Memory yet: the existing-memory check counts 0."""
+    session = MagicMock()
+    session.run.return_value.single.return_value = {"n": 0}
+    driver = MagicMock()
+    driver.session.return_value.__enter__.return_value = session
+    return driver
+
+
 class TestVerifiedMemoryPromotion:
     """Verified facts should be promoted to empirical Memory nodes."""
 
@@ -336,9 +345,7 @@ class TestVerifiedMemoryPromotion:
         }
         mock_chroma = MagicMock()
         mock_chroma.get_or_create_collection.return_value = MagicMock()
-        mock_neo4j = MagicMock()
-        mock_neo4j.session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_neo4j.session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_neo4j = _driver_without_memories()
 
         mock_create = MagicMock(return_value="mem-001")
 
@@ -466,13 +473,13 @@ class TestVerifiedMemoryPromotion:
         async def drive():
             with patch("core.agents.memory.detect_memory_conflict", side_effect=slow_detect):
                 t1 = asyncio.create_task(promote_verified_facts(
-                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                    report, MagicMock(), _driver_without_memories(), create_memory_fn=counting_create,
                 ))
                 # Yield so t1 enters the critical section
                 await asyncio.sleep(0)
                 await asyncio.sleep(0)
                 t2 = asyncio.create_task(promote_verified_facts(
-                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                    report, MagicMock(), _driver_without_memories(), create_memory_fn=counting_create,
                 ))
                 # Yield so t2 reaches the lock and blocks
                 await asyncio.sleep(0)
@@ -784,7 +791,9 @@ class TestAuthoritativeVerification:
                 "aspirin molecular weight", registry=mock_reg,
             ))
         assert result["authoritative_sources"] == []
-        assert "No authoritative sources" in result["evidence_summary"]
+        # A failed query is reported as a failure, not as "no results".
+        assert result["query_error"] == "Exception"
+        assert "query failed" in result["evidence_summary"]
 
     def test_nli_calls_use_async_batched_scorer(self):
         """Both NLI call sites (per-source entailment + KB-vs-external
@@ -811,6 +820,10 @@ class TestAuthoritativeVerification:
             patch("config.EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True),
             patch("core.utils.nli.nli_score_async", side_effect=fake_async),
             patch("core.utils.nli.nli_score", sync_mock),
+            # "180.16" reads as a datapoint, so the claim goes out as a local
+            # public-fact rewrite; supply one so the registry is reached.
+            patch("core.utils.internal_llm.call_internal_llm",
+                  new=AsyncMock(return_value="aspirin molecular weight")),
         ):
             result = _run(verify_claim_authoritatively(
                 "Aspirin has a molecular weight of 180.16 g/mol",

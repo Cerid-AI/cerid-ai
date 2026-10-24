@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import config
 from app.services.forget import engine as forget_engine
 from app.services.private_mode import private_blocks
+from app.services.verification_reports import absorb_embedded_reports
 from app.sync.user_state import (
     list_conversation_ids,
     read_conversation,
@@ -137,7 +138,11 @@ def save_conversation(body: dict[str, Any]):
         # any extra key here would be silently stripped on the wire — the
         # None value alone is the skip signal (mirrors the bulk endpoint).
         return {"saved": None}
-    write_conversation(sd, body)
+    stored = absorb_embedded_reports(body)
+    # Moving reports takes graph round trips; a forget that landed meanwhile wins.
+    if _forgotten(body["id"]):
+        raise HTTPException(status_code=410, detail="conversation forgotten")
+    write_conversation(sd, stored)
     return {"saved": body["id"]}
 
 
@@ -156,9 +161,16 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
     gone = [c["id"] for c in body if _forgotten(c["id"])]
     skip = set(gone)
     rest = [c for c in body if c["id"] not in skip]
+    saved = 0
     for conv in rest:
-        write_conversation(sd, conv)
-    return {"saved": len(rest), "gone": gone}
+        stored = absorb_embedded_reports(conv)
+        # Moving reports takes graph round trips; a forget that landed meanwhile wins.
+        if _forgotten(conv["id"]):
+            gone.append(conv["id"])
+            continue
+        write_conversation(sd, stored)
+        saved += 1
+    return {"saved": saved, "gone": gone}
 
 
 @router.delete("/conversations/{conv_id}", response_model=RemoveConversationResponse)

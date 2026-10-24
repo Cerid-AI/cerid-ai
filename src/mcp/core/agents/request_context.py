@@ -28,6 +28,10 @@ from dataclasses import dataclass
 PRIVATE_MODE_SKIP_KB_LEVEL = 2
 
 
+class ConsumerScopeRestricted(PermissionError):
+    """The consumer's scope does not reach the surface it asked for (a 403, never an empty 200)."""
+
+
 @dataclass(frozen=True)
 class RequestContext:
     """Immutable snapshot of the policy a single request must be evaluated under.
@@ -55,6 +59,15 @@ class RequestContext:
     def blocks_kb(self) -> bool:
         """True when Private Mode forbids KB/memory retrieval for this request."""
         return self.private_level >= PRIVATE_MODE_SKIP_KB_LEVEL
+
+    @property
+    def allows_memory(self) -> bool:
+        """Memory is the owner's data: a strict scope reaches it only by naming ``conversations``."""
+        return not (
+            self.strict_domains
+            and self.allowed_domains is not None
+            and "conversations" not in self.allowed_domains
+        )
 
     def allowed_domains_list(self) -> list[str] | None:
         return list(self.allowed_domains) if self.allowed_domains is not None else None

@@ -147,8 +147,8 @@ class TestSaveVerificationReport:
         )
 
         assert report_id  # Should still succeed
-        # Only the MERGE call, no VERIFIED relationship calls
-        verified_calls = [c for c in session.run.call_args_list if "VERIFIED" in str(c)]
+        # No VERIFIED relationship is written
+        verified_calls = [c for c in session.run.call_args_list if "MERGE (r)-[:VERIFIED]" in str(c)]
         assert len(verified_calls) == 0
 
     def test_stores_claims_as_json_string(self, mock_neo4j):
@@ -243,9 +243,9 @@ class TestGetVerificationReport:
 
         result = get_verification_report(driver, "c1")
         expected_keys = {
-            "report_id", "conversation_id", "claims",
+            "report_id", "conversation_id", "message_id", "claims",
             "overall_score", "verified", "agreed", "unverified",
-            "uncertain", "total", "created_at",
+            "uncertain", "total", "created_at", "edge_status",
         }
         assert expected_keys == set(result.keys())
 
@@ -394,3 +394,4 @@ class TestVerificationTelemetryHook:
             driver, "conv-broken-redis", claims, 0.9, verified=1, total=1,
         )
         assert report_id  # save still succeeded despite the broken Redis
+

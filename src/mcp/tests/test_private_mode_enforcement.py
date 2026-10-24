@@ -23,6 +23,7 @@ for the full contract.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -334,7 +335,7 @@ class TestVerifyStreamEndpointVerifiedMemoryGating:
             req = agents.VerifyStreamRequest(
                 response_text="x" * 300, conversation_id="conv-l1",
             )
-            resp = await agents.verify_stream_endpoint(req)
+            resp = await agents.verify_stream_endpoint(req, SimpleNamespace(headers={}))
             async for _ in resp.body_iterator:
                 pass
 
@@ -355,7 +356,7 @@ class TestVerifyStreamEndpointVerifiedMemoryGating:
             req = agents.VerifyStreamRequest(
                 response_text="x" * 300, conversation_id="conv-l0",
             )
-            resp = await agents.verify_stream_endpoint(req)
+            resp = await agents.verify_stream_endpoint(req, SimpleNamespace(headers={}))
             async for _ in resp.body_iterator:
                 pass
 

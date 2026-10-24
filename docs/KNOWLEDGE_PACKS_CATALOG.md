@@ -1,5 +1,7 @@
 # Knowledge Packs Catalog
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 > Curator-published, optional baseline corpora for the Cerid AI personal
 > knowledge companion. The repo ships **slim** — none of these packs are
 > bundled in the install. Operators opt into specific packs through the

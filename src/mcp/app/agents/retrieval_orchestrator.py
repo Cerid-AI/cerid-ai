@@ -17,6 +17,7 @@ import asyncio
 import logging
 from typing import Any
 
+import config
 from config.constants import (
     EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT,
     EXTERNAL_SOURCE_QUERY_TIMEOUT,
@@ -27,6 +28,7 @@ from config.settings import (
     MEMORY_RECALL_TIMEOUT_MS,
     MEMORY_RECALL_TOP_K,
 )
+from core.agents.crag import crag_wants_external, judge_external
 from core.models.external_evidence import ExternalEvidence
 from errors import RetrievalError
 
@@ -76,6 +78,10 @@ async def guarded_orchestrated_query(
 
     if request_context.blocks_kb:
         return kb_bypassed_envelope()
+    # Memory is the owner's data: a strict scope that leaves out conversations
+    # gets none, the wall /agent/query and guarded recall hold memory behind.
+    if not request_context.allows_memory:
+        context_sources = {**(context_sources or {}), "memory": False}
 
     return await orchestrated_query(
         query=query,
@@ -197,32 +203,38 @@ async def orchestrated_query(
         min_score=memory_min_score,
         timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
         as_of=kwargs.get("as_of"),
+        # Verified memories only when the caller names the conversations
+        # domain, as on the KB side (ruling D3).
+        include_verified="conversations" in (domains or []),
     )) if _mem_on else None
 
-    external_task = asyncio.create_task(_query_external_sources(
-        query=query,
-        domain=domains[0] if domains else None,
-        timeout=EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT,
-    )) if _ext_on else None
-
     # Gather only enabled tasks
-    _tasks = [t for t in (kb_task, memory_task, external_task) if t is not None]
+    _tasks = [t for t in (kb_task, memory_task) if t is not None]
     _raw = await asyncio.gather(*_tasks, return_exceptions=True) if _tasks else []
     _raw_iter = iter(_raw)
 
     _empty_kb: dict[str, Any] = {"results": [], "context": "", "strategy": "disabled"}
     kb_result: Any = next(_raw_iter) if kb_task else _empty_kb
     memory_results: Any = next(_raw_iter) if memory_task else []
-    external_results: Any = next(_raw_iter) if external_task else []
 
     timings["parallel_kb_memory_ms"] = round(
         (_time.monotonic() - parallel_start) * 1000, 1,
     )
 
-    # Handle KB exceptions
-    if isinstance(kb_result, (RetrievalError, ValueError, OSError, RuntimeError,
-                              AttributeError, TypeError, KeyError)):
-        logger.error("KB query failed: %s", kb_result)
+    # gather(return_exceptions=True) hands back a cancellation or interpreter
+    # exit as a value; those are not retrieval failures to degrade around.
+    for _r in _raw:
+        if isinstance(_r, BaseException) and not isinstance(_r, Exception):
+            raise _r
+
+    # A failed KB search still lets memory and the web answer, but the envelope
+    # says so the way agent_query does for a failed domain: degraded_reason for
+    # the user, domains_failed so the result cache does not keep it.
+    if isinstance(kb_result, Exception):
+        from core.utils.swallowed import log_swallowed_error
+        from utils.domain_privacy import owner_domains
+
+        log_swallowed_error("app.agents.retrieval_orchestrator.kb_query", kb_result)
         # Minimal error envelope — flatten rebuild below fills sources/confidence.
         kb_result = {
             "results": [],
@@ -232,18 +244,26 @@ async def orchestrated_query(
             "total_results": 0,
             "strategy": "error",
             "error": str(kb_result),
+            "domains_searched": [],
+            "domains_failed": list(domains or kwargs.get("allowed_domains") or owner_domains()),
+            "retrieval_degraded": True,
+            "degraded_reason": "The knowledge-base search failed — results may be missing.",
         }
-    elif isinstance(kb_result, BaseException):
-        logger.error("KB query failed with unexpected error: %s", kb_result)
-        kb_result = {
-            "results": [],
-            "sources": [],
-            "context": "",
-            "confidence": 0.0,
-            "total_results": 0,
-            "strategy": "error",
-            "error": str(kb_result),
-        }
+
+    # External sources answer to the same CRAG gate as manual mode, decided on
+    # the KB result: they ran in parallel and unconditionally here, so smart
+    # mode sent every question to the web, greetings and answerable ones
+    # included (14/14 answerable, 6/6 greetings on the live probe). With the KB
+    # off there is no KB to correct, and the gate fires as before.
+    external_results: Any = []
+    if _ext_on and crag_wants_external(
+        kb_result, query, getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.6),
+    ):
+        external_results = await _query_external_sources(
+            query=query,
+            domain=domains[0] if domains else None,
+            timeout=EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT,
+        )
 
     # Handle memory exceptions
     if isinstance(memory_results, BaseException):
@@ -266,21 +286,27 @@ async def orchestrated_query(
             kb_sources.append(r)
 
     # Normalize real external results to match frontend ExternalSourceResult shape.
-    # External sources use hardcoded confidence (not semantic similarity), so
-    # discount them to prevent book-metadata noise from outranking KB results.
+    # A source's confidence is a constant, not a match to the question: it is
+    # discounted, then the reranker scores the rows the way it scored the KB's.
+    fetched = []
     for raw in external_results:
         ev = ExternalEvidence.from_mapping(raw)
         rel = ev.relevance if ev.relevance is not None else 0.0
-        external_sources.append({
+        fetched.append({
             "content": ev.content,
             "relevance": round(rel * EXTERNAL_SOURCE_RELEVANCE_DISCOUNT, 3),
             "source_url": ev.url,
             "source_name": ev.source_name or ev.title,
+            "guid": ev.guid or "",
+            "filename": ev.source_name,
+            "domain": "external",
             "source_type": "external",
             # RAG Phase 1.1 — best-effort provenance date (None when the
             # external connector result carries no publish/fetch timestamp).
             "created_at": raw.get("created_at") or raw.get("published_at"),
         })
+    accepted = await judge_external(query, fetched)
+    external_sources.extend(accepted)
 
     timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
 
@@ -311,6 +337,19 @@ async def orchestrated_query(
             kb_sources, memory_sources, external_sources, source_config,
         )
 
+    # top_k caps what is returned, as agent_query_full caps the manual path:
+    # the KB result here is agent_query's, uncapped (a gui query with top_k 10
+    # came back with 71 rows). Ranked first so memory and web rows compete for
+    # the budget instead of queueing behind every KB row.
+    if top_k > 0:
+        kept = {id(r) for r in sorted(
+            [*kb_sources, *memory_sources, *external_sources],
+            key=lambda r: float(r.get("relevance") or 0.0), reverse=True,
+        )[:top_k]}
+        kb_sources = [r for r in kb_sources if id(r) in kept]
+        memory_sources = [r for r in memory_sources if id(r) in kept]
+        external_sources = [r for r in external_sources if id(r) in kept]
+
     # Build source_breakdown
     source_breakdown = {
         "kb": kb_sources,
@@ -320,6 +359,7 @@ async def orchestrated_query(
 
     # Enrich the base result with orchestrator data
     kb_result["source_breakdown"] = source_breakdown
+    kb_result["rerank_rejected"] = int(kb_result.get("rerank_rejected") or 0) + len(fetched) - len(accepted)
     kb_result["rag_mode"] = rag_mode
     kb_result["_timings"] = timings
 
@@ -336,7 +376,7 @@ async def orchestrated_query(
     kb_result["total_results"] = len(flat_pool)
     _relevances = [s.get("relevance", 0.0) for s in flat_pool]
     kb_result["confidence"] = (
-        round(sum(_relevances) / len(_relevances), 4) if _relevances else 0.0
+        round(min(1.0, max(0.0, sum(_relevances) / len(_relevances))), 4) if _relevances else 0.0
     )
 
     # Append memory context to the assembled context string
@@ -376,21 +416,27 @@ async def _query_external_sources(
     Returns empty list on any failure — external sources must never block
     the main KB retrieval pipeline.
     """
+    from core.agents.external_query import external_query_for
+
+    # A personal question goes out only as a public-fact rewrite, or not at all.
+    outgoing = await external_query_for(query)
+    if outgoing is None:
+        return []
     try:
         from app.data_sources import registry
         from utils.metadata import _extract_keywords_simple
 
         # Extract keywords — external APIs need search terms, not full questions
-        keywords = _extract_keywords_simple(query, max_keywords=5)
-        search_terms = " ".join(keywords) if keywords else query
-        logger.debug("External source search terms: %r → %r", query, search_terms)
+        keywords = _extract_keywords_simple(outgoing, max_keywords=5)
+        search_terms = " ".join(keywords) if keywords else outgoing
+        logger.debug("External source search terms: %r → %r", outgoing, search_terms)
 
         return await asyncio.wait_for(
             registry.query_all(
                 search_terms,
                 domain=domain,
                 timeout=timeout,
-                raw_query=query,
+                raw_query=outgoing,
                 keywords=keywords,
             ),
             timeout=timeout + 1.0,  # outer guard above per-source timeout
@@ -411,6 +457,7 @@ async def _recall_with_timeout(
     min_score: float,
     timeout_ms: int,
     as_of: str | None = None,
+    include_verified: bool = False,
 ) -> list[dict]:
     """Run memory recall with a hard timeout, returning empty on failure."""
     try:
@@ -424,6 +471,7 @@ async def _recall_with_timeout(
                 top_k=top_k,
                 min_score=min_score,
                 as_of=as_of,
+                include_verified=include_verified,
             ),
             timeout=timeout_ms / 1000.0,
         )

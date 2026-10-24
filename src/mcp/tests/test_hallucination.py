@@ -2756,9 +2756,8 @@ class TestGrokInVerificationPool:
     """Test Grok is in the verification model pool."""
 
     def test_grok_in_pool(self):
-        # grok-4.1-fast was removed from the OpenRouter catalog; the pool now
-        # carries the current grok (4.3) for cross-family verification diversity.
-        assert "openrouter/x-ai/grok-4.3" in config.VERIFICATION_MODEL_POOL
+        # The pool carries the current grok for cross-family verification diversity.
+        assert any(m.startswith("openrouter/x-ai/grok-") for m in config.VERIFICATION_MODEL_POOL)
 
     def test_pool_has_three_families(self):
         families = set()

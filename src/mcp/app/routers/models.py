@@ -16,11 +16,13 @@ from pydantic import BaseModel, Field
 
 from config.providers import PROVIDER_REGISTRY
 from core.routing.model_catalog import (
+    catalog_created,
     catalog_ids,
     diff_assignments,
     fetch_openrouter_catalog,
     resolve_assignments,
     resolve_latest,
+    save_catalog_snapshot,
 )
 
 
@@ -61,16 +63,16 @@ _ROUTING_TIERS_OVERLAY_PATH = Path(
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_ASSIGNMENTS: dict[str, str] = {
-    "coding": "anthropic/claude-sonnet-4.6",
-    "research": "x-ai/grok-4.3",
-    "simple": "google/gemini-2.5-flash",
-    "general": "anthropic/claude-sonnet-4.6",
-    "classifier": "meta-llama/llama-3.3-70b-instruct",
-    "verification": "x-ai/grok-4.3",
+    "coding": "anthropic/claude-sonnet-5.5",
+    "research": "x-ai/grok-4.7",
+    "simple": "google/gemini-3.8-flash",
+    "general": "anthropic/claude-sonnet-5.5",
+    "classifier": "meta-llama/llama-4-maverick",
+    "verification": "x-ai/grok-4.7",
     # Retired upstream (404) as of 2026-08-27 — see config/settings.py
     # CATEGORIZE_MODELS for the full note.
-    "categorization": "openai/gpt-4o-mini",
-    "synopsis": "openai/gpt-4o-mini",
+    "categorization": "openai/gpt-6-luna",
+    "synopsis": "openai/gpt-6-luna",
 }
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
@@ -232,11 +234,15 @@ async def _compute_model_updates() -> dict:
     import config as _settings  # module-level `config` is shadowed by a param elsewhere
 
     current = _current_assignments()
-    ids = catalog_ids(await fetch_openrouter_catalog())
+    catalog = await fetch_openrouter_catalog()
+    save_catalog_snapshot(catalog)
+    ids, created = catalog_ids(catalog), catalog_created(catalog)
     # Hardware-compatibility guard: the auto-update never adopts a model the
     # active platform can't run (e.g. a Metal-crash model on amd-mac).
     profile = getattr(_settings, "CERID_HARDWARE_PROFILE", "")
-    resolved = resolve_assignments(current, ids, hardware_profile=profile) if ids else dict(current)
+    resolved = (
+        resolve_assignments(current, ids, hardware_profile=profile, created=created) if ids else dict(current)
+    )
     updates = diff_assignments(current, resolved)
     # E1 CR-075: stamp each update with a stable id so a dismissal pins the
     # target — a later, newer target for the same role surfaces as a fresh
@@ -251,15 +257,18 @@ async def _compute_model_updates() -> dict:
         "catalog_size": len(ids),
         "resolved": resolved,
         "catalog_ids": ids,
+        "catalog_created": created,
     }
 
 
-def _refresh_routing_tiers_overlay(catalog_ids_list: list[str]) -> list[dict[str, str]]:
+def _refresh_routing_tiers_overlay(
+    catalog_ids_list: list[str], created: dict[str, float] | None = None
+) -> list[dict[str, str]]:
     """Resolve every smart-router tier id through the catalog and persist the
     ``{original_id: resolved_id}`` overlay the router reads.
 
-    Conservative semantics match the role pass: ``resolve_latest`` only upgrades
-    dotted-version ids within the same family (never cross-series). Only changed
+    Conservative semantics match the role pass: ``resolve_latest`` only moves an
+    id to a newer release of the same family (or a renamed line's successor). Only changed
     ids are written into the map (identity entries are omitted to keep it small;
     the router treats a missing key as identity). Empty catalog → no write.
     Returns the per-id diff rows ``{id, from, to}`` for logging. Fail soft: any
@@ -273,7 +282,7 @@ def _refresh_routing_tiers_overlay(catalog_ids_list: list[str]) -> list[dict[str
     overlay: dict[str, str] = {}
     diff: list[dict[str, str]] = []
     for src in tier_source_ids():
-        resolved = resolve_latest(src, catalog_ids_list)
+        resolved = resolve_latest(src, catalog_ids_list, created)
         if resolved != src:
             overlay[src] = resolved
             diff.append({"id": src, "from": src, "to": resolved})
@@ -304,7 +313,7 @@ async def apply_latest_assignments() -> dict:
     # Tier-overlay refresh runs every pass, independent of the role diff: the
     # smart-router tier tables upgrade on their own cadence, so an empty role
     # diff must NOT skip the tier refresh.
-    tier_diff = _refresh_routing_tiers_overlay(result.get("catalog_ids", []))
+    tier_diff = _refresh_routing_tiers_overlay(result.get("catalog_ids", []), result.get("catalog_created"))
 
     if not applied:
         return {
@@ -361,6 +370,7 @@ async def list_model_updates():
     """Latest in-family model updates available per role (live OpenRouter check)."""
     result = await _compute_model_updates()
     result.pop("resolved", None)
+    result.pop("catalog_created", None)
     visible = _drop_dismissed(result["updates"])
     result["updates"] = visible
     result["new"] = visible

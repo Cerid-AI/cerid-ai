@@ -70,11 +70,13 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
       role="listitem"
     >
       <button
-        aria-label="Claim verified by 1 source"
+        aria-label="Claim independently verified by 1 source"
         class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
         data-slot="hover-card-trigger"
         data-state="closed"
         data-verification-band="verified"
+        data-verified-basis="independent"
+        title="Supported by a source this answer was not drawn from: another document in your knowledge base, or the web."
         type="button"
       >
         <span
@@ -102,7 +104,7 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
               d="m9 11 3 3L22 4"
             />
           </svg>
-          Verified by 1 source
+          Independently verified · 1 source
         </span>
       </button>
     </div>
@@ -204,11 +206,13 @@ exports[`VerifiedResponse — settled state, verified claim > snapshot matches v
       role="listitem"
     >
       <button
-        aria-label="Claim verified by 1 source"
+        aria-label="Claim independently verified by 1 source"
         class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
         data-slot="hover-card-trigger"
         data-state="closed"
         data-verification-band="verified"
+        data-verified-basis="independent"
+        title="Supported by a source this answer was not drawn from: another document in your knowledge base, or the web."
         type="button"
       >
         <span
@@ -236,7 +240,7 @@ exports[`VerifiedResponse — settled state, verified claim > snapshot matches v
               d="m9 11 3 3L22 4"
             />
           </svg>
-          Verified by 1 source
+          Independently verified · 1 source
         </span>
       </button>
     </div>

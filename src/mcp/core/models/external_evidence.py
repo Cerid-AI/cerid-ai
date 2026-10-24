@@ -91,7 +91,7 @@ class ExternalEvidence:
     published_date: str | None = None
     nli_entailment: float | None = None  # NLI prob — separate scale from relevance
     nli_contradiction: float | None = None
-    guid: str | None = None  # ingest provenance, when present
+    guid: str | None = None  # stable row identity (DataSourceResult.guid, ingest provenance)
 
     @classmethod
     def from_mapping(

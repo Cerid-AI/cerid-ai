@@ -50,6 +50,19 @@ def _doc_with_all_primitives(reviewed: str = REVIEWED_TODAY) -> str:
     )
 
 
+def test_the_memory_contract_is_outside_collect_issues() -> None:
+    assert _LINT.memory_contract_issue("no sentence here") is not None
+    assert _LINT.memory_contract_issue(
+        "Material accumulates, stays checked, and can be forgotten."
+    ) is None
+    issues = _LINT.collect_issues(
+        _doc_with_all_primitives(),
+        max_age_days=90,
+        today=date.fromisoformat(REVIEWED_TODAY),
+    )
+    assert issues == []
+
+
 def test_clean_doc_returns_no_issues() -> None:
     text = _doc_with_all_primitives()
     today = date.fromisoformat(REVIEWED_TODAY)

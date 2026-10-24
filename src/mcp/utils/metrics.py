@@ -52,6 +52,18 @@ METRIC_NAMES = frozenset({
 
 # Model pricing table (USD per 1M tokens) --input/output
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
+    # Catalog-refreshed 2026-10-10 (the defaults since then).
+    "openai/gpt-6-luna": (0.10, 0.50),
+    "openai/gpt-6-luna-pro": (0.10, 0.50),
+    "openai/gpt-6.1-sol": (2.0, 10.0),
+    "anthropic/claude-haiku-5.5": (0.10, 0.50),
+    "anthropic/claude-sonnet-5.5": (2.0, 10.0),
+    "anthropic/claude-opus-5.5": (4.0, 20.0),
+    "x-ai/grok-4.7": (2.0, 6.0),
+    "google/gemini-3.8-flash": (0.75, 3.75),
+    "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "meta-llama/llama-4-maverick": (0.188, 0.652),
+    "meta-llama/llama-4-scout": (0.10, 0.30),
     "anthropic/claude-sonnet-4.6": (3.0, 15.0),
     "anthropic/claude-opus-4.6": (5.0, 25.0),
     "x-ai/grok-4.3": (1.25, 2.50),

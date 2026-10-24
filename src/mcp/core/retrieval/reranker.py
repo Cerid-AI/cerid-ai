@@ -225,6 +225,7 @@ def rerank(
 
     for result, ce_score in zip(candidates, ce_scores):
         original = result["relevance"]
+        result["rerank_score"] = round(float(ce_score), 4)
         blended = (
             config.RERANK_CE_WEIGHT * ce_score
             + config.RERANK_ORIGINAL_WEIGHT * original
@@ -237,7 +238,15 @@ def rerank(
         result["relevance"] = round(blended, 4)
 
     candidates.sort(key=lambda x: x["relevance"], reverse=True)
-    # Append cascade-dropped candidates after the cross-encoded survivors so
-    # they remain visible to downstream consumers (preserves recall) but
-    # land below anything that earned a cross-encoder score.
+    # Rows the cross-encoder did not score (past QUERY_RERANK_CANDIDATES, or
+    # cascade-dropped) are blended as if it had scored them 0. Left on the raw
+    # retrieval scale, a later sort lifted them above every candidate the
+    # cross-encoder rejected, and an unvetted tail row became the top answer.
+    for result in low_signal + remainder:
+        blended = config.RERANK_ORIGINAL_WEIGHT * result["relevance"]
+        if result.get("pack_id"):
+            blended *= config.PACK_RELEVANCE_WEIGHT
+        result["relevance"] = round(blended, 4)
+    # Append them after the cross-encoded survivors so they remain visible to
+    # downstream consumers (preserves recall).
     return candidates + low_signal + remainder

@@ -21,6 +21,8 @@ from app.sync._helpers import (
     BM25_SUBDIR,
     CHROMA_BATCH_SIZE,
     CHROMA_SUBDIR,
+    CONVERSATION_EDGE_TYPES,
+    CONVERSATION_EDGES_JSONL,
     DOMAINS_JSONL,
     ENTITIES_JSONL,
     ENTITY_EDGES_JSONL,
@@ -399,6 +401,27 @@ def export_memories(driver, sync_dir: str | None = None) -> dict[str, Any]:
     }
 
 
+def export_conversation_edges(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """Export which conversation each memory came from and each chat upload was
+    dropped in, so another machine's delete dialog can offer them too."""
+    sync_dir = sync_dir or _default_sync_dir()
+    out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
+    edges: list[dict[str, Any]] = []
+    try:
+        with driver.session() as session:
+            for record in session.run(
+                "MATCH (a:Artifact)-[r]->(c:Conversation) WHERE type(r) IN $types "
+                "RETURN a.id AS source_id, type(r) AS rel_type, c.id AS target_id, properties(r) AS props",
+                types=list(CONVERSATION_EDGE_TYPES),
+            ):
+                edges.append(dict(record))
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.export.conversation_edges', exc)
+        return {"error": str(exc), "conversation_edges": 0}
+    return {"conversation_edges": _write_jsonl(str(out_dir / CONVERSATION_EDGES_JSONL), edges)}
+
+
 def export_facts(driver, sync_dir: str | None = None) -> dict[str, Any]:
     """Export :Fact versions with their subject and object entities to
     {sync_dir}/neo4j/facts.jsonl. Each fact names its source memory
@@ -554,6 +577,7 @@ def export_all(
     memories_result = export_memories(driver, sync_dir=sync_dir)
     entities_result = export_entities(driver, sync_dir=sync_dir)
     facts_result = export_facts(driver, sync_dir=sync_dir)
+    conversation_edges_result = export_conversation_edges(driver, sync_dir=sync_dir)
     conversations_result = export_conversations(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_exported": 0, "skipped": True}
@@ -587,6 +611,7 @@ def export_all(
         "memories": memories_result,
         "entities": entities_result,
         "facts": facts_result,
+        "conversation_edges": conversation_edges_result,
         "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,

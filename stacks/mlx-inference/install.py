@@ -44,7 +44,9 @@ HEAVY_MIN_GIB = 128
 DEFAULT_ALLOW = ("127.0.0.1", "::1", "192.168.5.1")
 O200K_URL = "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken"
 O200K_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"  # pragma: allowlist secret
-REFUSED = re.compile(r'^(\S+) "[A-Z]+ [^"]*" 403\b', re.M)
+# serve.py writes "<iso time> <peer> \"<request line>\" <status> …"; servers
+# before the 2026-10-10 access log wrote the same without the time.
+REFUSED = re.compile(r'^(?:\S+Z )?(\S+) "[A-Z]+ [^"]*" 403\b', re.M)
 
 
 def say(msg: str = "") -> None:

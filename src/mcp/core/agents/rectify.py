@@ -13,8 +13,8 @@ from typing import Any
 import config
 from core.context.identity import with_tenant_scope
 from core.retrieval.artifact_rows import (
-    VERIFIED_MEMORY_PREFIX,
     artifact_row_ids,
+    is_verified_memory_row,
     remove_artifact_hype_rows,
 )
 from core.retrieval.hype_index import hype_collection_name
@@ -189,9 +189,9 @@ def _orphan_rows(collection: Any, key: str, neo4j_ids: set[str]) -> list[dict[st
             break
         metadatas = batch.get("metadatas") or []
         for i, chunk_id in enumerate(batch_ids):
-            if chunk_id.startswith(VERIFIED_MEMORY_PREFIX):
-                continue
             meta = metadatas[i] if metadatas else {}
+            if is_verified_memory_row(chunk_id, meta):
+                continue
             artifact_id = meta.get(key, "")
             if artifact_id and artifact_id not in neo4j_ids:
                 orphans.append({

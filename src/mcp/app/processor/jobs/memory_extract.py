@@ -15,17 +15,19 @@ synchronous path was sized against cloud latency; on a local daemon it is
 >120s once per-memory consolidation and conflict-resolution are included). See
 :func:`core.agents.memory.extract_and_store_memories`.
 
-The full ``SDKMemoryExtractResponse`` envelope is returned in
-``JobResult.metadata['result']`` — the queue persists ``JobResult.metadata``
-onto the ``JobRecord`` on completion, so the SDK status endpoint surfaces it
-verbatim (observationally identical to the old RQ ``job.result``).
+Neither the caller's text nor the result is in the job record (forget spec
+§6.5): the record lives 14 days and holds ``text_key``. The text, and then the
+``SDKMemoryExtractResponse`` envelope (it carries each memory's summary), live
+in ``app.db.redis.turn_text`` under the conversation, where the status
+endpoint reads the result and a conversation forget erases both.
 
 Payload schema
 --------------
-  {"response_text": str, "conversation_id": str, "model": str}
+  {"text_key": str, "conversation_id": str, "model": str}
 """
 from __future__ import annotations
 
+import json
 import logging
 from decimal import Decimal
 
@@ -50,10 +52,8 @@ class MemoryExtractJob(BaseJob):
 
     job_type = "memory_extract"
 
-    def __init__(
-        self, response_text: str, conversation_id: str, model: str = ""
-    ) -> None:
-        self._response_text = response_text
+    def __init__(self, text_key: str, conversation_id: str, model: str = "") -> None:
+        self._text_key = text_key
         self._conversation_id = conversation_id
         self._model = model
 
@@ -79,22 +79,28 @@ class MemoryExtractJob(BaseJob):
         Errors are logged then re-raised so the worker records the failure and
         schedules a retry; retry logic lives in the worker, not here.
         """
-        await progress_cb(0.0)
-        logger.info(
-            "memory_extract.start conversation=%s text_len=%d",
-            self._conversation_id,
-            len(self._response_text or ""),
-        )
-
         # Lazy imports keep worker boot light and resolve the store singletons
         # inside the worker process (the request-side DI chain isn't available
         # here). ``app.agents.memory`` injects ingest_fn + observation_date.
         from app.agents.memory import extract_and_store_memories
+        from app.db.redis import turn_text
         from app.deps import get_chroma, get_neo4j, get_redis
+
+        await progress_cb(0.0)
+        response_text = turn_text.get(get_redis(), self._text_key).get("response_text")
+        if response_text is None:
+            # Forgotten or expired: there is nothing left to extract from.
+            return JobResult(
+                job_id="", actual_tokens_in=0, actual_tokens_out=0,
+                metadata={"conversation_id": self._conversation_id, "skipped": "text_gone"},
+            )
+        logger.info(
+            "memory_extract.start conversation=%s text_len=%d", self._conversation_id, len(response_text),
+        )
 
         try:
             envelope = await extract_and_store_memories(
-                response_text=self._response_text,
+                response_text=response_text,
                 conversation_id=self._conversation_id,
                 model=self._model,
                 chroma_client=get_chroma(),
@@ -118,9 +124,38 @@ class MemoryExtractJob(BaseJob):
             envelope.get("skipped_duplicates"),
         )
 
+        # A forget that landed while this ran erased the key; writing the
+        # result then would bring the summaries back.
+        from core.forget import registry as forget_registry
+
+        stored = not forget_registry.is_forgotten("conversation", self._conversation_id) and (
+            turn_text.replace_if_present(
+                get_redis(), self._text_key, {"result": json.dumps(envelope)}, drop=("response_text",),
+            )
+        )
         return JobResult(
             job_id="",  # filled in by the worker after dequeue
             actual_tokens_in=_EST_TOKENS_IN,
             actual_tokens_out=_EST_TOKENS_OUT,
-            metadata={"result": envelope},
+            metadata={"conversation_id": self._conversation_id, "result_stored": stored},
         )
+
+
+def stored_result(text_key: str) -> dict | None:
+    """The result envelope of a finished job, or None when it is gone."""
+    from app.db.redis import turn_text
+    from app.deps import get_redis
+
+    raw = turn_text.get(get_redis(), text_key).get("result")
+    return json.loads(raw) if raw else None
+
+
+def enqueue_payload(response_text: str, conversation_id: str, model: str = "") -> dict[str, str]:
+    """Store the caller's text under its conversation and return the job payload
+    that refers to it."""
+    from app.db.redis import turn_text
+    from app.deps import get_redis
+
+    key = turn_text.new_key(conversation_id)
+    turn_text.put(get_redis(), key, {"response_text": response_text})
+    return {"text_key": key, "conversation_id": conversation_id, "model": model}

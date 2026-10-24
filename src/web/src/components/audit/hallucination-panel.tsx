@@ -10,7 +10,7 @@ import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, External
 import { submitClaimFeedback, verifySingleClaim } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase, ActivityLogEntry } from "@/hooks/use-verification-stream"
-import { countPositiveVerdicts, reportPositiveCounts, getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
+import { countPositiveVerdicts, reportPositiveCounts, getClaimDisplayStatus, verifiedBasis, verifiedLabel, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
 import { UX_COPY } from "@/lib/ux-copy"
 import { cn } from "@/lib/utils"
 import { logSwallowedError } from "@/lib/log-swallowed"
@@ -87,6 +87,7 @@ function ClaimBadge({
   claim,
   index,
   conversationId,
+  messageId,
   focused,
   onFocus,
   onRetry,
@@ -97,6 +98,7 @@ function ClaimBadge({
   claim: HallucinationClaim
   index: number
   conversationId?: string
+  messageId?: string
   focused?: boolean
   onFocus?: (index: number | null) => void
   onRetry?: () => void
@@ -113,13 +115,14 @@ function ClaimBadge({
   const effectiveExpanded = expanded || focused
 
   const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, undefined, claim)
+  const statusLabel = displayStatus === "verified" ? verifiedLabel(claim) : displayStatus
 
   const handleFeedback = async (correct: boolean) => {
     if (!conversationId || feedback) return
     const value = correct ? "correct" : "incorrect"
     setFeedback(value as "correct" | "incorrect")
     try {
-      await submitClaimFeedback(conversationId, index, correct)
+      await submitClaimFeedback(conversationId, index, correct, messageId)
     } catch {
       setFeedback(null) // Revert on error
     }
@@ -152,14 +155,17 @@ function ClaimBadge({
         </span>
         {expertVerified ? (
           <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-label-xs px-1.5 py-0.5">
-            <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert · {displayStatus}</span>
+            <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert · {statusLabel}</span>
           </Badge>
         ) : (
           <Badge
             variant="outline"
             className={`text-label-xs ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
+            title={displayStatus === "verified"
+              ? (verifiedBasis(claim) === "kb" ? UX_COPY.verification.kbVerifiedExplained : UX_COPY.verification.independentlyVerifiedExplained)
+              : undefined}
           >
-            {displayStatus}
+            {statusLabel}
           </Badge>
         )}
         {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
@@ -396,6 +402,8 @@ interface HallucinationPanelProps {
   featureEnabled?: boolean
   /** Conversation ID for claim feedback. */
   conversationId?: string
+  /** The assistant message whose report is shown (feedback and retries go to it). */
+  messageId?: string
   /** Streaming claims for real-time display. */
   streamingClaims?: StreamingClaim[]
   /** Current verification pipeline phase. */
@@ -424,7 +432,7 @@ interface HallucinationPanelProps {
 
 export function HallucinationPanel({
   report, loading, featureEnabled = false,
-  conversationId, streamingClaims, verificationPhase, activityLog,
+  conversationId, messageId, streamingClaims, verificationPhase, activityLog,
   focusedClaimIndex, onClaimFocus, onClose,
   expertVerification, toggleExpertVerification,
   inlineMarkups, toggleInlineMarkups,
@@ -455,13 +463,13 @@ export function HallucinationPanel({
 
     setRetryingClaims((prev) => new Set(prev).add(index))
     try {
-      const result = await verifySingleClaim(claims[index].claim, conversationId, index)
+      const result = await verifySingleClaim(claims[index].claim, conversationId, index, messageId)
       if (result) {
         onClaimUpdate?.(index, result)
       }
     } catch (err) { logSwallowedError(err, "claim.verify.retry", { index }) }
     setRetryingClaims((prev) => { const next = new Set(prev); next.delete(index); return next })
-  }, [report?.claims, conversationId, onClaimUpdate])
+  }, [report?.claims, conversationId, messageId, onClaimUpdate])
 
   // Auto-scroll focused claim into view
   useEffect(() => {
@@ -706,6 +714,7 @@ export function HallucinationPanel({
                 claim={mergedClaim}
                 index={i}
                 conversationId={conversationId}
+                messageId={messageId}
                 focused={focusedClaimIndex === i}
                 onFocus={onClaimFocus}
                 onRetry={() => handleRetryClaim(i)}

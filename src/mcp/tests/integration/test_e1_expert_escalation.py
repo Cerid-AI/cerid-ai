@@ -77,7 +77,9 @@ async def test_route_complex_low_stays_capable_without_flag(
 
     decision = await _route_complex(monkeypatch, "low")
 
-    assert decision.estimated_cost_per_1k == 0.003, "capable tier (claude-sonnet)"
+    from core.routing.smart_router import CAPABLE_MODELS
+
+    assert decision.estimated_cost_per_1k == CAPABLE_MODELS["claude-sonnet"]["cost"], "capable tier (claude-sonnet)"
     assert "claude" in decision.model.lower()
 
 
@@ -91,8 +93,10 @@ async def test_route_complex_low_escalates_to_expert_with_flag(
 
     decision = await _route_complex(monkeypatch, "low")
 
-    assert decision.estimated_cost_per_1k == 0.00125, "expert tier cost, not capable (0.003)"
-    assert "grok" in decision.model.lower(), "EXPERT_MODELS grok-4.20 id"
+    from core.routing.smart_router import EXPERT_MODELS
+
+    assert decision.estimated_cost_per_1k == EXPERT_MODELS["grok-4"]["cost"], "expert tier cost"
+    assert decision.model.endswith(":online") and "grok" in decision.model.lower(), "EXPERT_MODELS grok id"
     assert decision.provider == "openrouter_paid"
     assert decision.tier_p95_ms == 75000, "expert p95 budget (openrouter_expert)"
 
@@ -107,7 +111,9 @@ async def test_route_complex_medium_unaffected_by_flag(
 
     decision = await _route_complex(monkeypatch, "medium")
 
-    assert decision.estimated_cost_per_1k == 0.003, "medium stays capable"
+    from core.routing.smart_router import CAPABLE_MODELS
+
+    assert decision.estimated_cost_per_1k == CAPABLE_MODELS["claude-sonnet"]["cost"], "medium stays capable"
     assert "claude" in decision.model.lower()
 
 

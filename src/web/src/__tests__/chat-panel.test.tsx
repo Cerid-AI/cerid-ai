@@ -101,6 +101,7 @@ vi.mock("@/hooks/use-chat-send", () => ({
 vi.mock("@/hooks/use-kb-context", () => ({
   useKBContext: () => ({
     results: [],
+    activeDomains: new Set(),
     injectedContext: [],
     clearInjected: vi.fn(),
     setSelectedArtifactId: vi.fn(),
@@ -110,6 +111,7 @@ vi.mock("@/hooks/use-kb-context", () => ({
 vi.mock("@/hooks/use-orchestrated-query", () => ({
   useOrchestratedQuery: () => ({
     results: [],
+    activeDomains: new Set(),
     degradedReason: null,
     sourceBreakdown: null,
   }),

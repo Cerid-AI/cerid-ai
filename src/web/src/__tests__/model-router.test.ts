@@ -195,31 +195,31 @@ describe("recommendModel", () => {
   })
 
   it("excludes stale models for temporal queries in auto mode", () => {
-    // Start on GPT-4o-mini (cutoff 2024-10) with a temporal query
-    const gpt4oMini = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    // Start on Llama 4 Maverick (cutoff 2024-08) with a temporal query
+    const stale = MODELS.find((m) => m.id === "openrouter/meta-llama/llama-4-maverick")!
     const result = recommendModel(
       "What are the latest AI developments in 2026?",
-      gpt4oMini,
+      stale,
       [],
       0,
       "high",
     )
-    // Should NOT stay on GPT-4o-mini (cutoff 2024-10, 17+ months old)
-    expect(result.model.id).not.toBe(gpt4oMini.id)
+    // Should NOT stay on a model whose knowledge stops two years back
+    expect(result.model.id).not.toBe(stale.id)
     expect(result.model.capabilities?.knowledgeCutoff).toBeDefined()
   })
 
   it("prefers web-search-capable model for temporal queries", () => {
-    const gpt4oMini = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    const stale = MODELS.find((m) => m.id === "openrouter/meta-llama/llama-4-maverick")!
     const result = recommendModel(
       "What's happening with AI regulation right now?",
-      gpt4oMini,
+      stale,
       [],
       0,
       "high",
     )
     // Grok has webSearch: true — should be preferred
-    const grok = MODELS.find((m) => m.id === "openrouter/x-ai/grok-4.5")!
+    const grok = MODELS.find((m) => m.id === "openrouter/x-ai/grok-4.7")!
     expect(result.model.id).toBe(grok.id)
   })
 })

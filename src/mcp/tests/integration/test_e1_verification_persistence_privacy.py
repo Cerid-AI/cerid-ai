@@ -39,6 +39,7 @@ transport fails the merge.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import fakeredis
@@ -124,7 +125,7 @@ async def _fake_extract_claims(response_text, user_query=None):
 
 
 def _hall_key(conversation_id: str) -> str:
-    return f"{streaming.REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+    return streaming.report_key(conversation_id)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +289,8 @@ async def test_hallucination_endpoint_gates_persistence_at_l1(
     from app.routers.agents import HallucinationCheckRequest, hallucination_check_endpoint
 
     await hallucination_check_endpoint(
-        HallucinationCheckRequest(response_text=_RESPONSE, conversation_id="e1-ep-hall")
+        HallucinationCheckRequest(response_text=_RESPONSE, conversation_id="e1-ep-hall"),
+        SimpleNamespace(headers={}),
     )
 
     threaded = check_spy.kwargs.get("persist_report") if check_spy.kwargs else None
@@ -374,7 +376,8 @@ async def test_verify_stream_endpoint_threads_persist_report(
     from app.routers.agents import VerifyStreamRequest, verify_stream_endpoint
 
     resp = await verify_stream_endpoint(
-        VerifyStreamRequest(response_text=_RESPONSE, conversation_id="e1-ep-stream")
+        VerifyStreamRequest(response_text=_RESPONSE, conversation_id="e1-ep-stream"),
+        SimpleNamespace(headers={}),
     )
     # Drain the StreamingResponse body so the inner event_generator runs.
     async for _chunk in resp.body_iterator:

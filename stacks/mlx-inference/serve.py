@@ -16,7 +16,9 @@ file. Each row has a tier:
   small    utility chat model. Loaded at start, never unloaded.
   default  answers requests that name no model. Loaded at start, never unloaded.
   heavy    loaded when a request names it. One heavy slot; naming a different
-           heavy model swaps only that slot.
+           heavy model swaps only that slot. A load that the host's memory
+           cannot hold is refused with a 503, and an idle heavy model unloads
+           after CERID_MLX_HEAVY_IDLE_S or at once under memory pressure.
   embed    embedding model. Loaded at start, never unloaded.
 
 "aliases" maps legacy names onto a tier (small, default) or a model name.
@@ -48,6 +50,7 @@ import os
 import queue
 import re
 import struct
+import sys
 import threading
 import time
 import uuid
@@ -123,10 +126,97 @@ TIER_LIMITS = {
 PROMPT_CACHE_ENTRIES = 16
 V1_MAX_TOKENS = 8192
 V1_DEFAULT_MAX_TOKENS = 4096
+MAX_STOPS = 16
+
+# The heavy slot gives way to the rest of the host. On 2026-10-17 repeated
+# gpt-oss-120b loads (about 65 GB) beside test suites and two VMs filled swap,
+# and the server was killed and relaunched twice.
+#   HEAVY_IDLE_S     seconds a loaded heavy model may sit unused; 0 keeps it
+#   HEAVY_MARGIN_GB  memory a heavy load must leave free beyond its weights
+#                    (KV caches, activations, everything else on the host)
+HEAVY_IDLE_S = float(os.environ.get("CERID_MLX_HEAVY_IDLE_S", "600"))
+HEAVY_MARGIN_GB = float(os.environ.get("CERID_MLX_HEAVY_MARGIN_GB", "8"))
+PRESSURE_POLL_S = 10.0
+GB = 1e9
+# kern.memorystatus_vm_pressure_level: what memory_pressure(1) and Activity
+# Monitor's pressure graph read.
+PRESSURE_LEVELS = {1: "normal", 2: "warn", 4: "critical"}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+_LOG_LOCK = threading.Lock()
+
+
+def _emit(line: str) -> None:
+    """Write one log line whole. print() writes the text and the newline
+    separately, so handler threads logging at once ran their lines together."""
+    with _LOG_LOCK:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
+# Reasoning effort a caller may ask for, as the three levels gpt-oss knows.
+# OpenAI sends `reasoning_effort`, OpenRouter `reasoning: {effort}`, Ollama
+# `think`. gpt-oss cannot turn reasoning off, so none/minimal mean low.
+_EFFORTS = {"none": "low", "minimal": "low", "low": "low", "medium": "medium",
+            "high": "high", "xhigh": "high", "max": "high"}
+
+
+def effort_of(body: dict) -> str:
+    raw = body.get("reasoning_effort")
+    if raw is None and isinstance(body.get("reasoning"), dict):
+        raw = body["reasoning"].get("effort")
+    if raw is None and isinstance(body.get("think"), str):
+        raw = body["think"]
+    if raw is None:
+        return "medium"
+    effort = _EFFORTS.get(str(raw).lower())
+    if effort is None:
+        raise BadRequest(f"reasoning effort {raw!r} is not one of {sorted(_EFFORTS)}")
+    return effort
+
+
+def json_instruction(response_format) -> str | None:
+    """The instruction for a response_format, or None when none is asked for.
+
+    No grammar-constrained decoding here, so JSON mode is an instruction the
+    model follows, as /api/chat's format=json already was."""
+    if not isinstance(response_format, dict):
+        return None
+    kind = response_format.get("type")
+    if kind == "json_object":
+        return "Respond with one JSON object and no other text."
+    if kind == "json_schema":
+        schema = (response_format.get("json_schema") or {}).get("schema")
+        text = "Respond with one JSON object and no other text."
+        return text + (f" It must conform to this JSON Schema: {json.dumps(schema)}" if schema else "")
+    if kind in (None, "text"):
+        return None
+    raise BadRequest(f"response_format type {kind!r} is not supported")
+
+
+def with_instruction(messages: list[dict], instruction: str | None) -> list[dict]:
+    if not instruction:
+        return messages
+    for i, m in enumerate(messages):
+        if m.get("role") == "system":
+            merged = dict(m, content=f"{m.get('content') or ''}\n\n{instruction}".strip())
+            return [*messages[:i], merged, *messages[i + 1:]]
+    return [{"role": "system", "content": instruction}, *messages]
+
+
+def stop_strings(value) -> tuple[str, ...]:
+    """Ollama's options.stop or OpenAI's stop: absent, a string, or a list of strings."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or len(value) > MAX_STOPS or not all(isinstance(s, str) and s for s in value):
+        raise BadRequest(f"stop must be a non-empty string or a list of at most {MAX_STOPS} non-empty strings")
+    return tuple(dict.fromkeys(value))
 
 
 def _size(path: Path) -> int:
@@ -140,6 +230,40 @@ def _size(path: Path) -> int:
             except OSError:
                 continue
     return total
+
+
+def _sampling_defaults(model_dir: Path) -> dict:
+    """The truncation a model's generation_config.json samples it with.
+
+    Applied to a sampled request that sets none of its own; the temperature
+    stays the request's, greedy when absent. Gemma 4 ships top_k 64 and top_p
+    0.95. Sampled at temperature 1 from all 262k tokens instead, about 1
+    review reply in 100 took a token from outside that nucleus after its
+    answer: a "<" that went on to spell <|file_separator|>, or a stray
+    <channel|> (p 0.02) that visible() read as the end of a thought block,
+    leaving the reply empty.
+    """
+    path = model_dir / "generation_config.json"
+    try:
+        raw = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"unreadable {path}: {exc}") from None
+    out: dict = {}
+    top_k = raw.get("top_k")
+    if top_k is not None:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0:
+            raise SystemExit(f"{path}: top_k must be a non-negative integer, got {top_k!r}")
+        if top_k > 0:
+            out["top_k"] = top_k
+    top_p = raw.get("top_p")
+    if top_p is not None:
+        if isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not 0 < top_p <= 1:
+            raise SystemExit(f"{path}: top_p must be in (0, 1], got {top_p!r}")
+        if top_p < 1:
+            out["top_p"] = float(top_p)
+    return out
 
 
 def _package_version(name: str) -> str | None:
@@ -166,6 +290,7 @@ def _revision(config: bytes, models: dict[str, dict]) -> str:
     add("config", config)
     for name in sorted(models):
         add(f"weights:{name}", str(models[name]["size"]).encode())
+        add(f"sampling:{name}", json.dumps(models[name].get("sampling", {}), sort_keys=True).encode())
     for package in REVISION_PACKAGES:
         add(f"package:{package}", (_package_version(package) or "absent").encode())
     return f"cerid-mlx-{digest.hexdigest()[:12]}"
@@ -188,6 +313,89 @@ def _tier_limits(raw: dict) -> dict[str, dict]:
                 raise SystemExit(f"tiers.{tier}.{key} must be a positive integer")
             limits[tier][key] = value
     return limits
+
+
+# -- host memory ----------------------------------------------------------------
+
+@functools.cache
+def _mach():
+    """libc, this host's port, and vm_statistics64 from <mach/vm_statistics.h>."""
+    import ctypes
+    import ctypes.util
+
+    u32, u64 = ctypes.c_uint32, ctypes.c_uint64
+    counters = ("zero_fill_count", "reactivations", "pageins", "pageouts", "faults",
+                "cow_faults", "lookups", "hits", "purges")
+    fields = [("free_count", u32), ("active_count", u32), ("inactive_count", u32), ("wire_count", u32),
+              *[(n, u64) for n in counters],
+              ("purgeable_count", u32), ("speculative_count", u32),
+              *[(n, u64) for n in ("decompressions", "compressions", "swapins", "swapouts")],
+              ("compressor_page_count", u32), ("throttled_count", u32),
+              ("external_page_count", u32), ("internal_page_count", u32),
+              ("total_uncompressed_pages_in_compressor", u64)]
+    vm_statistics64 = type("vm_statistics64", (ctypes.Structure,), {"_fields_": fields})
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    libc.mach_host_self.restype = u32
+    # One send right for the life of the process: each call adds a reference.
+    return libc, libc.mach_host_self(), vm_statistics64
+
+
+def _sysctl_int(name: str) -> int | None:
+    import ctypes
+
+    libc = _mach()[0]
+    value, size = ctypes.c_uint64(0), ctypes.c_size_t(8)
+    if libc.sysctlbyname(name.encode(), ctypes.byref(value), ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
+        return None
+    return value.value
+
+
+def memory_probe() -> dict:
+    """The host's memory as the heavy slot judges it.
+
+    available: bytes the kernel can hand out without swapping, free + inactive
+      (host_statistics64's free count already includes speculative pages; this
+      is vm_stat's free + speculative + inactive).
+    pressure: "normal", "warn" or "critical".
+
+    Either is None where it cannot be read (not macOS). In-process calls, no
+    vm_stat fork: /api/ps and the idle check run it often.
+    """
+    available = pressure = None
+    if sys.platform != "darwin":
+        return {"available": available, "pressure": pressure}
+    try:
+        import ctypes
+
+        libc, host, vm_statistics64 = _mach()
+        stats = vm_statistics64()
+        count = ctypes.c_uint32(ctypes.sizeof(stats) // 4)
+        page = _sysctl_int("hw.pagesize")
+        if page and libc.host_statistics64(host, 4, ctypes.byref(stats), ctypes.byref(count)) == 0:  # HOST_VM_INFO64
+            available = (stats.free_count + stats.inactive_count) * page
+        level = _sysctl_int("kern.memorystatus_vm_pressure_level")
+        pressure = PRESSURE_LEVELS.get(level) if level is not None else None
+    except (OSError, AttributeError):
+        pass
+    return {"available": available, "pressure": pressure}
+
+
+def heavy_shortfall(size: int, probe: dict, margin_gb: float) -> dict | None:
+    """Why a heavy model of `size` bytes may not load now, or None when it may.
+
+    It may load when the kernel reports normal pressure and the available
+    memory holds its weights plus margin_gb. A reading that could not be taken
+    does not refuse: the guard steps aside where it cannot see.
+    """
+    need = size + margin_gb * GB
+    available, pressure = probe.get("available"), probe.get("pressure")
+    if pressure in ("warn", "critical") or (available is not None and available < need):
+        return {
+            "need_gb": round(need / GB, 1),
+            "available_gb": None if available is None else round(available / GB, 1),
+            "pressure": pressure,
+        }
+    return None
 
 
 class Catalog:
@@ -219,6 +427,7 @@ class Catalog:
                 "quantization": spec.get("quantization", ""),
                 "pooling": spec.get("pooling", "cls"),
                 "tool_format": tool_format,
+                "sampling": {} if tier == "embed" else _sampling_defaults(weights),
                 "size": _size(weights),
                 "modified_at": datetime.fromtimestamp(
                     weights.stat().st_mtime, timezone.utc
@@ -264,6 +473,10 @@ class GenJob:
         self.out: queue.Queue = queue.Queue()
         self.cancelled = threading.Event()
         self.gen = None
+        self.effort = "medium"
+        self.stops: tuple[str, ...] = ()
+        self.submitted = time.perf_counter()
+        self.started: float | None = None
 
 
 class ChatJob(GenJob):
@@ -286,10 +499,24 @@ class EmbedJob:
         self.texts = texts
         self.truncate = truncate
         self.out: queue.Queue = queue.Queue()
+        self.submitted = time.perf_counter()
+        self.started: float | None = None
 
 
 class BadRequest(ValueError):
     """The request cannot be served as sent. Returned to the caller as a 400."""
+
+
+class HeavyDeferred(RuntimeError):
+    """The heavy model does not fit in memory now. Returned as a 503, so the
+    caller falls back to another model instead of the host swapping."""
+
+    def __init__(self, name: str, shortfall: dict) -> None:
+        self.payload = {"error": "heavy deferred: memory", "model": name, **shortfall}
+        super().__init__(
+            f"heavy deferred: memory ({name} needs {shortfall['need_gb']} GB,"
+            f" {shortfall['available_gb']} GB available, pressure {shortfall['pressure']})"
+        )
 
 
 class Engine:
@@ -305,13 +532,15 @@ class Engine:
         self._active: list[GenJob] = []
         self._pending_heavy: list[GenJob] = []
         self._waiting: dict[str, list[GenJob]] = {"small": [], "default": []}
+        self._heavy_used = 0.0  # monotonic time a heavy job last started or finished
+        self._pressure_checked = 0.0
         threading.Thread(target=self._loop, name="mlx-gpu", daemon=True).start()
 
     # -- loading ------------------------------------------------------------
 
     def _load(self, name: str) -> None:
         spec = self.catalog.models[name]
-        print(f"loading {name}", flush=True)
+        _emit(f"{_now()} loading {name}")
         started = time.perf_counter()
         try:
             if spec["tier"] == "embed":
@@ -337,11 +566,11 @@ class Engine:
         except Exception as exc:
             with self._state:
                 self.load_errors[name] = f"{type(exc).__name__}: {exc}"
-            print(f"load failed {name}: {self.load_errors[name]}", flush=True)
+            _emit(f"{_now()} load failed {name}: {self.load_errors[name]}")
             raise
         with self._state:
             self.load_errors.pop(name, None)
-        print(f"loaded {name} in {time.perf_counter() - started:.1f}s", flush=True)
+        _emit(f"{_now()} loaded {name} in {time.perf_counter() - started:.1f}s")
 
     def _ensure(self, name: str) -> None:
         with self._state:
@@ -349,7 +578,7 @@ class Engine:
         if not ready:
             self._load(name)
 
-    def _unload_heavy(self) -> None:
+    def _unload_heavy(self, why: str = "swap") -> None:
         import mlx.core as mx
 
         with self._state:
@@ -362,7 +591,41 @@ class Engine:
             self.heavy = None
         gc.collect()
         mx.clear_cache()
-        print(f"unloaded {name}", flush=True)
+        _emit(f"{_now()} unloaded {name} ({why})")
+
+    def _heavy_idle(self) -> bool:
+        """A heavy model is loaded and nothing is using it or waiting for it."""
+        return self.heavy is not None and not self._pending_heavy and not any(
+            self.catalog.tier(j.name) == "heavy" for j in self._active
+        )
+
+    def _release_idle_heavy(self) -> None:
+        """Unload an idle heavy model once its idle time is up, or at once when
+        the kernel reports memory pressure. Pressure is read every
+        PRESSURE_POLL_S, not on every step."""
+        if not self._heavy_idle():
+            return
+        now = time.monotonic()
+        idle = now - self._heavy_used
+        if HEAVY_IDLE_S > 0 and idle >= HEAVY_IDLE_S:
+            self._unload_heavy(f"idle {idle:.0f}s")
+            return
+        if now - self._pressure_checked < PRESSURE_POLL_S:
+            return
+        self._pressure_checked = now
+        pressure = memory_probe()["pressure"]
+        if pressure in ("warn", "critical"):
+            self._unload_heavy(f"memory pressure {pressure}, idle {idle:.0f}s")
+
+    def _wake_after(self) -> float | None:
+        """How long the loop may block on its inbox: forever, unless an idle
+        heavy model is due a pressure check or its idle unload."""
+        if not self._heavy_idle():
+            return None
+        due = PRESSURE_POLL_S
+        if HEAVY_IDLE_S > 0:
+            due = min(due, HEAVY_IDLE_S - (time.monotonic() - self._heavy_used))
+        return max(due, 0.01)
 
     def resident(self) -> list[str]:
         with self._state:
@@ -386,21 +649,26 @@ class Engine:
         # values, so pin it once to the value they all set.
         if mx.metal.is_available():
             mx.set_wired_limit(mx.device_info()["max_recommended_working_set_size"])
-        for tier in RESIDENT_TIERS:
-            for name, spec in self.catalog.models.items():
-                if spec["tier"] == tier:
-                    try:
-                        self._load(name)
-                    except Exception:  # noqa: BLE001 — retried on the first request
-                        pass
+        # The embedders load first, before any request: every search needs one.
+        # The chat models load one at a time between requests, so an embed is
+        # not held behind them: after a restart, a search waited 9.4 s while
+        # two chat models loaded on this thread.
+        resident = [
+            name for tier in RESIDENT_TIERS
+            for name, spec in self.catalog.models.items() if spec["tier"] == tier
+        ]
+        for name in [n for n in resident if self.catalog.models[n]["tier"] == "embed"]:
+            self._preload(name)
+        resident = [n for n in resident if self.catalog.models[n]["tier"] != "embed"]
         while True:
             fresh = []
             # Block only when nothing can run. A job waiting for a slot that
             # the last step freed must start now, not when the next request
             # happens to arrive.
             idle = not (self._active or self._pending_heavy or any(self._waiting.values()))
+            block = idle and not resident
             try:
-                fresh.append(self._inbox.get(block=idle))
+                fresh.append(self._inbox.get(block=block, timeout=self._wake_after() if block else None))
                 while True:
                     fresh.append(self._inbox.get_nowait())
             except queue.Empty:
@@ -411,9 +679,19 @@ class Engine:
             self._admit_waiting()
             for job in list(self._active):
                 self._step(job)
+            self._release_idle_heavy()
+            if resident and not fresh and not self._active:
+                self._preload(resident.pop(0))
+
+    def _preload(self, name: str) -> None:
+        try:
+            self._ensure(name)
+        except Exception:  # noqa: BLE001 — retried on the first request
+            pass
 
     def _admit(self, job) -> None:
         if isinstance(job, EmbedJob):
+            job.started = time.perf_counter()
             try:
                 self._ensure(job.name)
                 with self._state:
@@ -458,6 +736,15 @@ class Engine:
                 if any(j.name == self.heavy for j in self._active):
                     return  # the heavy slot is busy; swap once it drains
                 self._unload_heavy()
+                # Measured after the old model is gone, so its memory counts.
+                short = heavy_shortfall(self.catalog.models[job.name]["size"], memory_probe(), HEAVY_MARGIN_GB)
+                if short is not None:
+                    self._pending_heavy.pop(0)
+                    deferred = HeavyDeferred(job.name, short)
+                    _emit(f"{_now()} {deferred}")
+                    job.out.put(deferred)
+                    job.out.put(None)
+                    continue
             elif not self._has_slot("heavy"):
                 return
             self._pending_heavy.pop(0)
@@ -470,6 +757,9 @@ class Engine:
             job.out.put(exc)
             job.out.put(None)
             return
+        job.started = time.perf_counter()
+        if self.catalog.tier(job.name) == "heavy":
+            self._heavy_used = time.monotonic()
         job.gen = self._generate_chat(job) if isinstance(job, ChatJob) else self._generate(job)
         self._active.append(job)
 
@@ -477,7 +767,7 @@ class Engine:
         done = False
         if job.cancelled.is_set():
             job.gen.close()
-            print(f"cancelled {job.name}: client disconnected", flush=True)
+            _emit(f"cancelled {job.name}: client disconnected")
             done = True
         else:
             try:
@@ -494,11 +784,13 @@ class Engine:
                 done = True
         if done:
             self._active.remove(job)
+            if self.catalog.tier(job.name) == "heavy":
+                self._heavy_used = time.monotonic()
             job.out.put(None)
 
     # -- generation -----------------------------------------------------------
 
-    def _render(self, name: str, tokenizer, messages, prompt: str, raw: bool) -> str:
+    def _render(self, name: str, tokenizer, messages, prompt: str, raw: bool, effort: str = "medium") -> str:
         if raw:
             return prompt
         # mlx-lm turns thinking on unless the caller passes False. Gemma 4 then
@@ -506,7 +798,7 @@ class Engine:
         chat = messages or [{"role": "user", "content": prompt}]
         extra = {"enable_thinking": False}
         if self.catalog.models[name]["family"] == "gpt-oss":
-            extra["reasoning_effort"] = "medium"
+            extra["reasoning_effort"] = effort
         try:
             rendered = tokenizer.apply_chat_template(
                 chat, add_generation_prompt=True, tokenize=False, **extra
@@ -519,27 +811,47 @@ class Engine:
             return tokenizer.decode(rendered)
         return rendered
 
+    def _sampler(self, job: GenJob):
+        """The request's temperature, truncated as the model's own config asks.
+
+        A request's top_p replaces the model's; top_k is always the model's.
+        """
+        from mlx_lm.sample_utils import make_sampler
+
+        defaults = self.catalog.models[job.name]["sampling"]
+        top_p = defaults.get("top_p", 1.0) if job.top_p is None else job.top_p
+        return make_sampler(
+            temp=job.temperature,
+            top_p=top_p if 0 < top_p < 1 else 0.0,
+            top_k=defaults.get("top_k", 0),
+        )
+
     def _generate(self, job: GenJob):
         from mlx_lm import stream_generate
-        from mlx_lm.sample_utils import make_sampler
 
         with self._state:
             model, tokenizer = self.loaded[job.name]
         # Render with the tokenizer of the model that answers. A prompt built
         # for another family feeds Gemma a Harmony prompt and gpt-oss a Gemma one.
-        prompt = self._render(job.name, tokenizer, job.messages, job.prompt, job.raw)
-        top_p = job.top_p if 0 < job.top_p < 1 else 0.0
-        sampler = make_sampler(temp=job.temperature, top_p=top_p)
+        prompt = self._render(job.name, tokenizer, job.messages, job.prompt, job.raw, job.effort)
+        sampler = self._sampler(job)
         pieces: list[str] = []
         last = None
-        for response in stream_generate(
-            model, tokenizer, prompt, max_tokens=job.max_tokens, sampler=sampler
-        ):
+        stopped = None
+        responses = stream_generate(model, tokenizer, prompt, max_tokens=job.max_tokens, sampler=sampler)
+        for response in responses:
             last = response
             if response.text:
                 pieces.append(response.text)
+                stopped = stop_cut("".join(pieces), job.stops) if job.stops else None
+                if stopped is not None:
+                    break
                 yield response.text, False, None
-        yield "", True, _stats(last) | {"text": "".join(pieces)}
+        responses.close()
+        stats = _stats(last) | {"text": "".join(pieces)}
+        if stopped is not None:
+            stats |= {"done_reason": "stop", "content": stopped}
+        yield "", True, stats
 
     def _generate_chat(self, job: ChatJob):
         """Generate one chat turn from tokens, reusing a cached prompt prefix.
@@ -556,14 +868,13 @@ class Engine:
             make_prompt_cache,
             trim_prompt_cache,
         )
-        from mlx_lm.sample_utils import make_sampler
 
         with self._state:
             model, tokenizer = self.loaded[job.name]
             store = self.prompt_caches.get(job.name)
         spec = self.catalog.models[job.name]
         started = time.perf_counter()
-        plan = chat_plan(spec["tool_format"], tokenizer, job.messages, job.tools, job.choice)
+        plan = chat_plan(spec["tool_format"], tokenizer, job.messages, job.tools, job.choice, job.effort)
         prompt = plan["prompt"]
 
         cache, rest = (None, prompt) if store is None else store.fetch_nearest_cache(job.name, prompt)
@@ -600,8 +911,7 @@ class Engine:
             mx.clear_cache()
             yield None
 
-        top_p = job.top_p if 0 < job.top_p < 1 else 0.0
-        sampler = make_sampler(temp=job.temperature, top_p=top_p)
+        sampler = self._sampler(job)
         fed = list(prompt)  # every token the cache has seen, for the post-turn entry
         completion = list(plan["opener_tokens"])
         pieces: list[str] = []
@@ -612,6 +922,7 @@ class Engine:
         generated = 0
         finish = "length"
         first_token_at = None
+        stopped = None
         while True:
             phase_stops = stops | {plan["end"]} if then else stops
             ended = None
@@ -627,6 +938,10 @@ class Engine:
                 completion.append(response.token)
                 if response.text:
                     pieces.append(response.text)
+                    stopped = stop_cut(plan["opener_text"] + "".join(pieces), job.stops) if job.stops else None
+                    if stopped is not None:
+                        finish = "stop"
+                        break
                 yield response.text, False, response.token
                 if response.finish_reason is not None:
                     finish = response.finish_reason
@@ -657,6 +972,7 @@ class Engine:
             store.insert_cache(job.name, fed, cache)
         done_at = time.perf_counter()
         yield "", True, {
+            **({} if stopped is None else {"content": stopped}),
             "prompt_tokens": len(prompt),
             "cached_tokens": cached,
             "completion_tokens": generated,
@@ -797,7 +1113,7 @@ def _encode(tokenizer, text: str) -> list[int]:
     return list(tokenizer.encode(text, add_special_tokens=bos is None or not text.startswith(bos)))
 
 
-def chat_plan(tool_format: str | None, tokenizer, messages: list[dict], tools, choice) -> dict:
+def chat_plan(tool_format: str | None, tokenizer, messages: list[dict], tools, choice, effort: str = "medium") -> dict:
     """Render a turn to prompt tokens and describe how to generate it.
 
       prompt         tokens to feed, ending in any forced opener
@@ -809,7 +1125,7 @@ def chat_plan(tool_format: str | None, tokenizer, messages: list[dict], tools, c
                      `then` (the forced header of a function call)
     """
     if tool_format == "harmony":
-        return _harmony_plan(messages, tools, choice)
+        return _harmony_plan(messages, tools, choice, effort)
     if tools and choice != "auto" and tool_format not in TOOL_OPENERS:
         raise BadRequest(f"tool_choice {choice!r} is not supported for this model")
     opener = ""
@@ -859,7 +1175,7 @@ def _harmony():
     return h, h.load_harmony_encoding(h.HarmonyEncodingName.HARMONY_GPT_OSS)
 
 
-def harmony_conversation(messages: list[dict], tools):
+def harmony_conversation(messages: list[dict], tools, effort: str = "medium"):
     """OpenAI-shaped messages as a harmony Conversation.
 
     System and developer text become the developer instructions, as the
@@ -871,7 +1187,7 @@ def harmony_conversation(messages: list[dict], tools):
     h, _ = _harmony()
     system = (
         h.SystemContent.new()
-        .with_reasoning_effort(h.ReasoningEffort.MEDIUM)
+        .with_reasoning_effort(getattr(h.ReasoningEffort, effort.upper()))
         .with_conversation_start_date(time.strftime("%Y-%m-%d"))
     )
     convo = [h.Message.from_role_and_content(h.Role.SYSTEM, system)]
@@ -926,9 +1242,9 @@ def harmony_conversation(messages: list[dict], tools):
     return h.Conversation.from_messages(convo)
 
 
-def _harmony_plan(messages: list[dict], tools, choice) -> dict:
+def _harmony_plan(messages: list[dict], tools, choice, effort: str = "medium") -> dict:
     h, enc = _harmony()
-    convo = harmony_conversation(messages, tools)
+    convo = harmony_conversation(messages, tools, effort)
     prompt = list(enc.render_conversation_for_completion(convo, h.Role.ASSISTANT))
     history = list(enc.render_conversation(convo))
     checkpoint = len(history) if prompt[: len(history)] == history else 0
@@ -972,7 +1288,7 @@ def _tool_parser(tool_format: str):
 
 
 def _unparsed(text: str, finish: str, error: str) -> dict:
-    print(f"tool call not parsed ({finish}): {error}", flush=True)
+    _emit(f"tool call not parsed ({finish}): {error}")
     return {"content": text, "reasoning": None, "calls": [], "finish": finish, "error": error}
 
 
@@ -1020,6 +1336,14 @@ def parse_reply(tool_format: str | None, text: str, tokens: list[int], tools, fi
         pos = j + len(end)
     content = visible("".join(prose)).strip() or None
     return {"content": content, "reasoning": None, "calls": calls, "finish": "tool_calls", "error": None}
+
+
+def chat_reply(tool_format: str | None, stats: dict, tools) -> dict:
+    """parse_reply for a finished chat turn, with the answer a stop string cut short."""
+    parsed = parse_reply(tool_format, stats["text"], stats["tokens"], tools, stats["finish"])
+    if "content" in stats:
+        parsed["content"] = stats["content"]
+    return parsed
 
 
 def _parse_harmony(tokens: list[int], tools, finish: str) -> dict:
@@ -1101,11 +1425,57 @@ def visible(raw: str) -> str:
         return found[-1].strip()
     if "<|" not in raw and "<channel|>" not in raw:
         return raw
-    text = raw.split("<channel|>")[-1]
+    # Gemma 4 opens a thought with <|channel> and closes it with <channel|>.
+    # As the chat template's strip_thinking does, drop only what an opener
+    # starts: a closer with no opener is stray, so its marker goes and the
+    # answer before it stays.
+    text = "".join(part.split("<|channel>", 1)[0] for part in raw.split("<channel|>"))
     for marker in ("<|end|>", "<|return|>", "<|start|>"):
         if marker in text:
             text = text.split(marker, 1)[0]
     return text.replace("<|message|>", "").replace("<|channel|>", "").strip()
+
+
+def _shown(raw: str) -> str:
+    """The answer the client is shown so far, unstripped, for stop matching.
+
+    Harmony's analysis is never shown: the tool-less system prompt names the
+    closing mark a stop is set on, so the analysis may quote it before any
+    answer is written. Until the final channel opens, nothing is shown.
+    """
+    if "<|channel|>" in raw or "<|message|>" in raw:
+        found = _FINAL_CHANNEL.findall(raw)
+        return found[-1] if found else ""
+    if "<|" in raw or "<channel|>" in raw:
+        return visible(raw)
+    return raw
+
+
+def stop_cut(raw: str, stops: tuple[str, ...]) -> str | None:
+    """The shown answer before the first stop string in it, or None if none appears."""
+    shown = _shown(raw)
+    hits = [i for i in (shown.find(s) for s in stops) if i >= 0]
+    return shown[: min(hits)] if hits else None
+
+
+class HoldBack:
+    """Streamed text, less any tail that may yet turn out to begin a stop string."""
+
+    def __init__(self, stops: tuple[str, ...]) -> None:
+        self.stops = stops
+        self.pending = ""
+
+    def feed(self, text: str) -> str:
+        self.pending += text
+        keep = 0
+        for stop in self.stops:
+            for k in range(min(len(stop) - 1, len(self.pending)), keep, -1):
+                if self.pending.endswith(stop[:k]):
+                    keep = k
+                    break
+        ready = self.pending[: len(self.pending) - keep]
+        self.pending = self.pending[len(ready) :]
+        return ready
 
 
 def _stats(response) -> dict:
@@ -1129,7 +1499,7 @@ def _stats(response) -> dict:
     }
 
 
-def _options(body: dict) -> tuple[int, float, float]:
+def _options(body: dict) -> tuple[int, float, float | None]:
     options = body.get("options") or {}
     raw_n = options.get("num_predict", body.get("num_predict", 256))
     try:
@@ -1142,14 +1512,15 @@ def _options(body: dict) -> tuple[int, float, float]:
         temperature = float(options.get("temperature", body.get("temperature", 0)))
     except (TypeError, ValueError):
         temperature = 0.0
+    # None: the model's own top_p (Engine._sampler).
     try:
-        top_p = float(options.get("top_p", 1.0))
+        top_p = None if options.get("top_p") is None else float(options["top_p"])
     except (TypeError, ValueError):
-        top_p = 1.0
+        top_p = None
     return num, temperature, top_p
 
 
-def _v1_options(body: dict) -> tuple[int, float, float]:
+def _v1_options(body: dict) -> tuple[int, float, float | None]:
     raw_n = body.get("max_completion_tokens", body.get("max_tokens"))
     if raw_n is None:
         num = V1_DEFAULT_MAX_TOKENS
@@ -1159,7 +1530,7 @@ def _v1_options(body: dict) -> tuple[int, float, float]:
         num = raw_n
     try:
         temperature = float(body.get("temperature") if body.get("temperature") is not None else 0)
-        top_p = float(body.get("top_p") if body.get("top_p") is not None else 1.0)
+        top_p = None if body.get("top_p") is None else float(body["top_p"])
     except (TypeError, ValueError):
         raise BadRequest("temperature and top_p must be numbers") from None
     return num, temperature, top_p
@@ -1171,7 +1542,47 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args) -> None:
-        print(f"{self.address_string()} {fmt % args}", flush=True)
+        _emit(f"{_now()} {self.address_string()} {fmt % args}")
+
+    # One line per response, written as its status goes out (for a stream:
+    # time to first byte): when, who, what, which model, how long so far, how
+    # long the job waited for the GPU loop, and how long the request waited
+    # between accept and its handler thread. install.py reads the same line
+    # for refused peers (REFUSED), so the peer and request line keep their place.
+    def log_request(self, code="-", size="-") -> None:
+        self._access_log(code)
+
+    def setup(self) -> None:
+        super().setup()
+        accepted = self.server.accepted.pop(id(self.request), None)
+        self._accept_ms = (time.perf_counter() - accepted) * 1000 if accepted else None
+
+    def parse_request(self) -> bool:
+        # The request line has just been read: time from here, not from the
+        # wait for it on an idle keep-alive connection.
+        self._t0, self._job = time.perf_counter(), None
+        return super().parse_request()
+
+    def _submit(self, job) -> None:
+        self._job = job
+        self.engine.submit(job)
+
+    def _access_log(self, code) -> None:
+        job = getattr(self, "_job", None)
+        t0 = getattr(self, "_t0", None)
+        accept = getattr(self, "_accept_ms", None)
+        wait = ((job.started or time.perf_counter()) - job.submitted) * 1000 if job else None
+        fields = [
+            _now(), self.client_address[0], f'"{getattr(self, "requestline", "")}"', str(code),
+            f"model={job.name if job else '-'}",
+            f"ms={(time.perf_counter() - t0) * 1000:.0f}" if t0 else "ms=-",
+            f"wait_ms={wait:.0f}" if wait is not None else "wait_ms=-",
+            f"accept_ms={accept:.0f}" if accept is not None else "accept_ms=-",
+        ]
+        if job is not None and hasattr(job, "effort"):
+            fields.append(f"effort={job.effort}")
+        _emit(" ".join(fields))
+        self._accept_ms = None
 
     def _reject(self) -> bool:
         peer = self.client_address[0]
@@ -1185,13 +1596,37 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return True
 
-    def _json(self, code: int, payload: dict) -> None:
+    def _json(self, code: int, payload: dict, headers: dict | None = None) -> None:
         body = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _deferred(self, exc: HeavyDeferred, openai: bool = False) -> None:
+        """503 for a heavy load the host's memory cannot hold. The body says
+        so in its own words, so a caller can tell it from a failure."""
+        payload = dict(exc.payload)
+        if openai:
+            payload["error"] = {"message": payload["error"], "type": "server_error", "param": None, "code": "heavy_deferred"}
+        self._json(503, payload, {"Retry-After": "60"})
+
+    def _memory(self) -> dict:
+        probe = memory_probe()
+        with self.engine._state:
+            heavy = self.engine.heavy
+        available = probe["available"]
+        return {
+            "pressure": probe["pressure"],
+            "available_gb": None if available is None else round(available / GB, 1),
+            "heavy_loaded": heavy is not None,
+            "heavy": heavy,
+            "heavy_idle_unload_s": HEAVY_IDLE_S,
+            "heavy_margin_gb": HEAVY_MARGIN_GB,
+        }
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -1220,7 +1655,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"models": [self._tag(n, n in resident) for n in self.catalog.models]})
             return
         if path == "/api/ps":
-            self._json(200, {"models": [self._tag(n, True) for n in resident]})
+            self._json(200, {"models": [self._tag(n, True) for n in resident], "memory": self._memory()})
             return
         if path == "/api/version":
             self._json(200, {"version": self.catalog.revision})
@@ -1242,6 +1677,7 @@ class Handler(BaseHTTPRequestHandler):
                     "tools": {n: s["tool_format"] for n, s in self.catalog.models.items() if s["tool_format"]},
                     "limits": self.catalog.limits,
                     "prompt_cache": self.engine.cache_stats(),
+                    "memory": self._memory(),
                 },
             )
             return
@@ -1297,11 +1733,22 @@ class Handler(BaseHTTPRequestHandler):
         prompt = body.get("prompt") or ""
         raw = bool(body.get("raw")) and path == "/api/generate" and not messages
         stream = bool(body.get("stream", path == "/api/chat"))
+        try:
+            stops = stop_strings((body.get("options") or {}).get("stop"))
+        except BadRequest as exc:
+            self._json(400, {"error": str(exc)})
+            return
         if path == "/api/chat" and body.get("tools"):
-            self._chat_ollama_tools(requested, name, body, messages, stream, num, temperature, top_p)
+            self._chat_ollama_tools(requested, name, body, messages, stream, num, temperature, top_p, stops)
             return
         job = GenJob(name, messages, prompt, raw, num, temperature, top_p)
-        self.engine.submit(job)
+        job.stops = stops
+        try:
+            job.effort = effort_of(body)
+        except BadRequest as exc:
+            self._json(400, {"error": str(exc)})
+            return
+        self._submit(job)
         try:
             self._respond(path, requested, job, stream)
         except (BrokenPipeError, ConnectionResetError):
@@ -1336,7 +1783,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         job = EmbedJob(name, texts, truncate=body.get("truncate", True) is not False)
         started = time.perf_counter()
-        self.engine.submit(job)
+        self._submit(job)
         result = job.out.get()
         if isinstance(result, ValueError):
             self._json(400, {"error": str(result)})
@@ -1385,25 +1832,41 @@ class Handler(BaseHTTPRequestHandler):
         out = job.out
         started = time.perf_counter()
         if stream:
+            # The status waits for the first item, as Ollama's does for the
+            # model to load, so a deferred heavy load is a 503, not a 200.
+            first = out.get()
+            if isinstance(first, HeavyDeferred):
+                self._deferred(first)
+                return
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             held_control = False
+            hold = HoldBack(job.stops)
+            sent = ""
+            pending = [first]
             while True:
-                item = out.get()
+                item = pending.pop() if pending else out.get()
                 if item is None:
                     break
                 if isinstance(item, Exception):
                     self._chunk({"error": f"{type(item).__name__}: {item}", "done": True})
                     break
                 text, final, stats = item
-                if not final and (held_control or "<|" in text):
+                if not final and (held_control or "<|" in text or "<channel|>" in text):
                     held_control = True
                     continue
-                if final and held_control:
-                    text = visible((stats or {}).get("text") or "")
+                if final and (held_control or hold.pending or "content" in (stats or {})):
+                    # Send what the answer adds to the text already sent.
+                    rest = (stats or {}).get("content", visible((stats or {}).get("text") or ""))
+                    text = rest[len(sent) :] if rest.startswith(sent) else ""
+                elif not final:
+                    text = hold.feed(text)
+                    if not text:
+                        continue
+                sent += text
                 if path == "/api/chat":
                     payload = {
                         "model": name,
@@ -1414,7 +1877,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     payload = {"model": name, "created_at": _now(), "response": text, "done": final}
                 if final and stats:
-                    payload.update({k: v for k, v in stats.items() if k != "text"})
+                    payload.update({k: v for k, v in stats.items() if k not in ("text", "content")})
                     payload["total_duration"] = int((time.perf_counter() - started) * 1e9)
                 self._chunk(payload)
             self.wfile.write(b"0\r\n\r\n")
@@ -1435,11 +1898,14 @@ class Handler(BaseHTTPRequestHandler):
                 text_parts.append(text)
             if final:
                 stats = piece_stats
+        if isinstance(error, HeavyDeferred):
+            self._deferred(error)
+            return
         if error is not None:
             self._json(500, {"error": f"{type(error).__name__}: {error}"})
             return
-        content = visible((stats or {}).get("text") or "".join(text_parts))
-        timing = {k: v for k, v in (stats or {}).items() if k != "text"}
+        content = (stats or {}).get("content", visible((stats or {}).get("text") or "".join(text_parts)))
+        timing = {k: v for k, v in (stats or {}).items() if k not in ("text", "content")}
         timing["total_duration"] = int((time.perf_counter() - started) * 1e9)
         if path == "/api/chat":
             reply = {"message": {"role": "assistant", "content": content}}
@@ -1497,14 +1963,21 @@ class Handler(BaseHTTPRequestHandler):
                 # one. Agent loops read whole turns; the latency lever is the
                 # prefix cache, not streaming.
                 raise BadRequest("stream is not supported with tools; send stream: false")
+            stops = stop_strings(body.get("stop"))
+            if tools and stops:
+                raise BadRequest("stop is not supported with tools")
             num, temperature, top_p = _v1_options(body)
+            effort = effort_of(body)
+            messages = with_instruction(messages, json_instruction(body.get("response_format")))
         except BadRequest as exc:
             self._v1_error(400, str(exc))
             return
         job = ChatJob(name, messages, tools, choice, num, temperature, top_p)
+        job.effort = effort
+        job.stops = stops
         rid = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
-        self.engine.submit(job)
+        self._submit(job)
         try:
             if stream:
                 self._stream_v1(requested, job, tool_format, rid, created, bool((body.get("stream_options") or {}).get("include_usage")))
@@ -1513,10 +1986,13 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(error, BadRequest):
                 self._v1_error(400, str(error))
                 return
+            if isinstance(error, HeavyDeferred):
+                self._deferred(error, openai=True)
+                return
             if error is not None or stats is None:
                 self._v1_error(500, f"{type(error).__name__}: {error}", "server_error")
                 return
-            parsed = parse_reply(tool_format, stats["text"], stats["tokens"], tools, stats["finish"])
+            parsed = chat_reply(tool_format, stats, tools)
             self._json(
                 200,
                 {
@@ -1541,6 +2017,9 @@ class Handler(BaseHTTPRequestHandler):
         first = job.out.get()
         if isinstance(first, BadRequest):
             self._v1_error(400, str(first))
+            return
+        if isinstance(first, HeavyDeferred):
+            self._deferred(first, openai=True)
             return
         if isinstance(first, Exception) or first is None:
             self._v1_error(500, f"{type(first).__name__}: {first}", "server_error")
@@ -1570,6 +2049,7 @@ class Handler(BaseHTTPRequestHandler):
             parser = h.StreamableParser(enc, h.Role.ASSISTANT)
         sent = ""
         held = False
+        hold = HoldBack(job.stops)
         pending = [first]
         while True:
             item = pending.pop() if pending else job.out.get()
@@ -1581,12 +2061,17 @@ class Handler(BaseHTTPRequestHandler):
                 break
             text, final, info = item
             if final:
-                if parser is None and held:
-                    # Control text appeared; send what the non-streamed answer
-                    # would add, if it still extends what was sent.
+                # Send what the non-streamed answer would add, if it still
+                # extends what was sent: the answer a stop string cut short,
+                # the answer around control text, or the text held back.
+                if "content" in info:
+                    rest = info["content"]
+                elif parser is None and held:
                     rest = visible(info["text"])
-                    if rest.startswith(sent) and rest != sent:
-                        send({"content": rest[len(sent) :]})
+                else:
+                    rest = sent + hold.pending
+                if rest.startswith(sent) and rest != sent:
+                    send({"content": rest[len(sent) :]})
                 send({}, info["finish"])
                 if include_usage:
                     send({}, usage=_v1_usage(info))
@@ -1599,18 +2084,22 @@ class Handler(BaseHTTPRequestHandler):
                     held = True
                     continue
                 if parser.current_channel == "final" and parser.last_content_delta:
-                    send({"content": parser.last_content_delta})
+                    text = hold.feed(parser.last_content_delta)
+                    if text:
+                        sent += text
+                        send({"content": text})
                 continue
             if held or "<|" in text or "<channel|>" in text:
                 held = True
                 continue
+            text = hold.feed(text)
             if text:
                 sent += text
                 send({"content": text})
         self._raw_chunk(b"data: [DONE]\n\n")
         self.wfile.write(b"0\r\n\r\n")
 
-    def _chat_ollama_tools(self, requested, name, body, messages, stream, num, temperature, top_p) -> None:
+    def _chat_ollama_tools(self, requested, name, body, messages, stream, num, temperature, top_p, stops) -> None:
         tool_format = self.catalog.models[name]["tool_format"]
         try:
             if tool_format is None:
@@ -1619,21 +2108,32 @@ class Handler(BaseHTTPRequestHandler):
                 raise BadRequest("stream is not supported with tools; send \"stream\": false")
             checked = chat_messages(messages)
             tools, choice = chat_tools({"tools": body.get("tools")})
+            if tools and stops:
+                raise BadRequest("stop is not supported with tools")
         except BadRequest as exc:
             self._json(400, {"error": str(exc)})
             return
         job = ChatJob(name, checked, tools, choice, num, temperature, top_p)
+        job.stops = stops
+        try:
+            job.effort = effort_of(body)
+        except BadRequest as exc:
+            self._json(400, {"error": str(exc)})
+            return
         started = time.perf_counter()
-        self.engine.submit(job)
+        self._submit(job)
         try:
             stats, error = self._finish_chat(job)
             if isinstance(error, BadRequest):
                 self._json(400, {"error": str(error)})
                 return
+            if isinstance(error, HeavyDeferred):
+                self._deferred(error)
+                return
             if error is not None or stats is None:
                 self._json(500, {"error": f"{type(error).__name__}: {error}"})
                 return
-            parsed = parse_reply(tool_format, stats["text"], stats["tokens"], tools, stats["finish"])
+            parsed = chat_reply(tool_format, stats, tools)
             self._json(
                 200,
                 {
@@ -1678,6 +2178,16 @@ class Server(ThreadingHTTPServer):
     # half of them as ConnectError. 128 is kern.ipc.somaxconn's default.
     request_queue_size = 128
 
+    def __init__(self, *a, **k) -> None:
+        super().__init__(*a, **k)
+        self.accepted: dict[int, float] = {}
+
+    def process_request(self, request, client_address) -> None:
+        # Stamped at accept, read by the handler thread: the gap is time spent
+        # waiting for a thread to run, which the access log reports.
+        self.accepted[id(request)] = time.perf_counter()
+        super().process_request(request, client_address)
+
 
 def main() -> None:
     catalog = Catalog(CONFIG_PATH)
@@ -1688,11 +2198,11 @@ def main() -> None:
         try:
             httpd = Server((host, PORT), Handler)
         except OSError as exc:
-            print(f"skip bind {host}:{PORT}: {exc}", flush=True)
+            _emit(f"skip bind {host}:{PORT}: {exc}")
             continue
         servers.append(httpd)
         threading.Thread(target=httpd.serve_forever, name=f"http-{host}", daemon=True).start()
-        print(f"listening {host}:{PORT}", flush=True)
+        _emit(f"listening {host}:{PORT}")
     if not servers:
         raise SystemExit("no bind succeeded")
     threading.Event().wait()

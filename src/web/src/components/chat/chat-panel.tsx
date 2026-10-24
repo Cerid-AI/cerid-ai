@@ -399,6 +399,15 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     }
   }, [ragMode, recentMessages, retrieveFor])
 
+  // The domain filter of the panel on screen, for a send that queries the
+  // knowledge base directly.
+  const kbActiveDomains = kbContext.activeDomains
+  const orchestratedActiveDomains = orchestratedContext.activeDomains
+  const sendKBDomains = useMemo(
+    () => [...(ragMode === "off" ? kbActiveDomains : orchestratedActiveDomains)],
+    [ragMode, kbActiveDomains, orchestratedActiveDomains],
+  )
+
   // --- Model routing ---
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
     routingMode,
@@ -467,6 +476,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
     kbResults: effectiveKBResults,
     kbResultsQuery: latestUserMessage,
     retrieve: retrieveForSend,
+    kbDomains: sendKBDomains,
     clearInjected,
     privateModeLevel,
     memoryEnabled: contextSources.memory !== false,
@@ -494,13 +504,17 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
       setPendingChatFiles([])
       for (const file of files) {
         try {
-          await uploadFile(file, { domain: options.domain, categorizeMode: options.categorize_mode })
+          await uploadFile(file, {
+            domain: options.domain, categorizeMode: options.categorize_mode,
+            // A private chat is never stored, so nothing is linked to it.
+            conversationId: active && !active.private ? active.id : undefined,
+          })
         } catch (err) {
           notifyError(err, { op: "chat.fileUpload", file: file.name })
         }
       }
     },
-    [pendingChatFiles],
+    [pendingChatFiles, active],
   )
 
   const handleCorrection = useCallback(
@@ -995,6 +1009,7 @@ export function ChatPanel({ onOpenSidebar }: ChatPanelProps = {}) {
           loading={halLoading}
           featureEnabled={hallucinationEnabled}
           conversationId={activeId ?? undefined}
+          messageId={selectedVerificationMsgId ?? undefined}
           streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
           verificationPhase={verification.phase}
           activityLog={verification.activityLog}

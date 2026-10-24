@@ -5,13 +5,13 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
-from errors import RetrievalError
+from .base import DataSource, DataSourceResult
 
-from .base import DataSource, DataSourceResult, logger
-
+_MAX_RELATED_TOPICS = 2
 _QUOTED_RE = re.compile(r'"([^"]+)"')
 # Runs of capitalised words: the named topic in a natural-language question.
 _CAP_RUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9'-]+(?:\s+[A-Z][A-Za-z0-9'-]+)*")
@@ -28,11 +28,16 @@ class DuckDuckGoSource(DataSource):
     description = "DuckDuckGo Instant Answers -- quick answers, related topics, abstracts. No API key required."
     requires_api_key = False
     domains: list[str] = []  # all domains
+    # Off unless the user turns it on: across the 2026-10-11 audit runs the
+    # Instant Answer API returned no row the cross-encoder accepted (37
+    # questions, 0 rows; tangents such as 'Anders Celsius' otherwise), while
+    # web search already reaches DuckDuckGo as a SearXNG engine.
+    enabled = False
 
     def score_confidence(self, raw_query: str, result: "DataSourceResult") -> float:
         """Boost .gov/.edu source URLs; reduce for tangential related topics."""
-        url = result.source_url.lower()
-        if ".gov" in url or ".edu" in url:
+        host = (urlsplit(result.source_url).hostname or "").rstrip(".")
+        if host.endswith((".gov", ".edu")):
             return min(1.0, result.confidence + 0.10)
         # Related topics with very short content are likely tangential
         if len(result.content) < 30:
@@ -61,43 +66,43 @@ class DuckDuckGoSource(DataSource):
         return keywords[-1] if keywords else raw_query
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                # Removed skip_disambig — disambiguation pages contain useful structured data
-                resp = await client.get(
-                    "https://api.duckduckgo.com/",
-                    params={"q": query, "format": "json", "no_html": "1"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Removed skip_disambig — disambiguation pages contain useful structured data
+            resp = await client.get(
+                "https://api.duckduckgo.com/",
+                params={"q": query, "format": "json", "no_html": "1"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-                results: list[DataSourceResult] = []
+            results: list[DataSourceResult] = []
 
-                # Abstract (instant answer)
-                abstract = data.get("AbstractText", "")
-                if abstract:
-                    results.append(DataSourceResult(
-                        title=data.get("Heading", query),
-                        content=abstract,
-                        source_url=data.get("AbstractURL", ""),
-                        source_name="DuckDuckGo",
-                        confidence=0.80,
-                    ))
+            # Abstract (instant answer)
+            abstract = data.get("AbstractText", "")
+            if abstract:
+                results.append(DataSourceResult(
+                    title=data.get("Heading", query),
+                    content=abstract,
+                    source_url=data.get("AbstractURL", ""),
+                    source_name="DuckDuckGo",
+                    confidence=0.80,
+                ))
 
-                # Related topics (up to 2)
-                for topic in data.get("RelatedTopics", [])[:2]:
-                    text = topic.get("Text", "")
-                    url = topic.get("FirstURL", "")
-                    if text and not isinstance(topic.get("Topics"), list):
-                        results.append(DataSourceResult(
-                            title=text[:80],
-                            content=text,
-                            source_url=url,
-                            source_name="DuckDuckGo",
-                            confidence=0.70,
-                        ))
+            # Related topics (up to 2). A group entry holds a "Topics" list and
+            # no text of its own; filtered before the cut, so groups cannot
+            # crowd out the flat topics behind them.
+            flat_topics = [
+                t for t in data.get("RelatedTopics", [])
+                if t.get("Text") and not isinstance(t.get("Topics"), list)
+            ]
+            for topic in flat_topics[:_MAX_RELATED_TOPICS]:
+                text = topic["Text"]
+                results.append(DataSourceResult(
+                    title=text[:80],
+                    content=text,
+                    source_url=topic.get("FirstURL", ""),
+                    source_name="DuckDuckGo",
+                    confidence=0.70,
+                ))
 
-                return results
-        except (RetrievalError, httpx.HTTPError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
-            logger.debug("DuckDuckGo query failed: %s", exc)
-            return []
+            return results

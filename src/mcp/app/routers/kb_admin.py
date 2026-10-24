@@ -20,6 +20,7 @@ from app.db.neo4j.artifacts import (
     delete_artifacts_by_domain,
     domain_artifact_stats,
     get_artifact,
+    get_source_paths,
     list_artifacts,
     list_duplicate_artifacts,
 )
@@ -200,6 +201,9 @@ class ReindexCorpusResponse(BaseModel):
     reindexed: int
     skipped: int
     errors: int
+    skipped_reasons: dict[str, int] = Field(
+        default_factory=dict, description="Skipped artifacts counted by reason"
+    )
     next_offset: int | None
     message: str
 
@@ -409,6 +413,30 @@ def _resolve_archive_source(filename: str, domain: str) -> Path | None:
     return None
 
 
+def _recorded_source(source_path: str) -> Path | None:
+    """The file an artifact recorded as its source, when it is still there and
+    under the archive root (the only place ``ingest_file`` reads from)."""
+    if not source_path:
+        return None
+    candidate = Path(source_path)
+    try:
+        candidate.resolve().relative_to(Path(config.ARCHIVE_PATH).resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+# Why reindex_corpus skipped an artifact (the ``skipped_reasons`` keys). The
+# knowledge-pack reasons are the PACK_SKIP_* values in app.services.knowledge_packs.
+_SKIP_NO_FILENAME = "no_filename"
+_SKIP_NO_SOURCE = "source_file_not_found"
+# An upload keeps no copy unless CERID_STORAGE_MODE=archive, and an archived
+# copy is known only once its path is recorded on the artifact.
+_SKIP_UPLOAD_NO_SOURCE = "upload_without_source_path"
+_SKIP_NOT_REINDEXED = "not_reindexed"
+_SKIP_FORGOTTEN = "forgotten"
+
+
 @router.post("/admin/kb/reindex", response_model=ReindexCorpusResponse)
 async def reindex_corpus(req: ReindexCorpusRequest | None = None):
     """Re-embed + re-index existing artifacts so newly-enabled retrieval
@@ -419,13 +447,20 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
     Chroma/BM25/sparse rows, rewrites all three from the same content-addressed
     chunk ids, and invalidates the semantic cache — so re-running any page is
     safe. Drive to completion by looping ``offset`` until ``next_offset`` is
-    null. Artifacts with no resolvable source file are skipped (their only copy
-    is the chunk text, which cannot be cleanly re-chunked).
+    null.
+
+    The source is the file the artifact recorded (``source_path``), else a file
+    of its name under the archive root. Knowledge-pack artifacts have neither,
+    because pack staging is deleted after install: their packs are re-staged
+    and re-ingested, once per pack per call. Artifacts with no resolvable
+    source are skipped and counted by reason in ``skipped_reasons`` (their only
+    copy is the chunk text, which cannot be cleanly re-chunked).
 
     NOTE: this does NOT flip any feature flag. Enable the flag first
     (``ENABLE_CONTEXTUAL_CHUNKS`` / ``ENABLE_SENTENCE_WINDOW``), then run this.
     """
     from app.services.ingestion import ingest_file
+    from app.services.knowledge_packs import reindex_pack_artifacts
 
     # Mirror the other admin mutators: tolerate a bodyless POST by falling back
     # to the model defaults rather than constructing the model with no args.
@@ -437,19 +472,32 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
         artifacts = list_artifacts(
             neo4j, domain=domain_filter, offset=offset, limit=limit,
         )
+        source_paths = get_source_paths(neo4j, [str(a.get("id", "")) for a in artifacts])
     except Exception as e:
         logger.error("Reindex: failed to list artifacts: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to list artifacts: {e}")
 
     reindexed = 0
-    skipped = 0
     errors = 0
+    skipped_reasons: dict[str, int] = {}
+
+    def _skip(reason: str) -> None:
+        skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+
+    pack_artifacts = [a for a in artifacts if a.get("client_source") == "knowledge-pack"]
     for a in artifacts:
+        if a.get("client_source") == "knowledge-pack":
+            continue
         filename = a.get("filename", "")
         domain = a.get("domain", "") or config.DEFAULT_DOMAIN
-        source = _resolve_archive_source(filename, domain)
+        source = _recorded_source(source_paths.get(str(a.get("id", "")), ""))
         if source is None:
-            skipped += 1
+            source = _resolve_archive_source(filename, domain)
+        if source is None:
+            if a.get("client_source") == "upload":
+                _skip(_SKIP_UPLOAD_NO_SOURCE)
+            else:
+                _skip(_SKIP_NO_SOURCE if filename else _SKIP_NO_FILENAME)
             continue
         try:
             result = await ingest_file(
@@ -457,11 +505,16 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
                 domain=domain,
                 sub_category=a.get("sub_category", "") or "",
                 force_reindex=True,
+                # A maintenance pass never cancels a forget: an artifact in
+                # the Trash stays there.
+                on_forgotten="skip",
             )
             if result.get("status") in ("success", "updated"):
                 reindexed += 1
+            elif result.get("reason") == "forgotten":
+                _skip(_SKIP_FORGOTTEN)
             else:
-                skipped += 1
+                _skip(_SKIP_NOT_REINDEXED)
         except Exception as e:  # noqa: BLE001 — per-artifact failure must not abort the batch
             errors += 1
             log_swallowed_error(
@@ -471,6 +524,15 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
                 context={"artifact_id": a.get("id", ""), "source_filename": filename},
             )
 
+    if pack_artifacts:
+        for outcome in (await reindex_pack_artifacts(pack_artifacts)).values():
+            if outcome == "reindexed":
+                reindexed += 1
+            elif outcome == "error":
+                errors += 1
+            else:
+                _skip(outcome)
+
     # Per-artifact re-ingest already invalidates the semantic cache; invalidate
     # once more for the batch to match the other admin mutators. Scoped to
     # domain_filter when the caller gave one (every artifact in the batch
@@ -478,16 +540,19 @@ async def reindex_corpus(req: ReindexCorpusRequest | None = None):
     # full-flush contract, same as before this batch invalidation was scoped.
     _invalidate_scoped_safe("kb_admin.reindex_corpus", domain_filter)
 
+    skipped = sum(skipped_reasons.values())
+    reasons = ", ".join(f"{k} {v}" for k, v in sorted(skipped_reasons.items()))
     next_offset = offset + limit if len(artifacts) == limit else None
     return ReindexCorpusResponse(
         requested=len(artifacts),
         reindexed=reindexed,
         skipped=skipped,
         errors=errors,
+        skipped_reasons=skipped_reasons,
         next_offset=next_offset,
         message=(
             f"Re-indexed {reindexed}/{len(artifacts)} artifact(s) "
-            f"(skipped {skipped}, errors {errors})."
+            f"(skipped {skipped}{f': {reasons}' if reasons else ''}; errors {errors})."
             + (f" More remain — resume at offset={next_offset}." if next_offset else "")
         ),
     )
@@ -810,6 +875,16 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
 
         # Delete ChromaDB collection for the domain
         coll_name = config.collection_name(domain)
+        # The lexical indexes hold the same chunk text; read the ids before the
+        # collection goes (audit F148).
+        try:
+            domain_chunk_ids = list(chroma.get_collection(name=coll_name).get(include=[]).get("ids") or [])
+        except Exception as e:
+            log_swallowed_error('app.routers.kb_admin', e)
+            domain_chunk_ids = []
+        from app.services.content_lifecycle import clear_lexical_domain
+
+        lexical_removed = clear_lexical_domain(domain, domain_chunk_ids)
         try:
             chroma.delete_collection(name=coll_name)
             logger.info("Deleted ChromaDB collection: %s", coll_name)
@@ -832,7 +907,8 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         audit_log.audit(
             "kb.clear_domain",
             target=domain,
-            detail={"artifacts_deleted": deleted_count, "chunks_removed": chunks_removed},
+            detail={"artifacts_deleted": deleted_count, "chunks_removed": chunks_removed,
+                    "lexical_removed": lexical_removed},
         )
         return {
             "domain": domain,

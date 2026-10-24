@@ -102,15 +102,24 @@ def _conversation_memory_queries(
     conditions = ["a.filename STARTS WITH 'memory_'", "a.superseded_by IS NULL"]
     if memory_type:
         conditions.append("a.filename STARTS WITH $memory_type_prefix")
-    if convo_prefix:
-        conditions.append("a.filename CONTAINS $convo_prefix")
+    # The conversation is the node's own (forget spec §6.3), or its edge for a
+    # memory written before; never a fragment of the filename.
+    # A memory older than its node's conversation and with no edge still names
+    # the first 8 characters of its conversation in its filename.
+    convo_filter = (
+        "WHERE cid STARTS WITH $convo_prefix OR (cid = '' AND a.filename CONTAINS left($convo_prefix, 8)) "
+        if convo_prefix else ""
+    )
     match = (
         "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
         "WHERE " + " AND ".join(conditions) + " "
+        "OPTIONAL MATCH (a)-[:EXTRACTED_FROM]->(c:Conversation) "
+        "WITH a, coalesce(a.conversation_id, head(collect(c.id)), '') AS cid "
+        + convo_filter
     )
     listing = match + (
         "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, "
-        "a.ingested_at AS created_at "
+        "a.ingested_at AS created_at, cid AS conversation_id "
         "ORDER BY a.ingested_at DESC LIMIT $fetch"
     )
     return listing, match + "RETURN count(a) AS total"
@@ -134,30 +143,38 @@ def _verified_memory_queries(
     ]
     if memory_type:
         conditions.append("m.memory_type = $memory_type")
-    convo_filter = "WHERE c.id STARTS WITH $convo_prefix " if convo_prefix else ""
+    convo_filter = "WHERE cid STARTS WITH $convo_prefix " if convo_prefix else ""
     match = (
         "MATCH (m:Memory) "
         "WHERE " + " AND ".join(conditions) + " "
         "OPTIONAL MATCH (m)-[:EXTRACTED_FROM]->(c:Conversation) "
-        f"WITH m, c {convo_filter}"
+        "WITH m, coalesce(m.conversation_id, head(collect(c.id)), '') AS cid "
+        + convo_filter
     )
     listing = match + (
         "RETURN m.id AS id, m.text AS text, m.memory_type AS memory_type, "
-        "m.created_at AS created_at, c.id AS conversation_id "
+        "m.created_at AS created_at, cid AS conversation_id "
         "ORDER BY m.created_at DESC LIMIT $fetch"
     )
     return listing, match + "RETURN count(DISTINCT m) AS total"
 
 
+def _memory_type_of(filename: str) -> str:
+    """``memory_{type}_{convo_prefix}_{timestamp}_{idx}``: types may hold "_"
+    (action_item, project_context), so the longest known type wins."""
+    import config
+
+    known = sorted(set(_MEMORY_TYPE_MAP.values()) | set(config.MEMORY_TYPES), key=len, reverse=True)
+    return next((t for t in known if filename.startswith(f"memory_{t}_")), "unknown")
+
+
 def _artifact_row_to_memory(record: Any) -> dict[str, Any]:
-    # memory_{type}_{convo_prefix}_{timestamp}_{idx}
     filename = record["filename"] or ""
-    parts = filename.split("_")
     return {
         "id": record["id"],
-        "type": parts[1] if len(parts) > 1 else "unknown",
+        "type": _memory_type_of(filename),
         "content": record["summary"] or "",
-        "conversation_id": parts[2] if len(parts) > 2 else "",
+        "conversation_id": record.get("conversation_id") or "",
         "created_at": record["created_at"],
         "source_filename": filename,
         "source": "conversation",
@@ -203,7 +220,7 @@ async def list_memories(
                     detail=f"Invalid memory type: {type}. Valid: facts, decisions, preferences, action-items",
                 )
 
-        convo_prefix = conversation_id[:8] if conversation_id else None
+        convo_prefix = conversation_id or None
         # Both stores are ordered independently, so each has to yield enough
         # rows to cover the requested page before they are merged.
         params: dict[str, Any] = {"fetch": offset + limit}
@@ -256,8 +273,17 @@ async def list_memories(
 # ---------------------------------------------------------------------------
 
 @router.patch("/memories/{memory_id}", response_model=UpdateMemoryResponse)
-async def update_memory(memory_id: str, req: MemoryUpdateRequest):
-    """Update a memory's summary text."""
+async def update_memory(
+    memory_id: str,
+    req: MemoryUpdateRequest,
+    request: Request = None,  # type: ignore[assignment]  # injected by FastAPI; None for direct callers
+):
+    """Update a memory's summary text. In multi-user mode only an admin may."""
+    _require_admin(request, "Editing a memory")
+    from core.forget.registry import is_forgotten
+
+    if is_forgotten("artifact", memory_id):
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
     try:
         driver = get_neo4j()
 
@@ -266,31 +292,33 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
             check = session.run(
                 "MATCH (a:Artifact {id: $memory_id})-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
                 "WHERE a.filename STARTS WITH 'memory_' "
+                "OPTIONAL MATCH (a)-[:EXTRACTED_FROM]->(c:Conversation) "
+                "WITH a, coalesce(a.conversation_id, head(collect(c.id)), '') AS cid "
                 "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, "
-                "a.ingested_at AS created_at",
+                "a.ingested_at AS created_at, cid AS conversation_id",
                 memory_id=memory_id,
             )
             record = check.single()
             if not record:
                 raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
 
-            session.run(
-                "MATCH (a:Artifact {id: $memory_id}) "
-                "SET a.summary = $summary",
-                memory_id=memory_id,
-                summary=req.summary,
-            )
-
         filename = record["filename"] or ""
-        parts = filename.split("_")
-        memory_type = parts[1] if len(parts) > 1 else "unknown"
-        convo_id_part = parts[2] if len(parts) > 2 else ""
+        edited_id = await asyncio.to_thread(_store_edit_as_new_version, driver, memory_id, record, req.summary)
+        if edited_id is None:
+            # The edited text is already stored (unchanged or a duplicate); only the
+            # display summary changes.
+            with driver.session() as session:
+                session.run(
+                    "MATCH (a:Artifact {id: $memory_id}) SET a.summary = $summary",
+                    memory_id=memory_id, summary=req.summary,
+                )
+            edited_id = memory_id
 
         return {
-            "id": memory_id,
-            "type": memory_type,
+            "id": edited_id,
+            "type": _memory_type_of(filename),
             "content": req.summary,
-            "conversation_id": convo_id_part,
+            "conversation_id": record.get("conversation_id") or "",
             "created_at": record["created_at"],
             "source_filename": filename,
         }
@@ -300,6 +328,47 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
     except Exception as e:
         logger.error(f"Update memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _store_edit_as_new_version(driver: Any, memory_id: str, record: Any, text: str) -> str | None:
+    """Store an edited memory the way a changed memory is stored: as a new
+    version that supersedes the old one (spec §7). Rewriting only the Neo4j
+    summary left the Chroma document, its embedding and the BM25 text on the
+    old wording, so recall kept answering from it (audit F040). Returns the new
+    version's id, or None when the text needs no new version."""
+    from app.services.ingestion import ingest_content
+    from core.agents.fact_derivation import OPEN_INTERVAL
+    from core.lineage import writer
+    from core.lineage.current import is_current
+    from core.utils.time import utcnow, utcnow_iso
+
+    chroma = get_chroma()
+    coll = chroma.get_or_create_collection(name=config.collection_name("conversations"))
+    got = coll.get(where={"artifact_id": {"$eq": memory_id}}, include=["metadatas"], limit=1)
+    old = dict((got.get("metadatas") or [{}])[0] or {})
+    if old and not is_current(old):
+        raise HTTPException(status_code=409, detail="This memory has a newer version; edit that one.")
+    filename = record["filename"] or ""
+    memory_type = _memory_type_of(filename)
+    conversation_id = record.get("conversation_id") or old.get("conversation_id") or ""
+    metadata = {k: old[k] for k in ("model", "valid_from", "event_date", "decay_anchor") if old.get(k)}
+    metadata.update({
+        "filename": f"memory_{memory_type}_{(conversation_id or 'edited')[:8]}_{utcnow().strftime('%Y%m%d_%H%M%S')}_edit",
+        "conversation_id": conversation_id,
+        "memory_type": memory_type,
+        "summary": text,
+        "created_at": utcnow_iso(),
+        "valid_to": OPEN_INTERVAL,
+        "access_count": "0",
+    })
+    result = ingest_content(text, "conversations", metadata=metadata)
+    new_id = result.get("artifact_id") or ""
+    if result.get("status") != "success" or not new_id or new_id == memory_id:
+        return None
+    outcome = writer.supersede(driver, chroma, memory_id, new_id)
+    if not outcome.ok:
+        raise HTTPException(status_code=409, detail=f"The edit was stored but not linked to the old version: {outcome.reason}")
+    return new_id
 
 
 # ---------------------------------------------------------------------------

@@ -30,8 +30,9 @@ from typing import Any
 import httpx
 
 import config.settings as config
+from config.constants import SEARXNG_ENGINE_TIMEOUT
 from core.utils.circuit_breaker import get_breaker
-from core.utils.llm_client import call_llm
+from core.utils.llm_client import call_llm_raw
 from errors import RetrievalError
 
 _logger = logging.getLogger("ai-companion.web_search")
@@ -183,6 +184,10 @@ class TavilyProvider(WebSearchProvider):
 # ---------------------------------------------------------------------------
 
 
+class SearchEnginesUnavailable(RuntimeError):
+    """Every engine behind the search provider was unavailable."""
+
+
 class SearxngProvider(WebSearchProvider):
     """SearXNG self-hosted — alternative provider for privacy-first users.
 
@@ -210,10 +215,19 @@ class SearxngProvider(WebSearchProvider):
                     "q": query,
                     "format": "json",
                     "pageno": 1,
+                    "timeout_limit": SEARXNG_ENGINE_TIMEOUT,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
+
+            # SearXNG answers 200 with no results when every engine it asked was
+            # suspended, CAPTCHA-blocked or timed out. That is an outage, not an
+            # empty answer: raise so the breaker and the source's health see it.
+            unresponsive = data.get("unresponsive_engines") or []
+            if not data.get("results") and unresponsive:
+                detail = ", ".join(": ".join(map(str, e)) for e in unresponsive)
+                raise SearchEnginesUnavailable(f"every SearXNG engine was unresponsive ({detail})")
 
             results: list[WebSearchResult] = []
             for i, item in enumerate(data.get("results", [])[:max_results]):
@@ -264,8 +278,10 @@ class OpenRouterSearchProvider(WebSearchProvider):
             },
             {"role": "user", "content": query},
         ]
+        from core.agents.hallucination.verification import _extract_citation_urls
+
         try:
-            content = await call_llm(
+            data = await call_llm_raw(
                 messages,
                 breaker_name="web-search",
                 model=model,
@@ -273,17 +289,20 @@ class OpenRouterSearchProvider(WebSearchProvider):
                 max_tokens=1500,
                 timeout=25.0,
             )
-        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+            message = data["choices"][0]["message"]
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError, IndexError):
             _logger.warning("OpenRouter online search failed", exc_info=True)
             return []
 
         # The :online model returns a prose answer, not structured results.
-        # Wrap it as a single result.
+        # Wrap it as a single result, addressed by the first page it cites:
+        # with no URL the row had no identity and no citation.
+        cited = _extract_citation_urls(message)
         return [
             WebSearchResult(
                 title=f"Web search: {query[:80]}",
-                url="",
-                snippet=content[:2000],
+                url=cited[0] if cited else "",
+                snippet=(message.get("content") or "")[:2000],
                 score=0.8,
                 published_date=None,
             )
@@ -359,11 +378,23 @@ async def search_and_verify(
         ``query``, ``results``, ``verified_results`` (if Self-RAG available),
         ``ingested_count``, ``provider``, ``timestamp``.
     """
+    from core.routing.egress import cloud_egress_refused
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    if refused := cloud_egress_refused():
+        return {
+            "query": query,
+            "results": [],
+            "verified_results": None,
+            "ingested_count": 0,
+            "provider": "none",
+            "timestamp": timestamp,
+            "error": f"Web search is off — {refused}",
+        }
     _check_rate_limit()
 
     effective_max = min(max_results, 10)
     provider = get_search_provider()
-    timestamp = datetime.now(timezone.utc).isoformat()
 
     try:
         raw_results = await provider.search(query, max_results=effective_max)

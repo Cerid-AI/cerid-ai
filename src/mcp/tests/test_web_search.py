@@ -147,16 +147,76 @@ async def test_searxng_provider_success():
     assert results[0].score == 1.0
 
 
+async def _searxng_search(payload: dict):
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=_make_mock_response(payload))
+    with patch.dict("os.environ", {"SEARXNG_URL": "http://localhost:8080"}), \
+         patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"), \
+         patch("utils.web_search._get_search_client", return_value=mock_client):
+        from core.utils.circuit_breaker import get_breaker
+        from utils.web_search import SearxngProvider
+        get_breaker("searxng").reset()
+        return await SearxngProvider().search("latest stable release python")
+
+
+@pytest.mark.asyncio
+async def test_searxng_with_every_engine_down_raises_instead_of_returning_nothing():
+    """Live 2026-10-10: brave and google cse suspended, duckduckgo CAPTCHA'd.
+    SearXNG answered 200 with no results, and the source reported an empty
+    answer, so nothing showed that web search was down."""
+    from utils.web_search import SearchEnginesUnavailable
+
+    with pytest.raises(SearchEnginesUnavailable, match="duckduckgo: CAPTCHA"):
+        await _searxng_search({"results": [], "unresponsive_engines": [
+            ["brave", "Suspended: too many requests"], ["duckduckgo", "CAPTCHA"]]})
+
+
+@pytest.mark.asyncio
+async def test_searxng_with_no_matches_and_engines_up_is_an_empty_answer():
+    assert await _searxng_search({"results": [], "unresponsive_engines": []}) == []
+
+
+@pytest.mark.asyncio
+async def test_searxng_results_from_the_engines_that_answered_still_count():
+    out = await _searxng_search({**_searxng_response_json(), "unresponsive_engines": [["brave", "Suspended"]]})
+    assert len(out) == 1
+
+
+@pytest.mark.asyncio
+async def test_searxng_answers_inside_the_source_budget():
+    """Live 2026-10-11: one hung engine held SearXNG to its 3 s default while
+    the source gave up at 2 s, so the answers the other engines had already
+    returned were dropped. SearXNG is told to stop waiting first."""
+    from config.constants import EXTERNAL_SOURCE_QUERY_TIMEOUT
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=_make_mock_response(_searxng_response_json()))
+    with patch.dict("os.environ", {"SEARXNG_URL": "http://localhost:8080"}), \
+         patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"), \
+         patch("utils.web_search._get_search_client", return_value=mock_client):
+        from core.utils.circuit_breaker import get_breaker
+        from utils.web_search import SearxngProvider
+        get_breaker("searxng").reset()
+        await SearxngProvider().search("half-life of carbon-14")
+
+    assert mock_client.get.await_args.kwargs["params"]["timeout_limit"] < EXTERNAL_SOURCE_QUERY_TIMEOUT
+
+
 # ---------------------------------------------------------------------------
 # OpenRouter search fallback
 # ---------------------------------------------------------------------------
 
 
+def _online_response(content: str, cited: list[str]) -> dict:
+    annotations = [{"type": "url_citation", "url_citation": {"url": u}} for u in cited]
+    return {"choices": [{"message": {"content": content, "annotations": annotations}}]}
+
+
 @pytest.mark.asyncio
 async def test_openrouter_search_fallback():
     """OpenRouter online model returns a single pseudo-result."""
-    with patch("utils.web_search.call_llm", new_callable=AsyncMock) as mock_llm:
-        mock_llm.return_value = "Here is a synthesized answer about the topic."
+    with patch("utils.web_search.call_llm_raw", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = _online_response("Here is a synthesized answer about the topic.", [])
 
         from utils.web_search import OpenRouterSearchProvider
         provider = OpenRouterSearchProvider()
@@ -169,9 +229,23 @@ async def test_openrouter_search_fallback():
 
 
 @pytest.mark.asyncio
+async def test_openrouter_search_fallback_is_addressed_by_what_it_cites():
+    """F104: the :online answer's url_citation annotations were discarded, so
+    the row had an empty URL — no identity and nothing to cite."""
+    cited = ["https://www.example.org/ethanol", "https://chem.example.edu/bp"]
+    with patch("utils.web_search.call_llm_raw", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = _online_response("Ethanol boils at 78.37 °C.", cited)
+
+        from utils.web_search import OpenRouterSearchProvider
+        results = await OpenRouterSearchProvider().search("boiling point of ethanol")
+
+    assert [r.url for r in results] == ["https://www.example.org/ethanol"]
+
+
+@pytest.mark.asyncio
 async def test_openrouter_search_fallback_failure():
     """OpenRouter provider returns empty list on LLM failure."""
-    with patch("utils.web_search.call_llm", new_callable=AsyncMock) as mock_llm:
+    with patch("utils.web_search.call_llm_raw", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = RuntimeError("LLM down")
 
         from utils.web_search import OpenRouterSearchProvider

@@ -132,44 +132,48 @@ def _check_budget(tier_key: str, slo_budget_ms: int | None) -> int:
 # where chat.py stripped a prefix that was never added.
 
 FREE_MODELS = {
-    "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",
+    "llama-3.3": "openrouter/meta-llama/llama-4-scout",
 }
 
 # E1 CR-027: the FREE tier dispatches this PAID llama-3.3 slug, so its
 # RouteDecision must stamp the real paid rate + provider="openrouter_paid" —
-# not provider="openrouter_free"/cost=0.0. Matches the paid llama-3.3 per-1K
-# rate the CR-013 local->cloud fallback uses (llm_client._FALLBACK_COST_PER_1K).
-_LLAMA_33_PAID_COST_PER_1K = 0.00015
+# not provider="openrouter_free"/cost=0.0. Matches the paid per-1K rate the
+# CR-013 local->cloud fallback uses (llm_client._FALLBACK_COST_PER_1K). The
+# slot is the cheapest reliable model — Llama 4 Scout since 2026-10-10 — so a
+# high cost sensitivity really is the cheapest route.
+_LLAMA_33_PAID_COST_PER_1K = 0.0001
 
-# Cheap tier: catalog-refreshed 2026-05-20 against OpenRouter live models.
-# Dict keys are stable identifiers used at call sites — only the underlying
-# model ID + cost change with each catalog refresh.
-# - "gpt-4o-mini" slot: gpt-4o-mini. gpt-5-nano was removed (reasoning model:
-#   max_tokens consumed as reasoning budget → 0 output chars).
-# - "gemini-flash" slot: gemini-3.1-flash-lite is cheaper + newer + larger
-#   context than gemini-2.5-flash.
+# Catalog-refreshed 2026-10-10 against OpenRouter live models. Dict keys are
+# stable identifiers used at call sites — only the underlying model ID + cost
+# change with each catalog refresh; at dispatch every id also resolves to the
+# newest release of its family (model_catalog.current_model_id).
+# - "gpt-4o-mini" slot: GPT-6 Luna, OpenAI's small line since GPT-4o mini.
+#   gpt-5-nano was removed earlier (reasoning model: max_tokens consumed as
+#   reasoning budget → 0 output chars), so Luna was probed for that before
+#   adoption.
+# - "gemini-flash" slot: gemini-3.5-flash-lite.
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
-    "gpt-4o-mini": {"id": "openrouter/openai/gpt-4o-mini", "cost": 0.00015},
-    "gemini-flash": {"id": "openrouter/google/gemini-3.1-flash-lite", "cost": 0.00025},
+    "gpt-4o-mini": {"id": "openrouter/openai/gpt-6-luna", "cost": 0.0001},
+    "gemini-flash": {"id": "openrouter/google/gemini-3.5-flash-lite", "cost": 0.0003},
 }
 
 CAPABLE_MODELS: dict[str, dict[str, str | float]] = {
-    "claude-sonnet": {"id": "openrouter/anthropic/claude-sonnet-4.6", "cost": 0.003},
-    "gpt-4o": {"id": "openrouter/openai/gpt-4o", "cost": 0.0025},
+    "claude-sonnet": {"id": "openrouter/anthropic/claude-sonnet-5.5", "cost": 0.002},
+    "gpt-4o": {"id": "openrouter/openai/gpt-6.1-sol", "cost": 0.002},
 }
 
 # Research / online-search tier: catalog-refreshed 2026-05-20.
 # Previous IDs (grok-4.1-fast:online, grok-4:online) were REMOVED from
 # OpenRouter's catalog — source of the 2026-05-20 Sentry 4xx burst.
-# Current xAI lineup is grok-4.20 / grok-4.20-multi-agent / grok-4.3.
+# Refreshed 2026-10-10: grok-4.7 (grok-4.20 is older despite the number).
 # `:online` is OpenRouter's generic web-search overlay; works on any
 # model ID.
 RESEARCH_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-online": {"id": "openrouter/x-ai/grok-4.3:online", "cost": 0.00125},
+    "grok-online": {"id": "openrouter/x-ai/grok-4.7:online", "cost": 0.002},
 }
 
 EXPERT_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-4": {"id": "openrouter/x-ai/grok-4.20:online", "cost": 0.00125},
+    "grok-4": {"id": "openrouter/x-ai/grok-4.7:online", "cost": 0.002},
 }
 
 # ---------------------------------------------------------------------------
@@ -618,14 +622,12 @@ async def route(
             model=model,
             provider="openrouter_paid",
             reason="dedicated verification model",
-            estimated_cost_per_1k=0.00015,
+            estimated_cost_per_1k=0.0001,
             tier_p95_ms=p95,
         )
 
     if task_type == TaskType.VERIFICATION_WEB:
         p95 = _check_budget("verification_web", slo_budget_ms)
-        # Catalog-refreshed 2026-05-20: grok-4.1-fast removed from
-        # OpenRouter; grok-4.3 is the current cheap-search-tier xAI model.
         model = config.VERIFICATION_CURRENT_EVENT_MODEL
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
@@ -633,14 +635,12 @@ async def route(
             model=model,
             provider="openrouter_paid",
             reason="web-search verification",
-            estimated_cost_per_1k=0.00125,
+            estimated_cost_per_1k=float(RESEARCH_MODELS["grok-online"]["cost"]),
             tier_p95_ms=p95,
         )
 
     if task_type == TaskType.VERIFICATION_EXPERT:
         p95 = _check_budget("verification_expert", slo_budget_ms)
-        # Catalog-refreshed 2026-05-20: grok-4 / grok-4:online removed
-        # from OpenRouter; grok-4.20 is the current expert-tier xAI model.
         # The expert branch wants the web-search (:online) variant — see the
         # VERIFICATION_EXPERT_WEB_MODEL note in config/settings.py.
         model = config.VERIFICATION_EXPERT_WEB_MODEL
@@ -650,7 +650,7 @@ async def route(
             model=model,
             provider="openrouter_paid",
             reason="expert verification",
-            estimated_cost_per_1k=0.00125,
+            estimated_cost_per_1k=float(EXPERT_MODELS["grok-4"]["cost"]),
             tier_p95_ms=p95,
         )
 
@@ -686,7 +686,7 @@ async def route(
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_paid",
-            reason="cheap tier — llama-3.3 (no local backend)",
+            reason="cheap tier — Llama (no local backend)",
             estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
@@ -734,7 +734,7 @@ async def route(
                 "research query — cheaper web model (high cost sensitivity)"
                 if cs == "high" else "research query — real-time data needed"
             ),
-            estimated_cost_per_1k=0.0002,
+            estimated_cost_per_1k=float(RESEARCH_MODELS["grok-online"]["cost"]),
             tier_p95_ms=p95,
         )
 
@@ -766,7 +766,7 @@ async def route(
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_paid",
-            reason="simple query — cheap tier (llama-3.3) sufficient",
+            reason="simple query — cheap tier (Llama) sufficient",
             estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
@@ -780,7 +780,7 @@ async def route(
                 model=_resolve_tier_id(str(CHEAP_MODELS["gemini-flash"]["id"])),
                 provider="openrouter_paid",
                 reason="complex query — cheapest capable model (high cost sensitivity)",
-                estimated_cost_per_1k=0.0003,
+                estimated_cost_per_1k=float(CHEAP_MODELS["gemini-flash"]["cost"]),
                 tier_p95_ms=p95,
             )
         # E1 CR-029: COMPLEX + low escalates to the EXPERT tier when the operator
@@ -809,7 +809,7 @@ async def route(
             model=_resolve_tier_id(str(CAPABLE_MODELS["claude-sonnet"]["id"])),
             provider="openrouter_paid",
             reason=reason,
-            estimated_cost_per_1k=0.003,
+            estimated_cost_per_1k=float(CAPABLE_MODELS["claude-sonnet"]["cost"]),
             tier_p95_ms=p95,
         )
 
@@ -819,7 +819,7 @@ async def route(
         return RouteDecision(
             model=_resolve_tier_id(FREE_MODELS["llama-3.3"]),
             provider="openrouter_paid",
-            reason="moderate query — cheap llama-3.3 (high cost sensitivity)",
+            reason="moderate query — cheap Llama (high cost sensitivity)",
             estimated_cost_per_1k=_LLAMA_33_PAID_COST_PER_1K,
             tier_p95_ms=p95,
         )
@@ -830,7 +830,7 @@ async def route(
             model=_resolve_tier_id(str(CAPABLE_MODELS["claude-sonnet"]["id"])),
             provider="openrouter_paid",
             reason="moderate query — capable model (low cost sensitivity)",
-            estimated_cost_per_1k=0.003,
+            estimated_cost_per_1k=float(CAPABLE_MODELS["claude-sonnet"]["cost"]),
             tier_p95_ms=p95,
         )
     # Medium: cheap paid model balances quality and cost
@@ -839,7 +839,7 @@ async def route(
         model=_resolve_tier_id(str(CHEAP_MODELS["gpt-4o-mini"]["id"])),
         provider="openrouter_paid",
         reason="moderate query — cost-effective balance",
-        estimated_cost_per_1k=0.00015,
+        estimated_cost_per_1k=float(CHEAP_MODELS["gpt-4o-mini"]["cost"]),
         tier_p95_ms=p95,
     )
 

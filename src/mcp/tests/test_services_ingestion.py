@@ -1165,8 +1165,12 @@ class TestForceReindex:
 
         assert result["status"] == "updated"
         upsert_kwargs = collection.upsert.call_args.kwargs
-        # Exactly the two layout chunks (verbatim), not token-chunked.
-        assert upsert_kwargs["documents"] == ["row one", "row two"]
+        # Exactly the two layout chunks, not token-chunked; each carries the
+        # source header token chunks carry (audit F125).
+        assert upsert_kwargs["documents"] == [
+            "Source: data.csv | Domain: coding\n\nrow one",
+            "Source: data.csv | Domain: coding\n\nrow two",
+        ]
         metas = upsert_kwargs["metadatas"]
         assert len(metas) == 2
         assert metas[0]["element_type"] == "CSVRow"
@@ -1482,3 +1486,276 @@ class TestIngestStorageBackpressure:
             result = ingest_content("fail-open content", domain="coding")
 
         assert result["status"] == "success"
+
+
+class TestLayoutChunksCarryTheirTitle:
+    """Audit F125: kj-method.md's chunks never said "KJ method", so "What is the
+    KJ method?" never retrieved it. A layout chunk now carries the same source
+    header a token chunk does, on fresh ingest as on re-ingest."""
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_fresh_layout_ingest_names_its_document_in_every_chunk(self, mock_chroma, mock_neo4j, mock_redis):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        pre_chunked = [
+            {"text": "How to do it\n\n1. Gather four or more participants.", "metadata": {"element_type": "MarkdownSection"}},
+            {"text": "Example from 18F\n\nUsed to group findings.", "metadata": {"element_type": "MarkdownSection"}},
+        ]
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content(
+                "How to do it ... Example from 18F ...", domain="projects",
+                metadata={"filename": "kj-method.md"}, pre_chunked=pre_chunked,
+            )
+
+        assert result["status"] == "success"
+        documents = [d for call in collection.upsert.call_args_list for d in call.kwargs.get("documents", [])]
+        assert documents and all(d.startswith("Source: kj-method.md | Domain: projects\n\n") for d in documents)
+
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_layout_chunk_stores_its_header_but_embeds_its_body(self, mock_chroma, mock_neo4j, mock_redis):
+        """The header's boilerplate pulled short on-topic chunks off their
+        questions (Spark REFRESH 0.81 -> 0.68 cosine); BM25 finds the title term."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        embedded: list[str] = []
+
+        def fake_ef(texts):
+            embedded.extend(texts)
+            return [[float(len(t)), 1.0] for t in texts]
+
+        bodies = ["Description\n\n`REFRESH` invalidates cached entries.", "Syntax\n\nREFRESH resource_path"]
+        pre_chunked = [{"text": b, "metadata": {"element_type": "MarkdownSection"}} for b in bodies]
+        with patch("app.services.ingestion.graph") as mock_graph, \
+                patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content(
+                " ".join(bodies), domain="coding",
+                metadata={"filename": "sql-ref-syntax-aux-cache-refresh.md"}, pre_chunked=pre_chunked,
+            )
+
+        assert result["status"] == "success"
+        call = next(c for c in collection.upsert.call_args_list if c.kwargs.get("documents"))
+        assert all(d.startswith("Source: sql-ref-syntax-aux-cache-refresh.md") for d in call.kwargs["documents"])
+        assert embedded == bodies
+        assert call.kwargs["embeddings"] == [[float(len(b)), 1.0] for b in bodies]
+
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_token_chunk_is_embedded_as_stored(self, mock_chroma, mock_neo4j, mock_redis):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        with patch("app.services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content("A plain note about the KJ method.", domain="notes", metadata={"filename": "note.txt"})
+
+        assert result["status"] == "success"
+        call = next(c for c in collection.upsert.call_args_list if c.kwargs.get("documents"))
+        assert call.kwargs.get("embeddings") is None
+
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_reindexed_layout_chunk_embeds_its_body(self, mock_chroma, mock_neo4j, mock_redis, mock_sem):
+        """The knowledge-pack re-index runs through _reingest_artifact."""
+        from app.services.ingestion import _reingest_artifact
+
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        mock_neo4j.return_value = MagicMock()
+        embedded: list[str] = []
+
+        def fake_ef(texts):
+            embedded.extend(texts)
+            return [[1.0, float(len(t))] for t in texts]
+
+        pre_chunked = [
+            {"text": "Streams\n\nStreams are high-level async primitives.", "metadata": {"element_type": "MarkdownSection"}},
+        ]
+        with patch("app.services.ingestion.graph") as mock_graph, \
+                patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+            mock_graph.update_artifact.return_value = None
+            result = _reingest_artifact(
+                {"id": "aid", "content_hash": "h", "chunk_ids": "[]"}, pre_chunked[0]["text"], "coding",
+                {"filename": "streams.md"}, "h", pre_chunked=pre_chunked,
+            )
+
+        assert result["status"] == "updated"
+        kwargs = collection.upsert.call_args.kwargs
+        assert kwargs["documents"][0].startswith("Source: streams.md | Domain: coding\n\n")
+        assert embedded == [pre_chunked[0]["text"]]
+        assert kwargs["embeddings"] == [[1.0, float(len(pre_chunked[0]["text"]))]]
+
+
+# Real Markdown through the real layout parser. The frontmatter document also
+# opens with an H1, so the frontmatter title has to win over it.
+_TITLED_DOCS = [
+    pytest.param(
+        "kj-method.md", "projects",
+        "---\ntitle: \"'KJ method'\"\ntags: [research]\n---\n# Affinity mapping\n\n"
+        "Group what you learned.\n\n## How to do it\n\n1. Gather four or more participants.\n",
+        "KJ method", id="frontmatter-title",
+    ),
+    pytest.param(
+        "asyncio-stream.md", "coding",
+        "# Streams¶\n\nStreams are high-level async primitives.\n\n## StreamReader\n\nRepresents a reader object.\n",
+        "Streams", id="h1-title",
+    ),
+    pytest.param(
+        "sql-ref-syntax-aux-cache-refresh.md", "coding",
+        "## Description\n\n`REFRESH` invalidates cached entries.\n\n## Syntax\n\nREFRESH resource_path\n",
+        "", id="untitled",
+    ),
+]
+
+
+def _layout_chunks(tmp_path, filename, text):
+    from core.ingest.dispatch import layout_aware_parse
+
+    path = tmp_path / filename
+    path.write_text(text, encoding="utf-8")
+    parsed = layout_aware_parse(path)
+    assert parsed is not None
+    return parsed[1]
+
+
+def _artifact_titles(mock_graph):
+    titles = []
+    for call in mock_graph.set_artifact_properties.call_args_list:
+        props = call.kwargs.get("properties") or call.args[2]
+        if "title" in props:
+            titles.append(props["title"])
+    return titles
+
+
+class TestLayoutChunksEmbedTheirDocumentTitle:
+    """Ruling D1 (audit F125): a layout chunk embeds ``<title>\\n\\n<body>``, the
+    title being the frontmatter ``title``, else the first ``#`` heading, else
+    none. The stored text keeps the source header, and the Artifact keeps the
+    title, on fresh ingest as on the re-ingest the knowledge-pack re-index runs."""
+
+    @pytest.mark.parametrize(("filename", "domain", "text", "title"), _TITLED_DOCS)
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_fresh_layout_ingest(self, mock_chroma, mock_neo4j, mock_redis, filename, domain, text, title, tmp_path):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+        embedded: list[str] = []
+
+        def fake_ef(texts):
+            embedded.extend(texts)
+            return [[float(len(t)), 1.0] for t in texts]
+
+        chunks = _layout_chunks(tmp_path, filename, text)
+        bodies = [c["text"] for c in chunks if c["metadata"].get("element_type") == "MarkdownSection"]
+        with patch("app.services.ingestion.graph") as mock_graph, \
+                patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.find_artifact_by_source_path.return_value = None
+            mock_graph.create_artifact.return_value = None
+            mock_graph.discover_relationships.return_value = 0
+            result = ingest_content(text, domain=domain, metadata={"filename": filename}, pre_chunked=chunks)
+
+        assert result["status"] == "success"
+        call = next(c for c in collection.upsert.call_args_list if c.kwargs.get("documents"))
+        assert call.kwargs["documents"] == [f"Source: {filename} | Domain: {domain}\n\n{b}" for b in bodies]
+        assert embedded == [f"{title}\n\n{b}" if title else b for b in bodies]
+        assert _artifact_titles(mock_graph) == ([title] if title else [])
+
+    @pytest.mark.parametrize(("filename", "domain", "text", "title"), _TITLED_DOCS)
+    @patch("utils.query_cache.invalidate_query_caches_threaded")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    def test_a_layout_reingest(
+        self, mock_chroma, mock_neo4j, mock_redis, mock_invalidate, filename, domain, text, title, tmp_path,
+    ):
+        from app.services.ingestion import _reingest_artifact
+
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+        mock_neo4j.return_value = MagicMock()
+        embedded: list[str] = []
+
+        def fake_ef(texts):
+            embedded.extend(texts)
+            return [[1.0, float(len(t))] for t in texts]
+
+        chunks = _layout_chunks(tmp_path, filename, text)
+        bodies = [c["text"] for c in chunks if c["metadata"].get("element_type") == "MarkdownSection"]
+        with patch("app.services.ingestion.graph") as mock_graph, \
+                patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+            mock_graph.update_artifact.return_value = None
+            result = _reingest_artifact(
+                {"id": "aid", "content_hash": "h", "chunk_ids": "[]"}, text, domain,
+                {"filename": filename}, "h", pre_chunked=chunks,
+            )
+
+        assert result["status"] == "updated"
+        kwargs = collection.upsert.call_args.kwargs
+        assert kwargs["documents"] == [f"Source: {filename} | Domain: {domain}\n\n{b}" for b in bodies]
+        assert embedded == [f"{title}\n\n{b}" if title else b for b in bodies]
+        assert _artifact_titles(mock_graph) == ([title] if title else [])
+
+
+@pytest.mark.parametrize(("raw", "title"), [
+    ("Streams¶", "Streams"),
+    ("'KJ method'", "KJ method"),
+    ("“KJ method” ¶", "KJ method"),
+    ("Closing sequence ##", "Closing sequence"),
+    ("C#", "C#"),
+    ("   ", ""),
+])
+def test_a_title_loses_trailing_markup_and_surrounding_quotes(raw, title):
+    assert ingestion_module._document_title({"title": raw}, []) == title
+
+
+def test_a_hostile_title_is_cleaned_in_bounded_time():
+    """A frontmatter title is user content; cleanup must not go quadratic on it."""
+    import time
+
+    from app.services.ingestion import _clean_title
+
+    start = time.perf_counter()
+    cleaned = _clean_title("KJ method " + " ¶" * 1_000_000)
+    assert time.perf_counter() - start < 1.0
+    assert cleaned == "KJ method"
+    assert len(_clean_title("x" * 10_000)) == 300

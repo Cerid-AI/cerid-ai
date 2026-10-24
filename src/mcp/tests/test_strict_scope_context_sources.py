@@ -72,3 +72,45 @@ def test_the_query_route_applies_it_before_it_reads_or_passes_the_sources() -> N
     assert applied < src.index("orchestrated_query(")
     assert applied < src.index("agent_query_full(")
     assert "requested_strict=bool(req.strict_domains)" in src
+
+
+def test_with_no_domain_named_the_consumer_wall_is_the_scope() -> None:
+    walled = _scoped_context_sources(
+        None, None, strict_domains=True, requested_strict=False, allowed_domains=["finance", "inbox"],
+    )
+    assert walled == {"memory": False}
+
+    with_memory = _scoped_context_sources(
+        None, None, strict_domains=True, requested_strict=False, allowed_domains=["conversations"],
+    )
+    assert with_memory == {}
+
+
+def test_a_suite_consumer_with_external_off_loses_the_web_without_a_strict_request() -> None:
+    out = _scoped_context_sources(
+        {"external": True},
+        ["general"],
+        strict_domains=True,
+        requested_strict=False,
+        allow_external=False,
+    )
+    assert out["external"] is False
+    assert out["memory"] is False
+
+
+def test_external_off_turns_the_web_off_even_when_the_query_is_not_strict() -> None:
+    given = {"external": True, "memory": True}
+    out = _scoped_context_sources(
+        given, None, strict_domains=False, requested_strict=False, allow_external=False,
+    )
+    assert out == {"external": False, "memory": True}
+    assert out is not given
+    assert given == {"external": True, "memory": True}
+
+
+def test_naming_conversations_from_outside_the_wall_does_not_reach_memory() -> None:
+    out = _scoped_context_sources(
+        None, ["conversations"], strict_domains=True, requested_strict=False,
+        allowed_domains=["finance", "inbox"],
+    )
+    assert out == {"memory": False}

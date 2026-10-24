@@ -8,7 +8,7 @@ __all__ = [
     "init_schema",
     # artifacts
     "create_artifact", "delete_artifact", "find_artifact_by_filename",
-    "find_artifact_by_external_id", "find_artifact_by_source_path", "get_artifact_versions",
+    "find_artifact_by_external_id", "find_artifact_by_source_path", "link_upload", "get_artifact_versions",
     "update_artifact", "get_artifact", "get_quality_scores",
     "get_verification_report", "save_verification_report",
     "count_artifacts", "list_artifacts", "recategorize_artifact", "set_artifact_properties",
@@ -42,6 +42,7 @@ from app.db.neo4j.artifacts import (  # noqa: F401,E402
     get_artifact_versions,
     get_quality_scores,
     get_verification_report,
+    link_upload,
     list_artifacts,
     recategorize_artifact,
     save_verification_report,

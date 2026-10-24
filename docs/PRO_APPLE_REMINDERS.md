@@ -1,5 +1,7 @@
 # Apple Reminders connector
 
+> Connector notes. The product tier around them is historical. Stamps use `config/taxonomy.py`.
+
 ## What this connector does
 
 The Apple Reminders connector reads your local Reminders through Apple's

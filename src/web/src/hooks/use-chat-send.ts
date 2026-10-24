@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
+import type { ChatMessage, KBQueryResult, MemoryRecallResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, injectionKey, memoryToKBResult, selectDocsWithinBudget } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
 import { detectAsOf } from "@/lib/as-of"
@@ -34,6 +34,11 @@ const DEFAULT_AUTO_INJECT_MAX = 3
  *  questions that cannot be answered without it. */
 const KB_WAIT_TIMEOUT_MS = 5_000
 
+/** Rows a send asks the knowledge base for. The panel's own retrieval asks for
+ *  10 (use-kb-context.ts, use-orchestrated-query.ts), so a send that asked for
+ *  fewer chose from a different pool than the one the panel shows. */
+const SEND_KB_TOP_K = 10
+
 /** Outcome of the auto-inject KB round trip. A plain `null` cannot say
  *  whether the KB had nothing, took too long, or failed — and the caller has
  *  to tell those apart to report the last two honestly. */
@@ -41,6 +46,94 @@ type KBInjectOutcome =
   | { kind: "ok"; value: Awaited<ReturnType<typeof queryKB>> }
   | { kind: "timeout" }
   | { kind: "error" }
+
+/** The same three answers for the memory leg, which used to turn a timeout or
+ *  a failure into an empty list. */
+type MemoryRecallOutcome =
+  | { kind: "ok"; value: MemoryRecallResult[] }
+  | { kind: "timeout" }
+  | { kind: "error" }
+
+/** Recall memories for a send, waiting no longer than the knowledge base. */
+async function recallWithinWait(content: string, asOf: string | undefined): Promise<MemoryRecallOutcome> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<MemoryRecallOutcome>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: "timeout" }), KB_WAIT_TIMEOUT_MS)
+  })
+  const recall: Promise<MemoryRecallOutcome> = recallMemories(content, 3, undefined, asOf)
+    .then((value) => ({ kind: "ok" as const, value: Array.isArray(value) ? value : [] }))
+    .catch(() => ({ kind: "error" as const }))
+  try {
+    return await Promise.race([recall, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Give compressed history back the identity and evidence of the messages it
+ *  came from. The server returns the turns it kept verbatim (role and content
+ *  unchanged) around a new summary; each of those is matched, in order, to its
+ *  original so its id, sourcesUsed and degradedReason survive. A message with
+ *  no original (the summary) carries the sources of the turns it replaced, so
+ *  later turns can still name the files those turns were shown. Exported for
+ *  tests. */
+export function restoreCompressedHistory(
+  original: ChatMessage[],
+  compressed: Pick<ChatMessage, "role" | "content">[],
+  now: number = Date.now(),
+): ChatMessage[] {
+  const matched = new Set<number>()
+  let cursor = 0
+  const restored: (ChatMessage | null)[] = compressed.map((m) => {
+    for (let j = cursor; j < original.length; j++) {
+      if (original[j].role === m.role && original[j].content === m.content) {
+        matched.add(j)
+        cursor = j + 1
+        return original[j]
+      }
+    }
+    return null
+  })
+  const replacedSources = new Map<string, SourceRef>()
+  original.forEach((m, j) => {
+    if (matched.has(j)) return
+    for (const s of m.sourcesUsed ?? []) replacedSources.set(injectionKey(s), s)
+  })
+  let sourcesCarried = false
+  return restored.map((m, i) => {
+    if (m) return m
+    const msg: ChatMessage = {
+      id: uuid(),
+      role: compressed[i].role as ChatMessage["role"],
+      content: compressed[i].content,
+      timestamp: now - (compressed.length - i) * 1000,
+    }
+    if (!sourcesCarried && replacedSources.size > 0) {
+      msg.sourcesUsed = [...replacedSources.values()]
+      sourcesCarried = true
+    }
+    return msg
+  })
+}
+
+/** The prior-context note names files from earlier turns, and only from
+ *  turns the model is actually sent: after the sliding window drops a turn,
+ *  naming its files tells the model it can see something it cannot. */
+function priorContextNoteFor(priorInjected: Set<string>, visible: Pick<ChatMessage, "sourcesUsed">[]): string {
+  if (priorInjected.size === 0) return ""
+  const priorFiles = new Set<string>()
+  for (const key of priorInjected) {
+    for (const m of visible) {
+      const src = m.sourcesUsed?.find((s) => injectionKey(s) === key)
+      if (src) {
+        if (src.filename) priorFiles.add(src.filename)
+        break
+      }
+    }
+  }
+  if (priorFiles.size === 0) return ""
+  return `\n\nNote: In earlier turns you were also shown content from: ${[...priorFiles].join(", ")}. That context is still relevant — refer to it as needed.`
+}
 
 /** Questions about the user's own data — the ones an LLM cannot answer
  *  without KB grounding and will instead hallucinate a denial for
@@ -124,7 +217,13 @@ interface UseChatSendOptions {
   /** Retrieval for the text being sent, shared with the panel's own request.
    *  Absent, the send queries the knowledge base itself. */
   retrieve?: (content: string) => Promise<Awaited<ReturnType<typeof queryKB>>>
-  clearInjected: () => void
+  /** The domain filter in force in the knowledge panel. A send that asks the
+   *  knowledge base itself (no shared `retrieve`, or a historical question)
+   *  searches the same domains the panel does. */
+  kbDomains?: string[]
+  /** Remove the given pins from the manual context. The send passes the pins
+   *  its prompt carried; a pin the context budget dropped stays pinned. */
+  clearInjected: (sent: KBQueryResult[]) => void
 
   /** Private Mode level (0=off, 1=skip saves, 2=skip KB, 3=skip audit,
    *  4=full ephemeral; docs/PRIVATE_MODE.md). At level >= 2 the send path injects NO KB documents or
@@ -159,10 +258,10 @@ interface UseChatSendReturn {
  * Client-side sliding window fallback.
  * Keeps system message + last N user/assistant pairs.
  */
-function slidingWindowPrune(
-  messages: Pick<ChatMessage, "role" | "content">[],
+function slidingWindowPrune<T extends Pick<ChatMessage, "role" | "content">>(
+  messages: T[],
   keepPairs: number = FALLBACK_KEEP_PAIRS,
-): Pick<ChatMessage, "role" | "content">[] {
+): T[] {
   if (messages.length === 0) return messages
 
   const system = messages[0]?.role === "system" ? messages[0] : null
@@ -172,7 +271,7 @@ function slidingWindowPrune(
   if (conversation.length <= keepCount) return messages
 
   const recent = conversation.slice(-keepCount)
-  const result: Pick<ChatMessage, "role" | "content">[] = []
+  const result: T[] = []
   if (system) result.push(system)
   result.push(...recent)
   return result
@@ -247,9 +346,13 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
       // Combine manually injected + auto-injected context
       // Skip chunks already sent to the model in prior turns (session dedup)
-      const manuallyInjected = bypassKB ? [] : [...options.injectedContext]
-      const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
+      const manualPins = bypassKB ? [] : [...options.injectedContext]
+      const manuallyInjected = [...manualPins]
+      // A pin excludes its own chunk, not every chunk of the same artifact.
+      const pinnedKeys = new Set(manualPins.map(injectionKey))
       const priorInjected = injectedHistoryRef.current
+      // What earlier turns were shown, before this turn adds to it.
+      const shownBefore = new Set(priorInjected)
 
       // Auto-inject: query KB with the CURRENT message and wait for it up to
       // KB_WAIT_TIMEOUT_MS. On timeout the send goes out with no KB context.
@@ -269,6 +372,10 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         const cacheWarm =
           !asOf && options.kbResults.length > 0 && options.kbResultsQuery === content
         let freshResults: KBQueryResult[] = cacheWarm ? options.kbResults : []
+        const groundingCritical = isPersonalDataQuery(content)
+        // E1 R16: honor contextSources.memory — do not recall when Memory is off.
+        const memoryOn = options.memoryEnabled !== false
+        let memoryOutcome: MemoryRecallOutcome = { kind: "ok", value: [] }
         // Only hit the network when the panel has not already retrieved for
         // this text. Wave-0 Task 3: useOrchestratedQuery / useKBContext
         // populate the TanStack cache — re-firing queryKB for the same text
@@ -276,38 +383,39 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         const cacheCold = !cacheWarm
         if (cacheCold && content.length > 2) {
           const injectAbort = new AbortController()
-          const groundingCritical = isPersonalDataQuery(content)
           const timers: ReturnType<typeof setTimeout>[] = []
           const waitTimeout = new Promise<KBInjectOutcome>((resolve) => {
             timers.push(setTimeout(() => resolve({ kind: "timeout" }), KB_WAIT_TIMEOUT_MS))
           })
-          // E1 R16: honor contextSources.memory — do not recall when Memory is off.
-          const memoryOn = options.memoryEnabled !== false
           // The KB leg is tagged so a 5xx, an abort and a genuinely empty
           // knowledge base stay three different answers all the way to the
           // degraded-reason check below — collapsing them into `null` is what
           // let a KB outage render as "you have nothing about that".
           // A historical question asks the KB directly with as_of: the shared
-          // retrieval (and its cache) answers for the present.
+          // retrieval (and its cache) answers for the present. Asked directly,
+          // it carries the domain filter the panel is using.
           const kbLeg: Promise<KBInjectOutcome> = (
             options.retrieve && !asOf
               ? options.retrieve(content)
-              : queryKB(content, undefined, 5, undefined, {
-                  signal: injectAbort.signal,
-                  excludePacks: !options.includePacks,
-                  asOf,
-                })
+              : queryKB(
+                  content,
+                  options.kbDomains?.length ? options.kbDomains : undefined,
+                  SEND_KB_TOP_K,
+                  undefined,
+                  {
+                    signal: injectAbort.signal,
+                    excludePacks: !options.includePacks,
+                    asOf,
+                  },
+                )
           )
             .then((value) => ({ kind: "ok" as const, value }))
             .catch(() => ({ kind: "error" as const }))
           let kbOutcome: KBInjectOutcome
-          let freshMemories: unknown
           try {
-            ;[kbOutcome, freshMemories] = await Promise.all([
+            ;[kbOutcome, memoryOutcome] = await Promise.all([
               Promise.race<KBInjectOutcome>([kbLeg, waitTimeout]),
-              memoryOn
-                ? Promise.race([recallMemories(content, 3, undefined, asOf).catch(() => []), waitTimeout]).catch(() => [])
-                : Promise.resolve([]),
+              memoryOn ? recallWithinWait(content, asOf) : Promise.resolve(memoryOutcome),
             ])
           } finally {
             for (const t of timers) clearTimeout(t)
@@ -319,7 +427,6 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             // panel's and is not the send's to cancel.
             injectAbort.abort()
           }
-          if (!Array.isArray(freshMemories)) freshMemories = []
           const freshKB = kbOutcome.kind === "ok" ? kbOutcome.value : null
           if (freshKB?.results?.length) {
             freshResults = freshKB.results
@@ -333,26 +440,25 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           } else if (freshKB?.degraded_reason) {
             effectiveDegradedReason = freshKB.degraded_reason
           }
-          // Merge memories into the candidate pool as pseudo-KB results.
-          if (memoryOn && Array.isArray(freshMemories) && freshMemories.length > 0) {
-            freshResults = [...freshResults]
-            for (const mem of freshMemories) {
-              freshResults.push(memoryToKBResult(mem))
-            }
+        } else if (!cacheCold && content.length > 2 && memoryOn) {
+          // Cache warm — skip queryKB but still pull fresh memories (they
+          // aren't covered by the TanStack KB cache), under the same wait as
+          // the cold path: without it a slow recall held the send.
+          memoryOutcome = await recallWithinWait(content, asOf)
+        }
+        // Merge memories into the candidate pool as pseudo-KB results (a new
+        // array: kbResults is the caller's React state). A recall that failed
+        // or never answered is reported the way the knowledge base's is,
+        // unless the knowledge base already gave a reason.
+        if (memoryOutcome.kind === "ok") {
+          if (memoryOutcome.value.length > 0) {
+            freshResults = [...freshResults, ...memoryOutcome.value.map(memoryToKBResult)]
           }
-        } else if (!cacheCold && content.length > 2) {
-          // Cache warm — skip queryKB but still pull fresh memories when Memory is on
-          // (memories aren't covered by the TanStack KB cache).
-          if (options.memoryEnabled !== false) {
-            const freshMemories = await recallMemories(content, 3).catch(() => [])
-            if (Array.isArray(freshMemories) && freshMemories.length > 0) {
-              // Avoid mutating the caller's kbResults array (it's a React
-              // state reference). Clone before pushing memory pseudo-results.
-              freshResults = [...freshResults]
-              for (const mem of freshMemories) {
-                freshResults.push(memoryToKBResult(mem))
-              }
-            }
+        } else if (!effectiveDegradedReason) {
+          if (memoryOutcome.kind === "error") {
+            effectiveDegradedReason = "Memory recall failed"
+          } else if (groundingCritical) {
+            effectiveDegradedReason = `Memory recall did not answer within ${KB_WAIT_TIMEOUT_MS}ms`
           }
         }
         if (freshResults.length > 0) {
@@ -368,17 +474,27 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           // a correct top match. Gate each candidate on its score RELATIVE to
           // the best available hit — autoInjectThreshold now means "fraction of
           // the top match" (e.g. 0.40 ⇒ keep chunks scoring ≥ 40% of the best).
-          const topRelevance = freshResults.reduce((mx, r) => Math.max(mx, r.relevance), 0)
-          const relFloor = topRelevance > 0 ? options.autoInjectThreshold * topRelevance : 0
+          // A memory's relevance is recall salience, not a rerank score, so each
+          // kind is gated against the best hit on its own scale: one strong
+          // memory must not raise the floor over every document, or vice versa.
+          const isMemory = (r: KBQueryResult) => r.source_type === "memory"
+          const floorFor = (rows: KBQueryResult[]) => {
+            const top = rows.reduce((mx, r) => Math.max(mx, r.relevance), 0)
+            return top > 0 ? options.autoInjectThreshold * top : 0
+          }
+          const docFloor = floorFor(freshResults.filter((r) => !isMemory(r)))
+          const memoryFloor = floorFor(freshResults.filter(isMemory))
           const candidates = freshResults
-            .filter((r) => r.relevance >= relFloor
-              && !injectedIds.has(r.artifact_id)
-              && !priorInjected.has(`${r.artifact_id}:${r.chunk_index}`))
+            .filter((r) => r.relevance >= (isMemory(r) ? memoryFloor : docFloor)
+              && !pinnedKeys.has(injectionKey(r))
+              && !priorInjected.has(injectionKey(r)))
           const autoInjectMax = options.autoInjectMax ?? DEFAULT_AUTO_INJECT_MAX
           for (const c of candidates) {
             if (autoInjectedCount >= autoInjectMax) break
             const chunkTokens = estimateTokenCount(c.content)
-            if (chunkTokens > remainingBudget) break
+            // A chunk too large for what is left is skipped, not the end of
+            // the list: a smaller, lower-ranked chunk may still fit.
+            if (chunkTokens > remainingBudget) continue
             manuallyInjected.push(c)
             remainingBudget -= chunkTokens
             autoInjectedCount++
@@ -387,11 +503,26 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       }
 
       let sourcesForAssistant: SourceRef[] | undefined
-      let allMessages: Pick<ChatMessage, "role" | "content">[] = []
+      let allMessages: Pick<ChatMessage, "role" | "content" | "sourcesUsed">[] = []
+      // The injected context, kept so the system message can be rebuilt for
+      // the turns that survive pruning.
+      let ragContext: string | null = null
+      const ragSystemFor = (visible: Pick<ChatMessage, "sourcesUsed">[]) =>
+        `${RAG_SYSTEM_PREAMBLE}${priorContextNoteFor(shownBefore, visible)}\n\n${ragContext}`
       // Deduplicate overlapping chunks and format with domain headers
       const dedupedSources = deduplicateChunks(manuallyInjected)
       if (dedupedSources.length > 0) {
-        sourcesForAssistant = dedupedSources.map((r) => ({
+        // Separate documents from memories for distinct formatting
+        const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
+        const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
+        // Phase 2.4: apply per-model-family char budget at document granularity.
+        // Documents are already sorted by descending relevance; whole docs are kept
+        // or dropped — never truncated mid-document.
+        const { selected: budgetedDocs, dropped } = selectDocsWithinBudget(docSources, modelToUse)
+        // What the answer credits, and what later turns treat as already shown,
+        // is what this prompt carries: a document the budget dropped was never seen.
+        const shown = [...budgetedDocs, ...memorySources]
+        sourcesForAssistant = shown.map((r) => ({
           artifact_id: r.artifact_id,
           filename: r.filename,
           domain: r.domain,
@@ -400,21 +531,13 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           chunk_index: r.chunk_index,
           tags: r.tags,
           quality_score: r.quality_score,
-          source_type: r.source_url
-            ? ("external" as const)
-            : r.source_type === "memory"
-              ? ("memory" as const)
+          source_type: r.source_type === "memory"
+            ? ("memory" as const)
+            : r.source_url
+              ? ("external" as const)
               : ("kb" as const),
           source_url: r.source_url,
         }))
-
-        // Separate documents from memories for distinct formatting
-        const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
-        const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
-        // Phase 2.4: apply per-model-family char budget at document granularity.
-        // Documents are already sorted by descending relevance; whole docs are kept
-        // or dropped — never truncated mid-document.
-        const { selected: budgetedDocs } = selectDocsWithinBudget(docSources, modelToUse)
         const contextParts = budgetedDocs.map(formatChunkWithHeader)
         if (memorySources.length > 0) {
           const memParts = memorySources.map((m) => {
@@ -423,35 +546,19 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           })
           contextParts.push("\n[Remembered Context]\n" + memParts.join("\n"))
         }
+        ragContext = contextParts.join("\n\n")
 
-        // Build prior-context summary so the model knows what it was shown before
-        let priorContextNote = ""
-        if (priorInjected.size > 0) {
-          const priorFiles = new Set<string>()
-          for (const key of priorInjected) {
-            const msg = history.find(
-              (m) => m.sourcesUsed?.some((s) => `${s.artifact_id}:${s.chunk_index}` === key),
-            )
-            if (msg) {
-              const src = msg.sourcesUsed?.find((s) => `${s.artifact_id}:${s.chunk_index}` === key)
-              if (src?.filename) priorFiles.add(src.filename)
-            }
-          }
-          if (priorFiles.size > 0) {
-            priorContextNote = `\n\nNote: In earlier turns you were also shown content from: ${[...priorFiles].join(", ")}. That context is still relevant — refer to it as needed.`
-          }
-        }
-
-        allMessages.push({
-          role: "system",
-          content: `${RAG_SYSTEM_PREAMBLE}${priorContextNote}\n\n${contextParts.join("\n\n")}`,
-        })
+        allMessages.push({ role: "system", content: ragSystemFor(history) })
 
         // Record injected chunks for session dedup on subsequent turns
-        for (const s of dedupedSources) {
-          priorInjected.add(`${s.artifact_id}:${s.chunk_index}`)
+        for (const s of shown) {
+          priorInjected.add(injectionKey(s))
         }
-        options.clearInjected()
+        // The pins this prompt carries leave the pin list; a pin the budget
+        // dropped was never sent, and stays for the user to see.
+        const droppedKeys = new Set(dropped.map(injectionKey))
+        const sentPins = manualPins.filter((r) => !droppedKeys.has(injectionKey(r)))
+        if (sentPins.length > 0) options.clearInjected(sentPins)
       }
 
       if (autoInjectedCount > 0) {
@@ -498,7 +605,11 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         // Immediately apply client-side sliding window for this send
         // (guarantees we don't exceed context window even if compress fails)
-        allMessages = slidingWindowPrune(allMessages, FALLBACK_KEEP_PAIRS) as typeof allMessages
+        allMessages = slidingWindowPrune(allMessages, FALLBACK_KEEP_PAIRS)
+        // The note names only files from turns that are still sent.
+        if (ragContext !== null) {
+          allMessages[0] = { role: "system", content: ragSystemFor(allMessages.slice(1)) }
+        }
 
         // Fire-and-forget: compress via backend for higher-quality pruning
         // and persist the compressed history for future turns.
@@ -516,13 +627,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
             targetTokens,
           )
             .then((result) => {
-              // Map compressed messages back to ChatMessage format for persistence
-              const compressed: ChatMessage[] = result.messages.map((m, i) => ({
-                id: uuid(),
-                role: m.role as ChatMessage["role"],
-                content: m.content,
-                timestamp: Date.now() - (result.messages.length - i) * 1000,
-              }))
+              const compressed = restoreCompressedHistory(snapshot, result.messages as Pick<ChatMessage, "role" | "content">[])
               options.mergeCompressedHistory!(capturedConvoId, compressed, originalCount)
               if (import.meta.env.DEV) {
                 console.log(

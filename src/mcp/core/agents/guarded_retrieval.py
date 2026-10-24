@@ -23,9 +23,13 @@ omitted context = error — is preserved.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
-from core.agents.request_context import RequestContext
+from core.agents.hallucination.scope import VerificationScope
+from core.agents.hallucination.scope import _scope as _verification_scope
+from core.agents.request_context import ConsumerScopeRestricted, RequestContext
 
 
 def kb_bypassed_envelope() -> dict[str, Any]:
@@ -101,6 +105,7 @@ async def guarded_agent_query_full(
         response_text=response_text,
         enable_self_rag=enable_self_rag,
         budget_seconds=request_context.budget_seconds,
+        memory_enabled=request_context.allows_memory,
         as_of=as_of,
     )
 
@@ -119,10 +124,14 @@ async def guarded_recall_memories(
 
     Private-Mode L2 treats episodic memory as protected content (the L2+
     contract strips ``<memory`` blocks at the generation boundary), so recall
-    returns empty before any vector search.
+    returns empty before any vector search. A consumer whose strict scope
+    does not name ``conversations`` is refused with ``ConsumerScopeRestricted``:
+    the same wall ``agent_query_full`` holds memory behind.
     """
     if request_context.blocks_kb:
         return []
+    if not request_context.allows_memory:
+        raise ConsumerScopeRestricted(request_context.client_id)
 
     from core.agents.memory import recall_memories
 
@@ -134,3 +143,26 @@ async def guarded_recall_memories(
         min_score=min_score,
         as_of=as_of,
     )
+
+
+@contextmanager
+def verification_scope(request_context: RequestContext) -> Iterator[VerificationScope]:
+    """Hold a verification to the request's policy while it runs.
+
+    Private Mode L2 reads no knowledge base and no memory. A consumer with an
+    allow-list verifies against those domains only, and against memory only
+    when its scope reaches memory (``RequestContext.allows_memory``).
+    """
+    if request_context.blocks_kb:
+        scope = VerificationScope(domains=frozenset(), memory=False)
+    elif request_context.allowed_domains is not None:
+        scope = VerificationScope(
+            domains=frozenset(request_context.allowed_domains), memory=request_context.allows_memory,
+        )
+    else:
+        scope = VerificationScope(domains=None, memory=True)
+    token = _verification_scope.set(scope)
+    try:
+        yield scope
+    finally:
+        _verification_scope.reset(token)

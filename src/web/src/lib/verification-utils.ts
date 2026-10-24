@@ -20,6 +20,7 @@ interface SourceFields {
   verification_method?: string
   source_artifact_id?: string
   source_urls?: string[]
+  circular_source?: boolean
 }
 
 const KB_METHODS = new Set(["kb", "kb_nli", "kb_batch", "kb_only_timeout"])
@@ -39,18 +40,38 @@ export function isSourceBacked(claim: SourceFields): boolean {
   )
 }
 
+/**
+ * What a verified claim rests on. "kb": a document the answer was drawn from,
+ * so the claim is faithful to the user's knowledge base. "independent": a
+ * source the answer was not drawn from (another document, or the web). The
+ * server marks the first with ``circular_source``.
+ */
+export function verifiedBasis(claim: Pick<SourceFields, "circular_source">): "kb" | "independent" {
+  return claim.circular_source ? "kb" : "independent"
+}
+
+/** Short label for a verified claim: "KB verified" or "independently verified". */
+export function verifiedLabel(claim: Pick<SourceFields, "circular_source">): string {
+  return verifiedBasis(claim) === "kb"
+    ? UX_COPY.verification.kbVerifiedShort
+    : UX_COPY.verification.independentlyVerifiedShort
+}
+
 /** Counts of positive verdicts in a claims list, split by the rule above. */
 export function countPositiveVerdicts(
   claims: Array<SourceFields & { status?: string }>,
-): { verified: number; agreed: number } {
+): { verified: number; agreed: number; kbVerified: number } {
   let verified = 0
   let agreed = 0
+  let kbVerified = 0
   for (const c of claims) {
     if (c.status !== "verified") continue
-    if (isSourceBacked(c)) verified++
-    else agreed++
+    if (isSourceBacked(c)) {
+      verified++
+      if (verifiedBasis(c) === "kb") kbVerified++
+    } else agreed++
   }
-  return { verified, agreed }
+  return { verified, agreed, kbVerified }
 }
 
 /**
@@ -61,7 +82,7 @@ export function countPositiveVerdicts(
 export function reportPositiveCounts(
   summary: { agreed?: number } | null | undefined,
   claims: Array<SourceFields & { status?: string }>,
-): { verified: number; agreed: number } {
+): { verified: number; agreed: number; kbVerified: number } {
   const counted = countPositiveVerdicts(claims)
   return typeof summary?.agreed === "number" ? { ...counted, agreed: summary.agreed } : counted
 }

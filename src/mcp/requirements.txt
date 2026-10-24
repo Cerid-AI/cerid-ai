@@ -1,23 +1,23 @@
 # Core framework
 fastapi>=0.141.1,!=0.136.3,<0.142  # 0.136.3 excluded — OSV MAL-2026-4750 (malicious `fastar` dep in [standard] extra)
-sentry-sdk[fastapi]>=2.68.1
+sentry-sdk[fastapi]>=2.72.0
 uvicorn[standard]>=0.52.4,<1
-starlette>=1.6.0  # security: CVE-2026-54283 (HIGH) — fastapi transitive, pin the fix
+starlette>=1.9.0  # security: CVE-2026-54283 (HIGH) — fastapi transitive, pin the fix
 opentelemetry-api>=1.45.1  # security: CVE-2026-114603 — chromadb/mcp transitive, pin the fix
 pydantic>=2.13.5,<3
 
 # MCP protocol
-mcp>=2.2,<3
+mcp>=2.3.0,<3
 
 # HTTP client
-httpx>=0.24,<0.29
+httpx>=0.28.1,<0.29
 
 # Templating (Bifrost config generation)
 jinja2>=3.1.6,<4  # 3.1.6 floor — CVE-2025-27516 (sandbox |attr filter bypass)
 
 # Databases
 chromadb>=1.5.9,<2      # client on 1.x; server image pin lifted in chromadb migration Phase 3 (data-volume migration)
-neo4j>=6.3.0,<7         # driver 6.x is the current latest line (no 7.x on PyPI as of 2026-05-08). Audit verified clean: all sessions use `with`, Result.summary→consume already done, no read_transaction/write_transaction, no Transaction.sync. Server image is neo4j:2026.09.0-community (calver) with GDS; the driver line is independent of the server tag.
+neo4j>=6.3.1,<7         # driver 6.x is the current latest line (no 7.x on PyPI as of 2026-05-08). Audit verified clean: all sessions use `with`, Result.summary→consume already done, no read_transaction/write_transaction, no Transaction.sync. Server image is neo4j:2026.09.0-community (calver) with GDS; the driver line is independent of the server tag.
 redis>=8.1,<9
 
 # GraphRAG retrieval scaffolding (Workstream E Phase 4a) — wraps neo4j-driver
@@ -27,7 +27,7 @@ neo4j-graphrag>=1.17.0,<2
 # Neo4j GDS Python client (Workstream E Phase 4b) — wraps the GDS plugin's
 # Cypher procedures with a typed Python API; needed for Leiden community
 # detection over the entity graph (gds.leiden.write).
-graphdatascience>=1.21,<2
+graphdatascience>=2.2,<3
 
 # AI / NLP
 tiktoken>=0.14.0,<1
@@ -43,7 +43,7 @@ pdfplumber>=0.11.10,<0.12
 python-docx>=1.2.0,<2
 python-pptx>=1.0.2,<2
 openpyxl>=3.1.5,<4
-pandas>=2.0,<3.1
+pandas>=3.0.6,<3.1
 # CFB/OLE container reader — backs app/parsers/msg_reader.py, our own minimal
 # MS-OXMSG (.msg) decoder. Used by app/parsers/email.py::parse_msg. .pst is
 # deferred (needs libpff).
@@ -76,10 +76,11 @@ langchain-text-splitters>=1.1.2,<2
 #   * langchain-core 1.3.3   CVE-2026-44843
 #   * langsmith 0.8.0        CVE-2026-45134
 #   * aiohttp 3.14.3         CVE-2026-69244 (HIGH) — added 2026-08-04
-urllib3>=2.7.0
-idna>=3.15
+#   * aiohttp 3.14.4         GHSA-2g87-pp6c-29x5, CVE-2026-111063, CVE-2026-111064 — added 2026-10-19
+urllib3>=2.8.0
+idna>=3.20
 langchain-core>=1.6.1
-langsmith>=0.9.3  # 0.8.18 fixes GHSA-f4xh-w4cj-qxq8 (HIGH)
+langsmith>=0.14.11  # 0.8.18 fixes GHSA-f4xh-w4cj-qxq8 (HIGH)
 # Transitive via fsspec + kubernetes, so a floor here is what holds it: a
 # lock-only bump would regress on the next `regen-lock.sh` full upgrade.
 # Found by the `docker` job's Trivy scan the FIRST time it executed after
@@ -89,13 +90,13 @@ aiohttp>=3.14.4
 
 # Code AST chunker (Workstream E Phase 2b.3) — Python grammar today;
 # tree-sitter-{javascript,typescript,go,rust} added per future sub-phase.
-tree-sitter>=0.23,<1
+tree-sitter>=0.26.0,<1
 tree-sitter-python>=0.25.0,<1
 
 # Email parser (Workstream E Phase 2b.4) — RFC822 header preservation +
 # reply-chain stripping. Both libs zero-transitive-dep, pure Python.
-mail-parser>=4.3.0,<5
-quotequail>=0.4,<1
+mail-parser>=4.8.0,<5
+quotequail>=0.5.4,<1
 
 # Logging (used by trading agent + internal tests)
 
@@ -135,7 +136,7 @@ pywhispercpp>=1.5.1,<2
 # feature flags still reported Pro-enabled. 4.x drops that path (torchcodec).
 pyannote.audio>=4.0.7,<5
 # Voice activity detection (also pulled by pyannote, pinning for reproducibility)
-silero-vad>=6.2.1,<7
+silero-vad>=6.2.3,<7
 
 
 # Security — content-type sniffing for upload validation (magic-byte guard)
@@ -151,4 +152,4 @@ defusedxml>=0.7.1,<1
 # signxml is Apache-2.0 and pure Python — it builds on lxml + cryptography,
 # which are already resolved here, so no native library and no Dockerfile
 # change. (python3-saml would have needed the xmlsec1 native lib.)
-signxml>=5.1.0,<6
+signxml>=5.2.0,<6

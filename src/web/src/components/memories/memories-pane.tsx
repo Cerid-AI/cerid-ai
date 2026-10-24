@@ -138,7 +138,8 @@ export default function MemoriesPane() {
     try {
       const updated = await updateMemory(editingId, editText.trim())
       setMemories((prev) =>
-        prev.map((m) => (m.id === editingId ? { ...m, content: updated.content } : m)),
+        // An edit is stored as a new version with its own id.
+        prev.map((m) => (m.id === editingId ? { ...m, id: updated.id, content: updated.content } : m)),
       )
       setEditingId(null)
       setEditText("")

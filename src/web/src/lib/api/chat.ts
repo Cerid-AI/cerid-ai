@@ -349,15 +349,6 @@ export async function syncConversation(conversation: Conversation): Promise<void
   if (!res.ok) throw new Error(await extractError(res, `Conversation sync failed: ${res.status}`))
 }
 
-export async function syncConversationsBulk(conversations: Conversation[]): Promise<void> {
-  const res = await fetch(`${MCP_BASE}/user-state/conversations/bulk`, {
-    method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(conversations),
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Bulk conversation sync failed: ${res.status}`))
-}
-
 export async function deleteConversationSync(convId: string): Promise<void> {
   const res = await fetch(`${MCP_BASE}/user-state/conversations/${convId}`, {
     method: "DELETE",

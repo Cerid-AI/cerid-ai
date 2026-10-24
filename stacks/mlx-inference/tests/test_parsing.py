@@ -90,6 +90,23 @@ def test_qwen_one_bad_call_among_several_fails_the_whole_reply(parsers):
     assert got["finish"] == "invalid_tool_call" and got["calls"] == []
 
 
+# Gemma 4 pairs <|channel> (opens a thought) with <channel|> (closes it).
+# The first case is a sampled review reply from 2026-10-21: the answer, then a
+# stray closer. Read as the end of a thought, it left the reply empty.
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        ("5: The refund multiplies the amount by 100.<channel|>\n", "5: The refund multiplies the amount by 100."),
+        ("NONE<channel|>", "NONE"),
+        ("<|channel>thought\nCheck line 5.<channel|>5: Wrong sign.", "5: Wrong sign."),
+        ("Hi<|channel>thought\nhm<channel|> there", "Hi there"),
+        ("5: Wrong sign.<|channel>thought\nunfinished", "5: Wrong sign."),
+    ],
+)
+def test_gemma_thought_markers_pair_as_the_chat_template_does(raw, want):
+    assert serve.visible(raw) == want
+
+
 def test_no_tools_offered_means_no_parsing(parsers):
     text = "<tool_call>\n<function=get_weather>\n</function>\n</tool_call>"
     got = parse("qwen3_coder", text, tools=None)
@@ -182,3 +199,56 @@ def test_ollama_message_arguments_are_an_object():
         "thinking": "r",
         "tool_calls": [{"function": {"name": "f", "arguments": {"a": 1}}}],
     }
+
+
+# -- stop strings ---------------------------------------------------------------
+
+MARK = "<<anneal:"
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        ("Done.\n\n<<anneal: end of the user’s message>> You are", "Done.\n\n"),
+        ("Done.", None),
+        ("Done. <<anneal", None),
+        # A thought is not shown, so a mark inside one does not stop the reply.
+        ("<|channel>thought\nIt ends at <<anneal:.<channel|>Done.", None),
+        ("<|channel>thought\nhm<channel|>Done.<<anneal:", "Done."),
+        # Neither is harmony's analysis; the final channel is.
+        ("<|channel|>analysis<|message|>It ends at <<anneal: here.", None),
+        ("<|channel|>analysis<|message|>At <<anneal:.<|end|><|start|>assistant<|channel|>final<|message|>Hi <<anneal:", "Hi "),
+    ],
+)
+def test_stop_cut_reads_only_the_shown_answer(raw, want):
+    assert serve.stop_cut(raw, (MARK,)) == want
+
+
+def test_stop_cut_takes_the_earliest_stop():
+    assert serve.stop_cut("a STOP b END", ("END", "STOP")) == "a "
+
+
+def feed_all(stops, pieces):
+    hold = serve.HoldBack(stops)
+    return [hold.feed(p) for p in pieces], hold.pending
+
+
+def test_holdback_holds_a_stop_prefix_split_over_tokens():
+    assert feed_all((MARK,), ["Done.", "\n\n<", "<", "anne", "al"]) == (["Done.", "\n\n", "", "", ""], "<<anneal")
+
+
+def test_holdback_releases_a_prefix_once_it_is_not_a_stop():
+    assert feed_all((MARK,), ["a <", "<an", "swer"]) == (["a ", "", "<<answer"], "")
+
+
+def test_holdback_keeps_the_longest_prefix_of_any_stop():
+    assert feed_all(("xyz", "ab"), ["1a", "x"]) == (["1", "a"], "x")
+
+
+def test_holdback_without_stops_passes_everything():
+    assert feed_all((), ["a", "<<", ""]) == (["a", "<<", ""], "")
+
+
+@pytest.mark.parametrize(("value", "want"), [(None, ()), ("x", ("x",)), (["x", "y", "x"], ("x", "y")), ([], ())])
+def test_stop_strings(value, want):
+    assert serve.stop_strings(value) == want

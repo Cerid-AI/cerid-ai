@@ -42,10 +42,11 @@ from core.agents.hallucination.patterns import (
     is_meta_self_referential,
 )
 from core.agents.hallucination.persistence import (
-    REDIS_HALLUCINATION_PREFIX,
     REDIS_HALLUCINATION_TTL,
     get_hallucination_report,
+    report_key,
 )
+from core.agents.hallucination.scope import cache_partition
 from core.agents.hallucination.source_backing import (
     counts_as_verified,
     is_agreement_only,
@@ -74,6 +75,11 @@ _RECLAIMABLE_STAT_KEYS = frozenset({"file", "slab_reclaimable"})
 # semaphore + per-claim asyncio timeout are the real pressure regulators;
 # this guard is observability + gentle backpressure, never a hard gate.
 _MEMORY_WAIT_MAX_SECONDS = 5.0
+
+# Strong references to in-flight memory-promotion tasks. The event loop keeps
+# only weak references, so an unreferenced fire-and-forget task can be garbage
+# collected before it finishes.
+_promotion_tasks: set[asyncio.Task[Any]] = set()
 
 # Task 12 / audit V-3: extract URLs the LLM cited inline in a claim so the
 # verifier can check them *first* instead of re-searching from claim text.
@@ -273,8 +279,13 @@ async def check_hallucinations(
     create_memory_fn: Any = None,
     *,
     persist_report: bool = True,
+    message_id: str = "",
+    source_artifact_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis.
+
+    ``source_artifact_ids`` names the KB artifacts the answer was generated
+    from; a verdict resting on one of them is labelled ``circular_source``.
 
     ``persist_report`` (keyword-only) gates the durable ``hall:{cid}`` Redis
     write. Callers pass ``False`` when Private Mode blocks server-side saves
@@ -351,6 +362,7 @@ async def check_hallucinations(
                 claim_text,
                 model=model or "",
                 method=_cache_tier,
+                partition=cache_partition(),
                 response_context=_cache_context,
             )
             if cached and cached.get("status") in ("verified", "unverified"):
@@ -401,6 +413,7 @@ async def check_hallucinations(
                 response_context=user_query,
                 claim_context=_extract_surrounding(claim_text),
                 source_urls=_extract_source_urls_from_claim(claim_text),
+                source_artifact_ids=source_artifact_ids,
             )
 
     results = await asyncio.gather(*[_limited_verify(i, c) for i, c in enumerate(claims)])
@@ -446,7 +459,7 @@ async def check_hallucinations(
     if persist_report:
         try:
             if _may_persist_report(conversation_id):
-                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                key = report_key(conversation_id, message_id)
                 redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
         except Exception as e:
             log_swallowed_error('core.agents.hallucination.streaming', e)
@@ -481,6 +494,8 @@ async def check_hallucinations(
                     redis_client=redis_client,
                 )
 
+            _promotion_tasks.add(_task)
+            _task.add_done_callback(_promotion_tasks.discard)
             _task.add_done_callback(_on_promotion_done)
         except Exception as exc:  # noqa: BLE001 — dispatch failure is non-blocking
             # Dispatch-time failures (ImportError on lazy import, TypeError on
@@ -576,6 +591,7 @@ def _merge_retry_into_existing(
     conversation_id: str,
     index: int,
     new_verdict: dict[str, Any] | None,
+    message_id: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, int], float] | None:
     """E1 CR-019: fold a single-claim retry verdict into the existing durable report.
 
@@ -587,7 +603,7 @@ def _merge_retry_into_existing(
     """
     if new_verdict is None:
         return None
-    existing = get_hallucination_report(redis_client, conversation_id)
+    existing = get_hallucination_report(redis_client, conversation_id, message_id)
     if not existing:
         return None
     claims = existing.get("claims")
@@ -622,6 +638,7 @@ async def verify_response_streaming(
     *,
     persist_report: bool = True,
     merge_claim_index: int | None = None,
+    message_id: str = "",
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -787,16 +804,18 @@ async def verify_response_streaming(
     # Reduces per-claim KB query overhead by sharing a single warm retrieval.
     batch_kb_context: list[dict[str, Any]] = []
     try:
+        from core.agents.hallucination.scope import kb_domains
         from core.agents.query_agent import lightweight_kb_query
         batch_query = " ".join(c for c in claims[:10])
         # Anti-circularity: mirror the per-claim path — never retrieve from
         # the conversations domain, or a response verifies against its own
         # (or a prior turn's) transcript once it gets ingested.
-        batch_domains = [d for d in owner_domains() if d != "conversations"]
-        batch_kb_context = await lightweight_kb_query(
-            batch_query, domains=batch_domains, chroma_client=chroma_client,
-            top_k=15,
-        )
+        batch_domains = kb_domains([d for d in owner_domains() if d != "conversations"])
+        if batch_domains:
+            batch_kb_context = await lightweight_kb_query(
+                batch_query, domains=batch_domains, chroma_client=chroma_client,
+                top_k=15,
+            )
     except Exception as kb_exc:
         # Batch pre-fetch is an optimization; per-claim queries still run.
         log_swallowed_error(
@@ -928,6 +947,7 @@ async def verify_response_streaming(
                 claim_text,
                 model=model or "",
                 method=_cache_tier,
+                partition=cache_partition(),
                 response_context=response_context or "",
             )
             if cached and cached.get("status") in ("verified", "unverified"):
@@ -1146,13 +1166,16 @@ async def verify_response_streaming(
         # retain the claim text for UI + feedback indices.
         claim_text = claims[j] if 0 <= j < len(claims) else ""
         if evidence and evidence["kb_quality"] >= 0.35:
-            kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+            # Retrieval similarity found related KB text; nothing checked that it
+            # supports the claim (no entailment, no anti-circular filter), and on
+            # this corpus unrelated chunks reach 0.7. So the claim stays uncertain,
+            # with the evidence attached, whatever the similarity.
             sources = [
                 r.get("source", "") for r in evidence["kb_results"][:3] if r.get("source")
             ]
             return {
                 "claim": claim_text,
-                "status": kb_status,
+                "status": "uncertain",
                 "similarity": evidence["kb_quality"],
                 "confidence": evidence["kb_quality"],
                 "reason": "KB-only verdict (verification timeout)",
@@ -1456,6 +1479,7 @@ async def verify_response_streaming(
                             source_urls=_extract_source_urls_from_claim(claim_text),
                             deadline=time.monotonic() + retry_budget,
                             stale_context=response_is_stale,
+                            source_artifact_ids=source_artifact_ids,
                         ),
                         timeout=retry_budget,
                     )
@@ -1569,7 +1593,7 @@ async def verify_response_streaming(
     if merge_claim_index is not None:
         merged = _merge_retry_into_existing(
             redis_client, conversation_id, merge_claim_index,
-            run_claims[0] if run_claims else None,
+            run_claims[0] if run_claims else None, message_id,
         )
         if merged is None:
             skip_durable = True
@@ -1595,7 +1619,7 @@ async def verify_response_streaming(
     if persist_report and not skip_durable:
         try:
             if _may_persist_report(conversation_id):
-                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                key = report_key(conversation_id, message_id)
                 redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
         except Exception as e:
             log_swallowed_error(
@@ -1639,6 +1663,8 @@ async def verify_response_streaming(
                     redis_client=redis_client,
                 )
 
+            _promotion_tasks.add(_task)
+            _task.add_done_callback(_promotion_tasks.discard)
             _task.add_done_callback(_on_promotion_done_streaming)
         except Exception as exc:  # noqa: BLE001 — dispatch failure is non-blocking
             # Streaming-path twin of the dispatch swallow above; resolved as
@@ -1721,7 +1747,7 @@ async def verify_response_streaming(
     if persist_report and not skip_durable:
         try:
             if _may_persist_report(conversation_id):
-                key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+                key = report_key(conversation_id, message_id)
                 redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(durable_report))
         except Exception as e:
             log_swallowed_error("core.agents.hallucination.streaming.persist_streaming_report", e)
@@ -1759,6 +1785,7 @@ async def verify_response_streaming(
                     unverified=durable_counts["unverified"],
                     uncertain=durable_counts["uncertain"],
                     total=durable_counts["total"],
+                    message_id=message_id,
                 )
                 persisted = True
         except Exception as exc:

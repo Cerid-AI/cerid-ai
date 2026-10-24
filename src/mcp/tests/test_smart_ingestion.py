@@ -109,6 +109,42 @@ class TestEnhancedCsvParser:
         assert "Schema:" in result["text"]
         assert "Sample" in result["text"]
 
+    def test_column_types_map_from_dtypes(self, tmp_path):
+        """String columns map to text under pandas 3's default `str` dtype,
+        and missing strings still render."""
+        csv_path = tmp_path / "typed.csv"
+        csv_path.write_text(
+            "name,age,salary,active,note\n"
+            "Alice,30,50000.5,True,first\n"
+            "Bob,25,45000.0,False,\n"
+        )
+
+        from app.parsers import parse_csv
+
+        result = parse_csv(str(csv_path))
+
+        assert json.loads(result["schema"]) == {
+            "name": "text",
+            "age": "integer",
+            "salary": "number",
+            "active": "boolean",
+            "note": "text",
+        }
+        assert "Bob" in result["text"]
+
+    def test_latin1_fallback_on_undecodable_utf8(self, tmp_path):
+        """A file that is not valid UTF-8 is re-read as latin-1."""
+        csv_path = tmp_path / "latin1.csv"
+        csv_path.write_bytes("city,count\nZürich,3\nSão Paulo,5\n".encode("latin-1"))
+
+        from app.parsers import parse_csv
+
+        result = parse_csv(str(csv_path))
+
+        assert result["row_count"] == 2
+        assert "Zürich" in result["text"]
+        assert "São Paulo" in result["text"]
+
     def test_csv_truncation_warning(self, tmp_path):
         """Large CSV sets truncated flag."""
         lines = ["id,value"]

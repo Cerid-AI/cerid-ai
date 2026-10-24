@@ -10,9 +10,7 @@ from http import HTTPStatus
 
 import httpx
 
-from errors import RetrievalError
-
-from .base import DataSource, DataSourceResult, logger
+from .base import DataSource, DataSourceResult
 
 _MATH_RE = re.compile(
     r"\b(?:calculate|compute|solve|integrate|derive|differentiate|convert|"
@@ -63,21 +61,17 @@ class WolframAlphaSource(DataSource):
         app_id = os.getenv("WOLFRAM_APP_ID")
         if not app_id:
             return []
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    "https://api.wolframalpha.com/v1/result",
-                    params={"appid": app_id, "i": query},
-                )
-                if resp.status_code == HTTPStatus.OK and resp.text:
-                    return [DataSourceResult(
-                        title=f"Wolfram Alpha: {query}",
-                        content=resp.text,
-                        source_url=f"https://www.wolframalpha.com/input?i={query}",
-                        source_name="Wolfram Alpha",
-                        confidence=0.95,
-                    )]
-                return []
-        except (RetrievalError, httpx.HTTPError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
-            logger.debug("Wolfram Alpha query failed: %s", exc)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                "https://api.wolframalpha.com/v1/result",
+                params={"appid": app_id, "i": query},
+            )
+            if resp.status_code == HTTPStatus.OK and resp.text:
+                return [DataSourceResult(
+                    title=f"Wolfram Alpha: {query}",
+                    content=resp.text,
+                    source_url=f"https://www.wolframalpha.com/input?i={query}",
+                    source_name="Wolfram Alpha",
+                    confidence=0.95,
+                )]
             return []

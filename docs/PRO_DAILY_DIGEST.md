@@ -1,5 +1,7 @@
 # Pro — Daily Digest
 
+> Connector notes. The product tier around them is historical. Digests stay in domain `digests`.
+
 A scheduled LLM-summarized "what happened in the last 24 hours" view
 of your KB. Surfaces in-app, persists as a KB artifact, and fires a
 webhook event for any external integrations.

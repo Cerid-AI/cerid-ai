@@ -167,10 +167,10 @@ async def test_retrieval_metrics(aclient: httpx.AsyncClient, seeded_benchmark: l
         distractors_above.append(sum(1 for rid in ranked_ids[:answer_pos] if rid in q["distractor_ids"]))
 
     summary = retrieval_summary(rankings, k=5)
-    for metric in ("ndcg", "mrr"):
+    for metric, floor in (("ndcg", NDCG_5_THRESHOLD), ("mrr", MRR_THRESHOLD)):
         d = summary[metric]
         print(
-            f"\n  Retrieval {metric}: mean={d['mean']:.3f} min={d['min']:.3f} max={d['max']:.3f} "
+            f"\n  Retrieval {metric}: mean={d['mean']:.3f} (floor {floor}) min={d['min']:.3f} max={d['max']:.3f} "
             f"spread={d['spread']:.3f} non_discriminating={d['non_discriminating']}"
         )
     for q, row, above in zip(seeded_benchmark, summary["per_query"], distractors_above):

@@ -79,7 +79,13 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 # Same resolution as run.sh: env wins, fall back to the repo .env.
-CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "${REPO_ROOT}/.env" 2>/dev/null | cut -d= -f2-)}"
+# A worktree has no .env of its own: fall back to the main checkout's.
+_ENV_FILE="${REPO_ROOT}/.env"
+if [ ! -f "$_ENV_FILE" ]; then
+  _COMMON_GIT="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ -n "$_COMMON_GIT" ] && _ENV_FILE="$(dirname "$_COMMON_GIT")/.env"
+fi
+CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "$_ENV_FILE" 2>/dev/null | cut -d= -f2-)}"
 export CERID_API_KEY
 
 # The CDP script reaches the MCP over the host port of the stack BETA_TARGET

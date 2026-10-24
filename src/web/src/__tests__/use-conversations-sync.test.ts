@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("@/lib/api", () => ({
   syncConversation: vi.fn().mockResolvedValue(undefined),
-  syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
   forgetSubjects: vi.fn().mockResolvedValue({ forget_id: "fg_1", state: "trashed", receipt: null }),
   restoreForget: vi.fn().mockResolvedValue({ restored: 1 }),

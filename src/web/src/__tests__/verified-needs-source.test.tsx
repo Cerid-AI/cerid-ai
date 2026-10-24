@@ -103,7 +103,7 @@ describe("isSourceBacked", () => {
   it("splits positive verdicts into verified and agreed", () => {
     expect(
       countPositiveVerdicts([agreed("a"), agreed("b"), fromKb("c"), fromWeb("d"), contradicted("e")]),
-    ).toEqual({ verified: 2, agreed: 2 })
+    ).toEqual({ verified: 2, agreed: 2, kbVerified: 0 })
   })
 })
 
@@ -145,9 +145,9 @@ describe("ClaimBadge", () => {
 
   it("reads Verified in green for a claim a source backs", () => {
     render(<ClaimBadge claim={forBadge(fromKb("a"))} />)
-    const button = screen.getByRole("button", { name: "Claim verified by 1 source" })
+    const button = screen.getByRole("button", { name: "Claim independently verified by 1 source" })
     expect(button).toHaveAttribute("data-verification-band", "verified")
-    expect(button).toHaveTextContent("Verified by 1 source")
+    expect(button).toHaveTextContent("Independently verified · 1 source")
     expect(button.innerHTML).toMatch(/green/)
   })
 
@@ -231,7 +231,7 @@ describe("HallucinationPanel", () => {
     expect(screen.getByRole("button", { name: "1 verified" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "2 agreed by a second model" })).toBeInTheDocument()
     expect(screen.getAllByText("agreed")).toHaveLength(2)
-    expect(screen.getAllByText("verified")).toHaveLength(1)
+    expect(screen.getAllByText("independently verified")).toHaveLength(1)
   })
 
   it("still names a contradicted claim refuted", () => {
@@ -278,20 +278,20 @@ describe("agreed count sent by the server", () => {
   const storedBefore = report(claims, counts)
 
   it("is used when the summary carries it", () => {
-    expect(reportPositiveCounts({ agreed: 2 }, claims)).toEqual({ verified: 1, agreed: 2 })
+    expect(reportPositiveCounts({ agreed: 2 }, claims)).toEqual({ verified: 1, agreed: 2, kbVerified: 0 })
     // The server's number, not a recount: a recount of these claims is 2.
     expect(reportPositiveCounts({ agreed: 3 }, claims).agreed).toBe(3)
   })
 
   it("is used when it is zero", () => {
-    expect(reportPositiveCounts({ agreed: 0 }, [fromKb("a")])).toEqual({ verified: 1, agreed: 0 })
+    expect(reportPositiveCounts({ agreed: 0 }, [fromKb("a")])).toEqual({ verified: 1, agreed: 0, kbVerified: 0 })
     expect(reportPositiveCounts({ agreed: 0 }, claims).agreed).toBe(0)
   })
 
   it("is counted from the claims for a report stored without it", () => {
-    expect(reportPositiveCounts({}, claims)).toEqual({ verified: 1, agreed: 2 })
-    expect(reportPositiveCounts(undefined, claims)).toEqual({ verified: 1, agreed: 2 })
-    expect(reportPositiveCounts(null, claims)).toEqual({ verified: 1, agreed: 2 })
+    expect(reportPositiveCounts({}, claims)).toEqual({ verified: 1, agreed: 2, kbVerified: 0 })
+    expect(reportPositiveCounts(undefined, claims)).toEqual({ verified: 1, agreed: 2, kbVerified: 0 })
+    expect(reportPositiveCounts(null, claims)).toEqual({ verified: 1, agreed: 2, kbVerified: 0 })
   })
 
   it.each([
@@ -324,5 +324,22 @@ describe("agreed count sent by the server", () => {
       <HallucinationPanel report={report(claims, { ...counts, agreed: 3 })} loading={false} featureEnabled={true} />,
     )
     expect(screen.getByRole("button", { name: "3 agreed by a second model" })).toBeInTheDocument()
+  })
+})
+
+describe("KB verified and independently verified", () => {
+  const kbVerified = { ...fromKb("Drawn from the answer's own source"), circular_source: true }
+
+  it("counts claims verified against the answer's own sources apart", () => {
+    expect(countPositiveVerdicts([kbVerified, fromKb("Elsewhere"), agreed("Agreed")]))
+      .toEqual({ verified: 2, agreed: 1, kbVerified: 1 })
+  })
+
+  it("labels the badge by what the claim rests on", () => {
+    render(<ClaimBadge claim={{ ...forBadge(kbVerified), circular_source: true }} />)
+
+    const button = screen.getByRole("button", { name: "Claim verified by 1 source the answer was drawn from" })
+    expect(button).toHaveTextContent("KB verified · 1 source")
+    expect(button).toHaveAttribute("data-verified-basis", "kb")
   })
 })

@@ -4,14 +4,14 @@
 """Classify a query and pick which knowledge surfaces to consult.
 
 Five intent buckets map to four surfaces (wiki / vector / graph /
-memory). Deterministic regex on the fast path; the LLM fallback for
-ambiguous cases is bounded by a 200ms / 200-token budget. Wiki-first
-for "what is X", vector-first for specific facts, graph-first for
-relational queries, memory-first for "what did we decide", mixed
+memory). Classification is deterministic regex only; there is no LLM
+fallback, so a query no pattern matches is ``mixed`` at confidence 0.5.
+Wiki-first for "what is X", vector-first for specific facts, graph-first
+for relational queries, memory-first for "what did we decide", mixed
 falls back to all-surfaces fusion.
 
-Distinct from ``core/retrieval/query_router.py`` which picks
-GraphRAG modes internal to retrieval.
+Distinct from ``RETRIEVAL_MODE`` (``config.features``), which picks how
+graph expansion runs inside retrieval.
 """
 from __future__ import annotations
 
@@ -81,7 +81,9 @@ _RELATIONAL_PATTERNS = [
     re.compile(r"\b(relate(?:s|d)?|connect(?:s|ed)?|connection|link(?:ed|s)?)\b.*\b(to|and|between|with)\b", re.IGNORECASE),
     re.compile(r"^\s*(compare|contrast|differences? between|relationship between)\b", re.IGNORECASE),
     re.compile(r"^\s*(list|show|surface)\s+(everything|all|every)\s+(that mentions|mentioning|about|involving)\b", re.IGNORECASE),
-    re.compile(r"\b(network|graph|neighbors|adjacent|connected to)\b", re.IGNORECASE),
+    # Graph vocabulary only in a relational phrase: bare "network" or "graph"
+    # is a topic word ("what is a neural network", "what is a graph database").
+    re.compile(r"\b(neighbou?rs? of|adjacent to|connected to|(?:network|graph) (?:around|surrounding))\b", re.IGNORECASE),
     # Finding #3: "vs"/"vs."/"versus" comparisons are relational — they should
     # consult the graph surface, not fall through to mixed.
     re.compile(r"\b(vs\.?|versus)\b", re.IGNORECASE),

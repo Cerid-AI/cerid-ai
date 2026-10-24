@@ -28,15 +28,25 @@ async def _noop_progress(_pct: float) -> None:
     return None
 
 
-def _job(**overrides) -> FeedbackIngestJob:
-    kwargs = {
-        "user_message": "What is Cerid?",
-        "assistant_response": "A personal AI knowledge companion.",
-        "model": "test-model",
-        "conversation_id": "convo-1234-abcd",
-    }
-    kwargs.update(overrides)
-    return FeedbackIngestJob(**kwargs)
+@pytest.fixture()
+def redis(monkeypatch):
+    """A real Redis in memory: the turn is stored and read back through it."""
+    import fakeredis
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("app.deps.get_redis", lambda: fake)
+    return fake
+
+
+def _job(redis, **overrides) -> FeedbackIngestJob:
+    from app.db.redis import turn_text
+
+    turn = {"user_message": "What is Cerid?", "assistant_response": "A personal AI knowledge companion."}
+    turn.update({k: overrides.pop(k) for k in list(overrides) if k in turn})
+    kwargs = {"model": "test-model", "conversation_id": "convo-1234-abcd", **overrides}
+    key = turn_text.new_key(kwargs["conversation_id"])
+    turn_text.put(redis, key, turn)
+    return FeedbackIngestJob(text_key=key, **kwargs)
 
 
 # ── job contract ──────────────────────────────────────────────────────────
@@ -48,30 +58,31 @@ def test_job_registered_in_default_registry():
     assert registry.get("feedback_ingest") is FeedbackIngestJob
 
 
-def test_job_is_medium_priority_and_free():
-    job = _job()
+def test_job_is_medium_priority_and_free(redis):
+    job = _job(redis)
     assert job.priority is Priority.MEDIUM
     estimate = job.estimate_cost()
     assert estimate.estimated_tokens_in == 0
     assert float(estimate.estimated_usd) == 0.0
 
 
-def test_record_payload_round_trips_for_worker_dispatch():
-    """Worker re-instantiates as job_class(**record.payload)."""
-    payload = {
-        "user_message": "hi",
-        "assistant_response": "hello",
-        "model": "m",
-        "conversation_id": "c1",
-    }
-    record = FeedbackIngestJob(**payload).new_record(payload=payload)
-    clone = FeedbackIngestJob(**record.payload)
+def test_the_job_record_holds_a_reference_not_the_turn(redis):
+    """Worker re-instantiates as job_class(**record.payload); the record lives
+    14 days, so it must not hold the words (forget spec §6.5)."""
+    job_id = enqueue_feedback_ingest_job(
+        user_message="my secret", assistant_response="noted", model="m", conversation_id="c1", redis_client=redis,
+    )
+    stored = redis.hgetall(f"cerid:proc:job:{job_id}")
+    assert "my secret" not in str(stored)
+    payload = __import__("json").loads(stored["payload"])
+    clone = FeedbackIngestJob(**payload)
     assert clone._conversation_id == "c1"
-    assert clone._user_message == "hi"
+    from app.db.redis import turn_text
+    assert turn_text.get(redis, payload["text_key"])["user_message"] == "my secret"
 
 
 @pytest.mark.asyncio
-async def test_run_ingests_turn_into_conversations_domain(monkeypatch):
+async def test_run_ingests_turn_into_conversations_domain(monkeypatch, redis):
     monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", False)
     captured: dict = {}
 
@@ -79,12 +90,12 @@ async def test_run_ingests_turn_into_conversations_domain(monkeypatch):
         captured.update(content=content, domain=domain, metadata=metadata)
         return {"status": "success", "artifact_id": "art:fb-1"}
 
+    job = _job(redis)
     with (
         patch("app.services.ingestion.ingest_content", side_effect=fake_ingest),
-        patch("app.deps.get_redis", return_value=MagicMock()),
         patch("core.utils.cache.log_event") as mock_log_event,
     ):
-        result = await _job().run(progress_cb=_noop_progress)
+        result = await job.run(progress_cb=_noop_progress)
 
     assert captured["domain"] == "conversations"
     assert "User: What is Cerid?" in captured["content"]
@@ -94,17 +105,30 @@ async def test_run_ingests_turn_into_conversations_domain(monkeypatch):
     assert result.metadata["artifact_id"] == "art:fb-1"
     assert result.metadata["status"] == "success"
     mock_log_event.assert_called_once()
+    assert not redis.exists(job._text_key)  # ingested: the stored turn is gone
 
 
 @pytest.mark.asyncio
-async def test_run_awaits_hallucination_check_when_enabled(monkeypatch):
+async def test_a_turn_that_is_gone_is_skipped(monkeypatch, redis):
+    """Forgotten (the purge erased it) or expired: nothing is ingested."""
+    monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", False)
+    job = _job(redis)
+    redis.delete(job._text_key)
+    with patch("app.services.ingestion.ingest_content") as ingest:
+        result = await job.run(progress_cb=_noop_progress)
+    assert result.metadata["skipped"] == "text_gone"
+    ingest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_awaits_hallucination_check_when_enabled(monkeypatch, redis):
     monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", True)
+    job = _job(redis)
     with (
         patch(
             "app.services.ingestion.ingest_content",
             return_value={"status": "success", "artifact_id": "art:fb-2"},
         ),
-        patch("app.deps.get_redis", return_value=MagicMock()),
         patch("app.deps.get_chroma", return_value=MagicMock()),
         patch("app.deps.get_neo4j", return_value=MagicMock()),
         patch("core.utils.cache.log_event"),
@@ -113,24 +137,25 @@ async def test_run_awaits_hallucination_check_when_enabled(monkeypatch):
             new_callable=AsyncMock,
         ) as mock_check,
     ):
-        await _job().run(progress_cb=_noop_progress)
+        await job.run(progress_cb=_noop_progress)
 
     mock_check.assert_awaited_once()
     assert mock_check.await_args.kwargs["conversation_id"] == "convo-1234-abcd"
+    assert mock_check.await_args.kwargs["response_text"] == "A personal AI knowledge companion."
 
 
 @pytest.mark.asyncio
-async def test_run_best_effort_tail_never_fails_the_job(monkeypatch):
+async def test_run_best_effort_tail_never_fails_the_job(monkeypatch, redis):
     """Audit-log / hallucination failures are swallowed (with
     log_swallowed_error) — the persisted ingest must not be retried because a
     side-channel hiccuped."""
     monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", True)
+    job = _job(redis)
     with (
         patch(
             "app.services.ingestion.ingest_content",
             return_value={"status": "success", "artifact_id": "art:fb-3"},
         ),
-        patch("app.deps.get_redis", return_value=MagicMock()),
         patch("app.deps.get_chroma", return_value=MagicMock()),
         patch("app.deps.get_neo4j", return_value=MagicMock()),
         patch("core.utils.cache.log_event", side_effect=RuntimeError("redis down")),
@@ -139,36 +164,34 @@ async def test_run_best_effort_tail_never_fails_the_job(monkeypatch):
             new_callable=AsyncMock, side_effect=RuntimeError("nli down"),
         ),
     ):
-        result = await _job().run(progress_cb=_noop_progress)
+        result = await job.run(progress_cb=_noop_progress)
 
     assert result.metadata["artifact_id"] == "art:fb-3"
 
 
 @pytest.mark.asyncio
-async def test_run_propagates_ingest_failure_for_retry(monkeypatch):
+async def test_run_propagates_ingest_failure_for_retry(monkeypatch, redis):
     """The ingest itself failing must raise so the worker retries — content
-    dedup makes the re-run converge instead of duplicating."""
+    dedup makes the re-run converge instead of duplicating — and the turn
+    stays stored for that retry."""
     monkeypatch.setattr("config.ENABLE_HALLUCINATION_CHECK", False)
+    job = _job(redis)
     with patch(
         "app.services.ingestion.ingest_content",
         side_effect=RuntimeError("chroma down"),
     ):
         with pytest.raises(RuntimeError):
-            await _job().run(progress_cb=_noop_progress)
+            await job.run(progress_cb=_noop_progress)
+    assert redis.exists(job._text_key)
 
 
-def test_enqueue_helper_round_trips_payload():
-    client = MagicMock()
-    job_id = enqueue_feedback_ingest_job(
-        user_message="hi",
-        assistant_response="hello",
-        model="m",
-        conversation_id="c1",
-        redis_client=client,
-    )
-    assert isinstance(job_id, str) and job_id
-    client.hset.assert_called_once()
-    client.lpush.assert_called_once()
+def test_a_failed_enqueue_leaves_no_turn_behind(redis):
+    with patch("app.db.redis.processor_queue.enqueue_job", side_effect=RuntimeError("queue down")):
+        with pytest.raises(RuntimeError):
+            enqueue_feedback_ingest_job(
+                user_message="hi", assistant_response="hello", conversation_id="c1", redis_client=redis,
+            )
+    assert not list(redis.scan_iter(match="cerid:proc:text:*"))
 
 
 # ── endpoint contract ─────────────────────────────────────────────────────

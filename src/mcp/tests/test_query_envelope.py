@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.query_envelope import QueryEnvelope, SourceItem
-from core.agents.query_agent import _format_chroma_result, assemble_context
+from core.agents.query_agent import _format_chroma_result, assemble_context, projected_sub_category
 
 
 def _src(
@@ -180,6 +180,40 @@ def test_format_chroma_result_pack_source_type():
     assert res["source_type"] == "pack"
     assert res["pack_id"] == "pack-xyz"
     assert res["created_at"] == "2026-04-05"
+
+
+def test_a_foreign_sub_category_yields_to_a_kind_in_the_ontology():
+    """Live anneal rows carry another domain's shelf. kind is the real one."""
+    res = _format_chroma_result(
+        content="a lesson",
+        relevance=0.9,
+        chunk_id="c1",
+        domain="anneal_lessons",
+        metadata={
+            "artifact_id": "a1",
+            "sub_category": "actions",
+            "kind": "lesson",
+            "source": "cerid-anneal",
+        },
+    )
+    assert res["sub_category"] == "lesson"
+    assert res["metadata"]["kind"] == "lesson"
+    assert res["metadata"]["source"] == "cerid-anneal"
+
+
+def test_a_stored_sub_category_in_the_ontology_wins():
+    res = _format_chroma_result(
+        content="a lesson",
+        relevance=0.9,
+        chunk_id="c1",
+        domain="anneal_lessons",
+        metadata={"sub_category": "general", "kind": "lesson"},
+    )
+    assert res["sub_category"] == "general"
+
+
+def test_an_unknown_domain_keeps_the_stored_sub_category():
+    assert projected_sub_category("scratch", {"sub_category": "retro", "kind": "lesson"}) == "retro"
 
 
 def test_assemble_context_preserves_provenance_fields():

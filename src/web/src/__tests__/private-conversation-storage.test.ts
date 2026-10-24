@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 vi.mock("@/lib/api", () => ({
   syncConversation: vi.fn().mockResolvedValue(undefined),
-  syncConversationsBulk: vi.fn().mockResolvedValue(undefined),
   deleteConversationSync: vi.fn().mockResolvedValue(undefined),
   fetchSyncedConversations: vi.fn().mockResolvedValue([]),
   fetchForgottenConversations: vi.fn().mockResolvedValue({ items: [], cursor: null }),
@@ -30,10 +29,7 @@ function everythingInBrowserStorage(): string {
 }
 
 function syncedBodies(): string {
-  return JSON.stringify([
-    ...vi.mocked(api.syncConversation).mock.calls,
-    ...vi.mocked(api.syncConversationsBulk).mock.calls,
-  ])
+  return JSON.stringify(vi.mocked(api.syncConversation).mock.calls)
 }
 
 function privateTurn(result: { current: ReturnType<typeof useConversations> }, id: string) {

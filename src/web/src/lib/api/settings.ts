@@ -19,10 +19,7 @@ import type {
   Plugin,
   PluginListResponse,
   AggregatedMetricsResponse,
-  TimeSeriesResponse,
   HealthScoreResponse,
-  CostBreakdownResponse,
-  QualityMetricsResponse,
   Workflow,
   WorkflowCreate,
   WorkflowRun,
@@ -334,15 +331,6 @@ export async function retestServices(): Promise<{ status: string; results: Recor
 // OpenRouter Credits
 // ---------------------------------------------------------------------------
 
-export async function fetchOpenRouterCredits(): Promise<import("../types").OpenRouterCredits> {
-  const res = await fetch(`${MCP_BASE}/providers/credits`, {
-    headers: mcpHeaders(),
-  })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): credits-unavailable is indistinguishable from credits-fetch-failed
-  if (!res.ok) return { available: false, error: `HTTP ${res.status}` }
-  return res.json()
-}
-
 export async function fetchProviderCredits(): Promise<import("../types").ProviderCredits> {
   const res = await fetch(`${MCP_BASE}/providers/credits`, {
     headers: mcpHeaders(),
@@ -372,14 +360,6 @@ export interface ConfiguredProviderInfo {
 export interface ConfiguredProvidersResponse {
   providers: ConfiguredProviderInfo[]
   total: number
-}
-
-/** Non-throwing — availability hints are best-effort decoration. */
-export async function fetchConfiguredProviders(): Promise<ConfiguredProvidersResponse> {
-  const res = await fetch(`${MCP_BASE}/providers/configured`, { headers: mcpHeaders() })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): zero-providers is indistinguishable from fetch-failed
-  if (!res.ok) return { providers: [], total: 0 }
-  return res.json()
 }
 
 export interface ModelCatalogResponse {
@@ -539,20 +519,6 @@ export async function scanWatchedFolder(id: string): Promise<{ status: string }>
   return res.json()
 }
 
-export async function fetchVaultProfile(id: string): Promise<VaultProfileResponse | null> {
-  const res = await fetch(`${MCP_BASE}/watched-folders/${id}/vault-profile`, { headers: mcpHeaders() })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): null-as-"no vault profile" is indistinguishable from null-as-fetch-failed
-  if (!res.ok) return null
-  return res.json()
-}
-
-export async function fetchInternalProvider(): Promise<{ provider: string; model: string; ollama_available: boolean }> {
-  const res = await fetch(`${MCP_BASE}/providers/internal`, { headers: mcpHeaders() })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): same shape as fetchOllamaStatus's masked-failure default
-  if (!res.ok) return { provider: "bifrost", model: "", ollama_available: false }
-  return res.json()
-}
-
 // ---------------------------------------------------------------------------
 // Data Sources
 // ---------------------------------------------------------------------------
@@ -642,18 +608,6 @@ export async function runAutomation(id: string): Promise<AutomationRun> {
   return res.json()
 }
 
-export async function fetchAutomationHistory(id: string): Promise<AutomationRun[]> {
-  const res = await fetch(`${MCP_BASE}/automations/${id}/history`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Fetch automation history failed: ${res.status}`))
-  return res.json()
-}
-
-export async function fetchAutomationPresets(): Promise<Record<string, { label: string; cron: string }>> {
-  const res = await fetch(`${MCP_BASE}/automations/presets`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Fetch automation presets failed: ${res.status}`))
-  return res.json()
-}
-
 // --- Plugins ---
 
 /**
@@ -686,12 +640,6 @@ export async function fetchPlugins(): Promise<PluginListResponse> {
   const res = await fetch(`${MCP_BASE}/plugins`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch plugins failed: ${res.status}`))
   return normalizePluginList(await res.json())
-}
-
-export async function fetchPlugin(name: string): Promise<Plugin> {
-  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Fetch plugin failed: ${res.status}`))
-  return res.json()
 }
 
 export async function enablePlugin(name: string): Promise<Plugin> {
@@ -731,27 +679,9 @@ export async function fetchObservabilityMetrics(windowMinutes = 60): Promise<Agg
   return res.json()
 }
 
-export async function fetchObservabilityTimeSeries(name: string, windowMinutes = 60): Promise<TimeSeriesResponse> {
-  const res = await fetch(`${MCP_BASE}/observability/metrics/${encodeURIComponent(name)}?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Metric time series fetch failed: ${res.status}`))
-  return res.json()
-}
-
 export async function fetchObservabilityHealthScore(windowMinutes = 60): Promise<HealthScoreResponse> {
   const res = await fetch(`${MCP_BASE}/observability/health-score?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Health score fetch failed: ${res.status}`))
-  return res.json()
-}
-
-export async function fetchObservabilityCost(windowMinutes = 60): Promise<CostBreakdownResponse> {
-  const res = await fetch(`${MCP_BASE}/observability/cost?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Cost breakdown fetch failed: ${res.status}`))
-  return res.json()
-}
-
-export async function fetchObservabilityQuality(windowMinutes = 60): Promise<QualityMetricsResponse> {
-  const res = await fetch(`${MCP_BASE}/observability/quality?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Quality metrics fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -762,12 +692,6 @@ export async function fetchObservabilityQuality(windowMinutes = 60): Promise<Qua
 export async function fetchWorkflows(): Promise<WorkflowListResponse> {
   const res = await fetch(`${MCP_BASE}/workflows`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch workflows failed: ${res.status}`))
-  return res.json()
-}
-
-export async function fetchWorkflow(id: string): Promise<Workflow> {
-  const res = await fetch(`${MCP_BASE}/workflows/${id}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Fetch workflow failed: ${res.status}`))
   return res.json()
 }
 
@@ -877,39 +801,10 @@ export interface ModelUpdatesFullResponse {
   catalog_size: number
 }
 
-export async function fetchModelUpdates(): Promise<ModelUpdatesResponse> {
-  const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): zero-updates is indistinguishable from fetch-failed
-  if (!res.ok) return { new: [], deprecated: [], last_checked: null }
-  return res.json()
-}
-
 export async function fetchModelUpdatesFull(): Promise<ModelUpdatesFullResponse> {
   const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Model updates fetch failed: ${res.status}`))
   return res.json()
-}
-
-export async function triggerModelUpdateCheck(): Promise<{
-  success: boolean
-  new_count: number
-  deprecated_count: number
-  last_checked: string
-}> {
-  const res = await fetch(`${MCP_BASE}/models/updates/check`, {
-    method: "POST",
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Model update check failed: ${res.status}`))
-  return res.json()
-}
-
-export async function dismissModelUpdate(updateId: string): Promise<void> {
-  const res = await fetch(`${MCP_BASE}/models/updates/dismiss/${encodeURIComponent(updateId)}`, {
-    method: "POST",
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Dismiss failed: ${res.status}`))
 }
 
 export interface ApplyModelUpdatesResponse {
@@ -1251,15 +1146,6 @@ export async function updateProAutomation(
     body: JSON.stringify(update),
   })
   if (!res.ok) throw new Error(await extractError(res, "Failed to update automation"))
-  return res.json()
-}
-
-export async function resetProAutomation(name: string): Promise<AutomationState> {
-  const res = await fetch(`${MCP_BASE}/settings/pro-automations/${name}`, {
-    method: "DELETE",
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to reset automation"))
   return res.json()
 }
 

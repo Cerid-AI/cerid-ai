@@ -203,6 +203,15 @@ def get_query_patterns(
 
 # Per-model cost rates (USD per 1K tokens, OpenRouter pricing)
 MODEL_COST_RATES = {
+    "openai/gpt-6-luna": {"input": 0.0001, "output": 0.0005},
+    "openai/gpt-6.1-sol": {"input": 0.002, "output": 0.010},
+    "anthropic/claude-sonnet-5.5": {"input": 0.002, "output": 0.010},
+    "anthropic/claude-opus-5.5": {"input": 0.004, "output": 0.020},
+    "x-ai/grok-4.7": {"input": 0.002, "output": 0.006},
+    "google/gemini-3.8-flash": {"input": 0.00075, "output": 0.00375},
+    "google/gemini-3.5-flash-lite": {"input": 0.0003, "output": 0.0025},
+    "meta-llama/llama-4-maverick": {"input": 0.000188, "output": 0.000652},
+    "meta-llama/llama-4-scout": {"input": 0.0001, "output": 0.0003},
     "anthropic/claude-sonnet-4": {"input": 0.003, "output": 0.015},
     "openai/gpt-4o": {"input": 0.0025, "output": 0.010},
     "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},

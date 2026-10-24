@@ -301,13 +301,17 @@ async def _execute_recall(input_data: dict) -> dict:
 
 async def _execute_web_search(input_data: dict) -> dict:
     """Wrap web search with Self-RAG verification."""
+    from app.services.request_policy import build_request_context
     from utils.web_search import search_and_verify
 
+    # Self-RAG re-reads the knowledge base to check each result; at Private
+    # Mode L2 the search runs without it.
+    kb = not build_request_context(client_id="a2a-agent").blocks_kb
     result = await search_and_verify(
         query=input_data.get("text", input_data.get("query", "")),
-        chroma_client=get_chroma(),
-        neo4j_driver=get_neo4j(),
-        redis_client=get_redis(),
+        chroma_client=get_chroma() if kb else None,
+        neo4j_driver=get_neo4j() if kb else None,
+        redis_client=get_redis() if kb else None,
     )
     return result
 
@@ -321,20 +325,24 @@ async def _execute_verification(input_data: dict) -> dict:
     # expert_mode) like REST /agent/hallucination, not just response_text.
     params = VerificationInput.model_validate(input_data)
 
-    result = await check_hallucinations(
-        response_text=params.response_text,
-        conversation_id=params.conversation_id,
-        chroma_client=get_chroma(),
-        neo4j_driver=get_neo4j(),
-        redis_client=get_redis(),
-        threshold=params.threshold,
-        model=params.model,
-        user_query=params.user_query,
-        expert_mode=params.expert_mode,
-        # Private Mode L1+ suppresses the durable hall:{cid} report on the A2A
-        # transport too, matching the REST handlers (CR-018/086).
-        persist_report=not saves_blocked(),
-    )
+    from app.services.request_policy import build_request_context
+    from core.agents.guarded_retrieval import verification_scope
+
+    with verification_scope(build_request_context(client_id="a2a-agent")):
+        result = await check_hallucinations(
+            response_text=params.response_text,
+            conversation_id=params.conversation_id,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+            threshold=params.threshold,
+            model=params.model,
+            user_query=params.user_query,
+            expert_mode=params.expert_mode,
+            # Private Mode L1+ suppresses the durable hall:{cid} report on the A2A
+            # transport too, matching the REST handlers (CR-018/086).
+            persist_report=not saves_blocked(),
+        )
     return result
 
 

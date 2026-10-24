@@ -51,6 +51,7 @@ from core.agents.hallucination.patterns import (
     _pick_verification_model,
     memory_authority_boost,
 )
+from core.agents.hallucination.scope import cache_partition
 from core.context.identity import with_tenant_scope
 from core.forget.read_filter import visible
 from core.lineage.current import version_fields
@@ -690,6 +691,35 @@ def _interpret_recency_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
     return verdict
 
 
+def _interpret_citation_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    """Interpret a verification verdict for a cited source (``[CITATION]`` claim).
+
+    The citation verifier judges whether the cited source exists
+    (``_SYSTEM_CITATION_VERIFICATION``), so verdicts map directly:
+    - "supported" → the source exists → "verified"
+    - "refuted" → the source appears fabricated → "unverified"
+    - "uncertain" → keep as-is
+    """
+    status = verdict["status"]
+    if status not in ("verified", "unverified"):
+        return verdict
+    prefixes = (
+        ("Cross-model verification confirmed: ", "Cross-model verification confirmed")
+        if status == "verified"
+        else (
+            "Cross-model verification found factual errors: ",
+            "Cross-model verification found factual errors",
+        )
+    )
+    clean_reason = verdict.get("reason", "")
+    for prefix in prefixes:
+        if clean_reason.startswith(prefix):
+            clean_reason = clean_reason[len(prefix):]
+            break
+    label = "Cited source exists" if status == "verified" else "Cited source appears fabricated"
+    return {**verdict, "reason": f"{label}: {clean_reason}".rstrip(": ")}
+
+
 # ---------------------------------------------------------------------------
 # Numeric contradiction detection (zero LLM cost)
 # ---------------------------------------------------------------------------
@@ -1156,11 +1186,17 @@ async def _independent_search_evidence_urls(
     if _budget is not None and _budget < _MIN_EXTERNAL_CALL_BUDGET_S:
         return []
 
+    from core.agents.external_query import external_query_for_claim
+
+    # A claim about the user's own data goes out only as a public-fact query.
+    outgoing = await external_query_for_claim(claim)
+    if outgoing is None:
+        return []
     try:
         from utils.web_search import search_and_verify
 
         search_result = await search_and_verify(
-            claim, max_results=_WEB_SEARCH_EVIDENCE_TOP_N,
+            outgoing, max_results=_WEB_SEARCH_EVIDENCE_TOP_N,
         )
         return [
             r["url"] for r in search_result.get("results", []) if r.get("url")
@@ -1300,22 +1336,18 @@ async def _verify_claim_externally(
             "source_urls": [],
         }
 
-    # External verification always egresses to OpenRouter (call_llm_raw is
-    # hard-wired to it), carrying claim text and KB snippets. On a local-provider
-    # install that contradicts the operator's choice, so honour the opt-out.
-    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
-        from core.routing.provider_state import is_local_provider
-        if is_local_provider():  # no-arg = the *active* provider
-            return {
-                "status": "uncertain",
-                "confidence": 0.3,
-                "reason": (
-                    "External verification skipped — local inference provider "
-                    "active and ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false"
-                ),
-                "verification_method": "none",
-                "source_urls": [],
-            }
+    # External verification egresses to OpenRouter (call_llm_raw is hard-wired
+    # to it), carrying claim text and KB snippets.
+    from core.routing.egress import cloud_egress_refused
+
+    if refused := cloud_egress_refused():
+        return {
+            "status": "uncertain",
+            "confidence": 0.3,
+            "reason": f"External verification skipped — {refused}",
+            "verification_method": "none",
+            "source_urls": [],
+        }
 
     # Deadline gate: with almost no budget left, an external call can only
     # end in the caller's wait_for firing mid-flight. Return a retryable
@@ -1449,7 +1481,12 @@ async def _verify_claim_externally(
                 auth_sources = auth_result.get("authoritative_sources", [])
                 if auth_sources:
                     evidence_lines = [
-                        f"- [{s['source']}] (NLI entailment: {s['nli_entailment']:.2f}): {s['content']}"
+                        f"- [{s['source']}] ("
+                        + (
+                            f"NLI entailment: {s['nli_entailment']:.2f}"
+                            if s.get("nli_scored") else "NLI: not scored"
+                        )
+                        + f"): {s['content']}"
                         for s in auth_sources[:3]
                     ]
                     _authoritative_evidence = (
@@ -1634,7 +1671,7 @@ async def _verify_claim_externally(
 
             # --- Citation verification (direct mapping) ---
             if is_citation:
-                verdict = _interpret_recency_verdict(verdict)
+                verdict = _interpret_citation_verdict(verdict)
                 logger.info(
                     "Citation claim verified: '%s...' → %s",
                     claim[:50],
@@ -2063,6 +2100,10 @@ async def _verify_via_cited_urls(
     terminal verdict dict (``claim`` stamped) or ``None`` to fall through to the
     KB + external path.
     """
+    from core.routing.egress import cloud_egress_refused
+
+    if cloud_egress_refused():
+        return None  # fetching a cited page is egress too; fall through to the KB
     for url in (source_urls or [])[:3]:
         _budget = _remaining_budget(deadline)
         if _budget is not None and _budget < _MIN_EXTERNAL_CALL_BUDGET_S * 2:
@@ -2086,22 +2127,21 @@ async def _gather_kb_evidence(
     chroma_client: Any,
     *,
     response_context: str | None,
-    source_artifact_ids: list[str] | None,
 ) -> list[dict[str, Any]]:
     """Evidence-gathering stage: assemble the KB + user-memory candidate set.
 
     Lightweight (vector + BM25) KB retrieval merged with the user-confirmed
-    memory query, memory-authority boosted, min-relevance filtered, anti-circular
-    penalized against ``source_artifact_ids``, relevance-sorted, and term-overlap
-    sanity filtered. Returns the candidate evidence list (before recency
+    memory query, memory-authority boosted, min-relevance filtered,
+    relevance-sorted, and term-overlap sanity filtered. Returns the candidate evidence list (before recency
     weighting); the caller owns the no-evidence → external fallback decision and
     the freshness re-rank so those stay visible in the orchestrator.
     """
+    from core.agents.hallucination.scope import kb_domains, memory_allowed
     from core.agents.query_agent import lightweight_kb_query
 
     # Exclude 'conversations' domain from general KB query to avoid
     # self-verification against feedback-ingested LLM responses.
-    verification_domains = [d for d in owner_domains() if d != "conversations"]
+    verification_domains = kb_domains([d for d in owner_domains() if d != "conversations"])
     # Build an enriched query: the bare claim text is often too terse
     # for vector search (e.g. "it uses 768 dimensions" without context).
     # Prepending the response_context topic gives the embedding model
@@ -2121,10 +2161,10 @@ async def _gather_kb_evidence(
         domains=verification_domains,
         top_k=5,
         chroma_client=chroma_client,
-    )
+    ) if verification_domains else []
 
     # Also query user-confirmed memories (filtered by memory_type)
-    memory_results = await _query_memories(claim, chroma_client, top_k=2)
+    memory_results = await _query_memories(claim, chroma_client, top_k=2) if memory_allowed() else []
 
     # Merge KB results with memory results
     all_results = list(kb_results)
@@ -2141,27 +2181,6 @@ async def _gather_kb_evidence(
         r for r in all_results
         if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
     ]
-
-    # --- Anti-circularity: penalise KB results that were injected into
-    # the LLM prompt.  These cannot independently verify a claim because
-    # the response was *derived* from them — matching is expected.
-    # Penalty is 0.15 (not 0.30): the old 0.30 was too aggressive — it
-    # pushed genuine supporting docs from 0.65 to 0.35, right at the
-    # discard threshold, causing false "uncertain" verdicts when the KB
-    # actually contained the answer.
-    _CIRCULAR_PENALTY = 0.15
-    if source_artifact_ids:
-        _src_set = set(source_artifact_ids)
-        for r in all_results:
-            aid = r.get("artifact_id", "")
-            if aid and aid in _src_set:
-                original_rel = r.get("relevance", 0.0)
-                r["_circular"] = True
-                r["relevance"] = max(0.0, round(original_rel - _CIRCULAR_PENALTY, 4))
-                logger.info(
-                    "Anti-circular penalty: artifact=%s relevance %.3f → %.3f",
-                    aid[:8], original_rel, r["relevance"],
-                )
 
     # Sort by relevance descending
     all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
@@ -2262,7 +2281,45 @@ async def _score_kb_grounding(
     return similarity, details, nli
 
 
+def label_answer_source(
+    result: dict[str, Any], source_artifact_ids: list[str] | None,
+) -> dict[str, Any]:
+    """Mark a verdict ``circular_source`` iff its KB evidence is one of the answer's sources.
+
+    Such a verdict still stands: it says the answer is faithful to the user's
+    knowledge base, and the UI shows it as "KB verified" rather than
+    "independently verified" (ruled 2026-10-10). Returns a copy, so a cached
+    verdict is never relabelled in place.
+    """
+    out = dict(result)
+    evidence = out.get("source_artifact_id")
+    if evidence and source_artifact_ids and evidence in set(source_artifact_ids):
+        out["circular_source"] = True
+    else:
+        out.pop("circular_source", None)
+    return out
+
+
 async def verify_claim(
+    claim: str,
+    chroma_client: Any,
+    neo4j_driver: Any,
+    redis_client: Any,
+    *args: Any,
+    source_artifact_ids: list[str] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Verify one claim (:func:`_verify_claim`) and label it against the answer's sources.
+
+    ``source_artifact_ids`` are the KB artifacts the answer was generated from.
+    The label is applied here, after the claim cache, because the same claim
+    can come from a different answer with different sources next time.
+    """
+    result = await _verify_claim(claim, chroma_client, neo4j_driver, redis_client, *args, **kwargs)
+    return label_answer_source(result, source_artifact_ids)
+
+
+async def _verify_claim(
     claim: str,
     chroma_client,
     neo4j_driver,
@@ -2271,7 +2328,6 @@ async def verify_claim(
     model: str | None = None,
     streaming: bool = False,
     expert_mode: bool = False,
-    source_artifact_ids: list[str] | None = None,
     response_context: str | None = None,
     claim_context: str | None = None,
     conversation_context: list[dict[str, str]] | None = None,
@@ -2321,6 +2377,8 @@ async def verify_claim(
     When ``expert_mode`` is True, all external verification calls use the
     expert-tier model (Grok 4) instead of the default model pool.
     """
+    # All three floors are on the KB retrieval-relevance scale (0-1 hybrid
+    # vector+BM25 score from lightweight_kb_query), not NLI probabilities.
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
     unverified_threshold = config.HALLUCINATION_UNVERIFIED_THRESHOLD
@@ -2356,6 +2414,7 @@ async def verify_claim(
         claim,
         model=model or "",
         method=_cache_tier,
+        partition=cache_partition(),
         response_context=response_context or "",
     )
     if cached and cached.get("status") in ("verified", "unverified", "uncertain"):
@@ -2409,6 +2468,7 @@ async def verify_claim(
                 response_context=response_context,
                 model=model or "",
                 method=_cache_tier,
+                partition=cache_partition(),
                 **_cache_ttl_kwargs,
             )
         return result
@@ -2436,12 +2496,11 @@ async def verify_claim(
             return await _cache_result(cited_verdict)
 
         # Stage 2 — evidence gathering: KB + user-memory candidate set,
-        # boosted / filtered / anti-circular-penalized / term-overlap sanitized.
+        # boosted / filtered / term-overlap sanitized.
         all_results = await _gather_kb_evidence(
             claim,
             chroma_client,
             response_context=response_context,
-            source_artifact_ids=source_artifact_ids,
         )
 
         # --- Fallback 1: No KB results at all → try external verification ---
@@ -2475,25 +2534,6 @@ async def verify_claim(
         # where the snippet's full paragraph matters.
         _snippet_limit = 1200 if expert_mode else 300
         _top_snippet = (top_result.get("content", "") or "")[:_snippet_limit] or None
-
-        # --- Anti-circularity escalation: if ALL top results are circular
-        # (derived from the same KB artifacts injected into the LLM prompt),
-        # the KB cannot independently verify the claim — escalate externally.
-        all_circular = source_artifact_ids and all(
-            r.get("_circular") for r in top_results
-        )
-        if all_circular:
-            logger.info(
-                "All top KB results are circular for claim '%s…' — escalating to external",
-                claim[:50],
-            )
-            ext_result = await _verify_claim_externally(
-                claim, model,
-                **_ext_common, kb_snippet=_top_snippet,
-            )
-            return await _cache_result(
-                _external_verdict(claim, ext_result, circular_source=True)
-            )
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
         if escalation_similarity < ext_kb_threshold:
@@ -2565,7 +2605,6 @@ async def verify_claim(
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb_nli",
-                **({"circular_source": True} if top_result.get("_circular") else {}),
             })
 
         if _nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
@@ -2636,7 +2675,6 @@ async def verify_claim(
                 "source_snippet": top_result.get("content", "")[:200],
                 "verification_details": details,
                 "verification_method": "kb_nli",
-                **({"circular_source": True} if top_result.get("_circular") else {}),
             })
 
         if similarity >= threshold:
@@ -2716,7 +2754,6 @@ async def verify_claim(
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb",
-                **({"circular_source": True} if top_result.get("_circular") else {}),
             })
         elif similarity < unverified_threshold:
             # --- Fallback 3: KB says "unverified" → try external ---
@@ -2770,9 +2807,12 @@ async def verify_claim(
                         kb_results=[{"content": _top_snippet}] if _top_snippet else None,
                     )
                     auth_sources = auth.get("authoritative_sources", [])
+                    # A verdict rests only on sources whose NLI was actually
+                    # computed; an unscored source's 0.0 is a placeholder.
+                    _scored = [s for s in auth_sources if s.get("nli_scored")]
                     # If any authoritative source has strong entailment, upgrade to verified
-                    strong_support = [s for s in auth_sources if s.get("nli_entailment", 0) >= config.NLI_ENTAILMENT_THRESHOLD]
-                    strong_contradict = [s for s in auth_sources if s.get("nli_contradiction", 0) >= config.NLI_CONTRADICTION_THRESHOLD]
+                    strong_support = [s for s in _scored if s.get("nli_entailment", 0) >= config.NLI_ENTAILMENT_THRESHOLD]
+                    strong_contradict = [s for s in _scored if s.get("nli_contradiction", 0) >= config.NLI_CONTRADICTION_THRESHOLD]
                     # Full structured evidence for downstream audit/UI — previously
                     # only the scalar verdict + source_urls survived, losing
                     # per-source NLI scores, domain classification, and
@@ -2795,10 +2835,14 @@ async def verify_claim(
                             **_kb_source_fields(top_result),
                         })
                     if strong_contradict:
+                        # Like the cited-URL path, similarity is the evidence's
+                        # entailment of the claim: here, that of the source that
+                        # contradicts it most.
+                        _strongest = max(strong_contradict, key=lambda s: s["nli_contradiction"])
                         return await _cache_result({
                             "claim": claim,
                             "status": "unverified",
-                            "similarity": 0.35,
+                            "similarity": round(float(_strongest["nli_entailment"]), 3),
                             "reason": f"Authoritative source contradicts: {strong_contradict[0].get('source', 'external')}",
                             "verification_method": "authoritative",
                             "source_urls": [s.get("source_url", "") for s in strong_contradict if s.get("source_url")],

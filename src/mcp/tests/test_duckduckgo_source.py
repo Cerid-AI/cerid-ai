@@ -97,3 +97,74 @@ async def test_a_single_topic_yields_results(ddg_api):
         "Greater Tokyo Area The third most populous metropolitan area in the world.",
     ]
     assert all(r.source_name == "DuckDuckGo" for r in results)
+
+
+# q=Python — group entries ahead of the plain topics, and an abstract whose
+# source page DuckDuckGo did not name.
+_GROUPS_FIRST = {
+    "AbstractText": "Python is a programming language.", "AbstractURL": "", "Heading": "Python",
+    "RelatedTopics": [
+        {"Name": "Snakes", "Topics": [{"FirstURL": "https://duckduckgo.com/Pythonidae", "Text": "Pythonidae"}]},
+        {"Name": "Comedy", "Topics": [{"FirstURL": "https://duckduckgo.com/Monty_Python", "Text": "Monty Python"}]},
+        {"FirstURL": "https://duckduckgo.com/CPython", "Text": "CPython The reference implementation of Python."},
+        {"FirstURL": "https://duckduckgo.com/PyPy", "Text": "PyPy A Python implementation with a JIT compiler."},
+    ],
+}
+
+
+@pytest.fixture
+def ddg_groups_first(monkeypatch):
+    real_client = httpx.AsyncClient
+
+    def patched_client(**kwargs):
+        transport = httpx.MockTransport(lambda _req: httpx.Response(200, json=_GROUPS_FIRST))
+        return real_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched_client)
+
+
+@pytest.mark.asyncio
+async def test_group_entries_do_not_crowd_out_the_plain_topics(ddg_groups_first):
+    """F48: the cut to two came before the group filter, so two leading groups
+    left no related topic at all."""
+    results = await DuckDuckGoSource().query("Python")
+    assert [r.source_url for r in results[1:]] == [
+        "https://duckduckgo.com/CPython",
+        "https://duckduckgo.com/PyPy",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_row_without_a_url_still_has_an_identity(ddg_groups_first):
+    """F47: the abstract arrives with AbstractURL "" — a row with no identity."""
+    first = [r.to_dict() for r in await DuckDuckGoSource().query("Python")]
+    again = [r.to_dict() for r in await DuckDuckGoSource().query("Python")]
+
+    assert first[0]["source_url"] == ""
+    guids = [row["guid"] for row in first]
+    assert all(guids)
+    assert len(set(guids)) == len(guids)
+    assert guids == [row["guid"] for row in again]
+
+
+def _scored(url: str) -> float:
+    from app.data_sources.base import DataSourceResult
+
+    row = DataSourceResult(
+        title="t", content="long enough content to pass the short-row cut", source_url=url, confidence=0.7,
+    )
+    return DuckDuckGoSource().score_confidence("q", row)
+
+
+@pytest.mark.parametrize("url", ["https://www.nasa.gov/moon", "https://mit.edu/", "https://ocw.mit.edu./courses"])
+def test_a_gov_or_edu_host_is_boosted(url):
+    assert _scored(url) == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.com/.gov-guide", "https://www.edu.example.com/page", "https://example.com/?ref=x.edu"],
+)
+def test_gov_or_edu_elsewhere_in_the_url_is_not_boosted(url):
+    """F46: the substring match boosted any URL containing '.gov' or '.edu'."""
+    assert _scored(url) == pytest.approx(0.7)

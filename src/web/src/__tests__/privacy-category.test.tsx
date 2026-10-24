@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { axe } from "jest-axe"
 import PrivacyCategory from "@/components/settings/categories/privacy"
+import { getDef } from "@/lib/settings-registry"
 import type { ServerSettings } from "@/lib/types"
 import type { SettingsCategoryPageProps } from "@/components/settings/categories/page-props"
 
@@ -164,5 +165,18 @@ describe("PrivacyCategory — accessibility", () => {
     vi.stubGlobal("fetch", mockApis())
     const { container } = render(<PrivacyCategory {...defaultProps} />, { wrapper })
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe("PrivacyCategory — encryption hint (audit F31)", () => {
+  // encryption-env-contract.test.ts pins the registry row to the variable
+  // utils/encryption.py reads; this pins what the page shows to the registry.
+  it("every rendered hint names the registry row's env var", async () => {
+    const writer = getDef("privacy.data.encryption")!.writer
+    const envVar = writer.kind === "env" ? writer.envVar : ""
+    vi.stubGlobal("fetch", mockApis())
+    render(<PrivacyCategory {...defaultProps} />, { wrapper })
+    const hints = await screen.findAllByText(/^CERID_ENCRYPTION/)
+    expect(hints.map((h) => h.textContent)).toEqual(hints.map(() => envVar))
   })
 })

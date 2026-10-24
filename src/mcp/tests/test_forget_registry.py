@@ -135,3 +135,60 @@ def test_any_live_forget_keeps_a_subject_forgotten_whatever_the_clocks_say(tmp_p
         _e("fg_A", "conversation", "c1", "restored", "2026-10-07T12:00:00Z"),
     ])
     assert reg.state_of("conversation", "c1") == "trashed"
+
+
+# ── An unreachable sync folder never makes a forget lapse ───────────────────
+
+def _forgotten_c1(tmp_path: Path) -> tuple[Path, Path]:
+    root, snap = tmp_path / "sync" / "forget", tmp_path / "data" / "registry-snapshot.jsonl"
+    Registry(root, "mA", snap).append([_e("fg_1", "conversation", "c1", "trashed", "2026-10-07T10:00:00Z", "mA")])
+    return root, snap
+
+
+def test_a_loaded_registry_keeps_its_forgets_when_the_folder_goes_away(tmp_path: Path):
+    root, snap = _forgotten_c1(tmp_path)
+    reg = Registry(root, "mB", snap)
+    assert reg.is_forgotten("conversation", "c1")
+    root.rename(tmp_path / "unmounted")
+    assert reg.is_forgotten("conversation", "c1")
+
+
+def test_an_emptied_folder_is_not_read_as_no_forgets(tmp_path: Path):
+    """An unmounted share leaves its mount point behind, empty."""
+    root, snap = _forgotten_c1(tmp_path)
+    reg = Registry(root, "mB", snap)
+    assert reg.is_forgotten("conversation", "c1")
+    for path in root.glob("registry*.jsonl"):
+        path.unlink()
+    assert reg.is_forgotten("conversation", "c1")
+
+
+def test_a_process_started_without_the_folder_reads_the_local_snapshot(tmp_path: Path):
+    root, snap = _forgotten_c1(tmp_path)
+    Registry(root, "mB", snap).is_forgotten("conversation", "c1")  # a successful load writes the snapshot
+    assert snap.stat().st_mode & 0o777 == 0o600
+    root.rename(tmp_path / "unmounted")
+    assert Registry(root, "mC", snap).is_forgotten("conversation", "c1")
+
+
+def test_an_unreadable_file_keeps_what_it_said(tmp_path: Path):
+    root, snap = _forgotten_c1(tmp_path)
+    Registry(root, "mB", snap).append([_e("fg_2", "conversation", "c2", "trashed", "2026-10-07T10:00:00Z", "mB")])
+    reg = Registry(root, "mC", snap)
+    assert reg.is_forgotten("conversation", "c1") and reg.is_forgotten("conversation", "c2")
+    locked = root / "registry-mA.jsonl"
+    locked.chmod(0)
+    try:
+        Registry(root, "mB", snap).append([_e("fg_3", "conversation", "c3", "trashed", "2026-10-07T11:00:00Z", "mB")])
+        assert reg.is_forgotten("conversation", "c1") and reg.is_forgotten("conversation", "c3")
+        assert Registry(root, "mD", snap).is_forgotten("conversation", "c1")  # a cold start, from the snapshot
+    finally:
+        locked.chmod(0o600)
+
+
+def test_a_fresh_install_has_no_forgets_and_sees_the_first_one(tmp_path: Path):
+    root, snap = tmp_path / "sync" / "forget", tmp_path / "data" / "registry-snapshot.jsonl"
+    reg = Registry(root, "mA", snap)
+    assert not reg.is_forgotten("conversation", "c1")
+    Registry(root, "mB", snap).append([_e("fg_1", "conversation", "c1", "trashed", "2026-10-07T10:00:00Z", "mB")])
+    assert reg.is_forgotten("conversation", "c1")

@@ -86,10 +86,11 @@ def claim_hash(claim: str) -> str:
     return hashlib.sha256(normalize_claim(claim).encode()).hexdigest()[:16]
 
 
-# Bump this string when the cache key algorithm changes. Entries written under
-# a prior schema will simply never be read — the old keys don't collide with
-# the new `verf:claim:v2:…` namespace and will age out via their 30d TTL.
-_CACHE_SCHEMA = "v2"
+# Bump this string when the cache key algorithm or the entry shape changes.
+# Entries written under a prior schema will simply never be read — the old keys
+# don't collide with the new namespace and age out via their 30d TTL. v3: the
+# entry keeps its evidence (source artifact, filename, URLs).
+_CACHE_SCHEMA = "v3"
 
 # Time-sensitive verdicts go stale fast, so cap their TTL regardless of the
 # caller-requested scope. 3 days in seconds. Applies to (a) web-search-method
@@ -108,6 +109,7 @@ def claim_cache_key(
     model: str,
     method: str,
     response_context: str,
+    partition: str = "",
 ) -> str:
     """Return a cache key mixing claim + model + method + response_context.
 
@@ -119,16 +121,16 @@ def claim_cache_key(
          across conversations even when "it" resolves to different subjects.
 
     Mixing model, method, and the surrounding response context into the hash
-    input eliminates both. The key is schema-versioned (``v2:``) so the v1
-    cache can be left untouched — its entries will simply never be read and
-    age out naturally.
+    input eliminates both. The key is schema-versioned (``_CACHE_SCHEMA``) so an
+    older cache can be left untouched — its entries will simply never be read
+    and age out naturally.
     """
     normalized = normalize_claim(claim)
     # \x1f (Unit Separator) cannot appear in model IDs or method names and is
     # vanishingly unlikely in response text, so it's a safe field delimiter.
     material = (
         f"{_CACHE_SCHEMA}\x1f{model}\x1f{method}\x1f{normalized}\x1f"
-        f"{response_context or ''}"
+        f"{response_context or ''}\x1f{partition}"
     )
     digest = hashlib.sha256(material.encode()).hexdigest()[:20]
     return f"{_CACHE_SCHEMA}:{digest}"
@@ -141,6 +143,7 @@ async def get_cached_verdict(
     model: str = "",
     method: str = "",
     response_context: str = "",
+    partition: str = "",
 ) -> dict[str, Any] | None:
     """Check if a claim has been verified before. Returns cached verdict or *None*.
 
@@ -148,13 +151,15 @@ async def get_cached_verdict(
 
     ``model``, ``method``, and ``response_context`` are folded into the key so
     that verdicts are scoped to the verification model, verification method,
-    and conversational context in which they were produced. Call sites that
+    and conversational context in which they were produced, and ``partition``
+    to the evidence the caller may read (tenant, domains, memory), so a verdict
+    never crosses a consumer's wall. Call sites that
     don't yet pass them fall back to empty strings and operate in their own
     (distinct) cache namespace.
     """
     if any(claim_text.strip().startswith(p) for p in _SPECIAL_PREFIXES):
         return None
-    key = f"verf:claim:{claim_cache_key(claim_text, model=model, method=method, response_context=response_context)}"
+    key = f"verf:claim:{claim_cache_key(claim_text, model=model, method=method, response_context=response_context, partition=partition)}"
     # L1 check (no network I/O)
     l1_hit = _l1_get(key)
     if l1_hit is not None:
@@ -184,6 +189,7 @@ async def cache_verdict(
     *,
     model: str | None = None,
     method: str | None = None,
+    partition: str = "",
 ) -> None:
     """Cache a verified claim verdict. Default TTL: 30 days.
 
@@ -218,7 +224,7 @@ async def cache_verdict(
     # self-consistent namespace with unupdated readers.
     key_model = model if model is not None else ""
     key_method = method if method is not None else ""
-    key = f"verf:claim:{claim_cache_key(claim_text, model=key_model, method=key_method, response_context=response_context or '')}"
+    key = f"verf:claim:{claim_cache_key(claim_text, model=key_model, method=key_method, response_context=response_context or '', partition=partition)}"
     try:
         cache_entry: dict[str, Any] = {
             "status": verdict.get("status", "unknown"),
@@ -227,6 +233,12 @@ async def cache_verdict(
             "verification_model": verdict.get("verification_model", ""),
             "reason": (verdict.get("reason") or "")[:200],
             "source_domain": verdict.get("source_domain", ""),
+            # The evidence itself: without it a cached KB verdict has no source
+            # the user can open, and cannot be labelled KB verified against the
+            # next answer's sources.
+            "source_artifact_id": verdict.get("source_artifact_id", ""),
+            "source_filename": verdict.get("source_filename", ""),
+            "source_urls": list(verdict.get("source_urls") or [])[:5],
             "cached": True,
         }
         if verdict.get("nli_entailment") is not None:

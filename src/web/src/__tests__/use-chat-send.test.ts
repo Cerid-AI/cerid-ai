@@ -299,11 +299,11 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(sysMsg!.content).not.toContain("below.py")
   })
 
-  it("stops adding chunks when the token budget is exhausted — and stops for good", async () => {
-    // A small model window keeps the fixture strings sane. The reserve the hook
+  it("skips a chunk the token budget cannot hold and keeps a smaller one that fits (F42)", async () => {
+    // The smallest model window keeps the fixture strings sane. The reserve the hook
     // subtracts is history + user message + already-injected + 1200, so filling
     // history to within a known margin of the window pins `remainingBudget`.
-    const model = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    const model = MODELS.reduce((a, b) => (b.effectiveContextWindow < a.effectiveContextWindow ? b : a))
     const userText = "which chunk survives the budget"
     const HEADROOM_TOKENS = 200
     const fillerTokens = model.effectiveContextWindow - 1200 - estimateTokenCount(userText) - HEADROOM_TOKENS
@@ -318,8 +318,8 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(remaining).toBeLessThan(HEADROOM_TOKENS + 5)
 
     // Sized so: fits.py consumes all but ~20 tokens, toobig.py needs far more
-    // than that, and trailing.py would comfortably fit in what's left. Only a
-    // `break` (not a `continue`) drops trailing.py too.
+    // than that, and trailing.py comfortably fits in what's left. A `break`
+    // on toobig.py would discard trailing.py as well.
     const fits = makeKBResult({
       artifact_id: "a1", relevance: 0.95, filename: "fits.py",
       content: "f".repeat(Math.floor((remaining - 20) * TOKEN_CHARS_RATIO)),
@@ -351,10 +351,8 @@ describe("useChatSend — KB injection payload assembly", () => {
     // the rendered system message.
     const sources = sentSources(opts._sendSpy) ?? []
     const names = sources.map((s: { filename: string }) => s.filename)
-    expect(names).toContain("fits.py")
-    expect(names).not.toContain("toobig.py")
-    expect(names).not.toContain("trailing.py")
-    expect(result.current.lastAutoInjectCount).toBe(1)
+    expect(names).toEqual(["fits.py", "trailing.py"])
+    expect(result.current.lastAutoInjectCount).toBe(2)
   })
 
   it("keeps injecting while chunks fit — the budget loop is not a one-shot", async () => {
@@ -480,6 +478,24 @@ describe("useChatSend — KB injection payload assembly", () => {
     const sys2 = msgs2.find((m) => m.role === "system")
     // No system message because the only candidate was already injected
     expect(sys2).toBeUndefined()
+  })
+
+  it("keeps injecting new external results after one was injected earlier in the chat", async () => {
+    // External rows carry no artifact id or chunk index; keyed as ":undefined"
+    // they all looked like the first one, so a chat got one web result ever.
+    const external = (url: string, content: string) =>
+      makeKBResult({ artifact_id: "", chunk_index: undefined, source_url: url, source_type: "external",
+        filename: "Wikipedia", content, relevance: 0.54 })
+    mockQueryKB.mockResolvedValueOnce({ results: [external("https://w/Lagos", "Lagos is a port city.")] })
+    const opts = makeOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const { result } = renderHook(() => useChatSend(opts))
+    await act(async () => { await result.current.handleSend("population of Lagos") })
+    expect(sentMessages(opts._sendSpy).find((m) => m.role === "system")!.content).toContain("Lagos is a port city.")
+
+    opts._sendSpy.mockClear()
+    mockQueryKB.mockResolvedValueOnce({ results: [external("https://w/Tungsten", "Tungsten has atomic number 74.")] })
+    await act(async () => { await result.current.handleSend("atomic number of tungsten") })
+    expect(sentMessages(opts._sendSpy).find((m) => m.role === "system")?.content).toContain("Tungsten has atomic number 74.")
   })
 
   it("injects memories as <memory> tags in system message", async () => {
