@@ -32,7 +32,8 @@ import json
 import logging
 import shutil
 import tarfile
-from collections.abc import Awaitable, Callable
+import tempfile
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,7 @@ from core.knowledge.packs import (
     assert_archive_path_safe,
     find_installed,
     load_install_state,
+    load_registry,
     parse_pack_json,
     remove_installed,
     save_install_state,
@@ -83,6 +85,7 @@ async def install_pack(
     ingest: IngestFn,
     keep_staging: bool = False,
     allowed_license_categories: frozenset[str] = DEFAULT_INSTALL_CATEGORIES,
+    enqueue_recompute: bool = True,
 ) -> InstalledPack:
     """Install a knowledge pack: download, verify, extract, ingest, record.
 
@@ -100,10 +103,12 @@ async def install_pack(
     embeddings + paraphrased outputs. ``unknown`` licenses are always
     rejected — a curator must pin a recognized SPDX id.
 
-    The function does *not* delete on failure — the staging directory
-    is preserved for inspection unless ``keep_staging`` is False, and
-    even then only on success. Half-ingested artifacts will dedup
-    cleanly on re-run because content_hash already protects us.
+    Staging: the staging directory is removed after the install, on
+    success or failure, unless ``keep_staging`` is True. A directory left
+    by an earlier run is removed before the download: on macOS the archive
+    is a bind mount, and writing over a stale tarball there fails with
+    EDEADLK. Half-ingested artifacts dedup cleanly on re-run because
+    content_hash already protects us.
     """
     async with _install_lock.get():
         existing = find_installed(load_install_state(state_path), pack.id)
@@ -135,9 +140,14 @@ async def install_pack(
                 f"own version."
             )
         pack_staging = staging_root / f"{pack.id}-{pack.version}"
-        pack_staging.mkdir(parents=True, exist_ok=True)
+        if not _remove_staging(pack_staging):
+            raise PackError(
+                f"Pack {pack.id!r}: a staging directory from an earlier run "
+                f"could not be removed ({pack_staging}). Remove it and retry."
+            )
         archive_path = pack_staging / "pack.tar.gz"
         try:
+            pack_staging.mkdir(parents=True, exist_ok=True)
             logger.info(
                 "Installing pack %s@%s from %s",
                 pack.id, pack.version, pack.download_url,
@@ -245,6 +255,8 @@ async def install_pack(
             # packs are invisible in the Constellation + trust-less until then.
             # Enqueue them now so the pack appears promptly. Best-effort: a queue
             # hiccup must never fail an otherwise-successful install.
+            if not enqueue_recompute:
+                return record
             try:
                 from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
                 from app.processor.jobs.compute_trust_state import ComputeTrustStateJob  # noqa: PLC0415
@@ -259,12 +271,27 @@ async def install_pack(
             return record
         finally:
             if not keep_staging:
-                try:
-                    shutil.rmtree(pack_staging, ignore_errors=True)
-                except Exception as exc:  # noqa: BLE001 — cleanup best-effort
-                    log_swallowed_error(
-                        "app.services.knowledge_packs.cleanup_staging", exc,
-                    )
+                _remove_staging(pack_staging)
+
+
+def _remove_staging(path: Path) -> bool:
+    """Remove a pack staging directory; True when it is gone.
+
+    Each failure is logged rather than ignored: ``ignore_errors=True`` hid the
+    removals that failed on the macOS bind mount, and the next install of the
+    same pack then failed on the tarball they left behind.
+    """
+    if not path.exists():
+        return True
+
+    def _log_failure(_func: Callable[..., Any], failed_path: str, exc: BaseException) -> None:
+        log_swallowed_error(
+            "app.services.knowledge_packs.cleanup_staging", exc,
+            context={"staging_path": failed_path},
+        )
+
+    shutil.rmtree(path, onexc=_log_failure)
+    return not path.exists()
 
 
 async def uninstall_pack(
@@ -545,6 +572,159 @@ async def uninstall_pack_default(pack_id: str) -> dict[str, Any]:
         state_path=default_state_path(),
         delete=_default_delete,
     )
+
+
+# ── Re-index installed pack content ──────────────────────────────────────
+
+# Why a knowledge-pack artifact was not re-indexed; the reindex endpoint
+# reports these keys in ``skipped_reasons``.
+PACK_SKIP_NO_TAG = "pack_tag_missing"
+PACK_SKIP_NOT_IN_REGISTRY = "pack_not_in_registry"
+PACK_SKIP_VERSION_CHANGED = "pack_version_changed"
+PACK_SKIP_UNPUBLISHED = "pack_unpublished"
+PACK_SKIP_FILE_MISSING = "pack_file_missing"
+PACK_SKIP_FORGOTTEN = "forgotten"
+PACK_SKIP_NOT_REINDEXED = "not_reindexed"
+
+
+def _pack_tag(tags_json: Any, prefix: str) -> str:
+    """The value of the first ``<prefix><value>`` tag, or ``""``."""
+    try:
+        tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+    except (TypeError, ValueError):
+        return ""
+    for tag in tags if isinstance(tags, list) else ():
+        if isinstance(tag, str) and tag.startswith(prefix):
+            return tag[len(prefix):]
+    return ""
+
+
+def _guarded_reindex_ingest(
+    wanted: set[tuple[str, str]], results: dict[tuple[str, str], str],
+) -> IngestFn:
+    """An :data:`IngestFn` that force re-ingests only the ``wanted`` (domain,
+    filename) pairs and records each one's outcome in ``results``."""
+    from app.services.ingestion import accepted_file_domain, ingest_file
+
+    async def _ingest(
+        file_path: Path,
+        domain: str,
+        sub_category: str,
+        tags: tuple[str, ...],
+        provenance: dict[str, str],
+    ) -> dict[str, Any]:
+        # The domain ingest_file will file this under, so the key matches the
+        # artifact's recorded domain.
+        domain = accepted_file_domain(domain)
+        key = (domain, file_path.name)
+        if key not in wanted:
+            return {"status": "skipped", "reason": "not_in_kb"}
+        results[key] = "error"
+        result = await ingest_file(
+            file_path=str(file_path),
+            domain=domain,
+            sub_category=sub_category,
+            tags=json.dumps(list(tags)),
+            client_source="knowledge-pack",
+            extra_metadata=dict(provenance),
+            force_reindex=True,
+            on_forgotten="skip",
+        )
+        if result.get("status") in ("success", "updated"):
+            results[key] = "reindexed"
+        elif result.get("reason") == "forgotten":
+            results[key] = PACK_SKIP_FORGOTTEN
+        else:
+            results[key] = PACK_SKIP_NOT_REINDEXED
+        return result
+
+    return _ingest
+
+
+async def reindex_pack_artifacts(artifacts: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """Re-stage the packs these artifacts came from and force re-ingest them.
+
+    Pack staging is deleted after install, so a pack artifact has no file to
+    re-read: the pack tarball is its source. The artifacts are grouped by their
+    ``pack:<id>`` tag, and each pack is installed once, into a throwaway state
+    file (the real one would skip an installed pack) and the default staging
+    root (so each file's path matches the one it was first ingested from). The
+    ingest re-indexes only the (domain, filename) pairs of the given artifacts,
+    which are all in the knowledge base: a pack document deleted or forgotten
+    since install is never brought back.
+
+    Returns ``{artifact_id: outcome}``, where outcome is ``"reindexed"``,
+    ``"error"`` or one of the ``PACK_SKIP_*`` reasons.
+    """
+    outcomes: dict[str, str] = {}
+    by_pack: dict[str, list[Mapping[str, Any]]] = {}
+    for a in artifacts:
+        pack_id = _pack_tag(a.get("tags"), "pack:")
+        if pack_id:
+            by_pack.setdefault(pack_id, []).append(a)
+        else:
+            outcomes[str(a.get("id", ""))] = PACK_SKIP_NO_TAG
+    if not by_pack:
+        return outcomes
+
+    try:
+        registry = load_registry(default_registry_path())
+    except PackError as exc:
+        log_swallowed_error("app.services.knowledge_packs.reindex_registry", exc)
+        for group in by_pack.values():
+            for a in group:
+                outcomes[str(a.get("id", ""))] = "error"
+        return outcomes
+
+    for pack_id, group in by_pack.items():
+        pack = registry.get(pack_id)
+        targets: list[Mapping[str, Any]] = []
+        for a in group:
+            aid = str(a.get("id", ""))
+            installed_version = _pack_tag(a.get("tags"), "pack-version:")
+            if pack is None:
+                outcomes[aid] = PACK_SKIP_NOT_IN_REGISTRY
+            elif not pack.download_url:
+                outcomes[aid] = PACK_SKIP_UNPUBLISHED
+            elif installed_version and installed_version != pack.version:
+                # Re-staging the registry's version would replace this
+                # document's text with another release's; that is an upgrade.
+                outcomes[aid] = PACK_SKIP_VERSION_CHANGED
+            else:
+                targets.append(a)
+        if pack is None or not targets:
+            continue
+
+        wanted = {(str(a.get("domain") or ""), str(a.get("filename") or "")) for a in targets}
+        results: dict[tuple[str, str], str] = {}
+        try:
+            with tempfile.TemporaryDirectory(prefix="cerid-pack-reindex-") as tmp:
+                await install_pack(
+                    pack,
+                    state_path=Path(tmp) / "installed_packs.json",
+                    staging_root=default_staging_root(),
+                    download=_default_download,
+                    ingest=_guarded_reindex_ingest(wanted, results),
+                    # Already installed under this licence; re-staging the
+                    # same version takes on no new obligation.
+                    allowed_license_categories=frozenset({pack.license_category}),
+                    # Reindex runs a page at a time and re-stages a pack once per
+                    # page; it adds no artifacts, so the layout and trust jobs
+                    # would only stack up behind each other.
+                    enqueue_recompute=False,
+                )
+        except Exception as exc:  # noqa: BLE001 — one pack's failure must not abort the batch
+            log_swallowed_error(
+                "app.services.knowledge_packs.reindex_pack", exc,
+                context={"pack_id": pack_id, "artifacts": len(targets)},
+            )
+            for a in targets:
+                outcomes[str(a.get("id", ""))] = "error"
+            continue
+        for a in targets:
+            key = (str(a.get("domain") or ""), str(a.get("filename") or ""))
+            outcomes[str(a.get("id", ""))] = results.get(key, PACK_SKIP_FILE_MISSING)
+    return outcomes
 
 
 # ── Processor-queue introspection (async install status) ─────────────────

@@ -118,14 +118,38 @@ class TestLateInteractionRerank:
             {"content": f"document {i} with some content text", "relevance": 0.9 - i * 0.1}
             for i in range(5)
         ]
-        original_last = results[4]["relevance"]
+        embedded: list[str] = []
 
         def embed_fn(texts):
+            embedded.extend(texts)
             return [np.random.randn(8) for _ in texts]
 
         reranked = late_interaction_rerank(results, "document content", embed_fn, top_n=2)
         assert len(reranked) == 5
-        assert reranked[4]["relevance"] == original_last
+        assert not any(f"document {i} " in t for t in embedded for i in (2, 3, 4))
+        assert [r["content"] for r in reranked[2:]] == [f"document {i} with some content text" for i in (2, 3, 4)]
+        assert all("late_interaction_score" not in r for r in reranked[2:])
+
+    def test_tail_shares_the_blended_scale(self):
+        # F109: re-scored rows were blended toward MaxSim while the tail kept the
+        # input score, and the pipeline re-sorts the whole list right after —
+        # so a tail row overtook every candidate whose blend pulled it down.
+        results = [
+            {"content": "alpha beta gamma delta", "relevance": 0.9},
+            {"content": "epsilon zeta eta theta", "relevance": 0.85},
+            {"content": "iota kappa lambda mu", "relevance": 0.8},
+            {"content": "nu xi omicron pi", "relevance": 0.7},
+        ]
+        query = "rho sigma tau"
+
+        def embed_fn(texts):
+            # Query windows and document windows are orthogonal: MaxSim 0.
+            return [np.array([1.0, 0.0]) if t == query else np.array([0.0, 1.0]) for t in texts]
+
+        reranked = late_interaction_rerank(results, query, embed_fn, top_n=2, blend_weight=0.5)
+        resorted = sorted(reranked, key=lambda r: r["relevance"], reverse=True)
+        assert [r["content"] for r in resorted] == [r["content"] for r in reranked]
+        assert [r["relevance"] for r in reranked] == [0.45, 0.425, 0.4, 0.35]
 
     def test_embed_fn_failure_returns_original(self):
         results = [

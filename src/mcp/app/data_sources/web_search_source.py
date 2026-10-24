@@ -43,6 +43,12 @@ class WebSearchDataSource(DataSource):
         every query on a default install)."""
         return bool(os.getenv("TAVILY_API_KEY") or os.getenv("SEARXNG_URL"))
 
+    def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
+        """A search engine reads the question better than its keywords: the
+        extractor drops 'AI' and the '14' of 'carbon-14'. The question has
+        already passed the privacy rewrite by the time it reaches a source."""
+        return raw_query
+
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         import config
         from utils.web_search import get_search_provider

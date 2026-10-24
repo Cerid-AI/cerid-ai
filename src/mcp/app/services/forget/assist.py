@@ -25,6 +25,7 @@ from typing import Any
 
 import config
 from core.forget import registry as forget_registry
+from core.retrieval.artifact_rows import LEGACY_VERIFIED_MEMORY_PREFIX, is_verified_memory_row
 from core.utils.swallowed import log_swallowed_error
 from core.utils.text import STOPWORDS, WORD_RE
 
@@ -37,7 +38,6 @@ MAX_CONVERSATIONS = 20
 MEMORY_MIN_RELEVANCE = 0.35
 _EXCERPT = 200
 _CONVERSATIONS_DOMAIN = "conversations"
-_VERIFIED_PREFIX = "verified_memory_"
 _MEMORY_TYPES = [
     "empirical", "decision", "preference", "project_context", "temporal", "conversational", "fact", "action_item",
 ]
@@ -161,8 +161,8 @@ def _memories(scope: str) -> list[dict[str, Any]]:
         relevance = l2_distance_to_relevance((got.get("distances") or [[1.0]])[0][i])
         if relevance < MEMORY_MIN_RELEVANCE:
             continue
-        if str(row_id).startswith(_VERIFIED_PREFIX):
-            kind, sid = "memory", str(row_id)[len(_VERIFIED_PREFIX):]
+        if is_verified_memory_row(str(row_id), meta):
+            kind, sid = "memory", str(meta.get("artifact_id") or str(row_id).removeprefix(LEGACY_VERIFIED_MEMORY_PREFIX))
         else:
             kind, sid = "artifact", str(meta.get("artifact_id") or "")
         if not sid or (kind, sid) in seen or forget_registry.is_forgotten(kind, sid):

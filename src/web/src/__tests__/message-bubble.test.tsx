@@ -49,17 +49,17 @@ describe("MessageBubble", () => {
 
   it("shows model badge for assistant messages", () => {
     render(
-      <MessageBubble message={makeMsg({ model: "openrouter/openai/gpt-4o-mini" })} />,
+      <MessageBubble message={makeMsg({ model: "openrouter/openai/gpt-6-luna" })} />,
     )
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
+    expect(screen.getByText("GPT-6 Luna")).toBeInTheDocument()
   })
 
   it("shows model badge for user messages when model is set", () => {
     // The ModelBadge is rendered for any message with a model, regardless of role
     render(
-      <MessageBubble message={makeMsg({ role: "user", model: "openrouter/openai/gpt-4o-mini" })} />,
+      <MessageBubble message={makeMsg({ role: "user", model: "openrouter/openai/gpt-6-luna" })} />,
     )
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
+    expect(screen.getByText("GPT-6 Luna")).toBeInTheDocument()
   })
 
   it("shows source attribution when sources are present", () => {

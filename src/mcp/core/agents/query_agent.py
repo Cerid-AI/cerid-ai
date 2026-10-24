@@ -21,13 +21,14 @@ import httpx
 import numpy as np
 
 import config
-from config.constants import COLLECTION_COUNT_CACHE_TTL_S
+from config.constants import COLLECTION_COUNT_CACHE_TTL_S, RERANK_REJECT_FLOOR
 from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
 from core.forget.read_filter import visible
 from core.lineage.current import CURRENT_ONLY_WHERE, VERSION_CLOSED, version_fields
 from core.lineage.history import attach_history, history_note
 from core.observability.span_helpers import breadcrumb, span
+from core.retrieval.artifact_rows import NOT_VERIFIED_MEMORY_WHERE
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
@@ -93,6 +94,26 @@ class StepTimer:
 # ---------------------------------------------------------------------------
 
 
+def projected_sub_category(domain: str, metadata: dict[str, Any]) -> str:
+    """The shelf a reader should see.
+
+    A stored sub-category outside this domain's ontology is a classifier
+    guess from another domain. Measured on the live anneal corpus: rows
+    stamped actions, facts, daily, agent_logs, and a path, while metadata.kind
+    already held lesson, decision, run, or conversation. A stored value that
+    is in the list wins, including general. kind is not promoted to its own
+    response field.
+    """
+    stored = str(metadata.get("sub_category") or "").strip()
+    allowed = config.sub_categories_for(domain)
+    if not allowed or stored in allowed:
+        return stored
+    kind = str(metadata.get("kind") or "").strip().lower()
+    if kind in allowed:
+        return kind
+    return stored
+
+
 def _format_chroma_result(
     content: str,
     relevance: float,
@@ -126,7 +147,7 @@ def _format_chroma_result(
         "created_at": created_at,
         "pack_id": pack_id,
         "ingested_at": metadata.get("ingested_at", ""),
-        "sub_category": metadata.get("sub_category", ""),
+        "sub_category": projected_sub_category(domain, metadata),
         "tags_json": metadata.get("tags_json", "[]"),
         "keywords": metadata.get("keywords", "[]"),
         "memory_type": metadata.get("memory_type", ""),
@@ -680,6 +701,7 @@ async def multi_domain_query(
     domain_record_types: dict[str, list[str]] | None = None,
     skipped_empty_out: set[str] | None = None,
     as_of: str | None = None,
+    exclude_verified_memories: bool = False,
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results.
 
@@ -690,6 +712,9 @@ async def multi_domain_query(
     ``domain_record_types`` is the consumer's per-domain ``record_type`` allow
     (``CONSUMER_REGISTRY[...]["record_types"]``): in a listed domain only rows
     of those types are retrieved, by the ``where`` clause and on the BM25 side.
+
+    ``exclude_verified_memories`` keeps verified memories out of the
+    conversations domain the same way, vector and BM25.
     """
     if domains is None:
         domains = owner_domains()
@@ -732,6 +757,22 @@ async def multi_domain_query(
 
     pc_enabled = _parent_child_enabled()
 
+    # The query is embedded once per embedding function and the vector reused.
+    # Every collection the app opens shares one, so a search embeds once;
+    # passing the text had each collection embed it again, 8-9 identical calls
+    # per search on the live corpus. A shared task, so a failure still reaches
+    # every domain's own handler.
+    _query_vectors: dict[int, asyncio.Future] = {}
+
+    async def _query_vector_for(collection: Any) -> list[float] | None:
+        ef = getattr(collection, "_embedding_function", None)
+        if ef is None:
+            return None
+        task = _query_vectors.get(id(ef))
+        if task is None:
+            task = _query_vectors[id(ef)] = asyncio.ensure_future(asyncio.to_thread(ef, [query]))
+        return [float(x) for x in (await task)[0]]
+
     async def query_domain(domain: str) -> list[dict[str, Any]]:
         """Query a single domain collection (vector + BM25 hybrid)."""
         col_name = config.collection_name(domain)
@@ -754,6 +795,8 @@ async def multi_domain_query(
             domain_filter = _with_record_types(
                 metadata_filter, (domain_record_types or {}).get(domain),
             )
+            if exclude_verified_memories and domain == "conversations":
+                domain_filter = _fuse_where(domain_filter, NOT_VERIFIED_MEMORY_WHERE)
             _where = exclude_folders(
                 _exclude_pending(with_tenant_scope(domain_filter)), folders_off,
             )
@@ -769,11 +812,15 @@ async def multi_domain_query(
             if as_of is None:
                 _where = _fuse_where(_where, CURRENT_ONLY_WHERE)
             query_kwargs: dict[str, Any] = {
-                "query_texts": [query],
                 "n_results": top_k,
                 "include": ["documents", "metadatas", "distances"],
                 "where": _where,
             }
+            vector = await _query_vector_for(collection)
+            if vector is not None:
+                query_kwargs["query_embeddings"] = [vector]
+            else:
+                query_kwargs["query_texts"] = [query]
             # ChromaDB client uses sync HTTP — offload to thread to avoid
             # blocking the event loop when multiple domains query in parallel.
             results = await asyncio.to_thread(collection.query, **query_kwargs)
@@ -1008,6 +1055,7 @@ async def multi_domain_query(
         except Exception as e:
             log_swallowed_error('core.agents.query_agent', e)
             logger.warning(f"Error querying domain {domain}: {e}")
+            _note_domain_failure(domain, e)
             return []
 
     tasks = [query_domain(domain) for domain in domains]
@@ -1091,6 +1139,7 @@ async def lightweight_kb_query(
     async with _VERIFY_KB_SEM.get():
         results = await multi_domain_query(
             query, domains=domains, top_k=top_k, chroma_client=chroma_client,
+            exclude_verified_memories="conversations" not in (domains or []),
         )
     results = deduplicate_results(results)
     # Filter out noise — verification operates on these results directly
@@ -1231,7 +1280,7 @@ async def graph_expand_results_via_entities(
     """GraphRAG local-mode expansion: extend results with artifacts that
     share entities with the seed set.
 
-    Used by step-6 when ``RETRIEVAL_MODE=local_graphrag``. Returns
+    Used by step-6 when ``RETRIEVAL_MODE`` is ``local_graphrag`` or ``auto``. Returns
     ``results`` unchanged when:
 
       - no seeds (nothing to expand from), or
@@ -1354,6 +1403,7 @@ async def graph_expand_results_via_entities(
                 "chunk_index": metadata.get("chunk_index", 0),
                 "collection": config.collection_name(domain),
                 "chunk_id": chunk_id,
+                "source_type": "kb",
                 "graph_source": True,
                 **version_fields(metadata),
                 "graph_expansion_mode": "local_graphrag",
@@ -1370,98 +1420,6 @@ async def graph_expand_results_via_entities(
     return results + expanded
 
 
-async def graph_expand_results_via_communities(
-    results: list[dict[str, Any]],
-    query: str,
-    chroma_client: Any | None = None,
-    neo4j_driver: Any | None = None,
-) -> list[dict[str, Any]]:
-    """GraphRAG global-mode expansion (Phase 4b.4).
-
-    Selects communities whose member entities overlap with the seed
-    artifacts' entities, then surfaces each matched community's
-    LLM-generated summary alongside one representative chunk per
-    community. Designed for thematic queries that the
-    :func:`core.agents.query_router.route` heuristic dispatched to
-    global mode.
-
-    No-op when:
-      - the community layer is empty (Leiden has not run yet), or
-      - none of the seeds carry any MENTIONS edges, or
-      - chroma or neo4j is unreachable.
-
-    The summary content rides as a synthetic ``content`` field on the
-    returned dicts so downstream rerank/fuse handles it identically
-    to a chunk; ``graph_expansion_mode="global_graphrag"`` tags the
-    origin so observability can trace the path.
-    """
-    if not results or neo4j_driver is None or chroma_client is None:
-        return results
-
-    seed_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
-    if not seed_ids:
-        return results
-
-    cypher = """
-    MATCH (a:Artifact)-[:MENTIONS]->(:Entity)-[:IN_COMMUNITY]->(c:Community)
-    WHERE a.id IN $seeds AND c.summary IS NOT NULL AND c.level = 0
-    WITH c, count(DISTINCT a) AS seed_overlap
-    OPTIONAL MATCH (c)<-[:IN_COMMUNITY]-(top:Entity)
-    WITH c, seed_overlap, collect(top)[..3] AS top_entities
-    RETURN c.id AS community_id, c.summary AS summary, c.level AS level,
-           seed_overlap, [t IN top_entities | t.canonical_id] AS top_entity_ids
-    ORDER BY seed_overlap DESC
-    LIMIT 5
-    """
-    try:
-        records, _, _ = await asyncio.to_thread(
-            neo4j_driver.execute_query, cypher, {"seeds": seed_ids},
-        )
-    except Exception as e:
-        log_swallowed_error('core.agents.query_agent', e)
-        logger.warning("global-mode community fetch failed: %s", e)
-        return results
-
-    if not records:
-        return results
-
-    existing_chunk_ids = {r.get("chunk_id") for r in results}
-    expanded: list[dict[str, Any]] = []
-    for record in records:
-        community_id = record["community_id"]
-        summary = record["summary"]
-        seed_overlap = int(record["seed_overlap"])
-        if not summary:
-            continue
-        synthetic_chunk_id = f"community:{community_id}"
-        if synthetic_chunk_id in existing_chunk_ids:
-            continue
-        expanded.append({
-            "content": summary,
-            "relevance": round(0.4 + 0.05 * min(seed_overlap, 5), 4),
-            "artifact_id": synthetic_chunk_id,
-            "filename": f"community:{community_id}",
-            "domain": "graph",
-            "chunk_index": 0,
-            "collection": "graph_communities",
-            "chunk_id": synthetic_chunk_id,
-            "graph_source": True,
-            "graph_expansion_mode": "global_graphrag",
-            "community_id": community_id,
-            "community_level": int(record["level"]),
-            "seed_overlap": seed_overlap,
-            "top_entities": list(record["top_entity_ids"]),
-        })
-        existing_chunk_ids.add(synthetic_chunk_id)
-
-    if expanded:
-        logger.info(
-            "GraphRAG global expansion added %d community summar(ies) (seeds=%d)",
-            len(expanded), len(seed_ids),
-        )
-    return results + expanded
-
-
 # ---------------------------------------------------------------------------
 # Reranking
 # ---------------------------------------------------------------------------
@@ -1473,6 +1431,21 @@ async def graph_expand_results_via_communities(
 # replaced relevance with the raw model score, which silently redefined both
 # ``confidence`` and the CRAG gate whenever RERANK_PROVIDER was flipped. Every
 # leg blends through here so the number downstream thresholds see is one scale.
+def vetted_by_cross_encoder(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows the cross-encoder accepted, when it scored any of them.
+
+    Blended at 0.4 x cross-encoder + 0.6 x retrieval, a row it scored 0.000
+    kept 0.38-0.50 and filled the top-k: half the slots on the audit suite,
+    while no row that answered a question scored below 0.44. Rows past its
+    candidate window count as scored 0 (see reranker.rerank); kept, they took
+    the rejected rows' slots. With no cross-encoder score anywhere (LLM leg,
+    reranking off, a single row) nothing is dropped.
+    """
+    if not any(r.get("rerank_score") is not None for r in rows):
+        return rows
+    return [r for r in rows if (r.get("rerank_score") or 0.0) >= RERANK_REJECT_FLOOR]
+
+
 def _blend_rerank_score(model_score: float, original: float) -> float:
     return round(
         config.RERANK_CE_WEIGHT * float(model_score)
@@ -1486,9 +1459,15 @@ def _apply_rerank_scores(
     scores: list[float],
     leg: str,
 ) -> list[dict[str, Any]]:
-    for r, s in zip(results, scores, strict=False):
+    # A short (or long) score list cannot be aligned to the rows: the unscored
+    # tail would keep its retrieval relevance and sort among blended scores.
+    # Raising sends the caller down the chain to the next leg.
+    if len(scores) != len(results):
+        raise ValueError(f"{leg} returned {len(scores)} scores for {len(results)} documents")
+    for r, s in zip(results, scores, strict=True):
         original = r.get("retrieval_relevance", r.get("relevance", 0.0))
         r["relevance"] = _blend_rerank_score(s, original)
+        r["rerank_score"] = round(float(s), 4)
         r["reranker_status"] = leg
     _rerank_served_leg.set(leg)
     return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
@@ -1528,6 +1507,32 @@ def _configured_rerank_leg() -> str:
 # means both "ONNX served fine" and "reranking was switched off").
 _rerank_served_leg: ContextVar[str] = ContextVar("cerid_rerank_served_leg", default="")
 
+# Domains whose search failed during this request (an embedder that refused,
+# a store that errored). Each domain returned [] and the request looked like
+# an empty knowledge base; the envelope now says it was a failure.
+_domain_failures: ContextVar[list[tuple[str, str, bool]] | None] = ContextVar("cerid_domain_failures", default=None)
+
+
+def _note_domain_failure(domain: str, exc: BaseException) -> None:
+    failures = _domain_failures.get()
+    if failures is not None:
+        failures.append((domain, type(exc).__name__, "embed" in str(exc).lower()))
+
+
+def domain_failure_reason(domains_searched: int) -> str:
+    """User-facing reason when some domain searches failed; empty when none did."""
+    failures = _domain_failures.get() or []
+    if not failures:
+        return ""
+    if any(is_embed for _, _, is_embed in failures):
+        cause = "the embedding service did not answer"
+    else:
+        cause = failures[0][1]
+    return (
+        f"Searching {len(failures)} of {max(domains_searched, len(failures))} knowledge-base "
+        f"domains failed ({cause}) — results may be missing."
+    )
+
 _RERANK_CROSS_ENCODER_LEGS = ("quenchforge", "sidecar", "onnx")
 
 
@@ -1542,7 +1547,7 @@ def rerank_degraded_reason() -> str:
     served = _rerank_served_leg.get()
     if not served:
         return ""
-    if served == "onnx_failed_no_fallback":
+    if served in ("onnx_failed_no_fallback", "llm_failed"):
         return (
             "Reranking is unavailable — results are ordered by vector "
             "similarity alone and may be less precise."
@@ -1829,12 +1834,18 @@ async def _rerank_llm(
 
         for rank_pos, result in enumerate(reranked):
             llm_score = 1.0 - (rank_pos / len(reranked))
-            original_score = result["relevance"]
+            original_score = result.get("retrieval_relevance", result["relevance"])
             result["relevance"] = round(
                 config.RERANK_LLM_WEIGHT * llm_score
                 + config.RERANK_ORIGINAL_WEIGHT * original_score,
                 4,
             )
+        # Rows past the candidate window count as model score 0, as on the
+        # cross-encoder leg: left on the raw retrieval scale they outranked
+        # candidates the LLM placed low.
+        for result in remainder:
+            original_score = result.get("retrieval_relevance", result["relevance"])
+            result["relevance"] = round(config.RERANK_ORIGINAL_WEIGHT * original_score, 4)
 
         return reranked + remainder
 
@@ -1843,12 +1854,14 @@ async def _rerank_llm(
         fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
         for r in fallback:
             r.setdefault("reranker_status", "llm_circuit_open")
+        _rerank_served_leg.set("llm_failed")
         return fallback
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.warning("LLM reranking failed, falling back to embedding sort: %s", e)
         fallback = sorted(results, key=lambda x: x["relevance"], reverse=True)
         for r in fallback:
             r.setdefault("reranker_status", "llm_failed")
+        _rerank_served_leg.set("llm_failed")
         return fallback
 
 
@@ -1937,11 +1950,11 @@ def _apply_active_learning_signals(
       outdated / off_topic / duplicate / spam — see ``pkb_flag`` for the
       taxonomy). The flag clears via ``pkb_flag(reason='')`` and the
       result reappears next query.
-    * **Multiplies** the relevance score by
-      ``endorsement_weight`` (default 1.0; range [0.1, 10.0]). User
-      endorsements rise; user-demoted artifacts sink. This runs BEFORE
-      the reranker so the cross-encoder sees boosted-in / demoted-out
-      candidates.
+    * **Records** ``endorsement_weight`` (default 1.0; range [0.1, 10.0])
+      on the result as ``_endorsement_weight`` when it is not 1.0.
+      Relevance is left alone here: the caller multiplies the weight into
+      the post-rerank score (Step 5.05), because a pre-rerank multiply was
+      washed out by the reranker.
 
     Single batched Cypher round-trip — collects all unique
     ``artifact_id`` values then UNWINDs to read both properties at once.
@@ -2083,7 +2096,7 @@ async def _apply_quality_and_summaries(
 
     This means quality=1.0 → 1.2x (boost), quality=0.5 → 1.0x (neutral),
     quality=0.0 → 0.8x (penalty). Artifacts with no stored score (never
-    curated) default to the neutral 0.5.
+    curated) default to the neutral 0.5. The result is capped at 1.0.
 
     Fetches real per-artifact scores via ``graph_store.get_quality_and_summaries``
     — a genuine single Cypher round-trip for the whole candidate set (see
@@ -2114,7 +2127,7 @@ async def _apply_quality_and_summaries(
         # Quality boost
         quality = scores.get(aid, 0.5)
         multiplier = config.QUALITY_BOOST_BASE + config.QUALITY_BOOST_FACTOR * quality
-        r["relevance"] = round(r["relevance"] * multiplier, 4)
+        r["relevance"] = round(min(1.0, r["relevance"] * multiplier), 4)
         r["quality_score"] = quality
         # Summary enrichment
         s = summaries.get(aid)
@@ -2291,6 +2304,7 @@ async def agent_query(
     exclude_packs: bool = False,
     budget_seconds: float | None = None,
     memory_enabled: bool = True,
+    memory_strict: bool | None = None,
     as_of: str | None = None,
 ) -> dict[str, Any]:
     """Budget-gated public entry for multi-domain query.
@@ -2334,6 +2348,7 @@ async def agent_query(
                 domain_record_types=domain_record_types,
                 exclude_packs=exclude_packs,
                 memory_enabled=memory_enabled,
+                memory_strict=memory_strict,
                 as_of=as_of,
             ),
             timeout=budget,
@@ -2386,6 +2401,7 @@ async def agent_query_full(
     enable_self_rag: bool | None = None,
     budget_seconds: float | None = None,
     memory_enabled: bool = True,
+    memory_strict: bool | None = None,
     as_of: str | None = None,
 ) -> dict[str, Any]:
     """Canonical full agentic-retrieval path.
@@ -2436,6 +2452,7 @@ async def agent_query_full(
             exclude_packs=exclude_packs,
             budget_seconds=budget_seconds,
             memory_enabled=memory_enabled,
+            memory_strict=memory_strict,
                 as_of=as_of,
         )
 
@@ -2547,12 +2564,10 @@ async def _hydrate_hype_hits(
             domain=domain,
             metadata=metadata,
         )
-        # dedup_with_hype_results keys off the HyPE-side source ids.
+        # The parent link rides on the hit, never in ``metadata``: that key is
+        # the chunk's custom ingest metadata, the same dict a content hit for
+        # this chunk carries, and a consumer key there must not steer the merge.
         hit["source_chunk_id"] = parent_id
-        hit["metadata"] = {
-            "source_chunk_id": parent_id,
-            "source_artifact_id": hit["artifact_id"],
-        }
         hydrated.append(hit)
     dropped = len(best_by_parent) - len(hydrated)
     if dropped:
@@ -2743,12 +2758,18 @@ def set_wiki_page_fetcher(
     _wiki_page_fetcher = fn
 
 
-async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
+async def _recall_wiki_surface(
+    entity_hint: str, scope: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Fetch the compiled wiki page for an entity and adapt it (GA P0.5 C2).
 
     Wires the wiki surface into the query path for ``compiled_summary`` queries
     ("what is X"). Returns [] when no fetcher is wired (app startup didn't
     register one) or no page exists. Graceful on any fetcher error.
+
+    ``scope`` is the set of domains a scoped query may read. A page compiled
+    from any domain outside it, or from domains nobody recorded, is left out:
+    a coding-only query was handed a page about dollar-cost averaging.
     """
     if _wiki_page_fetcher is None or not entity_hint:
         return []
@@ -2759,11 +2780,14 @@ async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
         return []
     if not page:
         return []
+    page_domains = set(page.get("domains") or [])
+    if scope is not None and not (page_domains and page_domains <= scope):
+        return []
     return [
         {
             "content": page.get("content", ""),
             "relevance": 1.0,  # the compiled summary is authoritative for this intent
-            "domain": "wiki",
+            "domain": page.get("primary_domain") or (min(page_domains) if page_domains else "wiki"),
             "artifact_id": page.get("slug", entity_hint),
             "filename": page.get("slug", entity_hint),
             "chunk_index": 0,
@@ -2777,12 +2801,32 @@ async def _recall_wiki_surface(entity_hint: str) -> list[dict[str, Any]]:
     ]
 
 
+def scope_memory_rows(
+    rows: list[dict[str, Any]],
+    *,
+    strict: bool,
+    domains: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Drop memory rows whose domain sits outside a strict scope.
+
+    The memory surface stamps every row ``domain="conversations"``. A strict
+    caller that did not name that domain must not receive them. A non-strict
+    caller keeps the rows the surface returned. Direct ``agent_query_full``
+    callers hit this even when they never passed through the router.
+    """
+    if not strict:
+        return list(rows)
+    scope = set(domains or [])
+    return [row for row in rows if row.get("domain") in scope]
+
+
 async def _recall_memory_surface(
     query: str,
     chroma_client: Any,
     neo4j_driver: Any,
     top_k: int,
     as_of: str | None = None,
+    include_verified: bool = False,
 ) -> list[dict[str, Any]]:
     """Recall episodic memories and adapt them to the query-result shape (GA P0.5 A2).
 
@@ -2798,6 +2842,7 @@ async def _recall_memory_surface(
 
         mems = await recall_memories(
             query, chroma_client=chroma_client, neo4j_driver=neo4j_driver, top_k=top_k, as_of=as_of,
+            include_verified=include_verified,
         )
     except Exception as exc:  # noqa: BLE001 — observability boundary
         log_swallowed_error("core.agents.query_agent.memory_surface", exc)
@@ -2889,6 +2934,7 @@ async def _agent_query_impl(
     domain_record_types: dict[str, list[str]] | None = None,
     exclude_packs: bool = False,
     memory_enabled: bool = True,
+    memory_strict: bool | None = None,
     as_of: str | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly.
@@ -2897,12 +2943,19 @@ async def _agent_query_impl(
     gate: when False the personal-context memory surface is suppressed so a user
     who toggled Memory off never has recalled memories enter their answer
     (CR-016). Defaults True — the historical always-on behavior.
+
+    ``memory_strict`` decides whether those rows are then held to the named
+    domains. ``None`` keeps the historical meaning and uses ``strict_domains``,
+    the flag that also holds the knowledge base. The router passes the narrower
+    flag: naming a domain holds the knowledge base and does not, by itself,
+    drop the owner's memories. A request or a registry that is strict still does.
     """
     timer = StepTimer(enabled=debug_timing)
     # Unconditional wall-clock start (StepTimer is a debug timer, off by default,
     # so its "total" is absent in production) — surfaces real retrieval latency
     # in the envelope so the Knowledge Console isn't a permanent 0ms (CR-039).
     _wall_start = time.monotonic()
+    _domain_failures.set([])
     # GA P0.5 A1a — compute the surface route once and surface it in every
     # return path so callers/UI/eval can see which surface intent fired.
     _surface_route = _surface_route_dict(query)
@@ -2939,11 +2992,12 @@ async def _agent_query_impl(
                 _ef = get_embedding_function()
                 if _ef is not None:
                     ef = _ef  # bind for mypy — lambda captures the variable, not the value
-                    _query_embedding = await asyncio.to_thread(
+                    query_embedding = await asyncio.to_thread(
                         lambda: np.asarray(ef([query])[0])
                     )
+                    _query_embedding = query_embedding
                     cached = cache_lookup(
-                        _query_embedding, redis_client, domains=_cache_domains,
+                        query_embedding, redis_client, domains=_cache_domains,
                         allowed_domains=allowed_domains,
                         memory_enabled=memory_enabled,
                     )
@@ -2999,6 +3053,9 @@ async def _agent_query_impl(
     # Feedback-ingested conversation turns would otherwise dominate results,
     # creating circular noise (same pattern as hallucination.py:87-89).
     effective_domains = domains
+    # Verified memories stay out unless the caller names the conversations
+    # domain itself (ruling D3): a consumer scope or "all domains" is not that.
+    _verified_memories_asked = "conversations" in (domains or [])
     if effective_domains is None and conversation_messages:
         _followup_domains = [d for d in owner_domains() if d != "conversations"]
         # CH4: keep the most-likely domains first and cap the tail so the
@@ -3093,10 +3150,15 @@ async def _agent_query_impl(
                             domain_record_types=domain_record_types,
                             skipped_empty_out=domains_skipped_empty,
                             as_of=as_of,
+                            exclude_verified_memories=not _verified_memories_asked,
                         )
 
-                    results = await parallel_retrieve(sub_queries, _retrieve_sub)
-                    _skip_normal_retrieval = True
+                    try:
+                        results = await parallel_retrieve(sub_queries, _retrieve_sub)
+                        _skip_normal_retrieval = True
+                    except Exception as exc:  # noqa: BLE001 — every sub-query failed
+                        # Answer the question whole rather than return nothing.
+                        log_swallowed_error("core.agents.query_agent.decomposed_retrieval", exc)
 
         if not _skip_normal_retrieval:
             with span("retrieval.chroma", "multi_domain_query", domains=len(effective_domains or []), top_k=effective_top_k):
@@ -3109,6 +3171,7 @@ async def _agent_query_impl(
                     domain_record_types=domain_record_types,
                     skipped_empty_out=domains_skipped_empty,
                     as_of=as_of,
+                    exclude_verified_memories=not _verified_memories_asked,
                 )
         breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
 
@@ -3123,7 +3186,13 @@ async def _agent_query_impl(
         with timer.step("memory_surface"):
             _mem = await _recall_memory_surface(
                 search_query, chroma_client, neo4j_driver, effective_top_k, as_of=as_of,
+                include_verified=_verified_memories_asked,
             )
+            if _mem:
+                _hold_memory = strict_domains if memory_strict is None else memory_strict
+                _mem = scope_memory_rows(
+                    _mem, strict=_hold_memory, domains=effective_domains,
+                )
             if _mem:
                 results = results + _mem
                 breadcrumb(f"memory surface: +{len(_mem)} memories", category="retrieval")
@@ -3134,11 +3203,22 @@ async def _agent_query_impl(
     # registers a wiki fetcher.
     # A compiled page describes the current state, so a historical (``as_of``)
     # question goes without it.
+    # The domains this caller may read, for the surfaces that add rows after
+    # the scoped scan (the wiki page, graph expansion): the strict scope, or
+    # else the domains it searched plus the consumer's wall (or every owner
+    # domain) minus the sensitive ones it has not opted into.
+    _readable = set(effective_domains or [])
+    if not strict_domains:
+        _readable |= set(visible_domains(
+            list(allowed_domains) if allowed_domains is not None else owner_domains(),
+            include_sensitive=sensitive_domains_opted_in(),
+        ) or [])
+
     if ENABLE_SURFACE_BIASED_RETRIEVAL and _surface_route.get("intent") == "compiled_summary" and as_of is None:
         _hint = _surface_route.get("matched_entity_hint")
         if _hint:
             with timer.step("wiki_surface"):
-                _wiki = await _recall_wiki_surface(_hint)
+                _wiki = await _recall_wiki_surface(_hint, scope=_readable)
                 if _wiki:
                     results = _wiki + results
                     breadcrumb("wiki surface: +1 compiled page", category="retrieval")
@@ -3162,7 +3242,7 @@ async def _agent_query_impl(
             cross_results = await multi_domain_query(
                 query=search_query,
                 domains=list(adjacent.keys()),
-                top_k=max(3, top_k // 2),
+                top_k=max(3, effective_top_k // 2),
                 chroma_client=chroma_client,
                 # E1 CR-057: honor the document/metadata scope on the adjacent-
                 # domain bleed too, or a file-scoped answer admits out-of-file
@@ -3170,6 +3250,7 @@ async def _agent_query_impl(
                 metadata_filter=metadata_filter,
                 domain_record_types=domain_record_types,
                 as_of=as_of,
+                exclude_verified_memories=not _verified_memories_asked,
             )
             for r in cross_results:
                 r["relevance"] = round(
@@ -3202,30 +3283,7 @@ async def _agent_query_impl(
         else:
             from config.features import RETRIEVAL_MODE
             with span("graph.expand", "neighbour_lookup", seed_count=len(results)):
-                # RETRIEVAL_MODE=auto delegates to the heuristic router
-                # which picks local_graphrag or global_graphrag per query.
-                effective_mode = RETRIEVAL_MODE
-                if effective_mode == "auto":
-                    from core.agents.query_router import route as _route
-                    effective_mode = _route(query)
-
-                if effective_mode == "global_graphrag" and neo4j_driver is not None:
-                    # Workstream E Phase 4b.4 — community-summary expansion.
-                    results = await graph_expand_results_via_communities(
-                        results=results,
-                        query=query,
-                        chroma_client=chroma_client,
-                        neo4j_driver=neo4j_driver,
-                    )
-                    if len(results) == graph_count_before:
-                        # No matching summaries (community layer empty or
-                        # query has no overlap with seed entities) → fall
-                        # back to local entity expansion for non-empty graphs.
-                        results = await graph_expand_results_via_entities(
-                            results=results, query=query,
-                            chroma_client=chroma_client, neo4j_driver=neo4j_driver,
-                        )
-                elif effective_mode == "local_graphrag" and neo4j_driver is not None:
+                if RETRIEVAL_MODE in ("local_graphrag", "auto") and neo4j_driver is not None:
                     # Workstream E Phase 4a.6 — entity-neighborhood expansion.
                     # Falls through to baseline silently when no entities yet.
                     results = await graph_expand_results_via_entities(
@@ -3246,7 +3304,6 @@ async def _agent_query_impl(
                         neo4j_driver=neo4j_driver,
                         graph_store=graph_store,
                     )
-        graph_results_added = len(results) - graph_count_before
 
     # Phase R.3 — HyPE dual-query augmentation.
     # When RETRIEVAL_HYPE_ENABLED=true, issue a parallel query against the
@@ -3261,27 +3318,19 @@ async def _agent_query_impl(
             metadata_filter=metadata_filter,
             domain_record_types=domain_record_types,
         )
+    # Graph expansion follows edges into any domain: a related artifact in a
+    # domain this caller may not read stays out. Memory rows answer to the
+    # memory rule upstream and are left alone.
+    results = [
+        r for r in results
+        if r.get("source_type") == "memory" or r.get("domain") in _readable
+    ]
     # Graph expansion and HyPE hydration add results after the per-domain arms
     # filtered theirs; this runs whether or not the Neo4j join below does.
     results = visible(results, as_of)
 
-    from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
-    temporal_days = parse_temporal_intent(query)
-
-    if temporal_days is not None:
-        results = [
-            r for r in results
-            if is_within_window(
-                r.get("ingested_at", ""),
-                temporal_days,
-            )
-        ]
-
-    for r in results:
-        ingested = r.get("ingested_at", "")
-        if ingested:
-            boost = recency_score(ingested) * config.TEMPORAL_RECENCY_WEIGHT
-            r["relevance"] = round(min(1.0, r["relevance"] + boost), 4)
+    from core.utils.temporal import apply_temporal_intent
+    results = apply_temporal_intent(results, query)
 
     # Step 4.5: Metadata boost — surface tag/sub_category-aligned results before reranking
     results = apply_metadata_boost(results, query)
@@ -3289,12 +3338,11 @@ async def _agent_query_impl(
     # Step 4.6: Context alignment boost — reward results matching conversation context
     results = apply_context_alignment_boost(results, conversation_messages)
 
-    # Step 4.7: Active-learning signals — apply endorsement_weight + drop flagged.
-    # Single-query Neo4j round-trip enriches each chunk with the source
-    # artifact's endorsement_weight (default 1.0) and flag_reason. Flagged
-    # artifacts are filtered out of the result set; endorsement_weight
-    # multiplies relevance so endorsed sources rise + de-emphasised
-    # sources sink before the reranker runs.
+    # Step 4.7: Active-learning signals — record endorsement_weight + drop
+    # flagged/archived. Single-query Neo4j round-trip enriches each chunk with
+    # the source artifact's endorsement_weight (default 1.0) and flag_reason.
+    # Flagged artifacts are filtered out of the result set; the weight is
+    # applied to the reranked score at Step 5.05.
     if results and neo4j_driver is not None:
         try:
             results = await asyncio.to_thread(
@@ -3351,16 +3399,22 @@ async def _agent_query_impl(
             use_reranking=use_reranking,
         )
 
+    # Step 5.02: when the cross-encoder served, only rows it vetted stay.
+    _retrieved = len(results)
+    results = vetted_by_cross_encoder(results)
+    rerank_rejected = _retrieved - len(results)
+
     # Step 5.05: Apply active-learning endorsement AFTER reranking. Step 4.7
     # stores each artifact's endorsement_weight but no longer pre-multiplies it,
     # because the reranker overwrites/blends relevance and washed the signal out.
     # Fold it into the final reranked score here — once, on every provider path —
     # then re-sort so a promoted (weight>1) / demoted (weight<1) artifact moves.
+    # Capped at 1.0 like every other boost: relevance is a 0-1 contract.
     if any(r.get("_endorsement_weight") for r in results):
         for _r in results:
             _w = _r.get("_endorsement_weight")
             if _w and _w != 1.0:
-                _r["relevance"] = round(float(_r.get("relevance") or 0.0) * float(_w), 4)
+                _r["relevance"] = round(min(1.0, float(_r.get("relevance") or 0.0) * float(_w)), 4)
         results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
     # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
@@ -3466,6 +3520,10 @@ async def _agent_query_impl(
     if sources:
         confidence = min(1.0, max(0.0, sum(s["relevance"] for s in sources) / len(sources)))
 
+    # Graph rows the scope, floor, rerank and gates let through, not the ones
+    # the expansion produced.
+    graph_results = sum(1 for r in results if r.get("graph_source"))
+
     # Step 8: Log query (optional)
     if redis_client:
         try:
@@ -3478,7 +3536,7 @@ async def _agent_query_impl(
                 extra={
                     "query": query,
                     "results": len(results),
-                    "graph_results": graph_results_added,
+                    "graph_results": graph_results,
                 },
             )
         except Exception as e:
@@ -3488,6 +3546,8 @@ async def _agent_query_impl(
     # E1 CR-032: envelope no longer carries write-only reranker_status /
     # domains_no_results (zero production readers; only tests pinned them).
     # domains_searched (CR-074) stays as the informational domain signal.
+    _searched = list(effective_domains) if effective_domains else owner_domains()
+    _failed_domains = sorted({d for d, _, _ in (_domain_failures.get() or [])})
     result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
@@ -3495,15 +3555,20 @@ async def _agent_query_impl(
         # Report the domains actually searched (after conversations-drop,
         # follow-up cap, and consumer allow-listing), not the raw requested set
         # (CR-074).
-        "domains_searched": list(effective_domains) if effective_domains else owner_domains(),
+        "domains_searched": [d for d in _searched if d not in _failed_domains],
+        # A domain whose search raised is reported here, not as searched.
+        "domains_failed": _failed_domains,
         # Requested domains whose collection existed but held zero documents
         # at query time — skipped before any embedding/Chroma/BM25 work.
         "domains_skipped_empty": sorted(domains_skipped_empty),
         "total_results": len(results),
         "token_budget_used": char_count,
-        "graph_results": graph_results_added,
+        "graph_results": graph_results,
         "results": results,
         "surface_route": _surface_route,
+        # Rows the cross-encoder rejected: an empty answer with rows rejected is
+        # "nothing here answers", not a failed retrieval.
+        "rerank_rejected": rerank_rejected,
     }
 
     # A weaker rerank leg serving the request is a property of THIS answer, not
@@ -3513,6 +3578,11 @@ async def _agent_query_impl(
     if _rerank_degraded:
         result_dict["retrieval_degraded"] = True
         result_dict["degraded_reason"] = _rerank_degraded
+
+    _failed = domain_failure_reason(len(_searched))
+    if _failed:
+        result_dict["retrieval_degraded"] = True
+        result_dict["degraded_reason"] = " ".join(r for r in (result_dict.get("degraded_reason"), _failed) if r)
 
     if _unsearchable_folders is not None:
         _folders_degraded = exclusion_degraded_reason()

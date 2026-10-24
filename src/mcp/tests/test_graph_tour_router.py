@@ -219,3 +219,27 @@ def test_pro_user_ignores_preview_flag(pro_enabled_client, mock_neo4j_with_rows)
     arc = r.json()
     assert len(arc["stops"]) == 5  # not clamped
     assert "[Preview]" not in arc["summary"]
+
+
+def test_a_focal_entity_outside_the_top_k_still_leads_the_tour():
+    """Audit F041: the focal entity was promoted only when it was already among
+    the most-mentioned entities, and was silently dropped otherwise."""
+    from app.routers.graph_tour import _fetch_top_entities
+
+    top = [_make_row("a", 100), _make_row("b", 50), _make_row("c", 20)]
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def run(self, cypher, **params):
+            rows = [_make_row("z", 1)] if "id" in params else list(top)
+            return MagicMock(data=lambda: rows)
+
+    driver = MagicMock()
+    driver.session = lambda: _Session()
+    rows = _fetch_top_entities(driver, 3, "z")
+    assert [r["id"] for r in rows] == ["z", "a", "b"]

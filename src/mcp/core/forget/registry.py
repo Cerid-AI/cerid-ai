@@ -11,6 +11,11 @@ always wins, so a restore written later on a machine with a skewed clock can
 never revive purged data. The index reloads whenever any file's size or mtime
 changes, so the server and the processor worker see each other's entries
 without a restart.
+
+An unreachable sync folder never makes a forget lapse. While the folder is
+unmounted or unreadable the index keeps what it last read, and a process that
+starts in that state reads a local snapshot written after every successful
+load. A single file that cannot be read keeps its last-read entries.
 """
 from __future__ import annotations
 
@@ -25,7 +30,9 @@ from typing import Any
 
 logger = logging.getLogger("ai-companion.forget")
 
-KINDS = frozenset({"conversation", "artifact", "chunk", "memory"})
+# ``operator_entry`` is a lineage in the operator record; its adapter is
+# registered at boot by the build that has the record.
+KINDS = frozenset({"conversation", "artifact", "chunk", "memory", "operator_entry"})
 STATES = frozenset({"trashed", "restored", "purged", "readded"})
 FORGOTTEN_STATES = frozenset({"trashed", "purged"})
 
@@ -92,21 +99,32 @@ def _wins(new: Entry, old: Entry | None) -> bool:
 
 
 class Registry:
-    def __init__(self, root: Path | None, machine_id: str) -> None:
+    def __init__(self, root: Path | None, machine_id: str, snapshot: Path | None = None) -> None:
         self._root = Path(root) if root else None
         self._machine_id = machine_id
+        self._snapshot = Path(snapshot) if snapshot else None
         self._lock = threading.Lock()
         self._signature: tuple[tuple[str, int, int], ...] = ()
+        self._loaded = False
+        self._unreachable = False
+        self._per_file: dict[str, list[Entry]] = {}
         self._by_subject: dict[Subject, Entry] = {}
         self._all: list[Entry] = []
         self._live: dict[Subject, set[str]] = {}
         self._live_by: dict[Subject, dict[str, str]] = {}
 
-    def _files(self) -> list[tuple[Path, os.stat_result]]:
-        if self._root is None or not self._root.is_dir():
+    def _files(self) -> list[tuple[Path, os.stat_result]] | None:
+        """The registry files, or None while the folder is missing or unreadable."""
+        if self._root is None:
             return []
+        try:
+            if not self._root.is_dir():
+                return None
+            paths = sorted(self._root.glob("registry*.jsonl"))
+        except OSError:
+            return None
         found = []
-        for path in sorted(self._root.glob("registry*.jsonl")):
+        for path in paths:
             try:
                 found.append((path, path.stat()))
             except OSError:
@@ -114,25 +132,86 @@ class Registry:
                 continue
         return found
 
+    @staticmethod
+    def _parse(lines: list[str]) -> list[Entry]:
+        parsed = []
+        for line in lines:
+            try:
+                entry = Entry.from_json(json.loads(line))
+            except json.JSONDecodeError:
+                entry = None
+            if entry is not None:
+                parsed.append(entry)
+        return parsed
+
+    def _read_snapshot(self) -> list[Entry]:
+        if self._snapshot is None:
+            return []
+        try:
+            return self._parse(self._snapshot.read_text(encoding="utf-8", errors="replace").splitlines())
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            logger.error("forget registry: cannot read the local snapshot: %s", exc)
+            return []
+
+    def _write_snapshot(self, entries: list[Entry]) -> None:
+        if self._snapshot is None:
+            return
+        try:
+            self._snapshot.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._snapshot.with_name(f".{self._snapshot.name}.{os.getpid()}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(e.to_json(), sort_keys=True) + "\n" for e in entries))
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self._snapshot)
+        except OSError as exc:
+            logger.error("forget registry: cannot write the local snapshot: %s", exc)
+
     def _refresh(self) -> None:
         files = self._files()
+        if not files:
+            # No registry file to read. That is a fresh install only when nothing
+            # was ever known here; otherwise the folder is unmounted, unreadable or
+            # mid-sync, and a forget must not lapse because of it.
+            known = self._all if self._loaded else self._read_snapshot()
+            if known:
+                if not self._unreachable:
+                    logger.error("forget registry: no registry file readable in %s; keeping the forgets already known", self._root)
+                    self._unreachable = True
+                if not self._loaded:
+                    self._index(known, ())
+                return
+        self._unreachable = False
+        files = files or []
         sig = tuple((p.name, st.st_size, st.st_mtime_ns) for p, st in files)
-        if sig == self._signature:
+        if self._loaded and sig == self._signature:
             return
         everything: list[Entry] = []
+        per_file: dict[str, list[Entry]] = {}
+        unread = False
         for path, _st in files:
             try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                entries = self._parse(path.read_text(encoding="utf-8", errors="replace").splitlines())
             except OSError as exc:
                 logger.warning("forget registry: cannot read %s: %s", path.name, exc)
-                continue
-            for line in lines:
-                try:
-                    entry = Entry.from_json(json.loads(line))
-                except json.JSONDecodeError:
-                    entry = None
-                if entry is not None:
-                    everything.append(entry)
+                entries, unread = self._per_file.get(path.name, []), True
+            per_file[path.name] = entries
+            everything.extend(entries)
+        self._per_file = per_file
+        if unread:
+            # The snapshot holds what that file said when it last read; read the
+            # file again next time rather than trusting the stale copy.
+            seen = set(everything)
+            everything.extend(e for e in self._read_snapshot() if e not in seen)
+            sig = ()
+        else:
+            self._write_snapshot(everything)
+        self._index(everything, sig)
+
+    def _index(self, everything: list[Entry], sig: tuple[tuple[str, int, int], ...]) -> None:
         # A ``readded`` entry cancels every entry of the forget it names, for that
         # subject only. The cancellation is causal (it names the forget), never by
         # time, so a skewed clock cannot decide it, and a later forget has a new id
@@ -166,6 +245,7 @@ class Registry:
         self._by_subject, self._all, self._signature = by_subject, everything, sig
         self._live = live
         self._live_by = live_by
+        self._loaded = True
 
     def append(self, entries: list[Entry]) -> None:
         if self._root is None:
@@ -270,7 +350,7 @@ def get_registry() -> Registry:
             import config
 
             root = Path(config.SYNC_DIR) / "forget" if config.SYNC_DIR else None
-            _REGISTRY = Registry(root, config.MACHINE_ID)
+            _REGISTRY = Registry(root, config.MACHINE_ID, Path(config.FORGET_REGISTRY_SNAPSHOT_PATH))
         return _REGISTRY
 
 

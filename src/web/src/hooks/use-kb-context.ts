@@ -52,7 +52,7 @@ export interface UseKBContextReturn {
   injectedContext: KBQueryResult[]
   injectResult: (result: KBQueryResult) => void
   removeInjected: (artifactId: string) => void
-  clearInjected: () => void
+  clearInjected: (rows?: KBQueryResult[]) => void
 }
 
 export function useKBContext(

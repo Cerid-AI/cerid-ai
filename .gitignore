@@ -162,7 +162,7 @@ docker-compose.override.yml
 
 # Eval harness outputs (Phase 0 quality program)
 src/mcp/tests/eval/out/
-scripts/out/
+**/scripts/out/
 .mutation-check.lock
 .ci-artifacts/
 

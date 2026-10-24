@@ -4,8 +4,8 @@
 // Graph API client — wraps /graph/* backend endpoints for the Atlas/
 // Constellation/Timeline visualization modes (Cerid v1.0 Phase A onward).
 
-import type { GraphHealth, NeighborhoodResponse } from "@/lib/types/graph"
-import { MCP_BASE, mcpHeaders, mcpUrl, extractError } from "./common"
+import type { NeighborhoodResponse } from "@/lib/types/graph"
+import { mcpHeaders, mcpUrl, extractError } from "./common"
 
 /**
  * Fetch a K-hop neighborhood around a focal entity.
@@ -39,16 +39,6 @@ export async function fetchNeighborhood(
   })
   if (!res.ok) throw new Error(await extractError(res, "Graph neighborhood fetch failed"))
   return res.json() as Promise<NeighborhoodResponse>
-}
-
-/**
- * Liveness probe for the graph subsystem. Cheap; does not run a Cypher
- * query. Useful for Settings → Diagnostics health card.
- */
-export async function fetchGraphHealth(): Promise<GraphHealth> {
-  const res = await fetch(`${MCP_BASE}/graph/health`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, "Graph health probe failed"))
-  return res.json() as Promise<GraphHealth>
 }
 
 // ---------------------------------------------------------------------------

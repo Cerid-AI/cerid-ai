@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: FSL-1.1-ALv2
 """What forgetting a conversation would remove, grouped for the delete dialog.
 
-Derived items (memories, the summary, verified memories) default to checked;
-documents the conversation cited default to unchecked, and a memory another
-live conversation also produced defaults to unchecked. Labels are read live and
+Derived items (memories, the summary, verified memories) and files uploaded in
+the chat default to checked; documents the conversation cited default to
+unchecked, and a memory or upload another live conversation also holds, or an
+upload the knowledge base already had, defaults to unchecked. Labels are read live and
 returned to the caller only; nothing here is stored.
 """
 from __future__ import annotations
@@ -46,10 +47,26 @@ def _derived(session: Any, cid: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def _uploads(session: Any, cid: str) -> list[dict[str, Any]]:
+    rows = session.run(
+        "MATCH (a:Artifact)-[u:UPLOADED_IN]->(:Conversation {id: $cid}) "
+        "OPTIONAL MATCH (a)-[:UPLOADED_IN]->(o:Conversation) WHERE o.id <> $cid "
+        "RETURN a.id AS id, a.filename AS filename, coalesce(u.existing, false) AS existing, "
+        "collect(DISTINCT o.id) AS others",
+        cid=cid,
+    )
+    return [dict(r) for r in rows]
+
+
 def _verified(session: Any, ids: list[str]) -> list[dict[str, Any]]:
     if not ids:
         return []
-    rows = session.run("MATCH (m:Memory) WHERE m.id IN $ids RETURN m.id AS id, m.text AS text", ids=ids)
+    rows = session.run(
+        "MATCH (m:Memory) WHERE m.id IN $ids "
+        "OPTIONAL MATCH (m)-[:EXTRACTED_FROM]->(o:Conversation) "
+        "RETURN m.id AS id, m.text AS text, collect(DISTINCT o.id) AS others",
+        ids=ids,
+    )
     return [dict(r) for r in rows]
 
 
@@ -93,6 +110,12 @@ def preview_conversation(cid: str, forgetting: frozenset[str] = frozenset()) -> 
         verified = [
             v for v in _verified(session, verified_memory_ids_for_conversation(cid)) if _live("memory", v["id"])
         ]
+        for v in verified:
+            # One claim is one memory (§6.3), so another chat may back it too.
+            v["others"] = [o for o in v.get("others") or [] if o and o != cid and _sharer(o, forgetting | {cid})]
+        uploads = [u for u in _uploads(session, cid) if u.get("id") and _live("artifact", u["id"])]
+        for u in uploads:
+            u["others"] = [o for o in u.get("others") or [] if o and _sharer(o, forgetting | {cid})]
         facts = _fact_count(session, [d["id"] for d in derived if not d["others"]])
 
     def memory_item(d: dict[str, Any]) -> dict[str, Any]:
@@ -105,7 +128,28 @@ def preview_conversation(cid: str, forgetting: frozenset[str] = frozenset()) -> 
             item["default"] = "unchecked"
         return item
 
-    cited = {a: f for a, f in _cited(conversation).items() if _live("artifact", a)}
+    def verified_item(v: dict[str, Any]) -> dict[str, Any]:
+        item: dict[str, Any] = {"kind": "memory", "id": v["id"], "label": _label(v.get("text"), v["id"])}
+        if v["others"]:
+            item["shared_with"] = len(v["others"])
+            item["default"] = "unchecked"
+        return item
+
+    def upload_item(u: dict[str, Any]) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "kind": "artifact", "id": u["id"], "label": _label(u.get("filename"), u["id"]),
+            "shared_with": len(u["others"]),
+        }
+        # Uploaded in another chat too, or already in the knowledge base before
+        # this chat: offered, not checked.
+        if u["others"] or u.get("existing"):
+            item["default"] = "unchecked"
+        if u.get("existing"):
+            item["existing"] = True
+        return item
+
+    uploaded = {u["id"] for u in uploads}
+    cited = {a: f for a, f in _cited(conversation).items() if _live("artifact", a) and a not in uploaded}
     used_by = dict.fromkeys(cited, 0)
     if cited and config.SYNC_DIR:
         for other in read_conversations(config.SYNC_DIR):
@@ -126,7 +170,8 @@ def preview_conversation(cid: str, forgetting: frozenset[str] = frozenset()) -> 
             {"key": "summary", "default": "checked",
              "items": [memory_item(d) for d in derived if d.get("scope") == "session_summary"]},
             {"key": "verified_memories", "default": "checked",
-             "items": [{"kind": "memory", "id": v["id"], "label": _label(v.get("text"), v["id"])} for v in verified]},
+             "items": [verified_item(v) for v in verified]},
+            {"key": "uploads", "default": "checked", "items": [upload_item(u) for u in uploads]},
             {"key": "cited_documents", "default": "unchecked",
              "items": [{"kind": "artifact", "id": a, "label": _label(f, a), "used_by": used_by[a]}
                        for a, f in cited.items()]},

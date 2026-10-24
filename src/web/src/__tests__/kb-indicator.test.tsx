@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
-import { KBContextIndicator } from "@/components/chat/kb-context-indicator"
+import { SourceAttribution } from "@/components/chat/source-attribution"
 import type { SourceRef } from "@/lib/types"
 
 function makeSource(overrides: Partial<SourceRef> = {}): SourceRef {
@@ -17,32 +17,27 @@ function makeSource(overrides: Partial<SourceRef> = {}): SourceRef {
   }
 }
 
-describe("KBContextIndicator", () => {
+describe("SourceAttribution badge (the message context indicator)", () => {
   it("renders nothing when no sources", () => {
-    const { container } = render(<KBContextIndicator sources={[]} />)
-    expect(container.firstChild).toBeNull()
-  })
-
-  it("renders nothing when sources undefined", () => {
-    const { container } = render(<KBContextIndicator />)
+    const { container } = render(<SourceAttribution sources={[]} variant="badge" />)
     expect(container.firstChild).toBeNull()
   })
 
   it("renders indicator when sources present", () => {
-    render(<KBContextIndicator sources={[makeSource()]} />)
+    render(<SourceAttribution sources={[makeSource()]} variant="badge" />)
     expect(screen.getByText(/Context sent to LLM/i)).toBeTruthy()
   })
 
   it("shows source count", () => {
-    render(<KBContextIndicator sources={[
+    render(<SourceAttribution sources={[
       makeSource({ artifact_id: "a1", filename: "a.pdf", relevance: 0.9 }),
       makeSource({ artifact_id: "a2", filename: "b.pdf", relevance: 0.8 }),
-    ]} />)
+    ]} variant="badge" />)
     expect(screen.getByText(/2 sources/i)).toBeTruthy()
   })
 
   it("shows singular for one source", () => {
-    render(<KBContextIndicator sources={[makeSource()]} />)
+    render(<SourceAttribution sources={[makeSource()]} variant="badge" />)
     expect(screen.getByText(/1 source\b/i)).toBeTruthy()
   })
 })

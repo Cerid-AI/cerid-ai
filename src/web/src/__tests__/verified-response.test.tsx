@@ -119,13 +119,13 @@ describe("VerifiedResponse — streaming state", () => {
 describe("VerifiedResponse — settled state, verified claim", () => {
   it("renders one badge for a verified claim", () => {
     render(<VerifiedResponse claims={[makeVerified()]} />)
-    // Badge shows "Verified by 1 source"
-    expect(screen.getByText(/Verified by 1 source/)).toBeTruthy()
+    // Badge shows "Independently verified · 1 source"
+    expect(screen.getByText(/Independently verified · 1 source/)).toBeTruthy()
   })
 
   it("badge has correct aria-label for verified band", () => {
     render(<VerifiedResponse claims={[makeVerified()]} />)
-    const btn = screen.getByRole("button", { name: /Claim verified by 1 source/ })
+    const btn = screen.getByRole("button", { name: /Claim independently verified by 1 source/ })
     expect(btn).toBeTruthy()
   })
 

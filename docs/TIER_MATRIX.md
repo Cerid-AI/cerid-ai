@@ -1,16 +1,18 @@
 # Cerid AI — Feature Tier Matrix
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 > GENERATED FILE — do not edit by hand. Regenerate with `python scripts/gen_tier_matrix.py`.
 > Source of truth: `config/features.py` (`_get_feature_tier` + `FEATURE_BUCKETS`); enforced by `tests/test_tier_matrix_drift.py`.
-> 50 feature flags across 9 sections.
+> 45 feature flags across 9 sections, plus 5 desktop features that are always on and have no gate.
 
 ## Tiers
 
-| Tier | License | Audience | Offering |
-|------|---------|----------|----------|
-| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Anyone who runs it | The public offering |
-| **Cerid Pro** | BUSL-1.1 | Same install, wider surfaces | In the repository, not sold |
-| **Cerid Enterprise** | In the tree | Multi-user surfaces in the code | Not a separate offer |
+| Tier | License | Audience | Price |
+|------|---------|----------|-------|
+| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, researchers, personal use | Free |
+| **Cerid Pro** | BUSL-1.1 | Business and power users | $15/mo · $144/yr |
+| **Cerid Enterprise** | Commercial | Regulated and large organizations | Contact |
 
 ## Feature Matrix
 
@@ -64,14 +66,14 @@
 
 | Feature | Core | Pro | Enterprise | Gate |
 |---------|------|-----|------------|------|
-| Keychain secrets | ✓ | ✓ | ✓ | `keychain_secrets` |
-| Menu-bar mode | ✓ | ✓ | ✓ | `menu_bar_mode` |
+| Auto-updates | ✓ | ✓ | ✓ | none (always on) |
+| Keychain secrets | ✓ | ✓ | ✓ | none (always on) |
+| Menu-bar mode | ✓ | ✓ | ✓ | none (always on) |
+| Permissions wizard (macOS privacy) | ✓ | ✓ | ✓ | none (always on) |
 | QuickLook preview | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `quicklook_preview` |
 | Share Sheet | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `share_sheet` |
 | Shortcuts actions | Coming in 1.0.x | Coming in 1.0.x | Coming in 1.0.x | `shortcuts_actions` |
-| Sparkle auto-updates | ✓ | ✓ | ✓ | `sparkle_updates` |
-| TCC permissions wizard | ✓ | ✓ | ✓ | `tcc_wizard` |
-| Universal binary | ✓ | ✓ | ✓ | `universal_binary` |
+| Universal binary (Apple silicon + Intel) | ✓ | ✓ | ✓ | none (always on) |
 | Voice Memos watcher | ✓ | ✓ | ✓ | `voice_memos_watch` |
 
 ### Other Pro Features

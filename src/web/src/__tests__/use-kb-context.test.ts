@@ -243,6 +243,23 @@ describe("useKBContext", () => {
     expect(result.current.injectedContext).toHaveLength(0)
   })
 
+  it("clears only the given chunks when passed some (F75)", () => {
+    const wrapper = createWrapper()
+    const { result } = renderHook(() => useKBContext("test query"), { wrapper })
+    const sent = makeResult({ artifact_id: "a1", chunk_index: 0 })
+    const sameArtifact = makeResult({ artifact_id: "a1", chunk_index: 3 })
+    const other = makeResult({ artifact_id: "a2", chunk_index: 0 })
+
+    act(() => {
+      result.current.injectResult(sent)
+      result.current.injectResult(sameArtifact)
+      result.current.injectResult(other)
+    })
+    act(() => { result.current.clearInjected([sent]) })
+
+    expect(result.current.injectedContext.map((r) => `${r.artifact_id}:${r.chunk_index}`)).toEqual(["a1:3", "a2:0"])
+  })
+
   it("returns error when query fails", async () => {
     mockQueryKB.mockRejectedValue(new Error("Network error"))
     const wrapper = createWrapper()

@@ -383,9 +383,11 @@ detect_port_conflicts() {
         [ -z "$port" ] && continue
         pids=$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)
         [ -z "$pids" ] && continue
-        # If the listener is com.docker.backend / vpnkit (a published container
-        # port), we can't easily attribute it here — leave conflict reclaim to
-        # detect_conflicts. Only warn for clearly-foreign non-docker listeners.
+        # A port a running container publishes is docker's, whatever process
+        # forwards it: com.docker.backend, vpnkit, or Colima's ssh mux, which
+        # this check used to report as a foreign listener for every port the
+        # stack held. Conflict reclaim stays with detect_conflicts.
+        [ -n "$(docker ps -q --filter "publish=${port}" 2>/dev/null)" ] && continue
         local cmd
         cmd=$(ps -o comm= -p "$(echo "$pids" | head -1)" 2>/dev/null || true)
         case "$cmd" in

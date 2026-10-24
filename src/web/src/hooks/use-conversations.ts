@@ -14,6 +14,7 @@ import {
   forgetSubjects,
   restoreForget,
   ForgetHttpError,
+  storeVerificationReports,
 } from "@/lib/api"
 import type { ForgetMode, ForgetResult, ForgetSubject } from "@/lib/api"
 import { logSwallowedError } from "@/lib/log-swallowed"
@@ -55,8 +56,8 @@ function markPrivate(c: Conversation): Conversation {
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
 
 /** Migrate old model IDs (missing openrouter/ prefix), validate against current MODELS list,
- *  migrate singular verificationReport → plural verificationReports,
- *  and add archived default. */
+ *  and add archived default. Reports a conversation still embeds are handed to
+ *  the server by the hook (``embeddedReports``), not migrated here. */
 function migrateConversations(convos: Conversation[]): Conversation[] {
   let changed = false
   const migrated = convos.map((c) => {
@@ -69,17 +70,6 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
       model = MODELS[0].id
       changed = true
     }
-    // Migrate singular verificationReport → plural verificationReports
-    const legacy = c as unknown as Record<string, unknown>
-    if (legacy.verificationReport && !c.verificationReports) {
-      const lastAssistant = c.messages
-        .filter((m) => m.role === "assistant" && m.content).pop()
-      if (lastAssistant) {
-        c.verificationReports = { [lastAssistant.id]: legacy.verificationReport as HallucinationReport }
-      }
-      delete legacy.verificationReport
-      changed = true
-    }
     // Add archived default for pre-existing conversations
     if (c.archived === undefined) {
       c.archived = false
@@ -89,6 +79,28 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
   })
   if (changed) saveConversations(migrated)
   return migrated
+}
+
+/** Verification reports a conversation kept before they were stored once on the
+ *  server (forget spec §6.2), by message id. The singular legacy field belonged
+ *  to the last assistant message. */
+function embeddedReports(c: Conversation): Record<string, HallucinationReport> {
+  const legacy = c as unknown as { verificationReports?: Record<string, HallucinationReport>; verificationReport?: HallucinationReport }
+  const reports = { ...(legacy.verificationReports ?? {}) }
+  if (legacy.verificationReport) {
+    const lastAssistant = c.messages.filter((m) => m.role === "assistant" && m.content).pop()
+    if (lastAssistant && !reports[lastAssistant.id]) reports[lastAssistant.id] = legacy.verificationReport
+  }
+  return reports
+}
+
+/** The conversation without the embedded reports the server now holds. */
+function withoutStoredReports(c: Conversation, stored: Set<string>): Conversation {
+  const left = Object.fromEntries(Object.entries(embeddedReports(c)).filter(([mid]) => !stored.has(mid)))
+  const rest = { ...c } as Conversation & { verificationReports?: unknown; verificationReport?: unknown }
+  delete rest.verificationReports
+  delete rest.verificationReport
+  return Object.keys(left).length ? ({ ...rest, verificationReports: left } as Conversation) : rest
 }
 
 function loadConversations(): Conversation[] {
@@ -522,36 +534,33 @@ export function useConversations() {
     })
   }, [persist])
 
-  /** Persist a verification report for a specific message in localStorage. */
-  const saveVerification = useCallback((convoId: string, msgId: string, report: HallucinationReport | null) => {
-    setConversations((prev) => {
-      const next = prev.map((c) => {
-        if (c.id !== convoId) return c
-        const reports = { ...(c.verificationReports ?? {}) }
-        if (report) {
-          reports[msgId] = report
-        } else {
-          delete reports[msgId]
+  // Reports this browser kept inside conversations before they were stored
+  // once on the server go there now, once; each conversation keeps whatever
+  // the server did not take (offline, the feature off) and tries again on the
+  // next load. Local only: the server copy of a conversation sheds its reports
+  // when it is next written.
+  useEffect(() => {
+    const pending = conversations.filter((c) => !c.private && Object.keys(embeddedReports(c)).length > 0)
+    if (pending.length === 0) return
+    let cancelled = false
+    void (async () => {
+      for (const c of pending) {
+        try {
+          const stored = new Set(await storeVerificationReports(c.id, embeddedReports(c)))
+          if (cancelled || stored.size === 0) continue
+          setConversations((prev) => {
+            const next = prev.map((x) => (x.id === c.id ? withoutStoredReports(x, stored) : x))
+            persist(next)
+            return next
+          })
+        } catch (err) {
+          logSwallowedError(err, "conversations.storeVerificationReports", { conversationId: c.id })
         }
-        return { ...c, verificationReports: reports, updatedAt: Date.now() }
-      })
-      const updated = next.find((c) => c.id === convoId)
-      persist(next, { convoId, server: updated ? { kind: "upsert", convo: updated } : undefined })
-      return next
-    })
-  }, [persist])
-
-  /** Get the stored verification report for a specific message. */
-  const getVerification = useCallback((convoId: string, msgId: string): HallucinationReport | null => {
-    const convo = conversations.find((c) => c.id === convoId)
-    return convo?.verificationReports?.[msgId] ?? null
-  }, [conversations])
-
-  /** Get all stored verification reports for a conversation (keyed by message ID). */
-  const getAllVerificationReports = useCallback((convoId: string): Record<string, HallucinationReport> => {
-    const convo = conversations.find((c) => c.id === convoId)
-    return convo?.verificationReports ?? {}
-  }, [conversations])
+      }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, at load: the conversations as they were stored
+  }, [])
 
   // Archive / unarchive
   const [showArchived, setShowArchived] = useState(false)
@@ -760,7 +769,6 @@ export function useConversations() {
     create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove, rename,
     replaceMessages, mergeCompressedHistory, clearMessages,
     verifiedConversations, markVerified, clearVerified,
-    saveVerification, getVerification, getAllVerificationReports,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
     bulkDelete, bulkArchive, forget, restore,
     syncFailing,

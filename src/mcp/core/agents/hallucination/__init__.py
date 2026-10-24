@@ -52,6 +52,7 @@ from core.agents.hallucination.persistence import (  # noqa: F401
     REDIS_HALLUCINATION_TTL,
     delete_hallucination_report,
     get_hallucination_report,
+    report_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,6 +105,7 @@ __all__ = [
     "verify_claims",
     "delete_hallucination_report",
     "get_hallucination_report",
+    "report_key",
     # Enums
     "NLIUse",
     "VerificationStatus",

@@ -128,9 +128,61 @@ is the only place models are declared. A row's `path` is absolute,
 - `small`, `default` and `embed` load at start and never unload.
 - `heavy` rows share one slot. Naming a heavy model loads it. Naming a
   different heavy model swaps only that slot, after the requests using the
-  current one finish. The other tiers are never evicted.
+  current one finish. The other tiers are never evicted. A heavy load the
+  host's memory cannot hold is refused, and an idle heavy model unloads (see
+  [The heavy slot and host memory](#the-heavy-slot-and-host-memory)).
 - A request with no `model` goes to the `default` row.
 - Exactly one `small` and one `default` row are required.
+
+### The heavy slot and host memory
+
+A heavy model is tens of gigabytes. Loaded beside everything else on the
+host, it pushes the machine into swap. The server measures before it loads,
+and lets go when the model is not in use.
+
+**Before a heavy load**, after any swap has unloaded the previous heavy
+model, the server reads two values from the kernel. The first is available
+memory: free plus inactive pages, which is `vm_stat`'s free, speculative and
+inactive pages. The second is the memory pressure level
+(`kern.memorystatus_vm_pressure_level`: normal, warn or critical). The load
+goes ahead only when pressure is normal and available memory is at least the
+model's weights on disk plus `CERID_MLX_HEAVY_MARGIN_GB`. Otherwise the
+request is answered at once with a 503 and a `Retry-After: 60` header, and
+the server logs a line beginning `heavy deferred: memory`:
+
+```json
+{"error": "heavy deferred: memory", "model": "gpt-oss-120b", "need_gb": 73.0, "available_gb": 41.2, "pressure": "warn"}
+```
+
+On `/v1/chat/completions` the `error` member is an OpenAI error object
+(`message` `heavy deferred: memory`, `code` `heavy_deferred`), and the other
+fields are the same. A streamed request gets the same 503: the status of a
+stream is sent with its first token, as Ollama sends it once the model has
+loaded. A client that climbs to another model on a failed call falls back.
+Nothing is queued, and the small, default and embed tiers keep answering. If
+a value cannot be read (not macOS), that check is skipped.
+
+**After a heavy load**, an idle heavy model is unloaded when either of these
+happens. Idle means no request is using it or waiting for it.
+
+- It has been idle for `CERID_MLX_HEAVY_IDLE_S`.
+- The kernel reports warn or critical pressure. The level is read every 10 s
+  while a heavy model sits idle.
+
+The next request that names it loads it again. That costs a load: about 13 s
+for gpt-oss-120b from a fast disk.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CERID_MLX_HEAVY_IDLE_S` | `600` | seconds an idle heavy model stays loaded; `0` keeps it until a swap or pressure |
+| `CERID_MLX_HEAVY_MARGIN_GB` | `8` | memory a heavy load must leave beyond its weights, for KV caches and the rest of the host |
+
+`GET /api/ps` and `GET /` carry a `memory` object, so a dashboard or a client
+can show it:
+
+```json
+"memory": {"pressure": "normal", "available_gb": 182.4, "heavy_loaded": false, "heavy": null, "heavy_idle_unload_s": 600.0, "heavy_margin_gb": 8.0}
+```
 
 `aliases` map other names onto a tier (`small`, `default`) or a row. They
 resolve on request and are **not** listed in `/api/tags`, so a client that
@@ -177,8 +229,9 @@ server never fetches it at run time.
 | `model` | a row or alias; missing means the `default` row |
 | `messages` | `system`, `developer` (read as system), `user`, `assistant`, `tool`. Content is a string or a list of text parts |
 | `max_tokens` / `max_completion_tokens` | 1 to 8192; default 4096 |
-| `temperature`, `top_p` | default 0 and 1 |
+| `temperature`, `top_p` | temperature defaults to 0 (greedy). A sampled turn keeps to the `top_k` and `top_p` in the model's `generation_config.json` (Gemma 4: 64 and 0.95); a request's `top_p` replaces the model's |
 | `stream`, `stream_options.include_usage` | SSE chunks ending in `data: [DONE]`; not with tools |
+| `stop` | a string or a list of up to 16; not with tools. Generation ends when the answer the client sees contains one (never gpt-oss's analysis or a Gemma thought); `content` is the text before it, `finish_reason` is `stop`. A stream holds back any tail that could begin one |
 | `tools`, `tool_choice` | below |
 
 The reply is a `chat.completion`: `choices[0].message` holds `content`, and
@@ -342,6 +395,8 @@ unvalidated: anything that can change how a model answers moves it.
   non-streaming responses.
 - `/api/chat` streams by default. `/api/generate` does not.
 - `format: "json"` adds a JSON-only system message when the caller sent none.
+- `options.stop` on `/api/chat` and `/api/generate` works as `stop` does on
+  `/v1/chat/completions`, with `done_reason: "stop"`.
 - Names have no slash, so Cerid treats them as local models.
 
 ## Operations
@@ -350,7 +405,9 @@ unvalidated: anything that can change how a model answers moves it.
 launchctl print gui/$(id -u)/com.cerid.mlx | grep -E 'state|pid ='
 launchctl kickstart -k gui/$(id -u)/com.cerid.mlx                 # restart
 tail -f ~/Library/Logs/com.cerid.mlx.log
-curl -s http://127.0.0.1:11434/ | python3 -m json.tool             # tiers, resident, heavy, load errors
+curl -s http://127.0.0.1:11434/ | python3 -m json.tool             # tiers, resident, heavy, load errors, memory
+curl -s http://127.0.0.1:11434/api/ps | python3 -m json.tool       # resident models, pressure, available GB, heavy slot
+grep -E 'heavy deferred|unloaded' ~/Library/Logs/com.cerid.mlx.log # refused heavy loads and every unload with its reason
 ~/.local/share/cerid-mlx/.venv/bin/python ~/.local/share/cerid-mlx/check.py          # endpoint checks
 ~/.local/share/cerid-mlx/.venv/bin/python ~/.local/share/cerid-mlx/check.py --heavy  # also loads each heavy row
 ```
@@ -383,7 +440,8 @@ MLX_STACK_TESTS_STRICT=1 /tmp/mlx-test/bin/python -m pytest stacks/mlx-inference
 | `test_parsing.py` | parse edge cases: unclosed calls, bad arguments, #1125 | mlx-lm, openai-harmony |
 | `test_requests.py` | request checks, template kwargs, forced openers, harmony rendering | openai-harmony for some |
 | `test_handler.py` | HTTP shapes and errors on a fake engine; catalog loading; `/api` without tools unchanged | mlx-lm for some |
-| `test_engine.py` | the engine on MLX with tiny random models: cache reuse, chunked prefill, caps, swap, stop at `<\|call\|>` | MLX |
+| `test_engine.py` | the engine on MLX with tiny random models: cache reuse, chunked prefill, caps, swap, stop at `<\|call\|>` and at stop strings, heavy deferral and idle/pressure unload | MLX |
+| `test_memory.py` | the heavy fit rule on fake readings; the macOS memory reading | |
 | `test_install.py` | install.py, and every shipped catalog loading through the server's own parser | |
 
 A test whose dependency is missing skips with the reason: Intel macOS has

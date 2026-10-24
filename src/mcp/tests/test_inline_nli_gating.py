@@ -185,6 +185,32 @@ async def test_gate_suppresses_contradicted_sentence():
 
 
 @pytest.mark.asyncio
+async def test_gate_sees_evidence_past_the_first_512_characters():
+    """The KB gate reads NLI_PREMISE_CHAR_LIMIT characters of evidence; the
+    inline gate must too. A contradicting fact at character ~900 was cut off by
+    the old 512-character slice and the contradicted sentence streamed through."""
+    from core.agents.hallucination.grounding_verifier import NLI_PREMISE_CHAR_LIMIT
+    from core.agents.hallucination.inline_gate import inline_nli_gate
+
+    lead = "Background on the project history and its many contributors. " * 14
+    context = lead + "The service listens on port 8443."
+    assert 512 < len(context) <= NLI_PREMISE_CHAR_LIMIT
+
+    async def fake_nli(premise, hypothesis):
+        if "port 8443" in premise and "8080" in hypothesis:
+            return {"contradiction": 0.92, "entailment": 0.02, "neutral": 0.06, "label": "contradiction"}
+        return {"contradiction": 0.05, "entailment": 0.1, "neutral": 0.85, "label": "neutral"}
+
+    with patch("core.agents.hallucination.inline_gate.nli_score_async", new=AsyncMock(side_effect=fake_nli)):
+        out = [
+            piece async for piece in inline_nli_gate(
+                _stream_from(["The service listens on port 8080."]), context=context,
+            )
+        ]
+    assert "".join(out) == ""
+
+
+@pytest.mark.asyncio
 async def test_gate_fails_open_on_nli_error():
     from core.agents.hallucination.inline_gate import inline_nli_gate
 

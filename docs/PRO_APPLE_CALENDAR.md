@@ -1,5 +1,7 @@
 # Apple Calendar connector
 
+> Connector notes. The product tier around them is historical. Stamps use `config/taxonomy.py` (domain `calendar`).
+
 ## What this connector does
 
 The Apple Calendar connector reads your local Calendar events through Apple's

@@ -1,5 +1,7 @@
 # Pro — Custom Smart RAG
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 Tune which sources influence Cerid's retrieval rankings. Boost what
 matters; demote what doesn't.
 

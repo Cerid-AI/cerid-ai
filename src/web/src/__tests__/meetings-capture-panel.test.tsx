@@ -14,7 +14,6 @@ const mockList = vi.fn()
 vi.mock("@/lib/api/meetings", () => ({
   uploadMeeting: (...a: unknown[]) => mockUpload(...a),
   listMeetingJobs: (...a: unknown[]) => mockList(...a),
-  getMeetingJob: vi.fn(),
 }))
 
 const job = (overrides: Partial<MeetingJob> = {}): MeetingJob => ({

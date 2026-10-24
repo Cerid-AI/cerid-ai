@@ -48,4 +48,4 @@ def test_provisional_hall_persist_marker_present() -> None:
         "await can clobber the previous report (E1 R9)"
     )
     # Two setex writes on the hall key path: provisional + final
-    assert src.count("REDIS_HALLUCINATION_PREFIX") >= 2
+    assert src.count("key = report_key(conversation_id, message_id)") >= 2

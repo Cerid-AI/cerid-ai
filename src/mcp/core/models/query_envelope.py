@@ -34,9 +34,12 @@ class SourceItem:
     collection: str = ""
     source_url: str = ""
     source_name: str = ""
+    # An external row's stable identity (ExternalEvidence.guid). KB rows are
+    # identified by artifact_id and chunk_id and carry none.
+    guid: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "content": self.content,
             "relevance": self.relevance,
             "artifact_id": self.artifact_id,
@@ -48,6 +51,9 @@ class SourceItem:
             "source_url": self.source_url,
             "source_name": self.source_name,
         }
+        if self.guid:
+            out["guid"] = self.guid
+        return out
 
 
 @dataclass

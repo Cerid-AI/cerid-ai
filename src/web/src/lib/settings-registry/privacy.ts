@@ -41,14 +41,17 @@ export const PRIVACY_DEFS: SettingDef[] = [
     group: "data",
     level: "core",
     label: "Encryption at rest",
-    helpText: "Whether Cerid encrypts stored KB data. Controlled by CERID_ENCRYPTION in .env — restart required.",
+    helpText:
+      "Field encryption of per-user API keys, synced settings and conversations, and chunk summaries. " +
+      "On exactly when CERID_ENCRYPTION_KEY is set in .env — restart required. " +
+      "Knowledge-base stores are not field-encrypted; use disk encryption for those.",
     scopeOfEffect: {
       scope: "env",
-      display: "Read-only here — set CERID_ENCRYPTION in .env and restart.",
+      display: "Read-only here — set CERID_ENCRYPTION_KEY in .env and restart.",
     },
-    keywords: ["encryption", "encrypt", "at rest", "security", "CERID_ENCRYPTION", "System"],
+    keywords: ["encryption", "encrypt", "at rest", "security", "CERID_ENCRYPTION_KEY", "System"],
     type: "display",
-    writer: { kind: "env", envVar: "CERID_ENCRYPTION" },
+    writer: { kind: "env", envVar: "CERID_ENCRYPTION_KEY" },
   },
   // ── Anonymization / Audit (read-only env rows) ──────────────────────────────
   {

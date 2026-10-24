@@ -66,7 +66,7 @@ export interface UseOrchestratedQueryReturn {
   injectedContext: KBQueryResult[]
   injectResult: (result: KBQueryResult) => void
   removeInjected: (artifactId: string) => void
-  clearInjected: () => void
+  clearInjected: (rows?: KBQueryResult[]) => void
 }
 
 interface OrchestratedQueryInput {

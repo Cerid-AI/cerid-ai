@@ -64,9 +64,12 @@ def test_local_inference_does_not_silently_flip_the_response_code(
 
 
 def test_the_opt_in_still_works(monkeypatch):
+    import fakeredis
+
     import config
 
     monkeypatch.setattr(config, "MEMORY_QUEUE_MODE", "async", raising=False)
+    monkeypatch.setattr("app.deps.get_redis", lambda: fakeredis.FakeRedis(decode_responses=True))
 
     with patch("core.routing.provider_state.is_local_provider", return_value=False):
         res = _client().post(

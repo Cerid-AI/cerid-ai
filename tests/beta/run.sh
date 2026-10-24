@@ -33,7 +33,13 @@ source "${SCRIPT_DIR}/lib/target.sh" || exit 2
 # environment, falling back to the repo .env, and forward it into the Docker
 # test containers below (conftest.py reads CERID_API_KEY → sets X-API-Key).
 # Backward-compatible: an empty key leaves tests running unauthenticated.
-CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "${REPO_ROOT}/.env" 2>/dev/null | cut -d= -f2-)}"
+# A worktree has no .env of its own: fall back to the main checkout's.
+_ENV_FILE="${REPO_ROOT}/.env"
+if [ ! -f "$_ENV_FILE" ]; then
+  _COMMON_GIT="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ -n "$_COMMON_GIT" ] && _ENV_FILE="$(dirname "$_COMMON_GIT")/.env"
+fi
+CERID_API_KEY="${CERID_API_KEY:-$(grep -E '^CERID_API_KEY=' "$_ENV_FILE" 2>/dev/null | cut -d= -f2-)}"
 export CERID_API_KEY
 
 # Parse flags
@@ -491,7 +497,7 @@ if ${RUN_EVAL:-false} && DOCKER_NETWORK=$(mcp_network_or_skip 2>/tmp/cerid-beta-
     -v "${SCRIPT_DIR}:/tests" -w /tests \
     python:3.11-slim bash -c "
       pip install -q httpx pytest 'pytest-asyncio>=0.23' pytest-rerunfailures 2>/dev/null
-      cd eval && python -m pytest . -v --tb=short \
+      cd eval && python -m pytest . -v --tb=short -rP \
         --reruns 1 --reruns-delay 5 \
         --junitxml=reports/eval.xml 2>&1
     "

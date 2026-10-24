@@ -35,4 +35,4 @@ def test_m0007_indexes_what_the_writer_looks_up() -> None:
 def test_m0007_is_registered_with_the_runner() -> None:
     from scripts.run_migrations import MIGRATIONS
 
-    assert MIGRATIONS[-1] == "app.db.neo4j.migrations.m0007_lineage"
+    assert "app.db.neo4j.migrations.m0007_lineage" in MIGRATIONS

@@ -1098,6 +1098,51 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_swallowed_error("app.main.chunk_id_migration_start", e)
 
+    # Job records written before phase 6 carry the words they work on; move
+    # them under their conversation, where a forget reaches them (spec §6.5).
+    try:
+        from app.services.job_text_migration import migrate_job_texts
+
+        async def _migrate_job_texts() -> None:
+            try:
+                await asyncio.to_thread(migrate_job_texts)
+            except Exception as exc:  # noqa: BLE001 — retried at the next boot
+                log_swallowed_error("app.main.job_text_migration", exc)
+
+        asyncio.create_task(_migrate_job_texts())
+    except Exception as e:
+        log_swallowed_error("app.main.job_text_migration_start", e)
+
+    # Verification reports are stored once, per message, in the graph; move
+    # the ones sync files still embed (spec §6.2).
+    try:
+        from app.services.verification_reports import migrate_reports
+
+        async def _migrate_reports() -> None:
+            try:
+                await asyncio.to_thread(migrate_reports)
+            except Exception as exc:  # noqa: BLE001 — retried at the next boot
+                log_swallowed_error("app.main.report_migration", exc)
+
+        asyncio.create_task(_migrate_reports())
+    except Exception as e:
+        log_swallowed_error("app.main.report_migration_start", e)
+
+    # One memory identity (spec §6.3): re-key verified-memory rows written
+    # before it and put every memory's conversation on its node.
+    try:
+        from app.services.memory_identity_migration import migrate_memory_identity
+
+        async def _migrate_memory_identity() -> None:
+            try:
+                await asyncio.to_thread(migrate_memory_identity)
+            except Exception as exc:  # noqa: BLE001 — retried at the next boot and after each sync import
+                log_swallowed_error("app.main.memory_identity_migration", exc)
+
+        asyncio.create_task(_migrate_memory_identity())
+    except Exception as e:
+        log_swallowed_error("app.main.memory_identity_migration_start", e)
+
     # Give memories and facts written before lineages existed their lineages
     # (spec §7). Recomputed from the graph, so it is a no-op once done.
     try:

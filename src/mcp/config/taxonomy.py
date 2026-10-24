@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Hierarchical Taxonomy (domains -> sub-categories -> tags)
@@ -80,6 +81,11 @@ TAXONOMY = {
         "icon": "calendar-days",
         "sub_categories": ["daily", "weekly", "general"],
     },
+    "calendar": {
+        "description": "Calendar events and reminders",
+        "icon": "calendar",
+        "sub_categories": ["meetings", "deadlines", "personal", "general"],
+    },
 }
 
 # User-defined custom domains via env var (JSON object with same shape as TAXONOMY entries)
@@ -149,9 +155,10 @@ DOMAIN_AFFINITY = {
     "coding":        {"projects": 0.6},
     "projects":      {"coding": 0.6, "finance": 0.4},
     "finance":       {"projects": 0.4},
-    "personal":      {"general": 0.5, "conversations": 0.3},
+    "personal":      {"general": 0.5, "conversations": 0.3, "calendar": 0.4},
     "general":       {"personal": 0.5, "conversations": 0.3},
     "conversations": {"personal": 0.3, "general": 0.3},
+    "calendar":      {"personal": 0.4, "meetings": 0.5},
 }
 CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY
 
@@ -204,7 +211,7 @@ TAG_VOCABULARY: dict[str, list[str]] = {
     "mail": [
         "thread", "reply", "newsletter", "receipt", "notification",
         "calendar-invite", "personal", "work", "promotional",
-        "automated", "transactional", "subscription",
+        "automated", "transactional", "subscription", "gmail", "outlook",
     ],
     "messages": [
         "chat", "thread", "group", "direct-message", "attachment",
@@ -226,4 +233,127 @@ TAG_VOCABULARY: dict[str, list[str]] = {
         "recap", "rollup", "briefing", "newsletter-summary",
         "activity-report",
     ],
+    "calendar": [
+        "calendar", "meeting", "deadline", "personal", "has-attendees",
+        "reminder", "agenda", "attendee", "location", "recurring",
+        "all-day", "invite",
+    ],
 }
+
+# Consumer corpora that must not enter TAXONOMY. Affinity, rectify, and the
+# owner's GUI read TAXONOMY; these domains stay reachable only by the
+# consumer whose allow-list names them. Same shape as a TAXONOMY entry,
+# plus the tag vocabulary _normalize_tags consults via vocabulary_for().
+OPERATIONAL_ONTOLOGY: dict[str, dict[str, Any]] = {
+    "anneal_lessons": {
+        "description": "Lessons the executor recorded",
+        "sub_categories": ["lesson", "correction", "hypothesis", "general"],
+        "tags": [
+            "lesson", "correction", "hypothesis", "pattern", "rule",
+            "regression", "handoff", "probe", "gate", "citation",
+        ],
+    },
+    "anneal_decisions": {
+        "description": "Rulings and grants",
+        "sub_categories": ["decision", "ruling", "grant", "refusal", "general"],
+        "tags": [
+            "decision", "ruling", "grant", "refusal", "exception",
+            "deadline", "scope", "owner", "reversal", "hold",
+        ],
+    },
+    "anneal_runs": {
+        "description": "Run reports",
+        "sub_categories": ["run", "report", "status", "heal", "general"],
+        "tags": [
+            "run", "report", "status", "heal", "quiet",
+            "failure", "escalation", "schedule", "outcome", "ledger",
+        ],
+    },
+    "anneal_conversations": {
+        "description": "Executor conversation summaries",
+        "sub_categories": ["conversation", "turn", "summary", "general"],
+        "tags": [
+            "conversation", "turn", "summary", "question", "answer",
+            "correction", "context", "handoff", "follow-up", "note",
+        ],
+    },
+    "trading": {
+        "description": "Paper-lab research notes",
+        "sub_categories": ["note", "kill", "keep", "session", "general"],
+        "tags": [
+            "note", "kill", "keep", "session", "backtest",
+            "signal", "journal", "hypothesis", "result", "risk",
+        ],
+    },
+    "boardroom_foundation": {
+        "description": "Parked boardroom foundation notes",
+        "sub_categories": ["brief", "decision", "general"],
+        "tags": [
+            "brief", "decision", "note", "agenda", "minute",
+            "risk", "budget", "owner", "parked", "reference",
+        ],
+    },
+    "boardroom_routing_examples": {
+        "description": "Parked routing examples",
+        "sub_categories": ["example", "general"],
+        "tags": [
+            "example", "route", "prompt", "case", "counterexample",
+            "pattern", "fixture", "note", "reference", "parked",
+        ],
+    },
+    "boardroom_campaigns": {
+        "description": "Parked campaign notes",
+        "sub_categories": ["campaign", "general"],
+        "tags": [
+            "campaign", "audience", "channel", "brief", "result",
+            "note", "schedule", "copy", "reference", "parked",
+        ],
+    },
+    "cerid_ai_business": {
+        "description": "Parked business notes",
+        "sub_categories": ["note", "general"],
+        "tags": [
+            "note", "pricing", "license", "customer", "roadmap",
+            "parked", "decision", "reference", "risk", "archive",
+        ],
+    },
+}
+
+
+def domain_spec(domain: str) -> dict[str, Any] | None:
+    """The ontology entry for a domain.
+
+    Operational domains win even when boot rehydration has copied their
+    ``:Domain`` node into TAXONOMY. That node exists so admin paths can see
+    the collection. Its sub-categories are historical path labels, not the shelf.
+    """
+    entry = OPERATIONAL_ONTOLOGY.get(domain)
+    if entry is not None:
+        return entry
+    return TAXONOMY.get(domain)
+
+
+def sub_categories_for(domain: str) -> list[str]:
+    entry = domain_spec(domain)
+    if not entry:
+        return []
+    return list(entry.get("sub_categories") or ["general"])
+
+
+def vocabulary_for(domain: str) -> list[str]:
+    """Preferred tags. TAXONOMY domains use TAG_VOCABULARY; operational domains use their own list."""
+    tags = TAG_VOCABULARY.get(domain)
+    if tags:
+        return list(tags)
+    entry = OPERATIONAL_ONTOLOGY.get(domain) or {}
+    return [t for t in entry.get("tags") or [] if isinstance(t, str)]
+
+
+def known_domain(domain: str) -> bool:
+    return domain in TAXONOMY or domain in OPERATIONAL_ONTOLOGY or domain in DOMAINS
+
+
+def corpus_domain(domain: str) -> bool:
+    """False for an operational domain whose records live outside the corpus
+    (``"corpus": False``): ingest refuses it, whoever asks."""
+    return (OPERATIONAL_ONTOLOGY.get(domain) or {}).get("corpus", True) is not False

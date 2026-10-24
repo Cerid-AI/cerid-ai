@@ -24,6 +24,15 @@ def _isolate_tombstone_log(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_model_catalog_snapshot(tmp_path, monkeypatch):
+    """The boot validation and the weekly model job write the catalog snapshot
+    that every OpenRouter call resolves through; keep tests off the real one."""
+    import config
+
+    monkeypatch.setattr(config, "MODEL_CATALOG_SNAPSHOT_PATH", str(tmp_path / "openrouter_catalog.json"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_forget_registry(tmp_path, monkeypatch):
     """The write barrier reads the forget registry on hot paths; without this,
     any test reaching it would read (or append to) the operator's sync dir."""
@@ -177,7 +186,7 @@ def _reset_llm_client():
     import os
 
     import core.utils.llm_client as _llm_mod
-    from core.utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import _BREAKER_REGISTRY
     from core.utils.claim_cache import clear_l1_cache
 
     # Ensure LLM calls use the direct OpenRouter path (mockable via httpx.AsyncClient)
@@ -210,17 +219,12 @@ def _reset_llm_client():
     with contextlib.suppress(Exception):  # best-effort private-mode cache reset
         import app.services.private_mode as _pm_mod
         _pm_mod._last_known_level = 0
-    # Reset all circuit breakers to prevent cross-test state leakage.
-    # The "bifrost-*" breaker names survive as legacy identifiers for
-    # historical call-site categories (rerank/claims/verify/...); Bifrost
-    # itself was retired (audit C-4 + 2026-04-17 follow-up).
-    for name in (
-        "bifrost-rerank", "bifrost-claims", "bifrost-verify",
-        "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
-        "bifrost-decompose", "web-search", "openrouter", "tavily",
-        "searxng", "ragas_eval", "neo4j", "ollama",
-    ):
-        get_breaker(name).reset()
+    # Reset every registered circuit breaker so state cannot leak between
+    # tests. A fixed list of names missed the datasource-* breakers: once a
+    # failing source raised, its breaker opened and later tests silently lost
+    # that source's rows.
+    for breaker in list(_BREAKER_REGISTRY.values()):
+        breaker.reset()
     yield
     _llm_mod._client = None
     clear_l1_cache()

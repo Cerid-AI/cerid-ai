@@ -41,6 +41,31 @@ function setup(onConfirm = vi.fn()) {
 describe("ForgetConversationDialog", () => {
   beforeEach(() => { vi.mocked(api.previewForget).mockReset() })
 
+  it("offers files uploaded in the chat, checked unless shared or already in the knowledge base", async () => {
+    vi.mocked(api.previewForget).mockResolvedValue({
+      ...PREVIEW,
+      groups: [
+        ...PREVIEW.groups.slice(0, 4),
+        { key: "uploads", default: "checked", items: [
+          { kind: "artifact", id: "u1", label: "notes.pdf", shared_with: 0 },
+          { kind: "artifact", id: "u2", label: "plan.docx", shared_with: 1, default: "unchecked" },
+          { kind: "artifact", id: "u3", label: "old.txt", shared_with: 0, default: "unchecked", existing: true },
+        ] },
+        PREVIEW.groups[4],
+      ],
+    })
+    const { onConfirm } = setup()
+    expect(await screen.findByText("Files uploaded in this chat")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "notes.pdf" })).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "plan.docx" })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "old.txt" })).not.toBeChecked()
+    expect(screen.getByText("Also uploaded in 1 other conversation · forgets the whole document")).toBeInTheDocument()
+    expect(screen.getByText("Was in your knowledge base before this chat · forgets the whole document")).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole("button", { name: "Move to Trash" }))
+    expect(onConfirm.mock.lastCall?.[1]).toContainEqual({ kind: "artifact", id: "u1" })
+    expect(onConfirm.mock.lastCall?.[1]).not.toContainEqual({ kind: "artifact", id: "u2" })
+  })
+
   it("lists what the chat produced with derived items checked and cited documents unchecked", async () => {
     vi.mocked(api.previewForget).mockResolvedValue(PREVIEW)
     setup()

@@ -56,26 +56,12 @@ def test_shipped_manifest_passes_loader_validation(plugin_dir: Path):
     _validate_manifest(manifest, plugin_dir)
 
 
-# Directories that advertise a plugin in the catalog but ship no plugin.py,
-# so the loader raises PluginLoadError for them on every startup. Both are
-# manifest + LICENSE only — there is no implementation to repair, so the
-# resolution is removing the catalog entry, which is an operator decision
-# (F214). Shrink-only: an entry that grows a plugin.py fails below, so this
-# list cannot outlive the directories it records.
-_CATALOG_ONLY = {"analytics", "workflow-builder"}
-
-
 @pytest.mark.parametrize(
     "plugin_dir", _all_shipped_plugin_dirs(), ids=lambda p: f"{p.parent.name}/{p.name}"
 )
 def test_shipped_plugin_ships_an_entry_point(plugin_dir: Path):
     """``manifest.json`` with no ``plugin.py`` is a PluginLoadError at boot."""
     has_entry_point = (plugin_dir / "plugin.py").exists()
-    if plugin_dir.name in _CATALOG_ONLY:
-        assert not has_entry_point, (
-            f"{plugin_dir.name} now ships a plugin.py — drop it from _CATALOG_ONLY"
-        )
-        pytest.skip(f"{plugin_dir.name}: catalog entry with no implementation (F214)")
     assert has_entry_point, (
         f"{plugin_dir} advertises a plugin in the catalog but ships no plugin.py"
     )

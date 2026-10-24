@@ -41,9 +41,9 @@ def _classify_model_tier(model_id: str) -> str | None:
     """
     m = model_id.removeprefix("openrouter/").lower()
 
-    if "claude-sonnet" in m or ("gpt-4o" in m and "mini" not in m):
+    if "claude-sonnet" in m or ("gpt-4o" in m and "mini" not in m) or "-sol" in m:
         return "openrouter_capable"
-    if "gpt-4o-mini" in m:
+    if "gpt-4o-mini" in m or "gpt-6-luna" in m:
         return "openrouter_cheap"
     if "gemini" in m and "flash" in m:
         return "openrouter_cheap"
@@ -51,7 +51,7 @@ def _classify_model_tier(model_id: str) -> str | None:
         return "openrouter_expert"
     if "grok" in m:
         return "openrouter_research"
-    if "llama-3.3" in m:
+    if "llama-3.3" in m or "llama-4" in m:
         return "openrouter_free"
     return None
 

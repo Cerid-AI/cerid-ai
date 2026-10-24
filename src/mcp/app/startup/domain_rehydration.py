@@ -64,17 +64,32 @@ def merge_persisted_domains(persisted: list[dict[str, Any]]) -> int:
     (add-only, mirroring the ``/taxonomy/domain`` endpoint's mutation). Returns
     the number of domains newly added. Pure w.r.t. Neo4j — unit-testable."""
     added: list[str] = []
+    operational = getattr(config, "OPERATIONAL_ONTOLOGY", {})
     for d in persisted:
         name = d["name"]
-        if name and name not in config.TAXONOMY:
+        if not name:
+            continue
+        # A consumer corpus already has a shelf in OPERATIONAL_ONTOLOGY.
+        # Rehydration used to copy the :Domain node into TAXONOMY, and the
+        # node's path labels (anneal_lessons/retro, trading/signals) then
+        # shadowed that shelf. Admin and sync still need the name on DOMAINS.
+        if name in operational:
+            if name not in config.DOMAINS:
+                config.DOMAINS.append(name)
+                added.append(name)
+            continue
+        if name not in config.TAXONOMY:
             config.TAXONOMY[name] = {
                 "description": d.get("description", ""),
                 "icon": d.get("icon", ""),
                 "sub_categories": d.get("sub_categories", []),
             }
             added.append(name)
+    if any(name in config.TAXONOMY for name in added):
+        config.DOMAINS = list(config.TAXONOMY.keys()) + [
+            name for name in config.DOMAINS if name not in config.TAXONOMY
+        ]
     if added:
-        config.DOMAINS = list(config.TAXONOMY.keys())
         logger.info("Rehydrated %d runtime domain(s) from Neo4j: %s", len(added), added)
     return len(added)
 

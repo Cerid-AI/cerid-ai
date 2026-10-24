@@ -204,7 +204,8 @@ def _purge_subjects(
     touched: set[str] = set()
     done: list[Subject] = []
     for subject in subjects:
-        complete = True
+        # A subject no store here can erase is not erased; it stays pending.
+        complete = bool(_adapters_for(subject.kind))
         for adapter in _adapters_for(subject.kind):
             slot = receipt["adapters"].setdefault(adapter.name, {"status": "done", "removed": 0})
             if adapter.name not in touched:

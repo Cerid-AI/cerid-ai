@@ -22,8 +22,6 @@ import type {
   SynopsisEstimate,
   TagSuggestion,
   UploadResult,
-  ParserCapability,
-  ArtifactFilterParams,
   RagMode,
   ContextSources,
   MemoryRecallResult,
@@ -473,7 +471,12 @@ export async function fetchAudit(
 
 export async function uploadFile(
   file: File,
-  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string; skipQuality?: boolean; skipMetadata?: boolean; quick?: boolean } = {},
+  opts: {
+    domain?: string; subCategory?: string; tags?: string; categorizeMode?: string; skipQuality?: boolean
+    skipMetadata?: boolean; quick?: boolean
+    /** The chat the file was dropped in: deleting the chat can then offer to forget it too. */
+    conversationId?: string
+  } = {},
 ): Promise<UploadResult> {
   const formData = new FormData()
   formData.append("file", file)
@@ -487,6 +490,7 @@ export async function uploadFile(
   // Quick capture: the server persists and answers at once; categorisation
   // and the display title land later from a processor job.
   if (opts.quick) params.set("quick", "true")
+  if (opts.conversationId) params.set("conversation_id", opts.conversationId)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout for large files
@@ -571,14 +575,6 @@ export interface ArchiveFilesResponse {
   files: ArchiveFile[]
   total: number
   storage_mode: string
-}
-
-/** @internal — no frontend consumer. Retained for test coverage. */
-export async function fetchArchiveFiles(domain?: string): Promise<ArchiveFilesResponse> {
-  const params = domain ? `?domain=${encodeURIComponent(domain)}` : ""
-  const res = await fetch(`${MCP_BASE}/archive/files${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to list archive files"))
-  return res.json()
 }
 
 // ---------------------------------------------------------------------------
@@ -696,45 +692,12 @@ export async function adminRepairCollection(collectionName: string, dryRun = tru
   return res.json()
 }
 
-export async function adminDeleteArtifact(artifactId: string): Promise<{ deleted: boolean; message: string }> {
-  const res = await fetch(`${MCP_BASE}/admin/artifacts/${encodeURIComponent(artifactId)}`, {
-    method: "DELETE",
-    headers: mcpHeaders(),
-  })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to delete artifact"))
-  return res.json()
-}
-
-// --- KB Parser Capabilities ---
-
-export async function fetchParserCapabilities(): Promise<{ capabilities: ParserCapability[]; tier: string }> {
-  const res = await fetch(`${MCP_BASE}/admin/kb/capabilities`, { headers: mcpHeaders() })
-  // eslint-disable-next-line cerid/no-error-as-empty-response -- M4 (2026-08-11 consolidated audit, Gate 3): silently downgrades tier to community on fetch failure, same shape as the use-entitlements bug
-  if (!res.ok) return { capabilities: [], tier: "community" }
-  return res.json()
-}
-
 export async function reIngestArtifact(artifactId: string): Promise<void> {
   const res = await fetch(`${MCP_BASE}/admin/artifacts/${artifactId}/reingest`, {
     method: "POST",
     headers: mcpHeaders(),
   })
   if (!res.ok) throw new Error(await extractError(res, "Re-ingest failed"))
-}
-
-export async function fetchArtifactsFiltered(params: ArtifactFilterParams): Promise<Artifact[]> {
-  const qs = new URLSearchParams()
-  if (params.domain) qs.set("domain", params.domain)
-  if (params.client_source) qs.set("client_source", params.client_source)
-  if (params.since) qs.set("since", params.since)
-  if (params.min_quality != null) qs.set("min_quality", String(params.min_quality))
-  qs.set("limit", String(params.limit ?? 50))
-  qs.set("offset", String(params.offset ?? 0))
-  const res = await fetch(`${MCP_BASE}/artifacts?${qs}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch artifacts"))
-  const raw = await res.json()
-  const artifacts: Artifact[] = Array.isArray(raw) ? raw : []
-  return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }
 
 // ---------------------------------------------------------------------------

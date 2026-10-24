@@ -9,7 +9,7 @@ descriptive text suitable for knowledge base storage.
 No additional Python dependencies required — uses httpx (already in core).
 
 Environment variables:
-  VISION_MODEL    — model ID for vision analysis (default: "openai/gpt-4o")
+  VISION_MODEL    — model ID for vision analysis (default: "openai/gpt-6.1-sol")
   BIFROST_URL     — Bifrost gateway URL (default: "http://localhost:8080")
 """
 
@@ -107,7 +107,7 @@ async def analyze_image(file_path: str, prompt: str | None = None) -> str:
             f"Unsupported image format: {ext}. Supported: {SUPPORTED_EXTENSIONS}"
         )
 
-    model = os.getenv("VISION_MODEL", "openai/gpt-4o")
+    model = os.getenv("VISION_MODEL", "openai/gpt-6.1-sol")
     bifrost_url = os.getenv("BIFROST_URL", "http://localhost:8080")
 
     logger.info("Vision analysis: %s (model: %s)", path.name, model)

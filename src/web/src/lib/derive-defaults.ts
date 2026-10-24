@@ -46,11 +46,11 @@ const PROVIDER_DEFAULTS: Record<string, string[]> = {
   // OpenRouter is preferred because it fans out to everything; within
   // OpenRouter, the cheapest capable model wins the default slot.
   openrouter: [
-    "openrouter/openai/gpt-4o-mini",        // cheapest capable ~$0.15/1M
-    "openrouter/anthropic/claude-haiku-4.5",
-    "openrouter/google/gemini-2.5-flash",
-    "openrouter/openai/gpt-4o",
-    "openrouter/anthropic/claude-sonnet-4.6",
+    "openrouter/openai/gpt-6-luna",         // cheapest capable ~$0.10/1M
+    "openrouter/anthropic/claude-haiku-5.5",
+    "openrouter/google/gemini-3.8-flash",
+    "openrouter/openai/gpt-6.1-sol",
+    "openrouter/anthropic/claude-sonnet-5.5",
   ],
   openai: [
     "openai/gpt-4o-mini",

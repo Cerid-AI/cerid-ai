@@ -439,10 +439,12 @@ def _resolve_stage_provider(stage: str | None, default_provider: str) -> str:
             resolved = env_override
         else:
             cloud_stages = CLOUD_ESCALATION_STAGES | CONSENTED_CLOUD_STAGES
-            if stage in LOCAL_FIRST_STAGES or (
-                stage in cloud_stages
-                and getattr(config, "CERID_ENVIRONMENT_PROFILE", "") == "local-only"
-            ):
+            from core.routing.egress import cloud_egress_refused
+
+            # The egress rule, not the requested profile string: a cloud profile
+            # resolved down to local-only at boot set the rule without changing
+            # the string, and its cloud stages still dispatched to OpenRouter.
+            if stage in LOCAL_FIRST_STAGES or (stage in cloud_stages and cloud_egress_refused()):
                 from config.environment_profiles import degrade_target_provider
 
                 resolved = degrade_target_provider(
@@ -1030,6 +1032,8 @@ async def _call_ollama(
     """
     import httpx
 
+    from core.utils.inference_ledger import note_local_completion, record_local_attempt
+
     is_interactive = _is_interactive(stage, interactive)
 
     if provider == "quenchforge":
@@ -1076,7 +1080,16 @@ async def _call_ollama(
         )
         resp.raise_for_status()
         data = resp.json()
-        return data.get("message", {}).get("content", "")
+        # Count the attempt, including done_reason "length", and still
+        # return the text. A truncation must not fail the ingest that
+        # asked for the completion.
+        if isinstance(data, dict):
+            note_local_completion(data)
+            message = data.get("message") or {}
+            content = message.get("content", "") if isinstance(message, dict) else ""
+        else:
+            content = ""
+        return content or ""
 
     # Retry transient back-pressure INSIDE the breaker call so one logical
     # request is at most ONE breaker outcome. Pre-fix the retry loop wrapped
@@ -1103,22 +1116,27 @@ async def _call_ollama(
                 await _wait_pacing_cooldown(is_interactive)
                 async with _get_pacing_gate().slot(is_interactive):
                     return await _do_call()
-            except httpx.ConnectError as exc:
+            except (httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                record_local_attempt(failed=True)
+                # Connect refused, or a connection dropped mid-request (the
+                # daemon restarting or crashing: ReadError, "server
+                # disconnected"): the same retry, then the same fallback.
                 inner_exc = exc
                 if attempt + 1 < max_retries:
                     delay = backoff_base * (2 ** attempt)
                     logger.info(
-                        "%s connect error (attempt %d/%d) — retry in %.2fs",
-                        label, attempt + 1, max_retries, delay,
+                        "%s %s (attempt %d/%d) — retry in %.2fs",
+                        label, type(exc).__name__, attempt + 1, max_retries, delay,
                     )
                     await asyncio.sleep(delay)
                     continue
                 logger.warning(
-                    "%s unreachable at %s (%s) — falling back to OpenRouter",
-                    label, base_url, start_hint,
+                    "%s unreachable at %s (%s: %s) — falling back to OpenRouter",
+                    label, base_url, type(exc).__name__, start_hint,
                 )
                 raise
             except httpx.TimeoutException as exc:
+                record_local_attempt(failed=True)
                 inner_exc = exc
                 # Arm the cooldown so CONCURRENT callers of the same class
                 # back off too — per-call retry backoff alone let N in-flight
@@ -1138,6 +1156,7 @@ async def _call_ollama(
                 )
                 raise
             except httpx.HTTPStatusError as exc:
+                record_local_attempt(failed=True)
                 inner_exc = exc
                 status = exc.response.status_code
                 # Retry server-side (5xx) and rate-limit (429) but not 4xx
@@ -1169,8 +1188,10 @@ async def _call_ollama(
     except CircuitOpenError as exc:
         logger.warning("%s circuit breaker open — falling back to OpenRouter", label)
         last_exc = exc
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-        last_exc = exc  # the specific failure was already logged in the retry loop
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+        # Every transport failure, not only connect/timeout: a ReadError or a
+        # dropped connection used to escape the fallback entirely.
+        last_exc = exc
     # Local backend exhausted. Falling back to OpenRouter re-sends the identical
     # payload (user content) to the cloud — which is exactly what an operator who
     # chose local inference for privacy does not want. Honour the opt-out before
@@ -1224,11 +1245,12 @@ async def _call_ollama(
 def _cloud_fallback_refused_by(stage: str | None) -> str:
     """Which setting forbids the local-to-cloud fallback for *stage*; "" allows it."""
     from config.stage_profiles import INBOX_STAGES, PRIVATE_LOCAL_STAGES
+    from core.routing.egress import cloud_egress_refused
 
     if stage in PRIVATE_LOCAL_STAGES:
         return "the stage never leaves the machine"
-    if not getattr(config, "ALLOW_CLOUD_EGRESS_WHEN_LOCAL", True):
-        return "ALLOW_CLOUD_EGRESS_WHEN_LOCAL=false"
+    if refused := cloud_egress_refused():
+        return refused
 
     if stage in INBOX_STAGES and not getattr(config, "INBOX_CLOUD_FALLBACK", False):
         return "CERID_INBOX_CLOUD_FALLBACK is not true"
@@ -1261,6 +1283,10 @@ def effective_environment_profile() -> str:
     return effective
 
 
+class LocalStreamError(RuntimeError):
+    """The local backend reported an error inside an already-open stream."""
+
+
 async def _stream_ollama(
     messages: list[dict[str, str]],
     *,
@@ -1273,7 +1299,8 @@ async def _stream_ollama(
     """Stream assistant-content deltas from a local Ollama-protocol backend.
 
     Yields each ``message.content`` fragment as the NDJSON stream arrives.
-    Errors (connect/timeout/HTTP) propagate to the caller, which decides
+    Errors (transport/HTTP, or an in-stream ``{"error": ...}`` object as
+    :class:`LocalStreamError`) propagate to the caller, which decides
     whether to fall back — this generator does not swallow them.
 
     ``model`` defaults to ``INTERNAL_LLM_MODEL`` / ``OLLAMA_DEFAULT_MODEL``;
@@ -1307,8 +1334,14 @@ async def _stream_ollama(
                 continue
             try:
                 data = _json.loads(line)
-            except ValueError:
+            except ValueError as exc:
+                log_swallowed_error("core.utils.internal_llm.stream_line", exc)
                 continue
+            if data.get("error"):
+                # Ollama reports a failure after the 200 as {"error": "..."}:
+                # no content and no done flag, so reading past it ended the
+                # stream empty, as if the model had nothing to say.
+                raise LocalStreamError(str(data["error"]))
             piece = data.get("message", {}).get("content", "")
             if piece:
                 yield piece
@@ -1384,9 +1417,9 @@ async def call_internal_llm_stream(
             inference_health.record_success("llm", provider=provider)
             return
         except (
-            httpx.ConnectError,
-            httpx.TimeoutException,
+            httpx.TransportError,
             httpx.HTTPStatusError,
+            LocalStreamError,
         ) as exc:
             log_swallowed_error("core.utils.internal_llm.stream_fallback", exc)
             if yielded_any:

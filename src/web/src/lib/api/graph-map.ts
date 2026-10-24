@@ -44,11 +44,6 @@ export interface GraphMapResponse {
   computed_at: string | null
   cached: boolean
   /**
-   * Layout that was actually served. Present when ?layout= was passed.
-   * Absent (undefined) on responses from the legacy no-param endpoint.
-   */
-  layout?: MapLayout
-  /**
    * True when the requested non-default layout artifact was not yet computed
    * and the server fell back to "force". Absent/undefined when not applicable.
    */

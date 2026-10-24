@@ -510,6 +510,11 @@ async def enrich(
             PRIVATE_MODE_SKIP_KB_LEVEL, entity_type,
         )
         return []
+    from core.routing.egress import cloud_egress_refused
+
+    if cloud_egress_refused():
+        logger.info("wiki_enrichment.egress_refused entity_type=%s", entity_type)
+        return []
 
     # Adapter instances created per-call so tests can patch adapter classes
     # at module level (e.g. patch("...wiki_enrichment.WikipediaAdapter")).

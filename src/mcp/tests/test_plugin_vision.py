@@ -108,7 +108,7 @@ class TestAnalyzeImage:
         # Verify the payload structure
         call_args = mock_client.post.call_args
         payload = call_args.kwargs.get("json") or call_args[1].get("json")
-        assert payload["model"] == "openai/gpt-4o"
+        assert payload["model"] == "openai/gpt-6.1-sol"
         assert len(payload["messages"]) == 1
         content = payload["messages"][0]["content"]
         assert any(c["type"] == "image_url" for c in content)

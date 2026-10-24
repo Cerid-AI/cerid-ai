@@ -112,6 +112,9 @@ FEATURE_FLAGS = {
     # tier matrix renders "Coming in 1.0.x" instead of claiming it ships.
     "hierarchical_taxonomy":     False,
     "file_upload_gui":           True,
+    # Entitlement, like every flag here: every tier may turn field encryption
+    # on. Whether it IS on depends only on CERID_ENCRYPTION_KEY, and GET
+    # /settings reports that as ``enable_encryption`` (utils/encryption.py).
     "encryption_at_rest":        True,
     "truth_audit":               True,
     "live_metrics":              True,
@@ -130,31 +133,16 @@ FEATURE_FLAGS = {
     "share_sheet":               False,
     "shortcuts_actions":         False,
     "quicklook_preview":         False,
-    "menu_bar_mode":             True,
-    "keychain_secrets":          True,
-    "tcc_wizard":                True,
-    "sparkle_updates":           True,
-    "universal_binary":          True,
     # RA-60 (2026-08-11): `spotlight_integration`, `safari_reading_list`,
     # and `apple_silicon_ml` were removed here — a repo-wide search found
     # no backend, desktop, or frontend code implementing any of them
     # (spotlight's real, shipped implementation is the distinct
     # `spotlight_donation` Pro flag; see NON_PLUGIN_IMPLEMENTATIONS below).
-    # They had shipped in TIER_MATRIX.md as ✓ available with nothing behind
-    # them. The five flags kept above (menu_bar_mode, keychain_secrets,
-    # tcc_wizard, sparkle_updates, universal_binary) DO have real desktop
-    # implementations (packages/desktop/src/main/{tray,secrets,permissions,
-    # updater}.ts, electron-builder's `universal` mac target) — they are
-    # unconditional app behavior, not something to remove. Backend capability
-    # reporting is already wired generically: get_feature_status() (below)
-    # walks every FEATURE_FLAGS entry, so GET /license/capabilities already
-    # reports each of these five with its real enabled state, same mechanism
-    # packages/desktop/src/main/connectors/spotlight.ts already reads for
-    # spotlight_donation. What's still missing is the packages/desktop
-    # consumer side: nothing in tray/secrets/permissions/updater.ts checks
-    # that response before running, so flipping a flag still disables
-    # nothing client-side. That consumer wiring is out of this package's
-    # scope (packages/desktop).
+    # The menu bar, Keychain secrets, permissions wizard, auto-updates and
+    # universal binary are not flags either: the desktop app ships them in
+    # every tier and nothing reads a flag before running them, so a flag
+    # would claim a switch that does not exist. scripts/gen_tier_matrix.py
+    # lists them in the tier matrix as always on.
 
     # ---- Pro features (require pro or enterprise tier) ----
     # Pro meeting capture bucket
@@ -262,11 +250,6 @@ FEATURE_BUCKETS: dict[str, list[str]] = {
         "share_sheet",
         "shortcuts_actions",
         "quicklook_preview",
-        "menu_bar_mode",
-        "keychain_secrets",
-        "tcc_wizard",
-        "sparkle_updates",
-        "universal_binary",
     ],
 }
 
@@ -312,7 +295,6 @@ def _refresh_flags() -> None:
 ENABLE_HALLUCINATION_CHECK = os.getenv("ENABLE_HALLUCINATION_CHECK", "true").lower() == "true"
 ENABLE_FEEDBACK_LOOP = os.getenv("ENABLE_FEEDBACK_LOOP", "false").lower() == "true"
 ENABLE_MEMORY_EXTRACTION = os.getenv("ENABLE_MEMORY_EXTRACTION", "true").lower() == "true"
-ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "false").lower() == "true"
 ENABLE_AUTO_INJECT = os.getenv("ENABLE_AUTO_INJECT", "true").lower() == "true"
 ENABLE_SELF_RAG = os.getenv("ENABLE_SELF_RAG", "true").lower() == "true"
 ENABLE_CONTEXTUAL_CHUNKS = os.getenv("ENABLE_CONTEXTUAL_CHUNKS", "false").lower() == "true"
@@ -344,7 +326,8 @@ ENABLE_MEMORY_RECALL = os.getenv("ENABLE_MEMORY_RECALL", "true").lower() == "tru
 # them as a `timings` field on the response. Per-request overrides via the
 # `X-Debug-Timing` header still work; this flag controls the default.
 ENABLE_STEP_TIMING = os.getenv("ENABLE_STEP_TIMING", "true").lower() == "true"
-# CERID_ENCRYPTION_KEY is read directly from env by utils/encryption.py
+# Field encryption has no toggle: it is on exactly when CERID_ENCRYPTION_KEY is
+# set, read directly from env by utils/encryption.py.
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # ---------------------------------------------------------------------------
@@ -438,7 +421,10 @@ SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
 #                       edges produced by Phase 4a.3 extraction. Requires
 #                       backfill (Phase 4a.4) to have populated the entity
 #                       graph; before backfill it falls through to baseline.
-#   "auto"            — Phase 4b.3 query-router decides per-query.
+#   "auto"            — the same entity expansion as "local_graphrag". It used
+#                       to send thematic queries to community summaries; that
+#                       path was retired 2026-10-12 (audit F129), so auto
+#                       routes nothing.
 RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "baseline").lower()
 _VALID_RETRIEVAL_MODES = frozenset(("baseline", "local_graphrag", "auto"))
 if RETRIEVAL_MODE not in _VALID_RETRIEVAL_MODES:
@@ -446,9 +432,6 @@ if RETRIEVAL_MODE not in _VALID_RETRIEVAL_MODES:
 
 # Parent-child chunking retrieval
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in ("true", "1")
-
-# Degradation tiers: circuit-breaker-aware graceful degradation
-ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Smart Orchestration
@@ -509,15 +492,17 @@ RAG_CONVERSATIONS_POLICY = os.getenv("RAG_CONVERSATIONS_POLICY", "exclude").stri
 _VALID_RAG_CONVERSATIONS_POLICIES = frozenset(("exclude", "discount", "include"))
 
 # ---------------------------------------------------------------------------
-# Unified toggle registry — single source of truth for all boolean toggles.
-# Module-level ENABLE_* vars above remain for backward compatibility.
-# Use ``set_toggle()`` (utils/features.py) for runtime mutations.
+# Unified toggle registry — every ENABLE_* toggle defined in this module.
+# Readers consult the module attribute at call time (``config.ENABLE_X``,
+# ``config.features.ENABLE_X`` or a function-local import), so ``set_toggle()``
+# (utils/features.py) reaches them; test_feature_registry.py enforces both.
+# The ENABLE_* settings in config/settings.py are not toggles: they are read
+# from the environment at startup and set_toggle() cannot change them.
 # ---------------------------------------------------------------------------
 FEATURE_TOGGLES: dict[str, bool] = {
     "enable_hallucination_check": ENABLE_HALLUCINATION_CHECK,
     "enable_feedback_loop": ENABLE_FEEDBACK_LOOP,
     "enable_memory_extraction": ENABLE_MEMORY_EXTRACTION,
-    "enable_encryption": ENABLE_ENCRYPTION,
     "enable_auto_inject": ENABLE_AUTO_INJECT,
     "enable_self_rag": ENABLE_SELF_RAG,
     "enable_contextual_chunks": ENABLE_CONTEXTUAL_CHUNKS,
@@ -536,6 +521,11 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_context_compression": ENABLE_CONTEXT_COMPRESSION,
     "enable_parent_child_retrieval": ENABLE_PARENT_CHILD_RETRIEVAL,
     "enable_contradiction_ledger": ENABLE_CONTRADICTION_LEDGER,
+    "enable_surface_biased_retrieval": ENABLE_SURFACE_BIASED_RETRIEVAL,
+    "enable_step_timing": ENABLE_STEP_TIMING,
+    "enable_fact_writes": ENABLE_FACT_WRITES,
+    "enable_fact_symbolic_count": ENABLE_FACT_SYMBOLIC_COUNT,
+    "enable_session_summarization": ENABLE_SESSION_SUMMARIZATION,
 }
 
 # ---------------------------------------------------------------------------
@@ -765,8 +755,6 @@ _COMMUNITY_FLAGS: frozenset[str] = frozenset({
     "truth_audit", "live_metrics", "private_mode", "basic_workflows",
     "voice_memos_watch", "share_sheet",
     "shortcuts_actions", "quicklook_preview",
-    "menu_bar_mode", "keychain_secrets", "tcc_wizard", "sparkle_updates",
-    "universal_binary",
 })
 
 

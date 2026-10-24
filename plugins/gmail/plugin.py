@@ -448,12 +448,13 @@ class GmailConnector:
             "date": message.date,
             "labels": json.dumps(message.labels),
             "content_hash": content_hash,
+            "sub_category": "gmail",
         }
 
         try:
             result = ingest_content(
                 content=content,
-                domain="general",
+                domain="mail",
                 metadata=metadata,
             )
             logger.info(

@@ -40,6 +40,7 @@ from core.processor import cost as cost_estimator
 from core.processor.job import BaseJob, JobRecord, JobResult, JobState
 from core.processor.mode import processor_is_disabled, resolve_processor_mode
 from core.processor.priority import priority_order
+from core.routing.egress import cloud_egress_refused
 from core.utils.cpu import effective_cpu_count as _effective_cpu_count
 from core.utils.internal_llm import llm_call_override
 from core.utils.swallowed import log_swallowed_error
@@ -307,6 +308,7 @@ class ProcessorWorker:
                 record.requires_llm
                 and chosen_model is not None
                 and chosen_model != default_local
+                and not cloud_egress_refused()
             ):
                 with llm_call_override("openrouter", chosen_model):
                     raw_result: JobResult = await job.run(progress_cb=progress_cb)

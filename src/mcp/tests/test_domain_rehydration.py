@@ -41,6 +41,26 @@ def test_merge_is_add_only_never_overwrites_static(monkeypatch):
     assert config.TAXONOMY[existing] == original
 
 
+def test_an_operational_domain_is_listed_and_not_copied_into_taxonomy(monkeypatch):
+    """The :Domain node for anneal stays on DOMAINS. Its path labels do not become the shelf."""
+    monkeypatch.setattr(config, "TAXONOMY", dict(config.TAXONOMY))
+    monkeypatch.setattr(config, "DOMAINS", list(config.DOMAINS))
+
+    added = merge_persisted_domains(
+        [{
+            "name": "anneal_lessons",
+            "description": "persisted",
+            "icon": "",
+            "sub_categories": ["anneal_lessons/retro"],
+        }]
+    )
+
+    assert added == 1
+    assert "anneal_lessons" not in config.TAXONOMY
+    assert "anneal_lessons" in config.DOMAINS
+    assert "lesson" in config.sub_categories_for("anneal_lessons")
+
+
 def test_merge_empty_list_is_noop(monkeypatch):
     monkeypatch.setattr(config, "TAXONOMY", dict(config.TAXONOMY))
     monkeypatch.setattr(config, "DOMAINS", list(config.DOMAINS))

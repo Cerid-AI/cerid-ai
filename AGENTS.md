@@ -4,7 +4,7 @@
 
 ## Project Landscape
 - **Primary development**: `cerid-ai-internal` (canonical)
-- **Public offering**: `cerid-ai` (the repository people run; not a store)
+- **Public distribution**: `cerid-ai`
 - **Supporting projects**: `quenchforge`, trading-agent, etc.
 - **Dotfiles**: `~/dotfiles` (shell, LaunchAgents, Claude hooks, skills)
 

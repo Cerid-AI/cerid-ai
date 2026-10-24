@@ -715,6 +715,10 @@ async def _extract_claims_llm(
         log_swallowed_error("core.agents.hallucination.extraction.internal_claims", e)
         logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
+    from core.routing.egress import cloud_egress_refused
+
+    if cloud_egress_refused():
+        return []  # the claim text may not leave the host; the caller falls back to heuristics
     for model in models:
         try:
             content = await call_llm(

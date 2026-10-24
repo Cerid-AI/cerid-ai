@@ -1,5 +1,7 @@
 # Pro Connector — Gmail
 
+> Connector notes. The product tier around them is historical. Mail lands in domain `mail`, sub-category `gmail`.
+
 ## What this connector does
 
 The Gmail Pro connector lets chat answers cite messages from your Gmail
@@ -118,7 +120,7 @@ container's persistent volume and survives restarts. Repeat this when you
 revoke access in your Google account settings, when you turn inbox actions
 on (the router does not start that re-login), or when the OAuth consent
 screen is still in "Testing" — Google expires that refresh token after 7
-days. The connector runbook is not a separate document in this repository.
+days. See `docs/RUNBOOK_PRO_CONNECTORS.md` §2.
 
 ## Enable in Cerid
 

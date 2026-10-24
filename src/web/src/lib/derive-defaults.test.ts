@@ -36,7 +36,7 @@ describe("deriveDefaultModel — registry resolution", () => {
   it("falls back to the static PROVIDER_DEFAULTS table when the registry is absent", () => {
     // Endpoint-unavailable path: routing fetch failed, registry is undefined.
     const providers = [{ id: "openrouter", configured: true }]
-    expect(deriveDefaultModel(providers)).toBe("openrouter/openai/gpt-4o-mini")
+    expect(deriveDefaultModel(providers)).toBe("openrouter/openai/gpt-6-luna")
   })
 
   it("uses the static table for a non-OpenRouter provider even when a registry is present", () => {

@@ -50,10 +50,7 @@ def _hype_hit(
         "tags_json": "[]",
         "keywords": "[]",
         "memory_type": "",
-        "metadata": {
-            "source_chunk_id": source_chunk_id,
-            "source_artifact_id": source_artifact_id,
-        },
+        "metadata": {},
     }
 
 
@@ -159,3 +156,72 @@ class TestDedupWithHypeResults:
         # The function appends when source_chunk_id is truthy-and-not-in-content.
         # Empty string → falls into "no source_chunk_id" branch → skipped.
         assert len(merged) == 1
+
+    def test_hype_hit_without_source_chunk_id_is_reported(self, caplog):
+        # F62: the dropped hit used to vanish without a trace, so an unlinked
+        # HyPE batch looked like an empty miss.
+        content = [_content_hit("c1", 0.7)]
+        unlinked = _hype_hit("orphan_hype_0", "", 0.9)
+        with caplog.at_level("WARNING", logger="ai-companion.hype_match"):
+            merged = dedup_with_hype_results(content, [unlinked])
+        assert [r["chunk_id"] for r in merged] == ["c1"]
+        assert "dropped 1 HyPE hit" in caplog.text
+
+
+class TestHypeOnlyHitKeepsHydratedFields:
+    """F63: a HyPE-only hit was rebuilt from a fixed field list, so it lost the
+    ``source_type`` label and, with it, the lineage and parent linkage the read
+    filters after the merge (``visible``) depend on."""
+
+    def _hydrated(self, metadata: dict) -> dict:
+        from core.agents.query_agent import _format_chroma_result
+
+        hit = _format_chroma_result(
+            content="parent chunk text", relevance=0.8, chunk_id="c9",
+            domain="general", metadata={"artifact_id": "a9", **metadata},
+        )
+        # Stamped the way the hydration step in query_agent stamps it.
+        hit["source_chunk_id"] = "c9"
+        return hit
+
+    def test_source_type_and_parent_linkage_survive(self):
+        hit = self._hydrated({"pack_id": "pack1", "parent_chunk_id": "p9"})
+        merged = dedup_with_hype_results([_content_hit("c1", 0.7)], [hit])
+        added = next(r for r in merged if r["chunk_id"] == "c9")
+        assert added["source_type"] == "pack"
+        assert added["parent_chunk_id"] == "p9"
+        assert added["artifact_id"] == "a9"
+        assert added["hype_source"] is True
+        assert "source_chunk_id" not in added
+        assert added["metadata"] == {}
+
+    def test_custom_ingest_metadata_survives(self):
+        """F131: the same chunk carries its custom metadata whether content
+        retrieval or HyPE found it."""
+        hit = self._hydrated({"repo_sig": "abc123", "importance": "high"})
+        merged = dedup_with_hype_results([], [hit])
+        assert merged[0]["metadata"] == {"repo_sig": "abc123", "importance": "high"}
+
+    def test_consumer_metadata_cannot_steer_the_merge(self):
+        """A consumer is free to name a custom key ``source_chunk_id``. It must
+        neither redirect the hit onto another chunk nor replace the artifact
+        id, and it must come back to the consumer unchanged."""
+        custom = {"source_chunk_id": "c1", "source_artifact_id": "theirs"}
+        hit = self._hydrated(custom)
+        merged = dedup_with_hype_results([_content_hit("c1", 0.7)], [hit])
+        added = next(r for r in merged if r["chunk_id"] == "c9")
+        assert added["artifact_id"] == "a9"
+        assert added["metadata"] == custom
+        c1 = next(r for r in merged if r["chunk_id"] == "c1")
+        assert c1["relevance"] == 0.7 and not c1.get("hype_boosted")
+
+    def test_superseded_version_stays_out_of_current_reads(self):
+        from core.lineage.current import valid_at
+
+        hit = self._hydrated({"valid_to": "2026-01-01T00:00:00Z", "superseded_by": "c10"})
+        merged = dedup_with_hype_results([], [hit])
+        assert valid_at(merged[0], None) is False
+
+    def test_bare_hit_defaults_to_kb(self):
+        merged = dedup_with_hype_results([], [_hype_hit("c2_hype_0", "c2", 0.6)])
+        assert merged[0]["source_type"] == "kb"

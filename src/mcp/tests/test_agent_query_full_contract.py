@@ -136,7 +136,7 @@ class _FakeExternalRegistry:
         self._rows = rows
         self.calls = 0
 
-    async def query_all(self, search_terms, domain=None, timeout=None):
+    async def query_all(self, search_terms, domain=None, timeout=None, *, raw_query=None, keywords=None):
         self.calls += 1
         return self._rows
 
@@ -196,7 +196,7 @@ async def test_wired_crag_merge_keeps_every_kb_result(wired_crag):
         "core.agents.query_agent.agent_query",
         new=AsyncMock(return_value=_legacy_kb_result()),
     ):
-        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+        out = await agent_query_full(query="vesting cliff rules", external_augmentation=True)
 
     kept = {r.get("artifact_id") for r in out["results"] if r.get("source_type") == "kb"}
     assert kept == {"a1", "a2"}, (
@@ -222,7 +222,7 @@ async def test_wired_crag_merge_holds_the_flatten_invariant(wired_crag):
         "core.agents.query_agent.agent_query",
         new=AsyncMock(return_value=_legacy_kb_result()),
     ):
-        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+        out = await agent_query_full(query="vesting cliff rules", external_augmentation=True)
 
     breakdown = out["source_breakdown"]
     assert len(out["results"]) == sum(len(v) for v in breakdown.values())
@@ -246,7 +246,7 @@ async def test_wired_crag_fires_and_appends_the_external_hit(wired_crag):
         "core.agents.query_agent.agent_query",
         new=AsyncMock(return_value=_legacy_kb_result()),
     ):
-        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+        out = await agent_query_full(query="vesting cliff rules", external_augmentation=True)
 
     assert registry.calls == 1
     external = [r for r in out["results"] if r.get("source_type") == "external"]
@@ -269,7 +269,7 @@ async def test_wired_crag_does_not_fire_on_a_strong_kb_hit(wired_crag):
         "core.agents.query_agent.agent_query",
         new=AsyncMock(return_value=strong),
     ):
-        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+        out = await agent_query_full(query="vesting cliff rules", external_augmentation=True)
 
     assert registry.calls == 0
     assert [r["artifact_id"] for r in out["results"]] == ["a1", "a2"]
@@ -296,12 +296,31 @@ async def test_wired_crag_merge_keeps_every_field_the_envelope_does_not_model(wi
     kb["sources"] = [{**kb["results"][0], "content": "vesting…"}]
 
     with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=kb)):
-        out = await agent_query_full(query="my vesting cliff", external_augmentation=True)
+        out = await agent_query_full(query="vesting cliff rules", external_augmentation=True)
 
-    assert out["results"][0]["chunk_index"] == 3
-    assert out["results"][0]["pack_id"] == "p1"
-    assert out["results"][0]["metadata"] == {"k": "v"}
-    assert out["results"][1]["source_type"] == "wiki"
-    assert out["sources"][0]["content"] == "vesting…", "sources collapsed into results"
+    by_id = {r.get("artifact_id"): r for r in out["results"]}
+    assert by_id["a1"]["chunk_index"] == 3
+    assert by_id["a1"]["pack_id"] == "p1"
+    assert by_id["a1"]["metadata"] == {"k": "v"}
+    assert by_id["a2"]["source_type"] == "wiki"
+    assert next(s for s in out["sources"] if s.get("artifact_id") == "a1")["content"] == "vesting…", "sources collapsed into results"
     assert len(out["sources"]) == 2 and len(out["results"]) == 3
     assert [r["artifact_id"] for r in out["source_breakdown"]["kb"]] == ["a1", "a2"]
+
+
+@pytest.mark.asyncio
+async def test_an_external_hit_competes_for_top_k_on_relevance(wired_crag):
+    """The top_k cap runs after CRAG. External rows appended behind every KB row
+    were the first cut: a Wikipedia hit at 0.54 lost to KB rows at 0.2, so
+    no external source ever reached a caller."""
+    from core.agents.query_agent import agent_query_full
+
+    wired_crag([{"content": "Lagos population", "url": "https://w/Lagos", "source_name": "Wikipedia", "relevance": 0.9}])
+    kb = [{"content": f"weak {i}", "relevance": 0.40 - 0.01 * i, "artifact_id": f"a{i}", "filename": "x.md",
+           "source_type": "kb", "domain": "general"} for i in range(10)]
+    weak = {"context": "", "sources": kb, "results": kb, "confidence": 0.3, "total_results": 10, "domains_searched": ["general"]}
+    with patch("core.agents.query_agent.agent_query", new=AsyncMock(return_value=weak)):
+        out = await agent_query_full(query="population of Lagos", top_k=3, external_augmentation=True)
+    assert out["results"][0]["source_type"] == "external"
+    assert out["sources"][0]["source_url"] == "https://w/Lagos"
+    assert [r["relevance"] for r in out["results"]] == sorted((r["relevance"] for r in out["results"]), reverse=True)

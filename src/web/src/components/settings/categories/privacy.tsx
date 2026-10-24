@@ -207,7 +207,7 @@ function DataProtectionSection() {
         <SettingRow def={encDef}>
           <div className="flex items-center gap-2">
             <Lock className="h-4 w-4 text-muted-foreground" />
-            <ReadOnlyEnvHint envVar="CERID_ENCRYPTION" />
+            <ReadOnlyEnvHint envVar="CERID_ENCRYPTION_KEY" />
           </div>
         </SettingRow>
         <AdvancedDisclosure category="privacy" group="data">

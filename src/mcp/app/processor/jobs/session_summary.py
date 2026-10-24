@@ -418,7 +418,7 @@ def _link_and_mark(driver: Any, artifact_id: str, conversation_id: str) -> None:
             "MATCH (a:Artifact {id: $aid}) "
             "MERGE (c:Conversation {id: $cid}) "
             "MERGE (a)-[:EXTRACTED_FROM]->(c) "
-            "SET a.memory_scope = $scope "
+            "SET a.memory_scope = $scope, a.conversation_id = coalesce(a.conversation_id, $cid) "
             "REMOVE a.summary_stale",
             aid=artifact_id,
             cid=conversation_id,

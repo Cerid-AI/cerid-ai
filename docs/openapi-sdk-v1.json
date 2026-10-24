@@ -422,6 +422,14 @@
             "title": "Response Text",
             "type": "string"
           },
+          "source_artifact_ids": {
+            "description": "KB artifact IDs the answer was generated from. A claim verified against one of them is labelled circular_source (KB verified).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Artifact Ids",
+            "type": "array"
+          },
           "threshold": {
             "anyOf": [
               {

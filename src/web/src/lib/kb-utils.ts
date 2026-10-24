@@ -25,6 +25,7 @@ export const MODEL_CONTEXT_CHAR_BUDGETS: Record<string, number> = {
   "gemini":      120_000,  // Gemini: 1M context
   "gpt-4o-mini": 20_000,   // GPT-4o-mini: cheaper, tighter budget (checked before gpt-4o)
   "gpt-4o":      40_000,   // GPT-4o: 128K context
+  "gpt-6":       120_000,  // GPT-6 Luna / Sol / Astra: 1M context
   "llama":       16_000,   // Llama: 32K–128K context
   "grok":        60_000,   // Grok: 2M context
 }
@@ -109,6 +110,18 @@ export function jaccardSimilarity(a: string, b: string): number {
  * Remove KB chunks with high text overlap (Jaccard similarity above threshold).
  * Keeps the first occurrence (higher relevance, since results are pre-sorted).
  */
+/**
+ * Identity of an injected source across turns. A KB chunk is its artifact and
+ * chunk; an external result has neither, so it is its URL (or, failing that,
+ * its opening text) — keyed by the empty id, every web result looked like the
+ * first one injected in the chat.
+ */
+export function injectionKey(source: { artifact_id?: string; chunk_index?: number; source_url?: string; content?: string }): string {
+  if (source.artifact_id) return `${source.artifact_id}:${source.chunk_index}`
+  if (source.source_url) return `url:${source.source_url}`
+  return `text:${(source.content ?? "").slice(0, 200)}`
+}
+
 export function deduplicateChunks(
   sources: KBQueryResult[],
   threshold = 0.7,
@@ -219,9 +232,10 @@ export function externalToKBResult(ext: ExternalSourceResult): KBQueryResult {
   return {
     content: ext.content,
     relevance: ext.relevance,
-    // Use the URL as a stable artifact_id so dedupeByArtifact can group
-    // multiple chunks from the same external page.
-    artifact_id: ext.source_url,
+    // The row's own guid when the backend sends one: two rows from one URL
+    // (or from none) are still two sources. Without it, the URL groups
+    // chunks of the same page.
+    artifact_id: ext.guid || ext.source_url,
     filename: displayName,
     domain: "external",
     chunk_index: 0,

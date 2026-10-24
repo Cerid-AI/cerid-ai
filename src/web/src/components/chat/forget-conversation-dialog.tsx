@@ -21,6 +21,7 @@ const HEADINGS: Partial<Record<PreviewGroup["key"], string>> = {
   memories: "Memories from this chat",
   summary: "Session summary",
   verified_memories: "Verified memories",
+  uploads: "Files uploaded in this chat",
   cited_documents: "Documents this chat cited",
 }
 
@@ -35,6 +36,11 @@ function defaultChecked(group: PreviewGroup, item: PreviewItem): boolean {
 function itemNote(group: PreviewGroup, item: PreviewItem): string | null {
   if (group.key === "memories" && item.shared_with) {
     return `Also from ${plural(item.shared_with, "other conversation")}`
+  }
+  if (group.key === "uploads") {
+    if (item.existing) return "Was in your knowledge base before this chat · forgets the whole document"
+    if (item.shared_with) return `Also uploaded in ${plural(item.shared_with, "other conversation")} · forgets the whole document`
+    return "Forgets the whole document"
   }
   if (group.key === "cited_documents") {
     return `Used by ${plural(item.used_by ?? 0, "other conversation")} · forgets the whole document`

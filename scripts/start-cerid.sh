@@ -77,7 +77,8 @@ fi
 for PORT_CHECK in "${CERID_PORT_GUI:-3000}:GUI" "${CERID_PORT_MCP:-8888}:MCP"; do
     _PORT="${PORT_CHECK%%:*}"
     _NAME="${PORT_CHECK##*:}"
-    if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"$_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"$_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
+        && [ -z "$(docker ps -q --filter "publish=$_PORT" 2>/dev/null)" ]; then
         echo "Warning: Port $_PORT ($_NAME) is already in use. Docker may fail to bind."
     fi
 done
@@ -963,12 +964,18 @@ if [ -n "$OLLAMA_PROFILE" ]; then
     fi
 elif [ "$OLLAMA_CONFIGURED" = "true" ] && [ "${CERID_OLLAMA_IMAGE:-}" = "native" ]; then
     # macOS native Ollama — check if it's running
-    echo -n "  Ollama (native)..."
-    OLLAMA_NATIVE_URL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "http://localhost:11434")
-    if wait_for_service "Ollama" "${OLLAMA_NATIVE_URL}/api/tags" 5 1; then
+    # OLLAMA_URL is the containers' address for the host's model server
+    # (host.docker.internal), which does not resolve on the host itself, so
+    # this probe reported a running server as down. Whichever server listens
+    # there (the MLX server on the Mac Studio, quenchforge on the Mac Pro) is
+    # started by its own LaunchAgent; `ollama serve` would fight it for the port.
+    echo -n "  Local model server..."
+    OLLAMA_NATIVE_URL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || true)
+    OLLAMA_HOST_URL=$(printf '%s' "${OLLAMA_NATIVE_URL:-http://localhost:11434}" | sed 's#host\.docker\.internal#localhost#')
+    if wait_for_service "Local model server" "${OLLAMA_HOST_URL}/api/tags" 5 1; then
         echo " ready"
     else
-        echo " not running (start with: ollama serve)"
+        echo " not answering at ${OLLAMA_HOST_URL} (restart its LaunchAgent: com.sunrunner.cerid-mlx on the Mac Studio, com.cerid.quenchforge on the Mac Pro)"
     fi
 fi
 

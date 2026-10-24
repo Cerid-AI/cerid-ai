@@ -9,8 +9,42 @@ import {
   getContextBudget,
   selectDocsWithinBudget,
   MODEL_CONTEXT_CHAR_BUDGETS,
+  externalToKBResult,
+  injectionKey,
 } from "@/lib/kb-utils"
-import type { KBQueryResult } from "@/lib/types"
+import type { ExternalSourceResult, KBQueryResult } from "@/lib/types"
+
+// ---------------------------------------------------------------------------
+// externalToKBResult
+// ---------------------------------------------------------------------------
+
+describe("externalToKBResult", () => {
+  const ext = (over: Partial<ExternalSourceResult>): ExternalSourceResult => ({
+    content: "page text",
+    relevance: 0.7,
+    source_url: "https://example.org/page",
+    source_type: "external",
+    ...over,
+  })
+
+  it("keeps two rows from the same URL apart when the backend gives each a guid", () => {
+    const a = externalToKBResult(ext({ guid: "g-1", content: "first passage" }))
+    const b = externalToKBResult(ext({ guid: "g-2", content: "second passage" }))
+    expect(a.artifact_id).not.toBe(b.artifact_id)
+    expect(injectionKey(a)).not.toBe(injectionKey(b))
+    expect(a.source_url).toBe(b.source_url)
+  })
+
+  it("keeps two URL-less rows apart by guid", () => {
+    const a = externalToKBResult(ext({ guid: "g-1", source_url: "" }))
+    const b = externalToKBResult(ext({ guid: "g-2", source_url: "" }))
+    expect(a.artifact_id).not.toBe(b.artifact_id)
+  })
+
+  it("falls back to the URL when there is no guid", () => {
+    expect(externalToKBResult(ext({})).artifact_id).toBe("https://example.org/page")
+  })
+})
 
 // ---------------------------------------------------------------------------
 // jaccardSimilarity

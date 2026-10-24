@@ -74,7 +74,7 @@ class TestMemoryRecallEnvelope:
         assert isinstance(body, dict), (
             f"D invariant: expected dict envelope, got {type(body).__name__}"
         )
-        assert body == {"memories": [], "total": 0}
+        assert body == {"memories": [], "total": 0, "degraded": False}
 
     @pytest.mark.asyncio
     async def test_populated_recall_returns_object(self, client):
@@ -127,7 +127,7 @@ class TestMemoryRecallEnvelope:
         assert res.status_code == 200
         body = res.json()
         assert isinstance(body, dict)
-        assert body == {"memories": [], "total": 0}
+        assert body == {"memories": [], "total": 0, "degraded": True}
 
 
 # ---------------------------------------------------------------------------

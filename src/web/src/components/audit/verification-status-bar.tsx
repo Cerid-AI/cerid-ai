@@ -301,7 +301,7 @@ export function VerificationStatusBar({
   // "verified" means a source the user can open. The server counts by the same
   // rule; counting the claims here keeps a report stored before that rule from
   // showing a second model's agreement as verified.
-  const { verified, agreed: agreedCount } = reportPositiveCounts(report.summary, report.claims)
+  const { verified, agreed: agreedCount, kbVerified } = reportPositiveCounts(report.summary, report.claims)
   const skippedCount = report.summary?.skipped ?? 0
 
   // Split uncertain into timed-out (evidence gathering cut short) and
@@ -396,8 +396,16 @@ export function VerificationStatusBar({
 
           {(verified > 0 || agreedCount > 0) && (
             <Tooltip><TooltipTrigger asChild>
-              <span className={cn("shrink-0", verified > 0 ? "text-green-700 dark:text-green-400" : "text-muted-foreground")}>{verified} verified</span>
-            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims supported by a source you can open: a KB document or a web result</p></TooltipContent></Tooltip>
+              <span className={cn("shrink-0", verified > 0 ? "text-green-700 dark:text-green-400" : "text-muted-foreground")}>
+                {verified} verified
+                {kbVerified > 0 && (
+                  <span className="text-muted-foreground"> ({UX_COPY.verification.verifiedSplit(kbVerified, verified - kbVerified)})</span>
+                )}
+              </span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">
+              Claims supported by a source you can open: a KB document or a web result.
+              {kbVerified > 0 && ` ${UX_COPY.verification.kbVerifiedExplained}`}
+            </p></TooltipContent></Tooltip>
           )}
           {agreedCount > 0 && (
             <Tooltip><TooltipTrigger asChild>

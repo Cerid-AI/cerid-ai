@@ -212,3 +212,111 @@ async def test_hype_boost_of_existing_content_hit_still_works() -> None:
     assert len(merged) == 1
     assert merged[0]["relevance"] > 0.1
     assert merged[0]["content"] == "body"
+
+
+# F131 — a HyPE-only hit carries the metadata a content hit for the same chunk
+# carries, the consumer's custom ingest metadata included.
+_CUSTOM = {"repo_sig": "abc123", "importance": "high"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_hype_on")
+async def test_hype_only_hit_keeps_the_chunks_custom_metadata() -> None:
+    import config
+    from core.agents import query_agent
+    from core.retrieval.hype_index import hype_collection_name
+
+    stored = {"filename": "notes.md", "artifact_id": "art-1", "chunk_index": 3, **_CUSTOM}
+    base_name = config.collection_name("general")
+    base = _FakeBaseCollection({"chunk-1": ("body", stored)})
+    hype = _FakeHypeCollection([
+        ("hype-1", "a question", {"source_chunk_id": "chunk-1", "source_artifact_id": "art-1"}),
+    ])
+    client = _FakeChroma({base_name: base, hype_collection_name(base_name): hype})
+
+    merged = await query_agent._augment_with_hype(
+        query="q", results=[], chroma_client=client, domains=["general"],
+    )
+
+    as_content_hit = query_agent._format_chroma_result(
+        content="body", relevance=0.5, chunk_id="chunk-1", domain="general", metadata=stored,
+    )
+    assert merged[0].get("metadata") == as_content_hit["metadata"] == _CUSTOM
+    assert merged[0]["artifact_id"] == "art-1"
+
+
+class _FakeDomainCollection(_FakeBaseCollection):
+    """A domain collection whose content search returns one chunk."""
+
+    def __init__(self, rows: dict[str, tuple[str, dict[str, Any]]], content_hit: str) -> None:
+        super().__init__(rows)
+        self._content_hit = content_hit
+
+    def count(self) -> int:
+        return len(self._rows)
+
+    def query(self, **kwargs: Any) -> dict[str, Any]:
+        doc, meta = self._rows[self._content_hit]
+        return {"ids": [[self._content_hit]], "documents": [[doc]],
+                "metadatas": [[meta]], "distances": [[0.3]]}
+
+    def get(self, **kwargs: Any) -> dict[str, Any]:
+        if "ids" not in kwargs:
+            self.get_calls.append(kwargs)
+            return {"ids": [], "documents": [], "metadatas": []}
+        return super().get(**kwargs)
+
+
+class _ListingChroma(_FakeChroma):
+    def list_collections(self) -> list[Any]:
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(name=n) for n in self._collections]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_hype_on")
+async def test_agent_query_returns_custom_metadata_on_content_and_hype_hits() -> None:
+    """Through the real agent_query: one chunk found by its content, another
+    only by its hypothetical question. Both answer with their own metadata."""
+    from unittest.mock import patch
+
+    import config
+    from core.agents.query_agent import agent_query
+    from core.retrieval.hype_index import hype_collection_name
+    from tests.test_rag_pipeline_integration import _FEATURE_OVERRIDES, _mock_neo4j
+
+    def _meta(name: str, custom: dict[str, Any]) -> dict[str, Any]:
+        return {"domain": "coding", "filename": name, "artifact_id": name, "chunk_index": 0,
+                "ingested_at": "", "sub_category": "", "tags_json": "[]", "keywords": "[]",
+                **custom}
+
+    by_content = {"repo_sig": "content-sig"}
+    base_name = config.collection_name("coding")
+    base = _FakeDomainCollection({
+        "c-content": ("Spark caches a DataFrame with cache().", _meta("spark.md", by_content)),
+        "c-hype": ("Persist with StorageLevel.MEMORY_AND_DISK.", _meta("persist.md", _CUSTOM)),
+    }, content_hit="c-content")
+    hype = _FakeHypeCollection([
+        ("c-hype_hype_0", "how do I keep a DataFrame in memory?",
+         {"source_chunk_id": "c-hype", "source_artifact_id": "persist.md"}),
+    ])
+    client = _ListingChroma({base_name: base, hype_collection_name(base_name): hype})
+    features: dict[str, Any] = {k.split(".")[-1]: v for k, v in _FEATURE_OVERRIDES.items()}
+    neutral = {"contradiction": 0.0, "entailment": 0.0, "neutral": 1.0, "label": "neutral"}
+
+    with (
+        patch.multiple("config.features", **features),
+        patch("core.retrieval.bm25.is_available", return_value=False),
+        patch("core.utils.nli.batch_nli_score", side_effect=lambda pairs: [neutral] * len(pairs)),
+    ):
+        result = await agent_query(
+            query="how do I cache a DataFrame", domains=["coding"], strict_domains=True,
+            chroma_client=client, neo4j_driver=_mock_neo4j(), use_reranking=False,
+            skip_cache=True,
+        )
+
+    by_file = {r["filename"]: r for r in result["results"]}
+    assert by_file["persist.md"].get("hype_source") is True, by_file
+    assert by_file["spark.md"]["metadata"] == by_content
+    assert by_file["persist.md"].get("metadata") == _CUSTOM

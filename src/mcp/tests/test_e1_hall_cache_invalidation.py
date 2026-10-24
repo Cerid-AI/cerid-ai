@@ -24,6 +24,10 @@ class _FakeRedis:
     def zrem(self, name, *members):
         return 0
 
+    def scan_iter(self, match=None, count=None):
+        import fnmatch
+        return iter([k for k in self.store if match is None or fnmatch.fnmatchcase(k, match)])
+
 
 def test_delete_hallucination_report_removes_key():
     from core.agents.hallucination import (

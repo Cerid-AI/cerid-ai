@@ -20,6 +20,7 @@ from app.deps import get_redis
 from app.services.private_mode import PRIVATE_MODE_KEY, get_private_mode_level
 from core.utils.swallowed import log_swallowed_error
 from core.utils.version import get_version
+from utils.encryption import get_encryptor
 from utils.features import set_toggle
 from utils.web_search import get_search_provider
 
@@ -479,7 +480,9 @@ async def get_settings_endpoint():
         "categorize_mode": config.CATEGORIZE_MODE,
         "chunk_max_tokens": config.CHUNK_MAX_TOKENS,
         "chunk_overlap": config.CHUNK_OVERLAP,
-        "enable_encryption": config.ENABLE_ENCRYPTION,
+        # Whether field encryption is actually on: it runs exactly when a usable
+        # CERID_ENCRYPTION_KEY is loaded. There is no separate switch.
+        "enable_encryption": get_encryptor() is not None,
         "enable_feedback_loop": config.ENABLE_FEEDBACK_LOOP,
         "enable_hallucination_check": config.ENABLE_HALLUCINATION_CHECK,
         "enable_memory_extraction": config.ENABLE_MEMORY_EXTRACTION,
@@ -787,12 +790,6 @@ def apply_settings_update(req: SettingsUpdateRequest) -> dict[str, str | bool | 
         updated["enable_hype"] = req.enable_hype
 
     if req.enable_parent_child_retrieval is not None:
-        os.environ["ENABLE_PARENT_CHILD_RETRIEVAL"] = (
-            "true" if req.enable_parent_child_retrieval else "false"
-        )
-        # The ingest path reads utils.chunker's copy, captured at import.
-        from utils import chunker as _chunker_mod
-        _chunker_mod.PARENT_CHILD_ENABLED = req.enable_parent_child_retrieval
         set_toggle("enable_parent_child_retrieval", req.enable_parent_child_retrieval)
         updated["enable_parent_child_retrieval"] = req.enable_parent_child_retrieval
 
@@ -1461,7 +1458,7 @@ async def get_egress_report():
     # model_catalog_refresh — app/scheduler.py only registers the weekly
     # job when MODEL_AUTO_UPDATE_ENABLED is true; the OpenRouter models
     # listing endpoint itself is unauthenticated.
-    catalog_on = bool(getattr(config, "MODEL_AUTO_UPDATE_ENABLED", True))
+    catalog_on = bool(getattr(config, "MODEL_AUTO_UPDATE_ENABLED", False))
     rows.append({
         "channel": "model_catalog_refresh",
         "destination": "openrouter.ai/api/v1/models",

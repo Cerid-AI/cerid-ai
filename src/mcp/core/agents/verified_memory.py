@@ -94,6 +94,14 @@ def _claim_lock(claim_text: str) -> asyncio.Lock:
     return _PROMOTE_LOCKS.setdefault(key, asyncio.Lock())
 
 
+def _memory_exists(neo4j_driver: Any, memory_id: str) -> bool:
+    if neo4j_driver is None:
+        return False
+    with neo4j_driver.session() as session:
+        rec = session.run("MATCH (m:Memory {id: $id}) RETURN count(m) AS n", id=memory_id).single()
+    return bool(rec and rec["n"])
+
+
 async def promote_verified_facts(
     verification_report: dict[str, Any],
     chroma_client: Any,
@@ -242,7 +250,28 @@ async def promote_verified_facts(
                 # verify_claim has only ever emitted the flat one.
                 primary_artifact_id = claim_data.get("source_artifact_id", "")
 
+                # One identity per claim (forget spec §6.3): the same claim is
+                # one memory on every machine, and a claim the person forgot
+                # keeps its forgotten id, so it is not promoted again.
+                from core.forget import registry as forget_registry
+                from core.retrieval.artifact_rows import (
+                    VERIFIED_MEMORY_SOURCE,
+                    verified_memory_id,
+                    verified_memory_row_id,
+                )
+
+                memory_id = verified_memory_id(claim_text)
+                if forget_registry.is_forgotten("memory", memory_id):
+                    counts["skipped_forgotten"] = counts.get("skipped_forgotten", 0) + 1
+                    continue
+                if _memory_exists(neo4j_driver, memory_id):
+                    # Already this claim's memory, perhaps superseded or merged
+                    # since; promoting again must not bring it back as current.
+                    counts["skipped_duplicate"] += 1
+                    continue
                 memory_id = create_memory_fn(neo4j_driver, {
+                    "id": memory_id,
+                    "conversation_id": report_id,
                     "text": claim_text,
                     "memory_type": "empirical",
                     "source": "verification",
@@ -300,13 +329,14 @@ async def promote_verified_facts(
                     coll_name = config.collection_name("conversations")
                     collection = chroma_client.get_or_create_collection(name=coll_name)
                     now_iso = datetime.now(timezone.utc).isoformat()
-                    collection.add(
-                        ids=[f"verified_memory_{memory_id}"],
+                    collection.upsert(
+                        ids=[verified_memory_row_id(memory_id, claim_text)],
                         documents=[claim_text],
                         metadatas=[{
                             "artifact_id": memory_id,
+                            **({"conversation_id": report_id} if report_id else {}),
                             "memory_type": "empirical",
-                            "memory_source_type": "verification",
+                            "memory_source_type": VERIFIED_MEMORY_SOURCE,
                             "domain": "conversations",
                             "filename": f"verified_fact_{memory_id[:8]}",
                             "ingested_at": now_iso,

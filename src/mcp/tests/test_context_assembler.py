@@ -66,7 +66,25 @@ class TestIntelligentAssemble:
             {"content": "C" * 100, "relevance": 0.7, "artifact_id": "a3", "filename": "c.md", "domain": "d"},
         ]
         context, sources, meta = intelligent_assemble(results, "test", max_chars=250)
-        assert len(sources) <= 3
+        assert sources
+        assert len(context) <= 250
+
+    def test_budget_counts_headers_separators_and_history(self):
+        # F102: the budget used to count content alone, so the source headers,
+        # the history note and the block separators pushed the real context past
+        # max_chars. Two 100-char contents fit a 250 budget by content length but
+        # not once each block is rendered.
+        results = [
+            {"content": "A" * 100, "relevance": 0.9, "filename": "a.md", "domain": "d",
+             "history": [{"valid_to": "2026-01-01", "value": "an earlier wording of A"}]},
+            {"content": "B" * 100, "relevance": 0.8, "filename": "b.md", "domain": "d"},
+        ]
+        for budget in (150, 250, 300, 400):
+            context, sources, _ = intelligent_assemble(results, "test", max_chars=budget)
+            assert len(context) <= budget, (budget, len(context))
+        context, sources, _ = intelligent_assemble(results, "test", max_chars=400)
+        assert len(sources) == 2
+        assert "Earlier versions" in context
 
     def test_coverage_metadata(self):
         results = [

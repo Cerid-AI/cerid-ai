@@ -18,7 +18,7 @@ Output policy (intentionally restrictive)
 
   Reserved keys (case-sensitive):
     ``tags``, ``aliases``, ``cssclass``, ``status``, ``created``,
-    ``updated``, ``source``
+    ``updated``, ``source``, ``title``
 
   Custom prefix:
     Any key starting with ``cerid:`` (e.g. ``cerid:priority``).
@@ -45,7 +45,7 @@ from core.utils.swallowed import log_swallowed_error
 logger = logging.getLogger("ai-companion.ingest.frontmatter")
 
 _RESERVED_KEYS: frozenset[str] = frozenset(
-    {"tags", "aliases", "cssclass", "status", "created", "updated", "source"},
+    {"tags", "aliases", "cssclass", "status", "created", "updated", "source", "title"},
 )
 _CUSTOM_PREFIX = "cerid:"
 

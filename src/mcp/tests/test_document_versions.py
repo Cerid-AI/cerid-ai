@@ -114,7 +114,7 @@ def test_identical_content_from_a_path_adopts_or_moves_it(monkeypatch, known, ex
     monkeypatch.setattr(ingestion, "utcnow_iso", lambda: "T")
     with patch("app.services.ingestion.graph") as graph:
         graph.get_artifact_versions.return_value = {"source_path": known}
-        ingestion._note_source_path(A, "/new/report.pdf", "report.pdf")
+        ingestion.note_source_path(A, "/new/report.pdf", "report.pdf")
     if expected is None:
         graph.set_artifact_properties.assert_not_called()
     else:
@@ -281,7 +281,7 @@ def test_an_unmounted_folder_is_not_a_move(monkeypatch):
     monkeypatch.setattr("os.path.isdir", lambda p: False)
     with patch("app.services.ingestion.graph") as graph:
         graph.get_artifact_versions.return_value = {"source_path": "/Volumes/offline/report.pdf"}
-        ingestion._note_source_path(A, "/elsewhere/report.pdf", "report.pdf")
+        ingestion.note_source_path(A, "/elsewhere/report.pdf", "report.pdf")
     graph.set_artifact_properties.assert_not_called()
 
 

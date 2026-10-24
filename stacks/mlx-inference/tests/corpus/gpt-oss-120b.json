@@ -1,8 +1,8 @@
 {
   "model": "gpt-oss-120b",
   "tool_format": "harmony",
-  "captured": "2026-09-25",
-  "server": "cerid-mlx serve.py at cerid-ai-internal 9ed0e4ae; mlx 0.32.2, mlx-lm 0.31.3",
+  "captured": "2026-10-21",
+  "server": "cerid-mlx-df7e9a11143d, mlx 0.32.4, mlx-lm 0.32.2",
   "sampling": "temperature 0, raw /api/generate",
   "cases": [
     {
@@ -154,7 +154,7 @@
         ]
       },
       "prompt_tokens": 209,
-      "completion": "<|channel|>analysis<|message|>The user asks a simple math: 17+25 = 42. They want just the number. So answer \"42\".<|end|><|start|>assistant<|channel|>final<|message|>42<|return|>",
+      "completion": "<|channel|>analysis<|message|>The user asks a simple arithmetic: 17+25 = 42. They want just the number. So answer \"42\".<|end|><|start|>assistant<|channel|>final<|message|>42<|return|>",
       "done_reason": "stop",
       "capture": "two requests; control tokens restored around the analysis and the final answer",
       "expect": {
@@ -248,7 +248,7 @@
         ]
       },
       "prompt_tokens": 256,
-      "completion": "<|channel|>analysis<|message|>We need to answer the user. Provide the weather info.<|end|><|start|>assistant<|channel|>final<|message|>The current weather in Paris is **18 °C** with **light rain**.<|return|>",
+      "completion": "<|channel|>analysis<|message|>We have the weather data. Need to respond.<|end|><|start|>assistant<|channel|>final<|message|>The current weather in Paris is **18 °C** with **light rain**.<|return|>",
       "done_reason": "stop",
       "capture": "two requests; control tokens restored around the analysis and the final answer",
       "expect": {

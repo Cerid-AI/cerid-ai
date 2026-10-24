@@ -11,6 +11,7 @@ toggle management utilities that depend on runtime mutation.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import config.features as _features_mod
@@ -42,6 +43,9 @@ def is_toggle_enabled(name: str) -> bool:
     return _features_mod.FEATURE_TOGGLES[name]
 
 
+_ENFORCED_BY = {"enable_model_router": "SMART_ROUTING_ENABLED"}
+
+
 def set_toggle(name: str, value: bool) -> None:
     """Set a feature toggle at runtime, updating all binding surfaces.
 
@@ -59,3 +63,20 @@ def set_toggle(name: str, value: bool) -> None:
     setattr(_features_mod, attr_name, value)
     if config_pkg is not None:
         setattr(config_pkg, attr_name, value)
+    # A toggle that aliases a setting the server enforces writes that setting too:
+    # chat routing reads SMART_ROUTING_ENABLED, so flipping enable_model_router
+    # alone changed nothing (audit F50).
+    enforced = _ENFORCED_BY.get(name)
+    if enforced:
+        import config.settings as _settings_mod
+
+        setattr(_settings_mod, enforced, value)
+        if config_pkg is not None:
+            setattr(config_pkg, enforced, value)
+    # Parent-child retrieval is read from the environment by the query path and
+    # the config recommender, and from utils.chunker's import-time copy by ingest.
+    if name == "enable_parent_child_retrieval":
+        os.environ["ENABLE_PARENT_CHILD_RETRIEVAL"] = "true" if value else "false"
+        from utils import chunker as _chunker_mod
+
+        _chunker_mod.PARENT_CHILD_ENABLED = value

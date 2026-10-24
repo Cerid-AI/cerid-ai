@@ -72,6 +72,7 @@ from app.routers.health import degradation_status, health_check, list_collection
 from app.routers.plugins import list_plugins
 from app.routers.sdk_version import SDK_VERSION
 from app.services.external_ingest import ExternalIngestRequest, IngestResult, ingest_external
+from app.services.ingest_ontology import OntologyError, apply_ontology
 from app.services.ingestion import ingest_content, ingest_file
 from app.services.private_mode import private_blocks
 from app.services.request_policy import build_request_context
@@ -122,13 +123,87 @@ _403 = {"description": "Consumer is not allowed to query the requested domain"}
 
 
 def _restricted_http() -> HTTPException:
+    return _blocked_http("consumer_domain_restricted")
+
+
+def _blocked_http(reason: str) -> HTTPException:
     return HTTPException(
         status_code=403,
         detail={
-            "retrieval_reason": "consumer_domain_restricted",
+            "retrieval_reason": reason,
             "retrieval_skipped": True,
         },
     )
+
+
+_SDK_CHUNK_CAP = 4000
+
+
+def _bound_chunk(row: dict[str, Any]) -> dict[str, Any]:
+    content = row.get("content")
+    if not isinstance(content, str) or len(content) <= _SDK_CHUNK_CAP:
+        return row
+    bounded = dict(row)
+    bounded["content"] = content[:_SDK_CHUNK_CAP]
+    bounded["truncated"] = True
+    return bounded
+
+
+def _bound_sdk_body(body: dict[str, Any], client_id: str) -> dict[str, Any]:
+    """Cap chunk text for suite callers. The GUI keeps the full chunk.
+
+    ``artifact_id`` and the assembled ``context`` stay. Only the per-chunk
+    ``content`` field is cut, and the row says so.
+    """
+    if client_id == "gui":
+        return body
+    for key in ("sources", "results"):
+        rows = body.get(key)
+        if isinstance(rows, list):
+            body[key] = [
+                _bound_chunk(row) if isinstance(row, dict) else row
+                for row in rows
+            ]
+    return body
+
+
+def _label_miss(body: dict[str, Any]) -> dict[str, Any]:
+    """An empty result that was not refused is a miss, not a silent wall."""
+    if body.get("retrieval_reason"):
+        return body
+    total = body.get("total_results")
+    rows = body.get("sources")
+    if rows is None:
+        rows = body.get("results")
+    if total == 0 or (total is None and not rows):
+        body["retrieval_reason"] = "miss"
+    return body
+
+
+def _stamp_ingest(domain: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    """Apply the existing ontology. A bad explicit sub-category is a 422."""
+    try:
+        return apply_ontology(domain, metadata, strict=True)
+    except OntologyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": str(exc),
+                "allowed_sub_categories": exc.allowed,
+            },
+        ) from exc
+
+
+def _echo_stamps(result: Any, metadata: dict[str, Any]) -> Any:
+    """A duplicate short-circuit returns before the chunk is stamped."""
+    if not isinstance(result, dict):
+        return result
+    result.setdefault("domain", metadata.get("domain"))
+    if metadata.get("sub_category"):
+        result.setdefault("sub_category", metadata["sub_category"])
+    if metadata.get("tags_json"):
+        result.setdefault("tags_json", metadata["tags_json"])
+    return result
 
 
 def _reject_restricted(result: Any) -> Any:
@@ -235,7 +310,14 @@ def _memory_async_enabled() -> bool:
     responses={403: _403, 422: _422, 503: _503},
 )
 async def sdk_query(req: AgentQueryRequest, request: Request):
-    return _reject_restricted(await agent_query_endpoint(req, request))
+    if private_blocks(2):
+        raise _blocked_http("private_mode")
+    result = _reject_restricted(await agent_query_endpoint(req, request))
+    if isinstance(result, dict):
+        client_id = request.headers.get("x-client-id", "gui")
+        _bound_sdk_body(result, client_id)
+        _label_miss(result)
+    return result
 
 
 @router.post(
@@ -246,8 +328,8 @@ async def sdk_query(req: AgentQueryRequest, request: Request):
     "(verified/unverified/uncertain) with sources and confidence scores.",
     responses={422: _422, 503: _503},
 )
-async def sdk_hallucination(req: HallucinationCheckRequest):
-    return await hallucination_check_endpoint(req)
+async def sdk_hallucination(req: HallucinationCheckRequest, request: Request):
+    return await hallucination_check_endpoint(req, request)
 
 
 @router.post(
@@ -302,18 +384,20 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, request: Request, wai
         # is already job-id idempotent via the queue record.
         return await idempotent(request, lambda: memory_extract_endpoint(req))
 
-    from app.processor.jobs.memory_extract import MemoryExtractJob
+    from app.db.redis import turn_text
+    from app.deps import get_redis
+    from app.processor.jobs.memory_extract import MemoryExtractJob, enqueue_payload
 
-    payload = {
-        "response_text": req.response_text,
-        "conversation_id": req.conversation_id,
-        "model": req.model,
-    }
-    job = MemoryExtractJob(**payload)
-    # The worker re-instantiates the job as ``MemoryExtractJob(**record.payload)``,
-    # so the payload must carry the __init__ kwargs verbatim.
-    record = job.new_record(payload=payload)
-    job_id = await queue.enqueue(record)
+    # The text goes under its conversation, the job record holds only a
+    # reference (forget spec §6.5). The worker re-instantiates the job as
+    # ``MemoryExtractJob(**record.payload)``.
+    payload = await asyncio.to_thread(enqueue_payload, req.response_text, req.conversation_id, req.model)
+    record = MemoryExtractJob(**payload).new_record(payload=payload)
+    try:
+        job_id = await queue.enqueue(record)
+    except Exception:
+        turn_text.discard(get_redis(), payload["text_key"])
+        raise
     accepted = SDKMemoryExtractAcceptedResponse(
         job_id=job_id,
         status="queued",
@@ -365,10 +449,12 @@ async def sdk_memory_extract_job_status(
         "error": None,
     }
     if status == "finished":
-        # The worker stores the SDKMemoryExtractResponse envelope in
-        # JobResult.metadata['result']; Pydantic re-validates here so any
-        # drift is loud.
-        envelope = (record.metadata or {}).get("result")
+        # The worker stores the SDKMemoryExtractResponse envelope under the
+        # job's text key, not in the record; Pydantic re-validates here so
+        # any drift is loud. A forgotten conversation has no result left.
+        from app.processor.jobs.memory_extract import stored_result
+
+        envelope = await asyncio.to_thread(stored_result, str((record.payload or {}).get("text_key") or ""))
         if envelope is not None:
             payload["result"] = SDKMemoryExtractResponse(**envelope).model_dump()
     elif status == "failed":
@@ -395,6 +481,7 @@ async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse
     # direct SDK caller can pre-assemble KB/memory context into messages;
     # strip it before generation so the model never sees the KB at L2+.
     from app.services.private_mode import strip_injected_context
+    from core.routing.egress import EgressRefused
     from core.routing.smart_router import (  # noqa: F401  (EXPERT_MODELS import for cost lookup)
         EXPERT_MODELS,
         BudgetUnsatisfiableError,
@@ -430,6 +517,8 @@ async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse
             },
             headers={"Retry-After": str(retry_after_s)},
         )
+    except EgressRefused as exc:
+        raise HTTPException(status_code=403, detail={"error": "egress_refused", "message": str(exc)}) from None
     return SDKLLMCompleteResponse(
         content=content,
         model=decision.model,
@@ -513,16 +602,25 @@ async def sdk_ingest(req: dict, request: Request):
     # legacy `tags` field alongside it rather than overwriting with tags-only.
     metadata = dict(req.get("metadata") or {})
     metadata.setdefault("tags", req.get("tags", ""))
-    # Idempotency-Key (GA P0.5 D1): a retried ingest with the same key does not
-    # double-write. No-op when the header is absent.
-    return await idempotent(
-        request,
-        lambda: ingest_content(
-            req.get("content", ""),
-            domain=domain,
-            metadata=metadata,
-        ),
-    )
+    # The header is the consumer. It wins over a body field of the same name.
+    client_id = request.headers.get("x-client-id")
+    if client_id:
+        metadata["client_source"] = client_id
+    metadata = _stamp_ingest(domain, metadata)
+
+    def _write() -> Any:
+        # Idempotency-Key (GA P0.5 D1): a retried ingest with the same key does not
+        # double-write. No-op when the header is absent.
+        return _echo_stamps(
+            ingest_content(
+                req.get("content", ""),
+                domain=domain,
+                metadata=metadata,
+            ),
+            metadata,
+        )
+
+    return await idempotent(request, _write)
 
 
 @router.post("/ingest/file", summary="Ingest File", responses={403: _403, 422: _422, 503: _503})  # response-model-allowed: dynamic response (shape varies)
@@ -530,6 +628,19 @@ async def sdk_ingest_file(req: dict, request: Request):
     # Same write scope as /ingest. An unrestricted consumer's empty domain
     # still means "categorize it".
     domain = _resolve_write_domain(request, req.get("domain") or "")
+    metadata = dict(req.get("metadata") or {})
+    client_id = request.headers.get("x-client-id") or ""
+    if client_id:
+        metadata["client_source"] = client_id
+    if domain:
+        metadata = _stamp_ingest(domain, metadata)
+    stamps = {
+        key: value
+        for key, value in metadata.items()
+        if isinstance(value, str) and key in {
+            "sub_category", "tags_json", "kind", "source_kind", "client_source",
+        }
+    }
     # Idempotency-Key (GA P0.5 D1): a retried file ingest with the same key
     # returns the first result instead of ingesting the file twice.
     return await idempotent(
@@ -539,6 +650,8 @@ async def sdk_ingest_file(req: dict, request: Request):
             domain=domain,
             tags=req.get("tags", ""),
             categorize_mode=req.get("categorize_mode", ""),
+            client_source=client_id,
+            extra_metadata=stamps or None,
         ),
     )
 
@@ -1004,7 +1117,7 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
     from core.agents.query_agent import agent_query_full
 
     if private_blocks(2):
-        return {"results": [], "total_results": 0, "confidence": 0.0}
+        raise _blocked_http("private_mode")
 
     ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
     try:
@@ -1031,8 +1144,17 @@ async def sdk_search(req: SDKSearchRequest, request: Request):
             detail="Retrieval is queued behind other knowledge queries. Retry in a moment.",
         ) from exc
     _reject_restricted(result)
-    sources = result.get("sources", [])
-    return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}
+    sources = result.get("sources", []) if isinstance(result, dict) else []
+    client_id = request.headers.get("x-client-id", "gui")
+    bounded = _bound_sdk_body({"results": list(sources)}, client_id)
+    body: dict[str, Any] = {
+        "results": bounded["results"],
+        "total_results": len(sources),
+        "confidence": result.get("confidence", 0.0) if isinstance(result, dict) else 0.0,
+    }
+    if isinstance(result, dict) and result.get("retrieval_reason"):
+        body["retrieval_reason"] = result["retrieval_reason"]
+    return _label_miss(body)
 
 
 @router.get("/plugins", summary="List Plugins", response_model=SdkPluginsResponse)
@@ -1052,6 +1174,7 @@ async def sdk_memory_recall(req: SDKMemoryRecallRequest, request: Request):
     from app.deps import get_chroma, get_neo4j
     from app.services.request_policy import build_request_context
     from core.agents.guarded_retrieval import guarded_recall_memories
+    from core.agents.request_context import ConsumerScopeRestricted
 
     ctx = build_request_context(client_id=request.headers.get("x-client-id", "gui"))
     try:
@@ -1063,6 +1186,8 @@ async def sdk_memory_recall(req: SDKMemoryRecallRequest, request: Request):
             top_k=req.top_k,
             as_of=req.as_of,
         )
+    except ConsumerScopeRestricted:
+        raise _restricted_http() from None
     except Exception as exc:  # noqa: BLE001 — empty recall, not 500
         log_swallowed_error("app.routers.sdk.memory_recall", exc)
         return SDKMemoryRecallResponse(memories=[], total=0, degraded=True)

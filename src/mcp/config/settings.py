@@ -85,12 +85,13 @@ CATEGORIZE_MODELS = {
     # CR-071: call_internal_llm tries that model, fails, and the first
     # "external fallback" is the same model again. A fallback chain whose
     # entries share a provider does not fall back — if OpenAI is degraded,
-    # retrying OpenAI helps nothing. gemini-3.1-flash-lite is a different
-    # provider at a comparable price (0.00025 vs 0.00015 per 1K), and it
-    # leaves the deduped chain as [gemini-flash, gpt-4o-mini]. Categorization
+    # retrying OpenAI helps nothing. Gemini Flash Lite is a different
+    # provider at a comparable price (0.0003 vs 0.0001 per 1K for GPT-6 Luna,
+    # the default since 2026-10-10), and it leaves the deduped chain as
+    # [gemini-flash, gpt-4o-mini slot]. Categorization
     # sends ~400 tokens per document, so the delta is cents per corpus pass.
-    "smart": "openrouter/google/gemini-3.1-flash-lite",
-    "pro": "openrouter/anthropic/claude-sonnet-4.6",
+    "smart": "openrouter/google/gemini-3.5-flash-lite",
+    "pro": "openrouter/anthropic/claude-sonnet-5.5",
 }
 
 # Max chars of document text sent to AI for classification (~400 tokens).
@@ -117,7 +118,7 @@ CATEGORIZE_CONFIDENCE_THRESHOLD = float(
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 
 # Default model for internal LLM calls (reranking, hallucination, memory extraction).
-# Uses gpt-4o-mini by default — cheap ($0.15/$0.60 per 1M tokens), reliable, no rate limits.
+# Uses GPT-6 Luna by default — cheap ($0.10/$0.50 per 1M tokens), reliable, no rate limits.
 # The free Llama model hits 429 rate limits frequently, causing 10s+ retry delays.
 # Default sourced from model registry (utils/model_registry.py).
 LLM_INTERNAL_MODEL = os.getenv("LLM_INTERNAL_MODEL", "") or get_model("internal", "default")
@@ -318,10 +319,16 @@ SOURCE_POLL_MAX_ARTIFACTS_PER_SOURCE = int(os.getenv("SOURCE_POLL_MAX_ARTIFACTS_
 # Empty disables.
 SCHEDULE_EMAIL_POLL = os.getenv("SCHEDULE_EMAIL_POLL", "*/15 * * * *")
 
-# CRAG-style retrieval quality gate — if top result relevance is below this
-# threshold after initial retrieval, supplement with external sources before
-# proceeding to expensive reranking/generation.
-RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
+# CRAG-style retrieval quality gate — if the KB's answer strength is below this,
+# external sources are added. Answer strength is the best cross-encoder score
+# when the reranker judged the rows, else the best relevance
+# (core.agents.crag.kb_answer_strength). It is not the blended relevance:
+# RERANK_CE_WEIGHT * cross-encoder + RERANK_ORIGINAL_WEIGHT * retrieval keeps a
+# chunk the cross-encoder rejects near 0.5 on its cosine alone and a compiled
+# wiki page at 0.6 or more. On the live corpus (2026-10-10) the cross-encoder's
+# best score was 0.52-1.0 (median 1.0) on questions the KB answers and 0-0.6
+# on most it cannot.
+RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.6"))
 
 # Staleness FLOOR for time-scoped queries — when the query names a window
 # ("today", "this week", "this month") and the freshest KB result is older than
@@ -405,6 +412,7 @@ MODEL_CONTEXT_CHAR_BUDGETS: dict[str, int] = {
     "gemini": 120_000,      # Gemini: 1M context
     "gpt-4o": 40_000,       # GPT-4o: 128K context
     "gpt-4o-mini": 20_000,  # GPT-4o-mini: 128K but cheaper
+    "gpt-6": 120_000,       # GPT-6 Luna / Sol / Astra: 1M context
     "llama": 16_000,        # Llama: 32K–128K context
     "grok": 60_000,         # Grok: 2M context — generous budget
 }
@@ -475,6 +483,7 @@ RERANK_MAX_LENGTH = int(os.getenv("RERANK_MAX_LENGTH", "512"))
 NLI_MODEL = os.getenv("NLI_MODEL", "cross-encoder/nli-deberta-v3-xsmall")
 NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
 NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
+# Both NLI thresholds are softmax class probabilities (0-1).
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
 # Inline NLI gating: when true, the MCP answer-synthesis path streams tokens
@@ -619,6 +628,10 @@ for _rt in GRAPH_RELATIONSHIP_TYPES:
 # embedding (backward compatible, no migration needed).  Any other model triggers
 # client-side ONNX embedding via utils/embeddings.py.
 # Default: Snowflake Arctic Embed M v1.5 (768d, 8192 ctx, client-side ONNX)
+# With EMBEDDINGS_PROVIDER=quenchforge this is the in-process fallback, which may
+# serve only if it is the model QUENCHFORGE_EMBED_MODEL names: for
+# nomic-embed-text-v1.5 set nomic-ai/nomic-embed-text-v1.5, or a stalled model
+# server leaves retrieval with no embedder.
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed-m-v1.5")
 # Target dimensions (0 = use model's native output).  Matryoshka-capable models
 # support truncation (e.g. 768→256 for speed).  Defaulting to 768 matches the
@@ -637,6 +650,7 @@ ONNX_EXECUTION_PROVIDERS = os.getenv("ONNX_EXECUTION_PROVIDERS", "")
 # ---------------------------------------------------------------------------
 # Hallucination Detection
 # ---------------------------------------------------------------------------
+# Verified / unverified floors on the KB retrieval-relevance scale (0-1), not NLI.
 HALLUCINATION_THRESHOLD = float(os.getenv("HALLUCINATION_THRESHOLD", "0.65"))
 HALLUCINATION_UNVERIFIED_THRESHOLD = float(os.getenv("HALLUCINATION_UNVERIFIED_THRESHOLD", "0.4"))
 HALLUCINATION_MIN_RESPONSE_LENGTH = int(os.getenv("HALLUCINATION_MIN_RESPONSE_LENGTH", "25"))
@@ -679,15 +693,13 @@ VERIFICATION_COMPLEX_MODEL = os.getenv(
 
 # Expert-tier verification model — high-capability reasoning model for
 # users who want maximum verification quality at higher cost.
-# Catalog-refreshed 2026-05-20: grok-4 was removed from OpenRouter;
-# grok-4.20 is the current expert-tier xAI model ($1.25/$2.50 per 1M
-# tokens, 2M context window) vs the prior grok-4 at $3/$15 per 1M.
-# Note: this default is for non-online (no web search) expert
-# verification; smart_router.VERIFICATION_EXPERT branch uses
-# grok-4.20:online when web search is desired.
+# Catalog-refreshed 2026-10-10: grok-4.7 ($2/$6 per 1M tokens); grok-4.20
+# is an older release despite its number. Note: this default is for
+# non-online (no web search) expert verification; the
+# smart_router.VERIFICATION_EXPERT branch uses the :online variant.
 VERIFICATION_EXPERT_MODEL = os.getenv(
     "VERIFICATION_EXPERT_MODEL",
-    "openrouter/x-ai/grok-4.20",
+    "openrouter/x-ai/grok-4.7",
 )
 
 # Web-search-enabled expert verification model (the `:online` variant) used by
@@ -696,18 +708,17 @@ VERIFICATION_EXPERT_MODEL = os.getenv(
 # env-overridable, catalog-visible default instead of a hardcoded literal.
 VERIFICATION_EXPERT_WEB_MODEL = os.getenv(
     "VERIFICATION_EXPERT_WEB_MODEL",
-    "openrouter/x-ai/grok-4.20:online",
+    "openrouter/x-ai/grok-4.7:online",
 )
 
 # ---------------------------------------------------------------------------
 # Cloud egress on a local-provider install
 # ---------------------------------------------------------------------------
-# Two paths send user content to OpenRouter even when the configured inference
-# provider is local: the internal-LLM fallback (when the local backend times
-# out or its breaker opens) and external claim verification. Both default ON to
-# preserve existing behaviour. Operators who chose local inference *for privacy*
-# set this false to keep content on the box — the local failure surfaces as an
-# error and verification degrades to KB-only instead of silently egressing.
+# False keeps all content on the box: no cloud LLM call (internal stages, their
+# fallback, chat and its fallback pool, verification, the SDK completion
+# route), no external data source, no web search. The local-only profile sets
+# it at boot. Every outbound chokepoint reads it through
+# core.routing.egress.cloud_egress_refused, never directly. Default ON.
 ALLOW_CLOUD_EGRESS_WHEN_LOCAL = (
     os.getenv("ALLOW_CLOUD_EGRESS_WHEN_LOCAL", "true").lower() == "true"
 )
@@ -721,6 +732,7 @@ INBOX_CLOUD_FALLBACK = os.getenv("CERID_INBOX_CLOUD_FALLBACK", "false").lower() 
 # ---------------------------------------------------------------------------
 ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
 EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "") or get_model("verification", "default")
+# Below this KB retrieval relevance (0-1), the claim goes to external verification.
 EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.5"))
 EXTERNAL_VERIFY_MAX_TOKENS = 250
 EXTERNAL_VERIFY_TEMPERATURE = 0.0
@@ -836,31 +848,61 @@ SYNOPSIS_MODEL_OPTIONS = {
         "rpm": 8,
         "throttle": 8.0,
     },
-    "openrouter/openai/gpt-4o-mini": {
-        "label": "GPT-4o Mini (legacy)",
-        "input_per_1m": 0.15,
-        "output_per_1m": 0.60,
+    # Catalog-refreshed 2026-10-10. A legacy id below still works: every call
+    # resolves to the newest release of its family (model_catalog.current_model_id).
+    "openrouter/openai/gpt-6-luna": {
+        "label": "GPT-6 Luna",
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.50,
         "rpm": 1000,
         "throttle": 0.5,
     },
-    "openrouter/google/gemini-3.1-flash-lite": {
-        "label": "Gemini 3.1 Flash Lite",
-        "input_per_1m": 0.25,
-        "output_per_1m": 1.50,
-        "rpm": 1000,
-        "throttle": 0.5,
-    },
-    "openrouter/google/gemini-2.5-flash": {
-        "label": "Gemini 2.5 Flash (legacy)",
+    "openrouter/google/gemini-3.5-flash-lite": {
+        "label": "Gemini 3.5 Flash Lite",
         "input_per_1m": 0.30,
         "output_per_1m": 2.50,
         "rpm": 1000,
         "throttle": 0.5,
     },
+    "openrouter/google/gemini-3.8-flash": {
+        "label": "Gemini 3.8 Flash",
+        "input_per_1m": 0.75,
+        "output_per_1m": 3.75,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/anthropic/claude-sonnet-5.5": {
+        "label": "Claude Sonnet 5.5",
+        "input_per_1m": 2.0,
+        "output_per_1m": 10.0,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/openai/gpt-4o-mini": {
+        "label": "GPT-4o Mini (legacy — runs as GPT-6 Luna)",
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.50,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/google/gemini-3.1-flash-lite": {
+        "label": "Gemini 3.1 Flash Lite (legacy — runs as 3.5)",
+        "input_per_1m": 0.30,
+        "output_per_1m": 2.50,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/google/gemini-2.5-flash": {
+        "label": "Gemini 2.5 Flash (legacy — runs as 3.8)",
+        "input_per_1m": 0.75,
+        "output_per_1m": 3.75,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
     "openrouter/anthropic/claude-sonnet-4.6": {
-        "label": "Claude Sonnet 4.6",
-        "input_per_1m": 3.0,
-        "output_per_1m": 15.0,
+        "label": "Claude Sonnet 4.6 (legacy — runs as 5.5)",
+        "input_per_1m": 2.0,
+        "output_per_1m": 10.0,
         "rpm": 1000,
         "throttle": 0.5,
     },
@@ -1022,10 +1064,11 @@ WIKI_STALE_SWEEP_WALL_CLOCK_S = float(os.getenv("WIKI_STALE_SWEEP_WALL_CLOCK_S",
 SCHEDULE_QUARANTINE_PURGE = os.getenv("SCHEDULE_QUARANTINE_PURGE", "0 3 * * *")
 
 # Auto-adopt the latest in-family model per role from the OpenRouter catalog.
-# MODEL_AUTO_UPDATE_ENABLED gates the scheduler job; set "false" to keep the
-# pinned assignments. Same-family + must-exist-in-catalog bounds the drift;
-# model_config.json stays revertible via PUT /models/assignments.
-MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "true").lower() in ("true", "1")
+# Dark by default. A weight shipping is not a reason to move the corpus.
+# Set MODEL_AUTO_UPDATE_ENABLED=true to register the weekly job. The pinned
+# assignments stay until then. Same-family + must-exist-in-catalog bounds
+# the drift; model_config.json stays revertible via PUT /models/assignments.
+MODEL_AUTO_UPDATE_ENABLED = os.getenv("MODEL_AUTO_UPDATE_ENABLED", "false").lower() in ("true", "1")
 SCHEDULE_MODEL_AUTO_UPDATE = os.getenv("SCHEDULE_MODEL_AUTO_UPDATE", "0 6 * * mon")  # Mon 6 AM
 
 # Routing-tiers overlay: a JSON map {original_tier_id: resolved_id} written by
@@ -1042,6 +1085,10 @@ ROUTING_TIERS_OVERLAY_PATH = os.getenv(
         "app", "data", "routing_tiers.json",
     ),
 )
+# The OpenRouter catalog's ``{id: created}``, written by the weekly job and the
+# boot validation; every OpenRouter call resolves its model through it to the
+# newest release of the same family (core/routing/model_catalog.current_model_id).
+MODEL_CATALOG_SNAPSHOT_PATH = os.path.join(os.path.dirname(ROUTING_TIERS_OVERLAY_PATH), "openrouter_catalog.json")
 
 # ---------------------------------------------------------------------------
 # Folder Scanning
@@ -1209,11 +1256,11 @@ INTERNAL_LLM_MODEL_BACKGROUND = os.getenv("INTERNAL_LLM_MODEL_BACKGROUND", "")
 # Display default surfaced by /providers when INTERNAL_LLM_MODEL is unset
 # (Slice 2.2 — model ids live in config, never as call-site literals).
 INTERNAL_LLM_MODEL_DEFAULT = os.getenv(
-    "INTERNAL_LLM_MODEL_DEFAULT", "meta-llama/llama-3.3-70b-instruct"
+    "INTERNAL_LLM_MODEL_DEFAULT", "meta-llama/llama-4-scout"
 )
 # JSON-mode fallback model for internal-LLM calls that must return strict JSON.
 INTERNAL_LLM_JSON_FALLBACK_MODEL = os.getenv(
-    "INTERNAL_LLM_JSON_FALLBACK_MODEL", "openai/gpt-4o-mini"
+    "INTERNAL_LLM_JSON_FALLBACK_MODEL", "openai/gpt-6-luna"
 )
 # Chat fallback pool — models tried when the primary chat model hits a
 # retryable error. Comma-separated env override; defaults to the v1 chain.
@@ -1221,7 +1268,7 @@ CHAT_FALLBACK_POOL = [
     m.strip()
     for m in os.getenv(
         "CHAT_FALLBACK_POOL",
-        "openai/gpt-4o-mini,google/gemini-2.5-flash,x-ai/grok-4.3,anthropic/claude-sonnet-4.6",
+        "openai/gpt-6-luna,google/gemini-3.8-flash,x-ai/grok-4.7,anthropic/claude-sonnet-5.5",
     ).split(",")
     if m.strip()
 ]
@@ -1500,6 +1547,9 @@ TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jso
 # Forget engine (docs/superpowers/specs/2026-10-07-forget-engine-design.md): trashed
 # subjects older than this many days are purged by the daily maintenance job; 0 = never.
 FORGET_TRASH_DAYS = int(os.getenv("FORGET_TRASH_DAYS", "30"))
+# A local copy of the forget registry, read when the sync folder is unreachable
+# (unmounted, or access revoked) so forgotten things stay forgotten.
+FORGET_REGISTRY_SNAPSHOT_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "forget", "registry-snapshot.jsonl")
 # Document versions (forget phase 5, spec §7): a re-ingested document keeps this
 # many versions; passages only older versions held are erased through the forget
 # engine, with a receipt. 0 keeps every version.
@@ -1608,6 +1658,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": ["finance", "inbox"],
         "record_types": {"inbox": ["mail_financial_card"]},
         "strict_domains": True,      # No bleed into personal/trading/coding/general
+        "allow_external": False,     # The book does not fall through to the web
     },
     "cerid-anneal": {
         "description": "cerid-anneal orchestrator — lessons/outcomes push (Lane A) and hub reads",
@@ -1637,6 +1688,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "anneal_conversations",
         ],
         "strict_domains": True,      # No bleed into personal/finance/trading/coding data
+        "allow_external": False,     # The executor does not fall through to the web
     },
     "folder_scanner": {
         "rate_limits": {

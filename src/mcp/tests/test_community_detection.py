@@ -10,7 +10,8 @@ contract.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
@@ -19,6 +20,87 @@ from app.db.neo4j.community_detection import (
     detect_communities,
     list_communities,
 )
+
+# ---------------------------------------------------------------------------
+# graphdatascience 2.x doubles
+# ---------------------------------------------------------------------------
+
+def _install_gds_v2(
+    monkeypatch,
+    *,
+    leiden_error: Exception | None = None,
+    projection_exists: bool = False,
+) -> SimpleNamespace:
+    """Patch ``graphdatascience.GraphDataScience`` with doubles specced on the
+    real 2.x client.
+
+    autospec checks every call against the installed signatures, so 1.x shapes
+    fail here: ``GraphDataScience.from_neo4j_driver`` does not exist, the
+    callable ``gds.graph.project(...)`` became ``gds.graph.project.native``,
+    ``gds.leiden.write`` takes snake_case keywords, it returns a typed
+    ``LeidenWriteResult`` (no ``.get``), and ``gds.graph.exists`` returns a
+    bool rather than a row with an ``"exists"`` key.
+    """
+    import graphdatascience
+    from graphdatascience import GraphDataScience
+    from graphdatascience.graph.graph_api import Graph
+    from graphdatascience.procedure_surface.api.community.leiden_endpoints import (
+        LeidenWriteResult,
+    )
+    from graphdatascience.procedure_surface.cypher.catalog.catalog_cypher_endpoints import (
+        CatalogCypherEndpoints,
+    )
+    from graphdatascience.procedure_surface.cypher.catalog.projection_cypher_endpoints import (
+        GraphWithProjectResult,
+        ProjectCypherEndpoints,
+    )
+    from graphdatascience.procedure_surface.cypher.community.leiden_cypher_endpoints import (
+        LeidenCypherEndpoints,
+    )
+
+    graph = create_autospec(Graph, instance=True)
+    graph.node_count.return_value = 2
+    graph.relationship_count.return_value = 1
+
+    project = create_autospec(ProjectCypherEndpoints, instance=True)
+    project.native.return_value = GraphWithProjectResult(graph, MagicMock())
+
+    catalog = create_autospec(CatalogCypherEndpoints, instance=True)
+    catalog.project = project
+    catalog.exists.return_value = projection_exists
+
+    leiden = create_autospec(LeidenCypherEndpoints, instance=True)
+    if leiden_error is not None:
+        leiden.write.side_effect = leiden_error
+    else:
+        leiden.write.return_value = LeidenWriteResult(
+            community_count=1,
+            community_distribution={},
+            compute_millis=1,
+            configuration={},
+            did_converge=True,
+            modularities=[0.4, 0.5],
+            modularity=0.5,
+            node_count=2,
+            node_properties_written=2,
+            post_processing_millis=0,
+            pre_processing_millis=0,
+            ran_levels=2,
+            write_millis=1,
+        )
+
+    gds = create_autospec(GraphDataScience, instance=True)
+    gds.graph = catalog
+    gds.leiden = leiden
+
+    gds_cls = create_autospec(GraphDataScience)
+    gds_cls.return_value = gds
+    monkeypatch.setattr(graphdatascience, "GraphDataScience", gds_cls)
+    return SimpleNamespace(
+        cls=gds_cls, gds=gds, catalog=catalog, project=project,
+        leiden=leiden, graph=graph,
+    )
+
 
 # ---------------------------------------------------------------------------
 # _projection_name
@@ -265,64 +347,27 @@ class TestDetectCommunitiesIsolatedSentinel:
 
     def test_isolated_sentinel_stats_key_present(self, monkeypatch):
         """stats['isolated_assigned'] equals the count of entities SET."""
-        import sys
-        from unittest.mock import patch
-
-        gds_mock = MagicMock()
-        gds_cls = MagicMock(return_value=gds_mock)
-        gds_cls.from_neo4j_driver = MagicMock(return_value=gds_mock)
-
-        graph_mock = MagicMock()
-        graph_mock.node_count.return_value = 2
-        graph_mock.relationship_count.return_value = 1
-        gds_mock.graph.project.return_value = (graph_mock, MagicMock())
-        gds_mock.leiden.write.return_value = {"modularity": 0.5, "ranLevels": 1}
-        gds_mock.graph.exists.return_value = {"exists": False}
-
-        driver = self._make_driver()
-
-        gds_module = MagicMock()
-        gds_module.GraphDataScience = gds_cls
-        with patch.dict(sys.modules, {"graphdatascience": gds_module}):
-            result = detect_communities(driver, min_community_size=1)
+        _, result = self._run_detect(monkeypatch)
 
         assert "isolated_assigned" in result
         assert result["isolated_assigned"] == 1
 
-    def _run_detect(self) -> tuple[MagicMock, dict]:
+    def _run_detect(self, monkeypatch) -> tuple[MagicMock, dict]:
         """Helper: run detect_communities with GDS mocked; return (session_ctx, result)."""
-        import sys
-        from unittest.mock import patch
-
-        gds_mock = MagicMock()
-        gds_cls = MagicMock(return_value=gds_mock)
-        gds_cls.from_neo4j_driver = MagicMock(return_value=gds_mock)
-
-        graph_mock = MagicMock()
-        graph_mock.node_count.return_value = 2
-        graph_mock.relationship_count.return_value = 1
-        gds_mock.graph.project.return_value = (graph_mock, MagicMock())
-        gds_mock.leiden.write.return_value = {"modularity": 0.5, "ranLevels": 1}
-        gds_mock.graph.exists.return_value = {"exists": False}
-
+        _install_gds_v2(monkeypatch)
         driver = self._make_driver()
         session_ctx = driver.session.return_value.__enter__.return_value
-
-        gds_module = MagicMock()
-        gds_module.GraphDataScience = gds_cls
-        with patch.dict(sys.modules, {"graphdatascience": gds_module}):
-            result = detect_communities(driver, min_community_size=1)
-
+        result = detect_communities(driver, min_community_size=1)
         return session_ctx, result
 
-    def test_isolated_sentinel_cypher_uses_isolated_string(self):
+    def test_isolated_sentinel_cypher_uses_isolated_string(self, monkeypatch):
         """The last session.run call must contain the literal string 'isolated'.
 
         This verifies the actual value flowing into Cypher — not just that the
         code path exists (already checked by test_isolated_sentinel_cypher_in_module)
         but that the mock was invoked with a query embedding ``'isolated'``.
         """
-        session_ctx, _ = self._run_detect()
+        session_ctx, _ = self._run_detect(monkeypatch)
         # Searched rather than indexed: this used to assert on the LAST call,
         # which broke the moment a statement was added after the sentinel. The
         # contract is that the sentinel is issued, not that it is issued last.
@@ -333,7 +378,7 @@ class TestDetectCommunitiesIsolatedSentinel:
             f"got: {cyphers!r}"
         )
 
-    def test_connected_entity_merge_uses_level0_cid(self):
+    def test_connected_entity_merge_uses_level0_cid(self, monkeypatch):
         """MERGE Community for a connected entity must pass cid='0:42'.
 
         The fixture supplies leiden_communityIds=[42] for both connected
@@ -341,7 +386,7 @@ class TestDetectCommunitiesIsolatedSentinel:
         that the value flowing into the ``cid`` kwarg of the MERGE call is
         exactly ``'0:42'`` — not a raw integer, not None, and not 'isolated'.
         """
-        session_ctx, _ = self._run_detect()
+        session_ctx, _ = self._run_detect(monkeypatch)
         all_calls = session_ctx.run.call_args_list
         # Calls 5 and 6 (0-indexed) are the two MERGE Community calls.
         # Find them by looking for calls that passed cid= as a kwarg.
@@ -354,3 +399,67 @@ class TestDetectCommunitiesIsolatedSentinel:
         assert all(
             cid == "0:42" for cid in merge_cids
         ), f"Expected all MERGE cid values to be '0:42'; got: {merge_cids}"
+
+
+class TestDetectCommunitiesGdsV2Api:
+    """The GDS client calls match the graphdatascience 2.x API."""
+
+    def _driver(self, entity_count: int = 3) -> MagicMock:
+        driver = MagicMock()
+        session = driver.session.return_value.__enter__.return_value
+        session.run.return_value.single.return_value = {"n": entity_count}
+        session.run.return_value.__iter__ = MagicMock(return_value=iter([]))
+        return driver
+
+    def test_client_built_from_driver_over_bolt(self, monkeypatch):
+        doubles = _install_gds_v2(monkeypatch)
+        driver = self._driver()
+
+        detect_communities(driver, neo4j_database="graphdb")
+
+        doubles.cls.assert_called_once_with(driver, database="graphdb", arrow=False)
+
+    def test_native_projection_and_snake_case_leiden_write(self, monkeypatch):
+        doubles = _install_gds_v2(monkeypatch)
+
+        stats = detect_communities(self._driver(), max_levels=4)
+
+        args = doubles.project.native.call_args.args
+        assert args[0] == stats["projection"]
+        assert args[1] == "Entity"
+        assert args[2] == {
+            "CO_MENTIONED": {"orientation": "UNDIRECTED", "properties": ["weight"]}
+        }
+        doubles.leiden.write.assert_called_once_with(
+            doubles.graph,
+            write_property="leiden_communityIds",
+            relationship_weight_property="weight",
+            include_intermediate_communities=True,
+            max_levels=4,
+        )
+        assert stats["nodes_projected"] == 2
+        assert stats["edges_projected"] == 1
+        assert stats["modularity"] == 0.5
+        assert stats["levels_produced"] == 2
+        doubles.graph.drop.assert_called_once_with()
+
+    def test_failed_leiden_drops_projection(self, monkeypatch):
+        doubles = _install_gds_v2(
+            monkeypatch, leiden_error=RuntimeError("leiden failed"),
+            projection_exists=True,
+        )
+
+        with pytest.raises(RuntimeError, match="leiden failed"):
+            detect_communities(self._driver())
+
+        proj_name = doubles.project.native.call_args.args[0]
+        doubles.catalog.exists.assert_called_once_with(proj_name)
+        doubles.catalog.drop.assert_called_once_with(proj_name)
+
+    def test_cleanup_skips_drop_when_projection_gone(self, monkeypatch):
+        doubles = _install_gds_v2(monkeypatch, projection_exists=False)
+
+        detect_communities(self._driver())
+
+        doubles.catalog.exists.assert_called_once()
+        doubles.catalog.drop.assert_not_called()

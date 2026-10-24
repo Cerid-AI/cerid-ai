@@ -11,7 +11,6 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import PrivacyCategory from "@/components/settings/categories/privacy"
-import { CAPABILITY_DESCRIPTIONS } from "@/lib/capability-descriptions"
 import { getDef } from "@/lib/settings-registry"
 import {
   PRIVATE_MODE_EGRESS_NOTE,
@@ -102,12 +101,5 @@ describe("Private Mode level copy comes from the shared contract", () => {
     )
     for (const level of PRIVATE_MODE_LEVELS) expect(def.helpText).toContain(`L${level.level} = ${level.name}`)
     expect(def.helpText).toContain(PRIVATE_MODE_EGRESS_NOTE)
-  })
-
-  it("the capability text names every level and says egress is not blocked", () => {
-    const text = CAPABILITY_DESCRIPTIONS.private_mode.description
-    for (const level of PRIVATE_MODE_LEVELS.slice(1)) expect(text).toContain(`${level.name} (L${level.level})`)
-    expect(text).toContain(PRIVATE_MODE_EGRESS_NOTE)
-    expect(CAPABILITY_DESCRIPTIONS.private_mode.tier).toBeUndefined()
   })
 })

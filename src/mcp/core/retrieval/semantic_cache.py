@@ -382,7 +382,7 @@ def cache_store(
     # recompute and usually a load artifact (budget expiry, rerank errors);
     # serving it at sim>=threshold poisons every similar query for the TTL
     # (live-caught 2026-07-13 by the retrieval harness).
-    if result.get("budget_exceeded") or not result.get("sources"):
+    if result.get("budget_exceeded") or result.get("retrieval_degraded") or not result.get("sources"):
         logger.debug("Semantic cache skip: empty/degraded result not stored")
         return
 

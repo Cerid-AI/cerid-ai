@@ -325,6 +325,126 @@ async def test_retries_exhaust_then_falls_through(monkeypatch):
     assert counter["n"] == 3
 
 
+def _chat_request() -> httpx.Request:
+    return httpx.Request("POST", "http://test-host:11434/api/chat")
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_connection_is_retried(monkeypatch):
+    """F70: a daemon that drops the connection mid-request raised
+    RemoteProtocolError, which neither the retry nor the fallback caught."""
+    counter = _wire_retry_harness(
+        monkeypatch,
+        [
+            httpx.RemoteProtocolError("Server disconnected without sending a response.", request=_chat_request()),
+            {"message": {"content": "ok"}},
+        ],
+    )
+    result = await mod._call_ollama(
+        [{"role": "user", "content": "hi"}], temperature=0, max_tokens=5,
+    )
+    assert result == "ok"
+    assert counter["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_read_errors_exhaust_then_fall_through(monkeypatch):
+    """F70: a ReadError on every attempt reaches the cloud fallback."""
+    counter = _wire_retry_harness(
+        monkeypatch,
+        [httpx.ReadError("connection reset", request=_chat_request()) for _ in range(3)],
+    )
+
+    async def _stub_call_llm(*args, **kwargs):  # noqa: ARG001
+        return "openrouter-stub"
+
+    monkeypatch.setattr(llm_client, "call_llm", _stub_call_llm)
+    result = await mod._call_ollama(
+        [{"role": "user", "content": "hi"}], temperature=0, max_tokens=5,
+    )
+    assert result == "openrouter-stub"
+    assert counter["n"] == 3
+
+
+# ---------------------------------------------------------------------------
+# _stream_ollama / call_internal_llm_stream — what the NDJSON stream reports
+# ---------------------------------------------------------------------------
+
+
+def _wire_stream(monkeypatch: pytest.MonkeyPatch, handler) -> None:
+    """A real httpx client over a scripted transport, and a stand-in for the
+    non-streaming fallback the stream degrades to."""
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(mod, "_get_ollama_client", AsyncMock(return_value=client))
+    monkeypatch.setattr(mod, "_resolve_stage_provider", lambda _stage, _default: "ollama")
+    monkeypatch.setenv("OLLAMA_URL", "http://test-host:11434")
+
+    async def _complete(*_a, **_k) -> str:
+        return "complete answer"
+
+    monkeypatch.setattr(mod, "call_internal_llm", _complete)
+
+
+def _ndjson(*lines: str) -> httpx.Response:
+    return httpx.Response(200, content=("\n".join(lines) + "\n").encode())
+
+
+async def _collect(**kwargs: Any) -> list[str]:
+    return [
+        c async for c in mod.call_internal_llm_stream(
+            [{"role": "user", "content": "hi"}], stage="probe/stream", **kwargs,
+        )
+    ]
+
+
+_OLLAMA_ERROR = '{"error": "llama runner process has terminated"}'
+
+
+@pytest.mark.asyncio
+async def test_an_error_object_in_the_stream_raises(monkeypatch):
+    """F39: {"error": ...} has no content and no done flag; the stream ended
+    empty, as if the model had answered nothing."""
+    _wire_stream(monkeypatch, lambda _req: _ndjson(_OLLAMA_ERROR))
+
+    with pytest.raises(mod.LocalStreamError, match="llama runner process has terminated"):
+        async for _ in mod._stream_ollama(
+            [{"role": "user", "content": "hi"}], temperature=0, max_tokens=5,
+        ):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_an_error_object_before_the_first_token_falls_back(monkeypatch):
+    _wire_stream(monkeypatch, lambda _req: _ndjson(_OLLAMA_ERROR))
+
+    assert await _collect() == ["complete answer"]
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_stream_falls_back(monkeypatch):
+    """F70: RemoteProtocolError escaped the stream's fallback."""
+    def _drop(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.", request=request)
+
+    _wire_stream(monkeypatch, _drop)
+
+    assert await _collect() == ["complete answer"]
+
+
+@pytest.mark.asyncio
+async def test_an_unparseable_line_is_reported(monkeypatch):
+    """F39: a line that is not JSON was skipped without a trace."""
+    reported: list[str] = []
+    monkeypatch.setattr(mod, "log_swallowed_error", lambda where, _exc, **_k: reported.append(where))
+    _wire_stream(
+        monkeypatch,
+        lambda _req: _ndjson("<html>502 Bad Gateway", '{"message": {"content": "hi"}, "done": true}'),
+    )
+
+    assert await _collect() == ["hi"]
+    assert reported == ["core.utils.internal_llm.stream_line"]
+
+
 # ---------------------------------------------------------------------------
 # llm_call_override — backward-compat + scoped routing (Task 2.5b)
 # ---------------------------------------------------------------------------

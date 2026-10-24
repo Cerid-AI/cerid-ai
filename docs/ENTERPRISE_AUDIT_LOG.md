@@ -1,5 +1,7 @@
 # Enterprise — Audit log
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 An append-only, hash-chained record of administrative and security actions.
 Reading it back is the Enterprise `audit_logging` feature; the recording is
 unconditional.

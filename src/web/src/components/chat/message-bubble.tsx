@@ -27,7 +27,6 @@ import type { ChatMessage, HallucinationClaim } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
 import { displayStatusLabel, matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { SourceAttribution } from "./source-attribution"
-import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
 import { DegradedBanner } from "./degraded-banner"
 import { SaveToVaultButton } from "./save-to-vault-button"
@@ -789,7 +788,7 @@ export function MessageBubble({ message, conversationId, verificationStatus, ver
 
         {!isUser && message.sourcesUsed && message.sourcesUsed.length > 0 && !!message.content && (
           <>
-            <KBContextIndicator sources={message.sourcesUsed} />
+            <SourceAttribution sources={message.sourcesUsed} variant="badge" />
             <SourceAttribution sources={message.sourcesUsed} />
           </>
         )}

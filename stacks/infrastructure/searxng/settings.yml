@@ -21,3 +21,11 @@ search:
   formats:
     - html
     - json
+
+# The image enables three web engines (brave, duckduckgo, google cse). Under
+# moderate use all three were suspended at once (too many requests, timeout),
+# and web search returned nothing. Yahoo answered from the same host while
+# they were down; bing, qwant, google and duckduckgo web were blocked.
+engines:
+  - name: yahoo
+    disabled: false

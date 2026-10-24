@@ -29,6 +29,11 @@ EXTERNAL_SOURCE_QUERY_TIMEOUT = 2.0
 # Longer per-source budget for the async /query orchestrator path, which is
 # off the synchronous 3 s cold-query SLO and can afford more headroom.
 EXTERNAL_SOURCE_BROAD_QUERY_TIMEOUT = 5.0
+# How long SearXNG waits for each engine (its timeout_limit). Below the
+# per-source budget, so a hung engine costs its own results and not the
+# whole search: SearXNG's 3 s default met the 2 s budget whenever one engine
+# hung, and the source returned nothing while the other engines had answered.
+SEARXNG_ENGINE_TIMEOUT = 1.5
 # Per-source budget for authoritative claim verification (hallucination gate).
 # Each of these paths applies an outer guard of (inner + 1.0 s).
 AUTHORITATIVE_VERIFY_QUERY_TIMEOUT = 4.0
@@ -50,6 +55,10 @@ RETRIEVAL_CACHE_TTL = 1800  # 30 minutes
 # book-metadata noise from outranking real KB hits. One value, two consumers
 # (crag gate + retrieval orchestrator).
 EXTERNAL_SOURCE_RELEVANCE_DISCOUNT = 0.6
+# A row the cross-encoder scores below this (sigmoid scale, 0-1) leaves the
+# pool. On the 2026-10 audit suite rejected rows scored <= 0.05 and the lowest
+# row that answered a question 0.44.
+RERANK_REJECT_FLOOR = 0.05
 CHUNK_MAX_TOKENS = 512
 CHUNK_OVERLAP_RATIO = 0.2
 PARENT_CHILD_RATIO_MIN = 4  # min child:parent token ratio

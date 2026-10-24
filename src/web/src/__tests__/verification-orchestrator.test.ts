@@ -48,25 +48,27 @@ vi.mock("@/hooks/use-verification-stream", () => ({
 }))
 
 // Mock conversations + KB injection contexts — orchestrator reads callbacks
-// off them; save/mark are shared spies so the persistence tests can assert.
-const mockSaveVerification: Mock = vi.fn()
+// off them; mark is a shared spy so the completion tests can assert.
 const mockMarkVerified: Mock = vi.fn()
 vi.mock("@/contexts/conversations-context", () => ({
   useConversationsContext: () => ({
     markVerified: mockMarkVerified,
     clearVerified: vi.fn(),
-    saveVerification: mockSaveVerification,
-    getVerification: vi.fn(() => null),
-    getAllVerificationReports: vi.fn(() => ({})),
   }),
+}))
+
+// Reports are stored once, on the server, per message (forget spec §6.2): the
+// orchestrator fetches a conversation's reports when it opens.
+const mockFetchReports: Mock = vi.fn(async () => ({}))
+vi.mock("@/lib/api", () => ({
+  fetchVerificationReports: (...args: unknown[]) => mockFetchReports(...args),
 }))
 
 vi.mock("@/contexts/kb-injection-context", () => ({
   useKBInjection: () => ({ injectedContext: [] }),
 }))
 
-// Sprint C: saveVerificationReport is no longer called from the hook —
-// the backend auto-persists on stream completion. No mock needed here.
+// The backend persists every report on stream completion; the hook saves nothing.
 
 import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
 
@@ -321,12 +323,13 @@ describe("useVerificationOrchestrator — per-message scoping", () => {
 describe("useVerificationOrchestrator — post-summary report refresh", () => {
   beforeEach(() => {
     mockStreamHook.mockClear()
-    mockSaveVerification.mockClear()
     mockMarkVerified.mockClear()
+    mockFetchReports.mockReset()
+    mockFetchReports.mockResolvedValue({})
     mockStreamReturn = defaultStreamReturn()
   })
 
-  it("re-persists the report when the retry sweep revises counts, and only then", async () => {
+  it("takes the revised report when the retry sweep revises counts, and only then", async () => {
     const messages = makeMessages("The capital of France is Paris.")
     const round1: HallucinationReport = {
       conversation_id: "conv-resave",
@@ -340,7 +343,7 @@ describe("useVerificationOrchestrator — post-summary report refresh", () => {
     }
     mockStreamReturn = { ...defaultStreamReturn(), phase: "done", report: round1 }
 
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ tick }: { tick: number }) => {
         void tick // rerender knob only
         return useVerificationOrchestrator({
@@ -355,14 +358,14 @@ describe("useVerificationOrchestrator — post-summary report refresh", () => {
     )
 
     await waitFor(() => {
-      expect(mockSaveVerification).toHaveBeenCalledTimes(1)
+      expect(mockMarkVerified).toHaveBeenCalledTimes(1)
     })
-    expect(mockSaveVerification).toHaveBeenLastCalledWith("conv-resave", "a1", round1)
+    expect(result.current.allVerificationReports.a1).toEqual(round1)
 
-    // Same report content — must NOT save again.
+    // Same report content — not taken again.
     rerender({ tick: 1 })
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(mockSaveVerification).toHaveBeenCalledTimes(1)
+    expect(mockMarkVerified).toHaveBeenCalledTimes(1)
 
     // Round-2 sweep resolves the timed-out claim and refreshes counts.
     const round2: HallucinationReport = {
@@ -377,8 +380,79 @@ describe("useVerificationOrchestrator — post-summary report refresh", () => {
     rerender({ tick: 2 })
 
     await waitFor(() => {
-      expect(mockSaveVerification).toHaveBeenCalledTimes(2)
+      expect(mockMarkVerified).toHaveBeenCalledTimes(2)
     })
-    expect(mockSaveVerification).toHaveBeenLastCalledWith("conv-resave", "a1", round2)
+    expect(result.current.allVerificationReports.a1).toEqual(round2)
+  })
+})
+
+describe("useVerificationOrchestrator — reports stored on the server", () => {
+  beforeEach(() => {
+    mockStreamHook.mockClear()
+    mockFetchReports.mockReset()
+    mockStreamReturn = defaultStreamReturn()
+  })
+
+  it("loads an opened conversation's reports and shows each message's own", async () => {
+    const older: HallucinationReport = {
+      conversation_id: "conv-open", timestamp: "t", skipped: false,
+      claims: [{ claim: "Older", status: "verified", similarity: 0.9 }],
+      summary: { total: 1, verified: 1, unverified: 0, uncertain: 0 },
+    }
+    mockFetchReports.mockResolvedValue({ a0: older })
+    const messages: ChatMessage[] = [
+      { id: "u0", role: "user", content: "First question?", timestamp: 1 },
+      { id: "a0", role: "assistant", content: "An older answer.", timestamp: 2, model: currentModel.id },
+      ...makeMessages("The capital of France is Paris."),
+    ]
+    const { result } = renderHook(() => useVerificationOrchestrator({
+      activeMessages: messages, activeId: "conv-open", isStreaming: false,
+      hallucinationEnabled: true, currentModel,
+    }))
+    await waitFor(() => expect(result.current.allVerificationReports.a0).toEqual(older))
+    expect(mockFetchReports).toHaveBeenCalledWith("conv-open")
+    // the stream verifies the latest message, under its own id
+    expect(mockStreamHook.mock.lastCall?.at(-1)).toBe("a1")
+
+    act(() => result.current.setSelectedVerificationMsgId("a0"))
+    await waitFor(() => expect(result.current.halReport).toEqual(older))
+  })
+
+  it("fetches nothing when verification is off", () => {
+    renderHook(() => useVerificationOrchestrator({
+      activeMessages: makeMessages("The capital of France is Paris."), activeId: "conv-off",
+      isStreaming: false, hallucinationEnabled: false, currentModel,
+    }))
+    expect(mockFetchReports).not.toHaveBeenCalled()
+  })
+})
+
+describe("useVerificationOrchestrator — the answer's sources reach verification", () => {
+  beforeEach(() => {
+    mockStreamHook.mockClear()
+    mockStreamReturn = defaultStreamReturn()
+  })
+
+  it("sends the KB documents retrieval put in the prompt, not memories or web results", () => {
+    // Before, only hand-injected documents were sent, so a claim verified
+    // against an auto-injected source read as independently verified.
+    const messages: ChatMessage[] = [
+      ...makeMessages(null),
+      {
+        id: "a1", role: "assistant", content: "Paris is the capital of France.", timestamp: 2, model: currentModel.id,
+        sourcesUsed: [
+          { artifact_id: "doc-a", filename: "france.md", domain: "general", relevance: 0.9, chunk_index: 0, source_type: "kb" },
+          { artifact_id: "doc-b", filename: "geo.md", domain: "general", relevance: 0.8, chunk_index: 1 },
+          { artifact_id: "mem-1", filename: "", domain: "conversations", relevance: 0.7, chunk_index: 0, source_type: "memory" },
+          { artifact_id: "", filename: "Wikipedia", domain: "external", relevance: 0.5, chunk_index: 0, source_type: "external" },
+        ],
+      },
+    ]
+    renderHook(() => useVerificationOrchestrator({
+      activeMessages: messages, activeId: "conv-src", isStreaming: false, hallucinationEnabled: true, currentModel,
+    }))
+
+    const calls = mockStreamHook.mock.calls
+    expect(calls[calls.length - 1][8]).toEqual(["doc-a", "doc-b"])
   })
 })

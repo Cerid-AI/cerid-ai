@@ -1,5 +1,7 @@
 # Enterprise — SAML 2.0 single sign-on
 
+> Historical record. Estate direction is `~/dotfiles/docs/estate-direction.md`. This repo is memory: material accumulates, stays checked, and can be forgotten.
+
 Authenticate users against your own identity provider (Okta, Entra ID / Azure
 AD, Google Workspace, Keycloak, …) instead of a password.
 
@@ -11,7 +13,7 @@ attested to, and single-user mode has exactly one operator authenticated by API
 key, with nobody for an IdP to distinguish. On a single-user install there is
 nothing for SSO to do, and the `sso_saml` capability says so: `/billing/capabilities`
 and `/license/capabilities` report it `enabled: false` whatever the tier until
-`CERID_MULTI_USER=true`, so a reader of the capability matrix is not told the
+`CERID_MULTI_USER=true`, so a buyer reading the capability matrix is not told the
 install serves something it does not mount.
 
 Multi-user mode is itself gated behind `CERID_MULTI_USER_EXPERIMENTAL=true` and

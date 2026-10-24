@@ -83,6 +83,12 @@ class PricingTable:
     """
 
     _DEFAULT: dict[str, _PricingRow] = {
+        # Catalog-refreshed 2026-10-10: the defaults since then.
+        "anthropic/claude-opus-5.5": _PricingRow(usd_per_1k_in=Decimal("0.004"), usd_per_1k_out=Decimal("0.020")),
+        "anthropic/claude-sonnet-5.5": _PricingRow(usd_per_1k_in=Decimal("0.002"), usd_per_1k_out=Decimal("0.010")),
+        "anthropic/claude-haiku-5.5": _PricingRow(usd_per_1k_in=Decimal("0.0001"), usd_per_1k_out=Decimal("0.0005")),
+        "openai/gpt-6-luna": _PricingRow(usd_per_1k_in=Decimal("0.0001"), usd_per_1k_out=Decimal("0.0005")),
+        "openai/gpt-6.1-sol": _PricingRow(usd_per_1k_in=Decimal("0.002"), usd_per_1k_out=Decimal("0.010")),
         # Anthropic — prices as of 2026-Q1
         "anthropic/claude-opus-4-7": _PricingRow(
             usd_per_1k_in=Decimal("0.015"),

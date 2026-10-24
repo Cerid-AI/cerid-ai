@@ -67,7 +67,44 @@ class TestSDKQuery:
         client = TestClient(_make_app())
         resp = client.post("/sdk/v1/query", json={"query": "nonexistent topic"})
         assert resp.status_code == 200
-        assert resp.json()["results"] == []
+        body = resp.json()
+        assert body["results"] == []
+        assert body["retrieval_reason"] == "miss"
+
+    @patch("app.routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
+    def test_private_mode_on_the_sdk_is_a_403(self, mock_query):
+        with patch("app.routers.sdk.private_blocks", return_value=True):
+            client = TestClient(_make_app())
+            resp = client.post("/sdk/v1/query", json={"query": "anything"})
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["retrieval_reason"] == "private_mode"
+        mock_query.assert_not_awaited()
+
+    @patch("app.routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
+    def test_a_non_gui_caller_gets_a_bounded_chunk_and_keeps_the_citation(self, mock_query):
+        mock_query.return_value = {
+            "context": "the cited answer stays whole",
+            "sources": [{
+                "content": "x" * 5000,
+                "artifact_id": "art-1",
+                "domain": "coding",
+            }],
+            "results": [],
+            "total_results": 1,
+        }
+        client = TestClient(_make_app())
+        resp = client.post(
+            "/sdk/v1/query",
+            json={"query": "circuit breaker pattern"},
+            headers={"X-Client-ID": "cerid-anneal"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["context"] == "the cited answer stays whole"
+        chunk = body["sources"][0]
+        assert chunk["artifact_id"] == "art-1"
+        assert chunk["truncated"] is True
+        assert len(chunk["content"]) == 4000
 
 
 # ---------------------------------------------------------------------------
@@ -585,8 +622,10 @@ class TestSDKSearch:
                 "/sdk/v1/search",
                 json={"query": "anything", "domain": "coding"},
             )
-        assert resp.status_code == 200
-        assert resp.json()["total_results"] == 0
+        assert resp.status_code == 403
+        detail = resp.json()["detail"]
+        assert detail["retrieval_reason"] == "private_mode"
+        assert detail["retrieval_skipped"] is True
         spy.assert_not_awaited()
 
     def test_collections_scoped_to_consumer(self):

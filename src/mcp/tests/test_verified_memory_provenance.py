@@ -36,7 +36,9 @@ def _promote(claims, create_fn):
     from core.agents.verified_memory import promote_verified_facts
 
     neo4j = MagicMock()
-    neo4j.session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+    session = MagicMock()
+    session.run.return_value.single.return_value = {"n": 0}  # no memory of this claim yet
+    neo4j.session.return_value.__enter__ = MagicMock(return_value=session)
     neo4j.session.return_value.__exit__ = MagicMock(return_value=False)
     chroma = MagicMock()
     chroma.get_or_create_collection.return_value = MagicMock()

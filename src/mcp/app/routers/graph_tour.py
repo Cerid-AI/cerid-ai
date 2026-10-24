@@ -196,14 +196,41 @@ def _fetch_top_entities(driver: Any, max_stops: int, focal_entity: str | None) -
         logger.exception("graph_tour: query failed: %s", exc)
         return []
 
-    # If a focal entity is provided, ensure it leads the list.
+    # A focal entity leads the tour whether or not it is among the most
+    # mentioned: it was dropped when it fell outside the top-K (audit F041).
     if focal_entity:
         focal_row = next((r for r in rows if r["id"] == focal_entity), None)
         if focal_row:
             rows.remove(focal_row)
+        else:
+            focal_row = _fetch_entity(driver, focal_entity)
+            if focal_row:
+                rows = rows[: max(0, max_stops - 1)]
+        if focal_row:
             rows.insert(0, focal_row)
 
     return rows
+
+
+def _fetch_entity(driver: Any, canonical_id: str) -> dict[str, Any] | None:
+    cypher = """
+        MATCH (e:Entity {canonical_id: $id})
+        RETURN
+            e.canonical_id AS id,
+            coalesce(e.name, e.canonical_id) AS name,
+            coalesce(e.mention_count, 0) AS mention_count,
+            e.umap_x AS x,
+            e.umap_y AS y,
+            e.umap_z AS z
+        LIMIT 1
+    """
+    try:
+        with driver.session() as session:
+            found = session.run(cypher, id=canonical_id).data()
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.exception("graph_tour: focal entity query failed: %s", exc)
+        return None
+    return found[0] if found else None
 
 
 def _camera_for_entity(row: dict[str, Any]) -> tuple[tuple[float, float, float], tuple[float, float, float]]:

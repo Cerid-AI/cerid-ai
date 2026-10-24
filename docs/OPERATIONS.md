@@ -169,9 +169,9 @@ Latency (P50/P95), LLM cost, NDCG retrieval quality, cache hit rate, verificatio
 
 ---
 
-## Pro surfaces
+## Pro Upgrade Path
 
-Pro surfaces (audio transcription, OCR, vision, metamorphic verification, visual workflows) stay behind the tier gates in this repository. The running app can still accept a previously issued license key, or start its local trial, from Settings. cerid.ai does not host a checkout.
+Pro features (audio transcription, OCR, vision, metamorphic verification, visual workflows) can be activated via **Settings > Pro tab** using a license key or Stripe checkout. The upgrade flow is self-serve within the running application — no external portal required.
 
 ---
 
@@ -621,10 +621,9 @@ All features below are present in the codebase. Some require environment variabl
 | Multi-user auth | `CERID_MULTI_USER` | `false` | JWT auth, tenant context, per-user API keys |
 | API key auth | `CERID_API_KEY` | (unset) | X-API-Key header auth when set |
 
-> **Note:** `ENABLE_ENCRYPTION` (`config/features.py`) is a settings-panel
-> display flag only — it does not gate any encryption code path. Field-level
-> Fernet encryption is controlled solely by whether `CERID_ENCRYPTION_KEY` is
-> set. See "Field-level encryption" below.
+> **Note:** encryption has no `ENABLE_` toggle. Field-level Fernet encryption
+> is on exactly when `CERID_ENCRYPTION_KEY` is set, and `GET /settings`
+> reports that state as `enable_encryption`. See "Field-level encryption" below.
 
 ### Field-level encryption
 

@@ -187,11 +187,17 @@ async def verify_claim_authoritatively(
 
     Returns:
         {
-            "authoritative_sources": [{"source": str, "content": str, "nli_entailment": float}],
-            "cross_validation": {"kb_vs_external_agreement": float},
+            "authoritative_sources": [{"source": str, "content": str, "nli_entailment": float,
+                                       "nli_scored": bool}],
+            "cross_validation": {"kb_vs_external_agreement": float, "compared_source": str}
+                                | {"skipped": str},
             "claim_domain": str,
             "evidence_summary": str,
+            "query_error": str,  # present only when the source query itself failed
         }
+
+    NLI scores are class probabilities (0-1). An entry with ``nli_scored`` False
+    was not scored; its 0.0 values are placeholders, not weak evidence.
     """
     if not getattr(config, "EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True):
         return {
@@ -219,6 +225,7 @@ async def verify_claim_authoritatively(
     # module-level provider that ``app/main.py`` wires at startup. Keeps
     # ``core/`` free of runtime ``app.*`` imports.
     external_results: list[dict] = []
+    query_error: str | None = None
     effective_registry = registry if registry is not None else _registry
     if effective_registry is None:
         logger.debug(
@@ -227,25 +234,31 @@ async def verify_claim_authoritatively(
         )
     else:
         try:
+            from core.agents.external_query import external_query_for_claim
             from core.utils.text import extract_keywords_simple
 
-            keywords = extract_keywords_simple(claim, max_keywords=5)
-            search_terms = " ".join(keywords) if keywords else claim
+            # A claim about the user's own data goes out only as a public-fact
+            # query, or not at all.
+            outgoing = await external_query_for_claim(claim)
+            if outgoing is not None:
+                keywords = extract_keywords_simple(outgoing, max_keywords=5)
+                search_terms = " ".join(keywords) if keywords else outgoing
 
-            raw_results = await asyncio.wait_for(
-                effective_registry.query_all(
-                    search_terms,
-                    timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT,
-                    raw_query=claim,
-                    keywords=keywords,
-                ),
-                timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT + 1.0,
-            )
-            external_results = raw_results[:max_sources]
+                raw_results = await asyncio.wait_for(
+                    effective_registry.query_all(
+                        search_terms,
+                        timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT,
+                        raw_query=outgoing,
+                        keywords=keywords,
+                    ),
+                    timeout=AUTHORITATIVE_VERIFY_QUERY_TIMEOUT + 1.0,
+                )
+                external_results = raw_results[:max_sources]
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
-            logger.debug("Authoritative source query failed (non-blocking)")
+            query_error = type(exc).__name__
+            logger.warning("Authoritative source query failed (non-blocking): %s", query_error)
 
     if not external_results:
         return {
@@ -254,66 +267,110 @@ async def verify_claim_authoritatively(
             "claim_domain": domain,
             "domain_confidence": domain_detail["confidence"],
             "secondary_domains": domain_detail["secondary"],
-            "evidence_summary": "No authoritative sources returned results.",
+            "evidence_summary": (
+                f"Authoritative source query failed ({query_error}); no evidence gathered."
+                if query_error
+                else "No authoritative sources returned results."
+            ),
+            **({"query_error": query_error} if query_error else {}),
         }
+
+    # Support / contradiction floors: NLI class probabilities (0-1), the same
+    # thresholds the verdict path applies to these sources.
+    entail_floor = config.NLI_ENTAILMENT_THRESHOLD
+    contra_floor = config.NLI_CONTRADICTION_THRESHOLD
 
     # Step 2: NLI entailment between claim and each external result.
     # ExternalEvidence normalises the source dict; to_authoritative_dict emits
-    # the legacy shape (source / content[:200] / source_url / nli_* / freshness)
-    # byte-for-byte, so downstream consumers see no change.
+    # the legacy shape (source / content[:200] / source_url / nli_* / freshness).
+    # ``nli_scored`` says whether the nli_* values were computed here. A source
+    # whose scoring failed carries 0.0 placeholders (never a producer-supplied
+    # value) and must not be read as scored-and-weak.
     scored_sources: list[dict[str, Any]] = []
-    try:
-        from core.utils.nli import nli_score_async
-
-        for ext in external_results:
-            content = ext.get("content", "")[:512]
-            if not content:
-                continue
-            nli = await nli_score_async(content, claim)
-            scored_sources.append(
-                ExternalEvidence.from_mapping(
-                    ext,
-                    nli_entailment=float(nli["entailment"]),
-                    nli_contradiction=float(nli["contradiction"]),
-                ).to_authoritative_dict()
-            )
-    except Exception as exc:
-        from core.utils.swallowed import log_swallowed_error
-        log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
-        logger.debug("NLI scoring of authoritative sources failed")
-        # Fall back to unscored sources (NLI defaults to 0.0)
-        for ext in external_results:
-            scored_sources.append(ExternalEvidence.from_mapping(ext).to_authoritative_dict())
-
-    # Step 3: Cross-validate KB results against external evidence
-    cross_validation: dict[str, Any] = {}
-    if kb_results and scored_sources:
+    premises: list[str] = []  # the text each scored_sources entry was scored on
+    for ext in external_results:
+        content = ext.get("content", "")[:512]
+        if not content:
+            continue
         try:
             from core.utils.nli import nli_score_async
 
-            kb_text = kb_results[0].get("content", "")[:512] if kb_results else ""
-            ext_text = scored_sources[0].get("content", "")[:512] if scored_sources else ""
-            if kb_text and ext_text:
-                cross_nli = await nli_score_async(kb_text, ext_text)
-                cross_validation = {
-                    "kb_vs_external_agreement": float(cross_nli["entailment"]),
-                    "kb_vs_external_contradiction": float(cross_nli["contradiction"]),
-                }
+            nli = await nli_score_async(content, claim)
+            entry = ExternalEvidence.from_mapping(
+                ext,
+                nli_entailment=float(nli["entailment"]),
+                nli_contradiction=float(nli["contradiction"]),
+            ).to_authoritative_dict()
+            entry["nli_scored"] = True
         except Exception as exc:
             from core.utils.swallowed import log_swallowed_error
             log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
-            logger.debug("KB vs external cross-validation failed")
+            entry = ExternalEvidence.from_mapping(ext).to_authoritative_dict()
+            entry.update(nli_entailment=0.0, nli_contradiction=0.0, nli_scored=False)
+        scored_sources.append(entry)
+        premises.append(content)
 
-    # Step 4: Build evidence summary for the LLM verifier
-    supporting = [s for s in scored_sources if s["nli_entailment"] >= 0.5]
-    contradicting = [s for s in scored_sources if s["nli_contradiction"] >= 0.5]
+    scored = [s for s in scored_sources if s["nli_scored"]]
 
-    if supporting:
+    # Step 3: Cross-validate the top KB result against the external source that
+    # bears most on the claim; the first source returned can be unrelated to it.
+    # Agreement / contradiction are NLI probabilities (0-1), KB text as premise.
+    # A cross-validation that could not run says why instead of staying empty.
+    cross_validation: dict[str, Any] = {}
+    if kb_results:
+        kb_text = (kb_results[0].get("content") or "")[:512]
+        bearing = [
+            i for i, s in enumerate(scored_sources)
+            if s["nli_scored"]
+            and (s["nli_entailment"] >= entail_floor or s["nli_contradiction"] >= contra_floor)
+        ]
+        if not kb_text:
+            cross_validation = {"skipped": "KB result has no content"}
+        elif not bearing:
+            cross_validation = {"skipped": "no external source bears on the claim"}
+        else:
+            best = max(
+                bearing,
+                key=lambda i: max(
+                    scored_sources[i]["nli_entailment"], scored_sources[i]["nli_contradiction"],
+                ),
+            )
+            try:
+                from core.utils.nli import nli_score_async
+
+                cross_nli = await nli_score_async(kb_text, premises[best])
+                cross_validation = {
+                    "kb_vs_external_agreement": float(cross_nli["entailment"]),
+                    "kb_vs_external_contradiction": float(cross_nli["contradiction"]),
+                    "compared_source": scored_sources[best]["source"],
+                }
+            except Exception as exc:
+                from core.utils.swallowed import log_swallowed_error
+                log_swallowed_error('core.agents.hallucination.authoritative_verify', exc)
+                cross_validation = {"skipped": f"NLI scoring failed ({type(exc).__name__})"}
+
+    # Step 4: Build evidence summary for the LLM verifier, from scored sources only.
+    supporting = [s for s in scored if s["nli_entailment"] >= entail_floor]
+    contradicting = [s for s in scored if s["nli_contradiction"] >= contra_floor]
+    unscored = len(scored_sources) - len(scored)
+
+    if supporting and contradicting:
+        summary = (
+            f"Authoritative sources disagree: {len(supporting)} support and "
+            f"{len(contradicting)} contradict the claim."
+        )
+    elif supporting:
         summary = f"{len(supporting)} authoritative source(s) support the claim."
     elif contradicting:
         summary = f"{len(contradicting)} authoritative source(s) contradict the claim."
+    elif scored:
+        summary = f"{len(scored)} source(s) queried — no strong entailment or contradiction."
+    elif scored_sources:
+        summary = f"{len(scored_sources)} source(s) returned but none could be NLI-scored."
     else:
-        summary = f"{len(scored_sources)} source(s) queried — no strong entailment or contradiction."
+        summary = "Authoritative sources returned no content to assess."
+    if scored and unscored:
+        summary += f" {unscored} source(s) could not be NLI-scored."
 
     return {
         "authoritative_sources": scored_sources,

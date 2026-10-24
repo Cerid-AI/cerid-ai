@@ -38,7 +38,7 @@ async def _route(monkeypatch: pytest.MonkeyPatch, *, cascade: bool, ollama_ok: b
 async def test_simple_chat_uses_free_tier_when_cascade_off(monkeypatch: pytest.MonkeyPatch) -> None:
     decision = await _route(monkeypatch, cascade=False, ollama_ok=True, models=["llama3.2:3b"])
     assert decision.provider == "openrouter_paid"
-    assert "llama-3.3" in decision.model.lower()
+    assert decision.model == sr.FREE_MODELS["llama-3.3"]
 
 
 @pytest.mark.asyncio

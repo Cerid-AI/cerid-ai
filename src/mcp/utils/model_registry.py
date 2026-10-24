@@ -19,53 +19,53 @@ logger = logging.getLogger("ai-companion.model_registry")
 
 ACTIVE_MODELS: dict[str, dict[str, Any]] = {
     "chat": {
-        "default": "openrouter/openai/gpt-4o-mini",
-        "advanced": "openrouter/anthropic/claude-sonnet-4.6",
-        "frontier": "openrouter/anthropic/claude-opus-4.6",
-        "reasoning": "openrouter/openai/o3-mini",
-        "fast": "openrouter/x-ai/grok-4.3",
+        "default": "openrouter/openai/gpt-6-luna",
+        "advanced": "openrouter/anthropic/claude-sonnet-5.5",
+        "frontier": "openrouter/anthropic/claude-opus-5.5",
+        "reasoning": "openrouter/openai/gpt-6-luna-pro",
+        "fast": "openrouter/x-ai/grok-4.7",
     },
     "internal": {
-        "default": "openrouter/openai/gpt-4o-mini",
+        "default": "openrouter/openai/gpt-6-luna",
         # OpenRouter retired the free llama-3.3 slug on 2026-08-27 (404) and
         # the remaining :free pool is shared/rate-limited, so "free" now
         # resolves to the cheapest RELIABLE model. Same id as "cheap" —
         # deliberately, so nothing silently reports $0 for a paid call.
-        "free": "openrouter/openai/gpt-4o-mini",
-        "pro": "openrouter/anthropic/claude-sonnet-4.6",
+        "free": "openrouter/openai/gpt-6-luna",
+        "pro": "openrouter/anthropic/claude-sonnet-5.5",
     },
     "verification": {
-        "default": "openrouter/openai/gpt-4o-mini",
+        "default": "openrouter/openai/gpt-6-luna",
         "pool": [
-            "openrouter/openai/gpt-4o-mini",
-            "openrouter/google/gemini-2.5-flash",
-            "openrouter/x-ai/grok-4.3",
+            "openrouter/openai/gpt-6-luna",
+            "openrouter/google/gemini-3.8-flash",
+            "openrouter/x-ai/grok-4.7",
         ],
-        "web_search": "openrouter/x-ai/grok-4.3:online",
-        "consistency": "openrouter/google/gemini-2.5-flash",
-        "complex": "openrouter/google/gemini-2.5-flash",
+        "web_search": "openrouter/x-ai/grok-4.7:online",
+        "consistency": "openrouter/google/gemini-3.8-flash",
+        "complex": "openrouter/google/gemini-3.8-flash",
     },
     "tiers": {
         # OpenRouter retired the free llama-3.3 slug on 2026-08-27 (404) and
         # the remaining :free pool is shared/rate-limited, so "free" now
         # resolves to the cheapest RELIABLE model. Same id as "cheap" —
         # deliberately, so nothing silently reports $0 for a paid call.
-        "free": "openrouter/openai/gpt-4o-mini",
-        "cheap": "openrouter/openai/gpt-4o-mini",
-        "capable": "openrouter/anthropic/claude-sonnet-4.6",
-        "research": "openrouter/x-ai/grok-4.3",
-        "expert": "openrouter/anthropic/claude-opus-4.6",
+        "free": "openrouter/openai/gpt-6-luna",
+        "cheap": "openrouter/openai/gpt-6-luna",
+        "capable": "openrouter/anthropic/claude-sonnet-5.5",
+        "research": "openrouter/x-ai/grok-4.7",
+        "expert": "openrouter/anthropic/claude-opus-5.5",
     },
 }
 
 _pricing_cache: dict[str, tuple[float, float]] = {}  # populated by validate_models
 _FALLBACK_PRICING: dict[str, tuple[float, float]] = {  # per 1M tokens
-    "openrouter/openai/gpt-4o-mini": (0.15, 0.60),
-    "openrouter/anthropic/claude-sonnet-4.6": (3.0, 15.0),
-    "openrouter/anthropic/claude-opus-4.6": (15.0, 75.0),
-    "openrouter/google/gemini-2.5-flash": (0.15, 0.60),
-    "openrouter/x-ai/grok-4.3": (0.20, 0.50),
-    "openrouter/openai/o3-mini": (1.10, 4.40),
+    "openrouter/openai/gpt-6-luna": (0.10, 0.50),
+    "openrouter/anthropic/claude-sonnet-5.5": (2.0, 10.0),
+    "openrouter/anthropic/claude-opus-5.5": (4.0, 20.0),
+    "openrouter/google/gemini-3.8-flash": (0.75, 3.75),
+    "openrouter/x-ai/grok-4.7": (2.0, 6.0),
+    "openrouter/openai/gpt-6-luna-pro": (0.10, 0.50),
 }
 
 
@@ -115,6 +115,9 @@ async def validate_models() -> dict[str, Any]:
             resp = await client.get("https://openrouter.ai/api/v1/models")
             resp.raise_for_status()
             catalog = {m["id"]: m for m in resp.json().get("data", [])}
+        from core.routing.model_catalog import save_catalog_snapshot
+
+        save_catalog_snapshot(list(catalog.values()))
 
         valid: list[str] = []
         invalid: list[str] = []
@@ -141,11 +144,11 @@ def get_model(role: str, key: str = "default") -> str:
     """Get a model ID from the registry by role and key."""
     role_models = ACTIVE_MODELS.get(role, {})
     if isinstance(role_models, dict):
-        value = role_models.get(key, role_models.get("default", "openrouter/openai/gpt-4o-mini"))
+        value = role_models.get(key, role_models.get("default", "openrouter/openai/gpt-6-luna"))
         if isinstance(value, str):
             return value
-        return role_models.get("default", "openrouter/openai/gpt-4o-mini")
-    return "openrouter/openai/gpt-4o-mini"
+        return role_models.get("default", "openrouter/openai/gpt-6-luna")
+    return "openrouter/openai/gpt-6-luna"
 
 
 def get_pricing(model_id: str) -> tuple[float, float]:

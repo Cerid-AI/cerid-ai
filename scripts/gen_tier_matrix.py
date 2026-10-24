@@ -58,11 +58,9 @@ LABELS = {
     "image_understanding": "Image understanding",
     "imessage_reader": "iMessage reader",
     "inbox_triage": "AI inbox triage",
-    "keychain_secrets": "Keychain secrets",  # pragma: allowlist secret
     "live_metrics": "Live metrics",
     "meeting_diarization": "Meeting diarization",
     "meeting_summary": "Meeting summary",
-    "menu_bar_mode": "Menu-bar mode",
     "metamorphic_verification": "Metamorphic verification",
     "multi_user": "Multi-user",
     "ocr_parsing": "OCR (scanned PDFs)",
@@ -79,14 +77,25 @@ LABELS = {
     "semantic_dedup": "Semantic deduplication",
     "share_sheet": "Share Sheet",
     "shortcuts_actions": "Shortcuts actions",
-    "sparkle_updates": "Sparkle auto-updates",
     "spotlight_donation": "Spotlight donation",
     "sso_saml": "SSO / SAML",
-    "tcc_wizard": "TCC permissions wizard",
     "truth_audit": "Truth audit",
-    "universal_binary": "Universal binary",
     "voice_memos_watch": "Voice Memos watcher",
 }
+
+# Desktop app behaviour that ships in every tier with no flag to turn it off
+# (packages/desktop/src/main/{tray,secrets,permissions,updater}.ts and the
+# `universal` mac build target). Listed so the matrix shows it, with no gate.
+_ALWAYS_ON: dict[str, list[str]] = {
+    "macOS Native — Community": [
+        "Auto-updates",
+        "Keychain secrets",
+        "Menu-bar mode",
+        "Permissions wizard (macOS privacy)",
+        "Universal binary (Apple silicon + Intel)",
+    ],
+}
+_NO_GATE = "none (always on)"
 
 # Section ordering. Bucket sections come first (in this order), then the
 # tier-derived catch-alls for flags that belong to no bucket.
@@ -166,8 +175,15 @@ def _collect() -> list[tuple[str, list[tuple[str, str]]]]:
 
 def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     total = sum(len(rows) for _, rows in sections)
+    always_on = sum(len(v) for v in _ALWAYS_ON.values())
     out: list[str] = []
     out.append("# Cerid AI — Feature Tier Matrix")
+    out.append("")
+    out.append(
+        "> Historical record. Estate direction is "
+        "`~/dotfiles/docs/estate-direction.md`. This repo is memory: "
+        "material accumulates, stays checked, and can be forgotten."
+    )
     out.append("")
     out.append(
         "> GENERATED FILE — do not edit by hand. Regenerate with "
@@ -178,23 +194,26 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
         "(`_get_feature_tier` + `FEATURE_BUCKETS`); enforced by "
         "`tests/test_tier_matrix_drift.py`."
     )
-    out.append(f"> {total} feature flags across {len(sections)} sections.")
+    out.append(
+        f"> {total} feature flags across {len(sections)} sections, plus "
+        f"{always_on} desktop features that are always on and have no gate."
+    )
     out.append("")
     out.append("## Tiers")
     out.append("")
-    out.append("| Tier | License | Audience | Offering |")
-    out.append("|------|---------|----------|----------|")
+    out.append("| Tier | License | Audience | Price |")
+    out.append("|------|---------|----------|-------|")
     out.append(
-        "| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Anyone who runs it | "
-        "The public offering |"
+        "| **Cerid Core** | FSL-1.1-ALv2 (source-available) | Developers, "
+        "researchers, personal use | Free |"
     )
     out.append(
-        "| **Cerid Pro** | BUSL-1.1 | Same install, wider surfaces | "
-        "In the repository, not sold |"
+        "| **Cerid Pro** | BUSL-1.1 | Business and power users | "
+        "$15/mo · $144/yr |"
     )
     out.append(
-        "| **Cerid Enterprise** | In the tree | Multi-user surfaces in the code | "
-        "Not a separate offer |"
+        "| **Cerid Enterprise** | Commercial | Regulated and large "
+        "organizations | Contact |"
     )
     out.append("")
     out.append("## Feature Matrix")
@@ -204,13 +223,19 @@ def _render(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
         out.append("")
         out.append("| Feature | Core | Pro | Enterprise | Gate |")
         out.append("|---------|------|-----|------------|------|")
+        lines: list[tuple[str, str]] = []
         for flag, tier in rows:
             if flag in _PLANNED:
                 planned = "Coming in 1.0.x"
-                out.append(f"| {_label(flag)} | {planned} | {planned} | {planned} | `{flag}` |")
+                lines.append((_label(flag), f"| {_label(flag)} | {planned} | {planned} | {planned} | `{flag}` |"))
                 continue
             core, pro, ent = _TICK[tier]
-            out.append(f"| {_label(flag)} | {core} | {pro} | {ent} | `{flag}` |")
+            lines.append((_label(flag), f"| {_label(flag)} | {core} | {pro} | {ent} | `{flag}` |"))
+        ungated = _ALWAYS_ON.get(title, [])
+        if ungated:
+            lines.extend((label, f"| {label} | ✓ | ✓ | ✓ | {_NO_GATE} |") for label in ungated)
+            lines.sort(key=lambda kv: kv[0].lower())
+        out.extend(line for _, line in lines)
         out.append("")
         footnote = _SECTION_FOOTNOTES.get(title)
         if footnote:

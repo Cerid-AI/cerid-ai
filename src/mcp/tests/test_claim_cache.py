@@ -333,11 +333,11 @@ def test_claim_cache_key_includes_response_context():
 
 
 def test_claim_cache_key_schema_version_prefix():
-    """Key must be prefixed with v2: schema tag so the v1 cache can be safely
-    left in place (it'll just never be read)."""
+    """Key must be prefixed with the v3 schema tag so older caches (whose
+    entries dropped the evidence) are left in place and never read."""
     from core.utils.claim_cache import claim_cache_key
     key = claim_cache_key("x", model="m", method="kb", response_context="")
-    assert key.startswith("v2:")
+    assert key.startswith("v3:")
 
 
 def test_claim_cache_key_deterministic():

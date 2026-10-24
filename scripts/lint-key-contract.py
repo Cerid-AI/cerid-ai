@@ -231,6 +231,9 @@ CHROMA_DYNAMIC_PRODUCER_KEYS: dict[str, str] = {
     "column_headers": (
         "src/mcp/core/ingest/parsers/csv_parser.py:96 + xlsx_parser.py:133"
     ),
+    # Anneal sends metadata.kind. It lands on every chunk through
+    # base_meta.update(metadata) and the shelf projection reads it back.
+    "kind": "src/mcp/app/services/ingestion.py:1533 base_meta.update(metadata)",
 }
 
 

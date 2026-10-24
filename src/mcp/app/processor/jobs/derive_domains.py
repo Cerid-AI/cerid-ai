@@ -106,9 +106,9 @@ def _specificity(domain: str) -> float:
 def _recency_decay(latest: str | None, now: datetime, half_life_days: float) -> float:
     """Exponential recency decay against an injected `now` (pure — no clock read).
 
-    Mirrors core.utils.temporal.recency_score's tz-stripping and
-    neutral-0.5-on-unparseable behaviour, but takes `now` as a parameter so
-    the fold is deterministic across runs (same now + rows => same salience).
+    Compares in UTC like core.utils.temporal.recency_score, but scores an
+    unparseable date a neutral 0.5 and takes `now` as a parameter so the fold
+    is deterministic across runs (same now + rows => same salience).
     """
     if not latest or half_life_days <= 0:
         # Neutral 0.5 on missing date OR a misconfigured (zero/negative)

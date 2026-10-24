@@ -51,8 +51,6 @@ export interface Conversation {
   archived?: boolean
   /** Held while private mode was on: kept in memory only, never stored or synced. */
   private?: boolean
-  /** Per-message verification reports — keyed by assistant message ID. */
-  verificationReports?: Record<string, HallucinationReport>
 }
 
 export interface ModelCapabilities {
@@ -78,25 +76,32 @@ export interface ModelOption {
 }
 
 export const MODELS: ModelOption[] = [
+  // Catalog-refreshed 2026-10-10 from OpenRouter (prices, windows). Knowledge
+  // cutoffs are approximate (the catalog does not publish them). The server
+  // also sends any older id of these families to the newest release.
   // --- Tier S: Frontier models ---
-  { id: "openrouter/anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 64_000, inputCostPer1M: 3.0, outputCostPer1M: 15.0,
-    capabilities: { reasoning: 90, coding: 95, creative: 85, factual: 88, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
-  { id: "openrouter/anthropic/claude-opus-4.6", label: "Claude Opus 4.6", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 32_000, inputCostPer1M: 5.0, outputCostPer1M: 25.0,
-    capabilities: { reasoning: 95, coding: 93, creative: 92, factual: 93, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
-  { id: "openrouter/x-ai/grok-4.5", label: "Grok 4.5", provider: "xAI", contextWindow: 500_000, effectiveContextWindow: 400_000, maxOutputTokens: 100_000, inputCostPer1M: 2.0, outputCostPer1M: 6.0,
-    capabilities: { reasoning: 88, coding: 82, creative: 78, factual: 90, webSearch: true, vision: true, knowledgeCutoff: "2026-03" } },
+  { id: "openrouter/anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 128_000, inputCostPer1M: 2.0, outputCostPer1M: 10.0,
+    capabilities: { reasoning: 93, coding: 96, creative: 88, factual: 90, webSearch: false, vision: true, knowledgeCutoff: "2026-05" } },
+  { id: "openrouter/anthropic/claude-opus-5.5", label: "Claude Opus 5.5", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 128_000, inputCostPer1M: 4.0, outputCostPer1M: 20.0,
+    capabilities: { reasoning: 97, coding: 96, creative: 94, factual: 95, webSearch: false, vision: true, knowledgeCutoff: "2026-05" } },
+  { id: "openrouter/openai/gpt-6.1-sol", label: "GPT-6.1 Sol", provider: "OpenAI", contextWindow: 1_050_000, effectiveContextWindow: 840_000, maxOutputTokens: 128_000, inputCostPer1M: 2.0, outputCostPer1M: 10.0,
+    capabilities: { reasoning: 94, coding: 94, creative: 86, factual: 90, webSearch: false, vision: true, knowledgeCutoff: "2026-06" } },
+  { id: "openrouter/x-ai/grok-4.7", label: "Grok 4.7", provider: "xAI", contextWindow: 500_000, effectiveContextWindow: 400_000, maxOutputTokens: 128_000, inputCostPer1M: 2.0, outputCostPer1M: 6.0,
+    capabilities: { reasoning: 91, coding: 88, creative: 80, factual: 91, webSearch: true, vision: true, knowledgeCutoff: "2026-06" } },
   // --- Tier A: Strong general-purpose ---
-  { id: "openrouter/openai/o3-mini", label: "o3-mini", provider: "OpenAI", contextWindow: 200_000, effectiveContextWindow: 160_000, maxOutputTokens: 100_000, inputCostPer1M: 1.10, outputCostPer1M: 4.40,
-    capabilities: { reasoning: 92, coding: 85, creative: 65, factual: 80, webSearch: false, vision: false, knowledgeCutoff: "2025-10" } },
-  { id: "openrouter/google/gemini-3-flash-preview", label: "Gemini 3 Flash", provider: "Google", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 65_536, inputCostPer1M: 0.50, outputCostPer1M: 3.0,
-    capabilities: { reasoning: 82, coding: 85, creative: 78, factual: 84, webSearch: false, vision: true, knowledgeCutoff: "2025-11" } },
-  // --- Tier B: Budget / legacy ---
-  { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", contextWindow: 128_000, effectiveContextWindow: 102_400, maxOutputTokens: 16_384, inputCostPer1M: 0.15, outputCostPer1M: 0.60,
-    capabilities: { reasoning: 70, coding: 72, creative: 75, factual: 78, webSearch: false, vision: true, knowledgeCutoff: "2024-10" } },
-  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 65_536, inputCostPer1M: 0.30, outputCostPer1M: 2.50,
-    capabilities: { reasoning: 78, coding: 80, creative: 75, factual: 82, webSearch: false, vision: true, knowledgeCutoff: "2025-06" } },
-  { id: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3", provider: "Meta", contextWindow: 131_072, effectiveContextWindow: 104_857, maxOutputTokens: 8_192, inputCostPer1M: 0.10, outputCostPer1M: 0.32,
-    capabilities: { reasoning: 75, coding: 78, creative: 72, factual: 75, webSearch: false, vision: false, knowledgeCutoff: "2024-12" } },
+  { id: "openrouter/google/gemini-3.8-flash", label: "Gemini 3.8 Flash", provider: "Google", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 65_536, inputCostPer1M: 0.75, outputCostPer1M: 3.75,
+    capabilities: { reasoning: 88, coding: 88, creative: 80, factual: 86, webSearch: false, vision: true, knowledgeCutoff: "2026-05" } },
+  { id: "openrouter/openai/gpt-6-luna-pro", label: "GPT-6 Luna Pro", provider: "OpenAI", contextWindow: 1_050_000, effectiveContextWindow: 840_000, maxOutputTokens: 128_000, inputCostPer1M: 0.10, outputCostPer1M: 0.50,
+    capabilities: { reasoning: 90, coding: 84, creative: 70, factual: 82, webSearch: false, vision: true, knowledgeCutoff: "2026-05" } },
+  // --- Tier B: Budget ---
+  { id: "openrouter/anthropic/claude-haiku-5.5", label: "Claude Haiku 5.5", provider: "Anthropic", contextWindow: 1_000_000, effectiveContextWindow: 800_000, maxOutputTokens: 128_000, inputCostPer1M: 0.10, outputCostPer1M: 0.50,
+    capabilities: { reasoning: 82, coding: 85, creative: 78, factual: 82, webSearch: false, vision: true, knowledgeCutoff: "2026-06" } },
+  { id: "openrouter/openai/gpt-6-luna", label: "GPT-6 Luna", provider: "OpenAI", contextWindow: 1_050_000, effectiveContextWindow: 840_000, maxOutputTokens: 128_000, inputCostPer1M: 0.10, outputCostPer1M: 0.50,
+    capabilities: { reasoning: 80, coding: 80, creative: 76, factual: 80, webSearch: false, vision: true, knowledgeCutoff: "2026-05" } },
+  { id: "openrouter/google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", provider: "Google", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 65_536, inputCostPer1M: 0.30, outputCostPer1M: 2.50,
+    capabilities: { reasoning: 78, coding: 78, creative: 72, factual: 78, webSearch: false, vision: true, knowledgeCutoff: "2026-03" } },
+  { id: "openrouter/meta-llama/llama-4-maverick", label: "Llama 4 Maverick", provider: "Meta", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 16_384, inputCostPer1M: 0.188, outputCostPer1M: 0.652,
+    capabilities: { reasoning: 76, coding: 76, creative: 72, factual: 76, webSearch: false, vision: true, knowledgeCutoff: "2024-08" } },
 ]
 
 export const PROVIDER_COLORS: Record<string, string> = {
@@ -541,6 +546,8 @@ export interface ExternalSourceResult {
   source_url: string
   source_name?: string
   source_type: "external"
+  /** Stable per-row id from the backend (CRAG and smart-mode rows). */
+  guid?: string
 }
 
 export interface SourceBreakdown {
@@ -980,8 +987,6 @@ export interface ServerSettings {
   rerank_provider?: "sidecar" | "quenchforge" | "in-process"
   quenchforge_embed_model?: string
   quenchforge_rerank_model?: string
-  // Context source gates
-  context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
   pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean
@@ -1078,8 +1083,6 @@ export interface SettingsUpdate {
   quenchforge_embed_model?: string
   quenchforge_rerank_model?: string
   rag_mode?: string  // KB injection mode in SettingsUpdate
-  // Context source gates
-  context_sources?: ContextSources
   // v0.93.9 — internal LLM provider/model now mutable via PATCH /settings.
   internal_llm_provider?: "openrouter" | "ollama" | "quenchforge"
   internal_llm_model?: string
@@ -1135,10 +1138,10 @@ export interface SynopsisEstimate {
 }
 
 export const SYNOPSIS_MODELS = [
-  { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 (Free)" },
-  { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini" },
-  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "openrouter/anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
+  { id: "openrouter/openai/gpt-6-luna", label: "GPT-6 Luna" },
+  { id: "openrouter/google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite" },
+  { id: "openrouter/google/gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+  { id: "openrouter/anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5" },
 ] as const
 
 export interface LiveMetrics {

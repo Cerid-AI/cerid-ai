@@ -1,14 +1,14 @@
 # Cerid AI — Brand Identity Guide
 
-> **Status:** tier labels and shield files checked against the app on 2026-10-17. The color hex values below were not re-measured. These names are labels in the running app. They are not prices, and cerid.ai does not sell them.
+> **Status:** reference, last reviewed 2026-09-07; not re-verified against code since 2026-03-30
 
 ## Brand Names
 
-| Tier | Name in the app | Tagline | Shield Style |
-|------|-----------------|---------|--------------|
-| **Core** (`community`) | Cerid AI | Smart. Extensible. Private. | Teal outline, teal C |
-| **Pro** (a gate in this repository) | Cerid Pro | Smart. Secure. Fully Controlled. | Silver/chrome trim, teal C |
-| **Enterprise** (not a separate offer) | Cerid Vault | Secure by Design. Mission Assured. | Gold trim, teal C, gold accent |
+| Tier | Product Name | Tagline | Shield Style |
+|------|-------------|---------|--------------|
+| **Core** (community) | Cerid Core | Smart. Extensible. Private. | Teal outline, teal C |
+| **Pro** (commercial) | Cerid Pro | Smart. Secure. Fully Controlled. | Silver/chrome trim, teal C |
+| **Enterprise** | Cerid Vault | Secure by Design. Mission Assured. | Gold trim, teal C, gold accent |
 
 ## Color Palette
 
@@ -56,17 +56,32 @@
 .bg-gold\/10 { background: oklch(0.78 0.12 85 / 10%); }
 ```
 
-## Marketing site
+### Marketing Site (packages/marketing/src/app/globals.css)
 
-The public site is the separate `cerid-ai-marketing` repository. It is not a package in this tree.
+```css
+/* Wordmark gradient (#00E5D8 → #7FF9E8) */
+.text-brand-gradient { background: linear-gradient(135deg, #00E5D8, #7FF9E8); }
+
+/* Shine sweep animation */
+.text-brand-shine { animation: shine-sweep 4s ease-in-out infinite; }
+
+/* Teal glow pulse */
+.glow-teal { animation: teal-pulse 4s ease-in-out infinite; }
+
+/* Circuit-board background pattern */
+.bg-circuit { background-image: radial-gradient(circle, rgba(0,229,216,0.07) 1.5px, transparent); }
+
+/* Gold section dividers */
+.divider-gold { border-image: linear-gradient(90deg, transparent, rgba(212,175,55,0.4), transparent) 1; }
+```
 
 ## SVG Shield Component
 
-The app picks the shield in `src/web/src/components/layout/sidebar.tsx`:
+Three-variant SVG shield available at `src/web/src/components/layout/sidebar.tsx` and `packages/marketing/src/components/brand-shield.tsx`:
 
-- **Core (`community`):** Teal outline, teal gradient "C" — `/cerid-core.svg`
-- **Pro:** Silver/chrome outline, teal "C" — `/cerid-pro.svg`
-- **Vault (`enterprise`):** Gold trim, teal "C", gold accent dot — `/cerid-vault.svg`
+- **Core:** Teal outline, teal gradient "C"
+- **Pro:** Silver/chrome outline, teal "C"
+- **Vault:** Gold trim, teal "C", gold accent dot
 
 Static SVG files:
 - `src/web/public/cerid-core.svg`
@@ -84,9 +99,9 @@ Source images in `~/Dropbox/cerid-sync/Graphics and branding/`:
 | `eK2nQ.jpg` | Hero tagline banner | Marketing features |
 | `HT7YS.jpg` | 6-feature icon grid | Cropped into badges |
 | `K56Cs.jpg` | 4-feature icon set | Cropped into badges |
-| `kr4QB.jpg` | Cerid Vault app icon | Retired pricing artwork |
-| `57mYS.jpg` | Cerid Core app icon | Retired pricing artwork |
-| `5c1SK.jpg` | CERID PRO wordmark | Retired pricing artwork |
+| `kr4QB.jpg` | Cerid Vault app icon | Marketing pricing |
+| `57mYS.jpg` | Cerid Core app icon | Marketing pricing |
+| `5c1SK.jpg` | CERID PRO wordmark | Marketing pricing |
 | `sHzTK.jpg` | 3D shield with rivets | Marketing security |
 | `umLv0.jpg` | Secure Intelligence banner | Marketing security |
 | `pOXvI.jpg` | Privacy-First graphic | Marketing privacy |
@@ -100,14 +115,14 @@ Individual badges cropped from grids:
 
 ## Tier-Reactive Elements
 
-The GUI sidebar, favicon, and browser tab title follow the active tier. The code tier values are `community`, `pro`, and `enterprise` (`src/web/src/App.tsx`, `src/web/src/components/layout/sidebar.tsx`):
+The GUI sidebar, favicon, and browser tab title update dynamically based on the active tier:
 
-| Element | `community` | `pro` | `enterprise` |
-|---------|-------------|-------|--------------|
-| Sidebar tier word | AI | PRO | VAULT |
-| Tier-word color | Muted | Muted | Gold |
-| Shield menu | Muted | Teal | Gold |
-| Favicon | `/cerid-core.svg` | `/cerid-pro.svg` | `/cerid-vault.svg` |
-| Browser tab | "Cerid AI" | "Cerid Pro" | "Cerid Vault" |
+| Element | Core | Pro | Vault |
+|---------|------|-----|-------|
+| Sidebar wordmark | CERID **CORE** | CERID **PRO** | CERID **VAULT** |
+| Wordmark tier color | Muted gray | Teal (brand) | Gold |
+| Favicon | Teal shield SVG | Silver shield SVG | Gold shield SVG |
+| Browser tab | "Cerid Core" | "Cerid Pro" | "Cerid Vault" |
+| Pro badges | Gold (locked) | Gold (active) | Gold (all unlocked) |
 
-The shield icon in the sidebar cycles `community` → `pro` → `enterprise` through `POST /settings/tier`.
+Tier cycling is available via the Shield icon in the sidebar bottom-left (cycles Core → Pro → Vault via `POST /settings/tier`).

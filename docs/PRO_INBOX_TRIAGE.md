@@ -1,5 +1,7 @@
 # Pro — AI Inbox Triage
 
+> Connector notes. The product tier around them is historical. Finance reads `inbox` only as `mail_financial_card`.
+
 Categorize Gmail, Outlook, and Apple Mail. Classification stops at the
 first confident rung: a sticking rule, then the small local model, then
 the heavy local model, then the frontier model. The frontier model does
@@ -41,9 +43,10 @@ its consumer entry (`CONSUMER_REGISTRY["cerid-finance"]`) grants `inbox`
 with `record_types: {"inbox": ["mail_financial_card"]}`, so its
 retrieval in that domain is narrowed to card rows (`where` clause and
 the BM25 side) and it cannot write there. It sees no `mail_thread` row.
-That grant is the exception: finance may read the card and may not write the
-mail domain. The suite-contracts spec is not in this repository. Mail does not
-create finance transactions, balances, or recurring rules.
+The exception is recorded in the suite-contracts spec
+(`docs/superpowers/specs/2026-09-17-suite-contracts-design.md`, "RAG
+namespaces"). Mail does not create finance transactions, balances, or
+recurring rules.
 
 Apply does not ingest. The route hook only accepts or rejects a post the
 triage pass already built. Payload kind before that hook: `none` → none,

@@ -534,7 +534,9 @@ class TestImportAllWiring:
         ), patch(
             # The real one would open the configured Chroma beside a mock graph.
             "app.services.chunk_id_migration.migrate_chunk_ids", return_value={"rows": 0},
-        ) as mock_rekey:
+        ) as mock_rekey, patch(
+            "app.services.memory_identity_migration.migrate_memory_identity", return_value={},
+        ):
             result = import_mod.import_all(driver, sync_dir=str(tmp_path))
 
         assert result["memories"] == {"memories_merged": 3, "edges_merged": 1}

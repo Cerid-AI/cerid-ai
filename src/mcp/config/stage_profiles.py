@@ -144,6 +144,8 @@ STAGE_PROFILES: dict[str, tuple[TaskType, Hardness]] = {
     "inbox_triage_draft": (TaskType.GENERATION, Hardness.HARD),
     "forget_assist": (TaskType.CLASSIFICATION, Hardness.MODERATE),
     "forget_assist_cloud": (TaskType.CLASSIFICATION, Hardness.MODERATE),
+    # Rewrites a personal question as a query for a related public fact.
+    "external_query_generalize": (TaskType.EXTRACTION, Hardness.SIMPLE),
     # --- Reranking ---
     "assembler_rerank": (TaskType.RERANKING, Hardness.SIMPLE),
     "rerank_llm": (TaskType.RERANKING, Hardness.SIMPLE),
@@ -179,6 +181,7 @@ INTERACTIVE_STAGES = frozenset({
     # The user waits on the forget assistant's grouping.
     "forget_assist",
     "forget_assist_cloud",
+    "external_query_generalize",
 })
 
 MCP_STAGE_PREFIX = "mcp_"
@@ -229,8 +232,9 @@ INBOX_STAGES = LOCAL_FIRST_STAGES | CLOUD_ESCALATION_STAGES
 # Stages that never leave the machine: forced to the local backend whatever
 # the profile, a PROVIDER_STAGE pin or a call override says, and a local
 # failure is the outcome (no cloud fallback, no opt-in flag). The forget
-# assistant reads what the user wants forgotten.
-PRIVATE_LOCAL_STAGES = frozenset({"forget_assist"})
+# assistant reads what the user wants forgotten; the external-query rewrite reads
+# a personal question in order to keep it from leaving.
+PRIVATE_LOCAL_STAGES = frozenset({"forget_assist", "external_query_generalize"})
 
 # The same work, sent to the cloud only after the user consented to it on
 # that request. Never under the local-only profile.

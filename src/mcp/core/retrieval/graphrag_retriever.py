@@ -229,7 +229,7 @@ def entity_neighborhood_artifact_ids(
     with any of the seed artifacts, ranked by share count.
 
     Used by ``core/agents/query_agent.py`` step-6 when
-    ``RETRIEVAL_MODE=local_graphrag``: instead of expanding via
+    ``RETRIEVAL_MODE`` is ``local_graphrag`` or ``auto``: instead of expanding via
     Domain/SubCategory/Tag relationships, expand via shared
     ``(:MENTIONS)`` neighbours produced by entity extraction.
 

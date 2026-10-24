@@ -1,5 +1,7 @@
 # Apple Mail connector
 
+> Connector notes. The product tier around them is historical. The mail ontology already has sub-category `apple_mail`.
+
 ## What this connector does
 
 The Apple Mail connector reads your local Mail.app message store and

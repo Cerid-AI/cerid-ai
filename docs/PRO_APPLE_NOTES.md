@@ -1,5 +1,7 @@
 # Apple Notes connector
 
+> Connector notes. The product tier around them is historical. Notes already land in domain `notes`.
+
 ## What this connector does
 
 The Apple Notes connector reads your local Notes database and ingests every

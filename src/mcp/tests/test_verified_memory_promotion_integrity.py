@@ -22,7 +22,7 @@ class _Collection:
     def query(self, **_kw: Any) -> dict[str, Any]:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-    def add(self, **kw: Any) -> None:
+    def upsert(self, **kw: Any) -> None:
         if self.add_error is not None:
             raise self.add_error
         self.added.append(kw)
@@ -37,8 +37,9 @@ class _Chroma:
 
 
 class _Session:
-    def __init__(self, runs: list[tuple[str, dict[str, Any]]]) -> None:
+    def __init__(self, runs: list[tuple[str, dict[str, Any]]], exists: bool = False) -> None:
         self._runs = runs
+        self._exists = exists
 
     def __enter__(self) -> "_Session":
         return self
@@ -50,16 +51,20 @@ class _Session:
         self._runs.append((cypher, params))
         return self
 
-    def single(self) -> None:
+    def single(self) -> Any:
+        last = self._runs[-1][0] if self._runs else ""
+        if "RETURN count(m) AS n" in last:
+            return {"n": 1 if self._exists else 0}
         return None
 
 
 class _Driver:
     def __init__(self) -> None:
         self.runs: list[tuple[str, dict[str, Any]]] = []
+        self.exists = False
 
     def session(self) -> _Session:
-        return _Session(self.runs)
+        return _Session(self.runs, self.exists)
 
 
 _KB_CLAIM = {
@@ -89,9 +94,9 @@ _EXTERNAL_CLAIM = {
 }
 
 
-def _promote(claim: dict[str, Any], chroma: _Chroma, driver: _Driver, create_fn: Any) -> dict[str, int]:
+def _promote(claim: dict[str, Any], chroma: _Chroma, driver: _Driver, create_fn: Any, cid: str = "") -> dict[str, int]:
     return asyncio.run(promote_verified_facts(
-        {"conversation_id": "", "claims": [claim]},
+        {"conversation_id": cid, "claims": [claim]},
         chroma, driver, create_memory_fn=create_fn,
     ))
 
@@ -135,3 +140,39 @@ def test_an_externally_verified_memory_keeps_its_source_urls():
         "no write to the memory node carried the source URLs: "
         f"{[params for _c, params in driver.runs]}"
     )
+
+
+def test_a_claim_is_one_memory_wherever_it_is_promoted():
+    """Forget spec §6.3: the id comes from the claim, the row is {id}_{h16},
+    and the memory names the conversation it came from."""
+    from core.retrieval.artifact_rows import verified_memory_id
+
+    collection = _Collection()
+    seen: list[dict[str, Any]] = []
+    counts = _promote(_KB_CLAIM, _Chroma(collection), _Driver(), lambda _d, m: seen.append(m) or m["id"], cid="conv-1")
+    assert counts["promoted"] == 1
+    memory_id = verified_memory_id(_KB_CLAIM["claim"])
+    assert seen[0]["id"] == memory_id and seen[0]["conversation_id"] == "conv-1"
+    row_id = collection.added[0]["ids"][0]
+    assert row_id.startswith(f"{memory_id}_") and len(row_id) == len(memory_id) + 17
+    assert collection.added[0]["metadatas"][0]["conversation_id"] == "conv-1"
+
+
+def test_a_claim_the_person_forgot_is_not_promoted_again(monkeypatch):
+    from core.retrieval.artifact_rows import verified_memory_id
+
+    gone = verified_memory_id(_KB_CLAIM["claim"])
+    monkeypatch.setattr("core.forget.registry.is_forgotten", lambda kind, i: kind == "memory" and i == gone)
+    collection = _Collection()
+    counts = _promote(_KB_CLAIM, _Chroma(collection), _Driver(), lambda _d, m: m["id"])
+    assert counts["promoted"] == 0 and counts["skipped_forgotten"] == 1 and not collection.added
+
+
+def test_a_claim_whose_memory_exists_is_not_promoted_again():
+    """Its memory may have been superseded or merged since; a fresh row would
+    bring it back as current."""
+    driver = _Driver()
+    driver.exists = True
+    collection = _Collection()
+    counts = _promote(_KB_CLAIM, _Chroma(collection), driver, lambda _d, m: m["id"])
+    assert counts["promoted"] == 0 and counts["skipped_duplicate"] == 1 and not collection.added

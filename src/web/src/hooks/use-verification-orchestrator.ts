@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
 /**
- * Orchestrates verification state: streaming verification, saved report fetching,
+ * Orchestrates verification state: streaming verification, stored report fetching
+ * (from the server, where reports live once per message),
  * report caching, re-verify triggering, proactive model-switch banners,
  * and per-message verification selection.
  *
@@ -27,6 +28,8 @@ import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { MODELS } from "@/lib/types"
+import { fetchVerificationReports } from "@/lib/api"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { countPositiveVerdicts, reportPositiveCounts } from "@/lib/verification-utils"
 import type { ChatMessage, HallucinationClaim, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
@@ -85,8 +88,13 @@ export function useVerificationOrchestrator({
   currentModel,
   expertVerification,
 }: UseVerificationOrchestratorOptions): UseVerificationOrchestratorReturn {
-  const { markVerified, clearVerified, saveVerification, getVerification, getAllVerificationReports: getAllReports } = useConversationsContext()
+  const { markVerified, clearVerified } = useConversationsContext()
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
+  // The active conversation's stored reports, fetched from the server: reports
+  // live there once, per message, not inside the saved conversation (§6.2).
+  const [serverReports, setServerReports] = useState<{ convId: string | null; reports: Record<string, HallucinationReport> }>(
+    { convId: null, reports: {} },
+  )
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
@@ -191,17 +199,27 @@ export function useVerificationOrchestrator({
   // Without this, injectedContext is empty by the time verification reads it.
   const lastInjectedIdsRef = useRef<string[]>([])
   const { injectedContext } = useKBInjection()
+  // The KB documents the answer was generated from: what the user injected by
+  // hand plus what retrieval put in the prompt (the answer's sourcesUsed). A
+  // claim verified against one of them is shown as "KB verified".
+  const latestAnswerSourceIds = useMemo(() => {
+    const last = activeMessages?.filter((m) => m.role === "assistant").at(-1)
+    return (last?.sourcesUsed ?? [])
+      .filter((s) => (s.source_type ?? "kb") === "kb" && s.artifact_id)
+      .map((s) => s.artifact_id)
+  }, [activeMessages])
   const sourceArtifactIds = useMemo(() => {
     // Prefer live context; fall back to persisted ref (post-clear)
-    const liveIds = injectedContext.map((r) => r.artifact_id).filter(Boolean)
-    if (liveIds.length > 0) {
+    let injected = injectedContext.map((r) => r.artifact_id).filter(Boolean)
+    if (injected.length > 0) {
       // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
-      lastInjectedIdsRef.current = liveIds
-      return liveIds
+      lastInjectedIdsRef.current = injected
+    } else {
+      // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
+      injected = lastInjectedIdsRef.current
     }
-    // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
-    return lastInjectedIdsRef.current
-  }, [injectedContext])
+    return [...new Set([...injected, ...latestAnswerSourceIds])]
+  }, [injectedContext, latestAnswerSourceIds])
 
   // Streaming verification hook
   const verification = useVerificationStream(
@@ -214,7 +232,20 @@ export function useVerificationOrchestrator({
     priorAssistantContext,
     expertVerification,
     sourceArtifactIds,
+    lastAssistantMsgId,
   )
+
+  // Fetch the conversation's stored reports when it opens.
+  useEffect(() => {
+    if (!activeId || !hallucinationEnabled) return
+    let cancelled = false
+    fetchVerificationReports(activeId)
+      .then((reports) => {
+        if (!cancelled) setServerReports({ convId: activeId, reports })
+      })
+      .catch((err) => logSwallowedError(err, "verification.fetchReports"))
+    return () => { cancelled = true }
+  }, [activeId, hallucinationEnabled])
 
   // Clear stale saved report, verified mark, AND module-level cache when a new
   // response starts streaming. Also auto-reset selected message to latest.
@@ -247,11 +278,8 @@ export function useVerificationOrchestrator({
 
   // Cache completed verification report — uses refs to avoid triggering re-renders
   const markVerifiedRef = useRef(markVerified)
-  const saveVerificationRef = useRef(saveVerification)
   // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
   markVerifiedRef.current = markVerified
-  // eslint-disable-next-line react-hooks/refs -- established ref pattern in this hook; React Compiler bailout reviewed and accepted
-  saveVerificationRef.current = saveVerification
 
   useEffect(() => {
     if (verification.phase !== "done" || !verification.report || !activeId || !lastAssistantMsgId) return
@@ -271,21 +299,13 @@ export function useVerificationOrchestrator({
     }
     reportCache.set(key, verification.report)
 
-    // Defer context saves to next event loop tick.
-    // This breaks the synchronous render loop: without deferral, calling
-    // markVerified/saveVerification updates conversations state, which
-    // re-renders the entire component tree, which can re-trigger effects.
-    const reportCopy = verification.report
+    // Defer the context update to the next event loop tick: markVerified
+    // updates conversations state, which re-renders the entire component tree,
+    // which can re-trigger effects. The report itself is stored by the server
+    // (the stream persists it and emits "persisted"); nothing is saved here.
     const aid = activeId
-    const mid = lastAssistantMsgId
     setTimeout(() => {
       markVerifiedRef.current(aid)
-      saveVerificationRef.current(aid, mid, reportCopy)
-
-      // Neo4j persistence is handled by the backend itself — the stream
-      // generator invokes save_verification_report once the retry sweep
-      // + consistency checks settle, then emits a "persisted" SSE event.
-      // Sprint C removed the redundant FE call that used to live here.
     }, 0)
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
@@ -306,22 +326,21 @@ export function useVerificationOrchestrator({
       return
     }
 
-    // 2. Check localStorage (persisted across page reloads)
-    const localReport = getVerification(activeId, effectiveMsgId)
-    if (localReport) {
+    // 2. The conversation's stored reports, fetched from the server
+    const storedReport = serverReports.convId === activeId ? serverReports.reports[effectiveMsgId] : undefined
+    if (storedReport) {
       if (reportCache.size >= MAX_REPORT_CACHE) {
         const firstKey = reportCache.keys().next().value
         if (firstKey !== undefined) reportCache.delete(firstKey)
       }
-      reportCache.set(key, localReport)
-      setSavedReport(localReport)
+      reportCache.set(key, storedReport)
+      setSavedReport(storedReport)
       return
     }
 
-    // No cached report — user can re-verify via button
+    // No stored report — user can re-verify via button
     setSavedReport(null)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude getVerification (context callback, causes re-render loops)
-  }, [activeId, effectiveMsgId, hallucinationEnabled])
+  }, [activeId, effectiveMsgId, hallucinationEnabled, serverReports])
 
   // Proactive web-model switch banner
   useEffect(() => {
@@ -402,12 +421,12 @@ export function useVerificationOrchestrator({
   }, [activeId, lastAssistantMsgId, clearVerified])
 
   // All verification reports for badges on all messages.
-  // Merges three sources: localStorage (persisted), module-level cache
+  // Merges three sources: the server's stored reports, the module-level cache
   // (survives pane switches), and the live streaming report.
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- explicit useMemo was added by hand; Compiler bailout is informational
   const allVerificationReports = useMemo(() => {
     if (!activeId) return {}
-    const stored = getAllReports(activeId)
+    const stored = serverReports.convId === activeId ? serverReports.reports : {}
 
     // Include module-level cache entries for this conversation
     const prefix = `${activeId}:`
@@ -419,13 +438,14 @@ export function useVerificationOrchestrator({
       }
     }
 
-    // Merge: cached fills gaps, stored overrides cached, live overrides all
-    const merged = { ...cached, ...stored }
+    // Merge: stored fills gaps, this session's reports override the snapshot
+    // fetched when the conversation opened, live overrides all
+    const merged = { ...stored, ...cached }
     if (lastAssistantMsgId && verification.report) {
       merged[lastAssistantMsgId] = verification.report
     }
     return merged
-  }, [activeId, getAllReports, lastAssistantMsgId, verification.report])
+  }, [activeId, serverReports, lastAssistantMsgId, verification.report])
 
   return {
     halReport,

@@ -115,6 +115,21 @@ def collect_issues(text: str, max_age_days: int, today: date) -> list[str]:
     return issues
 
 
+MEMORY_SENTENCE = "Material accumulates, stays checked, and can be forgotten."
+
+
+def memory_contract_issue(memory_text: str) -> str | None:
+    """The memory contract, checked beside the product story, not inside it.
+
+    ``collect_issues`` stays the five-heading gate. Synthetic product-story
+    fixtures do not carry this sentence, and must not start failing because
+    of it.
+    """
+    if MEMORY_SENTENCE not in memory_text:
+        return f"docs/MEMORY.md is missing the sentence: {MEMORY_SENTENCE}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     doc_path: Path = args.doc
@@ -125,6 +140,12 @@ def main(argv: list[str] | None = None) -> int:
 
     text = doc_path.read_text(encoding="utf-8")
     issues = collect_issues(text, max_age_days=args.max_age_days, today=date.today())
+    if doc_path == DEFAULT_DOC_PATH:
+        memory_path = Path("docs/MEMORY.md")
+        memory_text = memory_path.read_text(encoding="utf-8") if memory_path.exists() else ""
+        contract = memory_contract_issue(memory_text)
+        if contract:
+            issues.append(contract)
     if not issues:
         print(f"PRODUCT_STORY: OK ({doc_path}) — all 5 primitives present, last review within window.")
         return 0

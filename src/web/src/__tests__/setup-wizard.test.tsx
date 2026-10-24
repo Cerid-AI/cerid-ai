@@ -76,13 +76,6 @@ vi.mock("@/lib/api/knowledge-packs", () => ({
       ],
     },
   }),
-  installKnowledgePack: vi.fn().mockResolvedValue({
-    pack_id: "python-stdlib-docs",
-    version: "1.0.0",
-    installed_at: "2026-05-10T12:00:00Z",
-    domain: "coding",
-    artifact_count: 208,
-  }),
 }))
 
 vi.mock("@/lib/api/kb", () => ({

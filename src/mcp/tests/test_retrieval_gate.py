@@ -101,3 +101,59 @@ class TestClassifyRetrievalNeed:
     def test_top_k_zero_on_skip(self):
         d = classify_retrieval_need("hi")
         assert d.top_k == 0
+
+    def test_greeting_followed_by_content_retrieves(self):
+        # Audit F37: the greeting pattern was anchored only at the start, so any
+        # query opening with a greeting word skipped retrieval.
+        for query in [
+            "hello world program in rust",
+            "thanks to the new index, what is our refund policy",
+            "hey what does the onboarding doc say about laptops",
+            "ok so where is the Q3 budget spreadsheet",
+            "good night sleep tips from my parenting notes",
+        ]:
+            d = classify_retrieval_need(query)
+            assert d.action != "skip", f"Expected retrieval for {query!r}"
+
+    def test_greeting_with_filler_still_skips(self):
+        for phrase in [
+            "thank you", "thanks so much!", "hey, thanks", "ok thanks",
+            "thanks for the help", "bye everyone", "hello again",
+            "good morning", "Good evening!", "good morning team",
+        ]:
+            d = classify_retrieval_need(phrase)
+            assert d.action == "skip", f"Expected skip for {phrase!r}"
+            assert d.reason == "conversational"
+
+    def test_rephrase_request_with_new_subject_retrieves(self):
+        # Audit F64: "rephrase/summarize/explain this" was prefix-only, so a
+        # request naming new content skipped retrieval.
+        for query in [
+            "please summarize this contract clause about termination",
+            "can you explain this error in the auth module",
+            "could you rewrite it using the style guide from the wiki",
+        ]:
+            d = classify_retrieval_need(query)
+            assert d.action != "skip", f"Expected retrieval for {query!r}"
+
+    def test_rephrase_request_about_prior_turn_still_skips(self):
+        for phrase in [
+            "can you rephrase that?", "please summarize the above",
+            "could you explain it again", "can you rewrite this more simply",
+        ]:
+            d = classify_retrieval_need(phrase)
+            assert d.action == "skip", f"Expected skip for {phrase!r}"
+
+    def test_technical_term_matches_whole_words_only(self):
+        # Audit F65: substring matching upgraded "format" (orm), "cheapest"
+        # (heap) and "hashtag" (hash) to full retrieval.
+        for query in ["what is the format?", "explain cheapest flights", "define a hashtag"]:
+            d = classify_retrieval_need(query)
+            assert d.action == "light", f"Expected light for {query!r}"
+            assert d.reason == "simple_lookup"
+
+    def test_technical_term_upgrade_still_fires(self):
+        for query in ["what is a hash?", "define the hashes", "explain a state machine"]:
+            d = classify_retrieval_need(query)
+            assert d.action == "full", f"Expected full for {query!r}"
+            assert d.reason == "technical_term_upgrade"

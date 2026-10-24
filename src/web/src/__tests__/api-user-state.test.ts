@@ -8,7 +8,7 @@ vi.stubEnv("VITE_CERID_API_KEY", "")
 
 const {
   fetchUserState, fetchSyncedConversations, syncConversation,
-  syncConversationsBulk, deleteConversationSync, syncPreferences,
+  deleteConversationSync, syncPreferences,
   fetchForgottenConversations, ConversationGoneError,
 } = await import("@/lib/api")
 
@@ -149,32 +149,6 @@ describe("fetchForgottenConversations", () => {
   it("rejects on a non-2xx response", async () => {
     vi.stubGlobal("fetch", mockFetch({ message: "boom" }, 500))
     await expect(fetchForgottenConversations()).rejects.toThrow()
-  })
-})
-
-describe("syncConversationsBulk", () => {
-  it("sends POST with array body", async () => {
-    vi.stubGlobal("fetch", mockFetch({ status: "ok" }))
-    const convs = [
-      { id: "c1", title: "A", messages: [], createdAt: 1, updatedAt: 2, model: "m" },
-      { id: "c2", title: "B", messages: [], createdAt: 3, updatedAt: 4, model: "m" },
-    ]
-
-    await syncConversationsBulk(convs as never)
-    expect(fetch).toHaveBeenCalledWith(
-      "http://test-mcp:8888/user-state/conversations/bulk",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify(convs),
-      }),
-    )
-  })
-
-  it("rejects on a non-2xx response", async () => {
-    vi.stubGlobal("fetch", mockFetch({ error_code: "SERVER_ERROR", message: "boom" }, 500))
-    const convs = [{ id: "c1", title: "A", messages: [], createdAt: 1, updatedAt: 2, model: "m" }]
-
-    await expect(syncConversationsBulk(convs as never)).rejects.toThrow()
   })
 })
 

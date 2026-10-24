@@ -22,6 +22,8 @@ from app.sync._helpers import (
     BM25_SUBDIR,
     CHROMA_BATCH_SIZE,
     CHROMA_SUBDIR,
+    CONVERSATION_EDGE_TYPES,
+    CONVERSATION_EDGES_JSONL,
     DOMAINS_JSONL,
     ENTITIES_JSONL,
     ENTITY_EDGES_JSONL,
@@ -76,16 +78,17 @@ def _is_forgotten_transcript(meta: dict[str, Any]) -> bool:
     )
 
 
-_VERIFIED_MEMORY_ROW_PREFIX = "verified_memory_"
+def _is_forgotten_verified_memory(row_id: str, meta: dict[str, Any] | None = None) -> bool:
+    """A verified memory's recall document whose memory is trashed or purged.
+    Its ``artifact_id`` is the memory id, which the registry records under kind
+    ``memory``, not ``artifact``. An export from before §6.3 still names it
+    ``verified_memory_{id}``."""
+    from core.retrieval.artifact_rows import LEGACY_VERIFIED_MEMORY_PREFIX, is_verified_memory_row
 
-
-def _is_forgotten_verified_memory(row_id: str) -> bool:
-    """A verified memory's recall document (``verified_memory_{id}``) whose
-    memory is trashed or purged. Its ``artifact_id`` is the memory id, which
-    the registry records under kind ``memory``, not ``artifact``."""
-    return row_id.startswith(_VERIFIED_MEMORY_ROW_PREFIX) and forget_registry.is_forgotten(
-        "memory", row_id[len(_VERIFIED_MEMORY_ROW_PREFIX):],
-    )
+    if not is_verified_memory_row(row_id, meta):
+        return False
+    memory_id = str((meta or {}).get("artifact_id") or "") or row_id.removeprefix(LEGACY_VERIFIED_MEMORY_PREFIX)
+    return forget_registry.is_forgotten("memory", memory_id)
 
 
 def _is_forgotten_chunk(row_id: str, meta: dict[str, Any]) -> bool:
@@ -540,7 +543,7 @@ def import_chroma(
                 if (
                     (artifact_id and _is_forgotten_artifact(str(artifact_id)))
                     or _is_forgotten_transcript(meta)
-                    or _is_forgotten_verified_memory(str(chunk_id))
+                    or _is_forgotten_verified_memory(str(chunk_id), meta)
                     or _is_forgotten_chunk(str(chunk_id), meta)
                 ):
                     skipped += 1
@@ -945,6 +948,40 @@ def import_facts(driver, sync_dir: str | None = None, applied: set[str] | None =
     return {"facts_merged": merged, "facts_skipped": skipped}
 
 
+def import_conversation_edges(driver, sync_dir: str | None = None) -> dict[str, Any]:
+    """Merge Artifact → Conversation provenance from conversation_edges.jsonl.
+    Only edges between an artifact this machine holds and a conversation, neither
+    of them forgotten; the type comes from a fixed list, never from the file."""
+    sync_dir = sync_dir or _default_sync_dir()
+    path = str(Path(sync_dir) / NEO4J_SUBDIR / CONVERSATION_EDGES_JSONL)
+    merged = skipped = 0
+    try:
+        with driver.session() as session:
+            for row in _iter_jsonl(path):
+                aid, cid, rel = str(row.get("source_id") or ""), str(row.get("target_id") or ""), row.get("rel_type")
+                if (
+                    rel not in CONVERSATION_EDGE_TYPES or not aid or not cid
+                    or _is_forgotten_artifact(aid) or forget_registry.is_forgotten("conversation", cid)
+                ):
+                    skipped += 1
+                    continue
+                props = {k: v for k, v in (row.get("props") or {}).items() if isinstance(v, (str, int, float, bool))}
+                found = session.run(
+                    f"MATCH (a:Artifact {{id: $aid}}) MERGE (c:Conversation {{id: $cid}}) "
+                    f"MERGE (a)-[r:{rel}]->(c) SET r += $props RETURN count(r) AS n",
+                    aid=aid, cid=cid, props=props,
+                ).single()
+                if found and found["n"]:
+                    merged += 1
+                else:
+                    skipped += 1
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_.conversation_edges', exc)
+        return {"error": str(exc), "edges_merged": merged, "edges_skipped": skipped}
+    return {"edges_merged": merged, "edges_skipped": skipped}
+
+
 def import_entities(driver, sync_dir: str | None = None) -> dict[str, Any]:
     """
     Merge :Entity nodes and their direct MENTIONS provenance edges (from
@@ -1123,6 +1160,7 @@ def import_all(
     memories_result = import_memories(driver, sync_dir=sync_dir)
     entities_result = import_entities(driver, sync_dir=sync_dir)
     facts_result = import_facts(driver, sync_dir=sync_dir, applied=applied)
+    conversation_edges_result = import_conversation_edges(driver, sync_dir=sync_dir)
     conversations_result = import_conversations(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_added": 0, "skipped": True}
@@ -1200,16 +1238,27 @@ def import_all(
         from core.utils.swallowed import log_swallowed_error
         log_swallowed_error('app.sync.import_.lineage_migration', exc)
 
+    # An older export still names verified memories' rows the old way.
+    identity_result: dict[str, Any] = {}
+    try:
+        from app.services.memory_identity_migration import migrate_memory_identity
+        identity_result = migrate_memory_identity(neo4j=driver)
+    except Exception as exc:
+        from core.utils.swallowed import log_swallowed_error
+        log_swallowed_error('app.sync.import_.memory_identity_migration', exc)
+
     logger.info("Full import complete from %s", sync_dir)
     return {
         "chunk_ids_rekeyed": rekey_result,
         "lineages": lineage_result,
+        "memory_identity": identity_result,
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
         "memories": memories_result,
         "entities": entities_result,
         "facts": facts_result,
+        "conversation_edges": conversation_edges_result,
         "conversations": conversations_result,
         "redis": redis_result,
         "tombstones": tombstone_result,

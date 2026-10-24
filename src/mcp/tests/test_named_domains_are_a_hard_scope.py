@@ -201,6 +201,7 @@ async def test_naming_a_domain_keeps_memory_and_leaves_the_web_as_asked(
     await _ask(domains=["tasks"])
 
     assert passed["strict_domains"] is True
+    assert passed["memory_strict"] is False
     assert passed["memory_enabled"] is True
     assert passed["external_augmentation"] is True
 
@@ -221,6 +222,7 @@ async def test_asking_for_strict_domains_still_turns_memory_and_the_web_off(
     await _ask(domains=["tasks"], strict_domains=True)
 
     assert passed["strict_domains"] is True
+    assert passed["memory_strict"] is True
     assert passed["memory_enabled"] is False
     assert passed["external_augmentation"] is False
 
@@ -241,6 +243,7 @@ async def test_memory_stays_when_conversations_is_a_named_domain(
     await _ask(domains=["tasks", "conversations"])
 
     assert passed["strict_domains"] is True
+    assert passed["memory_strict"] is False
     assert passed["memory_enabled"] is True
     assert passed["external_augmentation"] is True
 
@@ -252,6 +255,7 @@ async def test_asking_for_the_domain_scope_still_turns_the_web_off(
     await _ask(domains=["tasks"], query_scope="domain")
 
     assert passed["strict_domains"] is True
+    assert passed["memory_strict"] is True
     assert passed["memory_enabled"] is False
     assert passed["external_augmentation"] is False
 
@@ -263,6 +267,7 @@ async def test_an_unscoped_gui_query_keeps_memory_the_web_and_the_loose_scope(
     await _ask()
 
     assert not passed["strict_domains"]
+    assert passed["memory_strict"] is False
     assert passed["domains"] is None
     assert passed["allowed_domains"] is None
     assert passed["memory_enabled"] is True
@@ -274,6 +279,7 @@ async def test_an_empty_domain_list_names_nothing(passed: dict[str, Any]) -> Non
     await _ask(domains=[])
 
     assert not passed["strict_domains"]
+    assert passed["memory_strict"] is False
     assert passed["memory_enabled"] is True
     assert passed["external_augmentation"] is True
 
@@ -286,12 +292,15 @@ async def test_a_consumer_strict_by_registration_is_unchanged(
     await _ask("cerid-finance", domains=domains)
 
     assert passed["strict_domains"] is True
+    assert passed["memory_strict"] is True
     assert passed["allowed_domains"] == ["finance", "inbox"]
     assert passed["domain_record_types"] == {"inbox": ["mail_financial_card"]}
     assert passed["domains"] == domains
-    # #471: memory goes off for a strict scope with named domains, the web stays.
-    assert passed["memory_enabled"] is (domains is None)
-    assert passed["external_augmentation"] is True
+    # Memory goes off for a strict scope that leaves out conversations — the
+    # named domains, or with none named the consumer's wall. This consumer's
+    # registry also turns the web off.
+    assert passed["memory_enabled"] is False
+    assert passed["external_augmentation"] is False
 
 
 @pytest.mark.asyncio
@@ -311,6 +320,7 @@ async def test_the_smart_path_is_held_to_the_named_domains_too(
     await _ask(domains=["tasks"], rag_mode="smart")
 
     assert seen["strict_domains"] is True
+    assert seen["memory_strict"] is False
     assert seen["context_sources"] is None
 
 
@@ -331,6 +341,7 @@ async def test_the_smart_path_still_loses_memory_when_the_request_asks_for_the_s
     await _ask(domains=["tasks"], rag_mode="smart", query_scope="domain")
 
     assert seen["strict_domains"] is True
+    assert seen["memory_strict"] is True
     assert seen["context_sources"] == {"memory": False, "external": False}
 
 
@@ -376,3 +387,22 @@ async def test_no_memory_is_recalled_for_a_scope_that_is_strict_without_the_name
     assert _memory_rows(result) == []
     assert chroma.recalled == []
     assert _kb_domains(result) == {domain}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rag_mode", ["manual", "smart"])
+@pytest.mark.parametrize("domains", [None, ["conversations"]])
+async def test_a_strict_consumer_is_held_to_its_wall_for_memory(
+    chroma: _FixtureChromaClient, rag_mode: str, domains: list[str] | None,
+) -> None:
+    """Live 2026-10-10: cerid-finance (strict, finance + inbox) got the owner's
+    conversation memories asking without ``domains`` (5 smart, 8 manual) and by
+    naming ``conversations`` (5 smart)."""
+    result = await _ask(
+        "cerid-finance", query=RECALL_QUERY, rag_mode=rag_mode, context_sources=NO_WEB,
+        domains=domains,
+    )
+
+    assert _memory_rows(result) == []
+    assert chroma.recalled == []
+    assert "conversations" not in _kb_domains(result)

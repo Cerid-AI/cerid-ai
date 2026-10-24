@@ -132,7 +132,7 @@ async def test_cr067_persisted_overall_is_post_sweep(monkeypatch):
 async def test_cr113_redis_report_carries_consistency_issue(monkeypatch):
     """The durable Redis hall:{cid} report must include consistency_issue, like
     Neo4j/FE. RED on HEAD: Redis is serialized before the consistency fold-in."""
-    from core.agents.hallucination.streaming import REDIS_HALLUCINATION_PREFIX
+    from core.agents.hallucination.persistence import REDIS_HALLUCINATION_PREFIX
 
     async def _vc(claim_text, *a, **k):
         return {"status": "verified", "similarity": 0.7, "verification_method": "kb"}

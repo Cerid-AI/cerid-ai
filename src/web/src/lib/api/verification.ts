@@ -3,15 +3,39 @@
 
 import { MCP_BASE, mcpHeaders, extractError } from "./common"
 
-import type { HallucinationClaim } from "../types"
+import type { HallucinationClaim, HallucinationReport } from "../types"
 
 // --- Hallucination Detection ---
 
-// E1 CR-065: saveVerificationReport was removed here — Sprint C moved report
-// persistence server-side (verify_response_streaming persists to Neo4j and emits
-// a "persisted" SSE event the stream hook now surfaces on failure). The FE helper
-// was dead code with no callers; the POST /verification/save endpoint remains for
-// external SDK consumers.
+// Reports are stored once, server-side, per message (forget spec §6.2): the
+// verify stream persists them, and a conversation fetches its reports on demand.
+// They are no longer kept inside saved conversations.
+
+/** Every stored report of a conversation, keyed by the message it verified. */
+export async function fetchVerificationReports(conversationId: string): Promise<Record<string, HallucinationReport>> {
+  const res = await fetch(`${MCP_BASE}/verification/${encodeURIComponent(conversationId)}/reports`, {
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Verification reports failed: ${res.status}`))
+  const body = (await res.json()) as { reports?: Record<string, HallucinationReport> }
+  return body.reports ?? {}
+}
+
+/** Hand the server reports this browser kept inside a conversation (before
+ *  reports were stored once). Returns the message ids the server now holds. */
+export async function storeVerificationReports(
+  conversationId: string,
+  reports: Record<string, HallucinationReport>,
+): Promise<string[]> {
+  const res = await fetch(`${MCP_BASE}/verification/${encodeURIComponent(conversationId)}/reports`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ reports }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Storing verification reports failed: ${res.status}`))
+  const body = (await res.json()) as { stored?: string[] }
+  return body.stored ?? []
+}
 
 export function streamVerification(
   responseText: string,
@@ -22,6 +46,8 @@ export function streamVerification(
   conversationHistory?: Array<{ role: string; content: string }>,
   expertMode?: boolean,
   sourceArtifactIds?: string[],
+  /** The assistant message being verified: its report is kept under it. */
+  messageId?: string,
 ): { response: Promise<Response>; abort: () => void } {
   const controller = new AbortController()
   const response = fetch(`${MCP_BASE}/agent/verify-stream`, {
@@ -36,6 +62,7 @@ export function streamVerification(
       ...(conversationHistory?.length && { conversation_history: conversationHistory }),
       ...(expertMode && { expert_mode: true }),
       ...(sourceArtifactIds?.length && { source_artifact_ids: sourceArtifactIds }),
+      ...(messageId && { message_id: messageId }),
     }),
     signal: controller.signal,
   })
@@ -46,6 +73,7 @@ export async function submitClaimFeedback(
   conversationId: string,
   claimIndex: number,
   correct: boolean,
+  messageId?: string,
 ): Promise<void> {
   const res = await fetch(`${MCP_BASE}/agent/hallucination/feedback`, {
     method: "POST",
@@ -54,6 +82,7 @@ export async function submitClaimFeedback(
       conversation_id: conversationId,
       claim_index: claimIndex,
       correct,
+      ...(messageId && { message_id: messageId }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `Claim feedback failed: ${res.status}`))
@@ -72,6 +101,7 @@ export async function verifySingleClaim(
   claimText: string,
   conversationId: string,
   claimIndex: number,
+  messageId?: string,
 ): Promise<ClaimVerificationResult | null> {
   const res = await fetch(`${MCP_BASE}/agent/verify-stream`, {
     method: "POST",
@@ -85,6 +115,7 @@ export async function verifySingleClaim(
       // whole report with a 1-claim one (which wiped the other claims' verdicts
       // and broke their feedback indices).
       single_claim_index: claimIndex,
+      ...(messageId && { message_id: messageId }),
     }),
   })
   if (!res.ok || !res.body) return null

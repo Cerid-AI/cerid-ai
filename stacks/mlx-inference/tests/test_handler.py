@@ -235,6 +235,24 @@ def test_v1_stream_holds_control_text(server):
     assert "<|" not in text and "<channel|>" not in text
 
 
+STRAY_CLOSER = [("5: Wrong", False, 1), (" sign.", False, 2), ("<channel|>", False, 3), ("\n", False, 4), ("", True, stats("5: Wrong sign.<channel|>\n"))]
+
+
+def test_v1_stream_keeps_the_answer_before_a_stray_closer(server):
+    engine, post, _ = server
+    engine.items = STRAY_CLOSER
+    got = events(post("/v1/chat/completions", v1("default-g", stream=True))[2])
+    assert "".join(c["choices"][0]["delta"].get("content", "") for c in got[:-1] if c["choices"]) == "5: Wrong sign."
+
+
+def test_api_chat_stream_keeps_the_answer_before_a_stray_closer(server):
+    engine, post, _ = server
+    engine.items = [*STRAY_CLOSER[:-1], ("", True, {**stats("5: Wrong sign.<channel|>\n"), "done_reason": "stop"})]
+    _, _, raw = post("/api/chat", {"model": "default-g", "messages": [{"role": "user", "content": "hi"}]})
+    lines = [json.loads(line) for line in raw.decode().splitlines() if line]
+    assert "".join(x["message"]["content"] for x in lines) == "5: Wrong sign."
+
+
 def test_v1_stream_harmony_sends_only_the_final_channel(server, harmony):
     engine, post, _ = server
     _, enc = serve._harmony()
@@ -283,7 +301,7 @@ def test_api_chat_without_tools_is_the_unchanged_path(server):
         False,
         256,
         0.0,
-        1.0,
+        None,
     )
     assert code == 200
     assert list(body) == [
@@ -350,6 +368,151 @@ def test_api_generate_is_the_unchanged_path(server):
     assert body["response"] == "Hello"
 
 
+# -- stop strings -----------------------------------------------------------------
+
+MARK = "<<anneal:"
+# What the engine yields when the reply runs into a stop: the tokens before the
+# one that completed it (a split "<<anneal"), then stats with the answer cut short.
+STOPPED = [
+    ("Done.", False, None),
+    ("\n\n<", False, None),
+    ("<anneal", False, None),
+    ("", True, {"prompt_eval_count": 3, "prompt_eval_duration": 1, "eval_count": 4, "eval_duration": 2,
+                "done_reason": "stop", "text": "Done.\n\n<<anneal:", "content": "Done.\n\n"}),
+]
+
+
+def ndjson(raw: bytes) -> list:
+    return [json.loads(line) for line in raw.decode().splitlines() if line]
+
+
+def test_api_chat_stop_cuts_the_answer(server):
+    engine, post, _ = server
+    engine.items = STOPPED
+    code, _, raw = post("/api/chat", {"model": "default-g", "stream": False, "messages": USER, "options": {"stop": [MARK]}})
+    body = json.loads(raw)
+    assert code == 200 and engine.jobs[0].stops == (MARK,)
+    assert body["message"]["content"] == "Done.\n\n" and body["done_reason"] == "stop"
+    assert "content" not in body and "text" not in body
+
+
+def test_api_chat_stream_holds_back_a_stop_split_over_tokens(server):
+    engine, post, _ = server
+    engine.items = STOPPED
+    lines = ndjson(post("/api/chat", {"model": "default-g", "messages": USER, "options": {"stop": MARK}})[2])
+    sent = [x["message"]["content"] for x in lines]
+    assert "".join(sent) == "Done.\n\n" and not any("<" in s for s in sent)
+    assert lines[-1]["done"] is True and lines[-1]["done_reason"] == "stop" and "content" not in lines[-1]
+
+
+def test_api_generate_stop_cuts_the_response(server):
+    engine, post, _ = server
+    engine.items = STOPPED
+    body = json.loads(post("/api/generate", {"model": "default-g", "prompt": "hi", "stream": False, "options": {"stop": [MARK]}})[2])
+    assert body["response"] == "Done.\n\n" and body["done_reason"] == "stop"
+
+
+def test_api_chat_stream_sends_a_held_prefix_that_was_not_a_stop(server):
+    engine, post, _ = server
+    engine.items = [
+        ("a <", False, None),
+        ("<an", False, None),
+        ("swer", False, None),
+        ("", True, {**LEGACY_ITEMS[-1][2], "text": "a <<answer"}),
+    ]
+    sent = [x["message"]["content"] for x in ndjson(post("/api/chat", {"model": "default-g", "messages": USER, "options": {"stop": [MARK]}})[2])]
+    assert sent == ["a ", "<<answer", ""]
+
+
+def test_api_chat_stream_sends_a_held_prefix_when_the_reply_ends_inside_it(server):
+    engine, post, _ = server
+    engine.items = [("x <", False, None), ("", True, {**LEGACY_ITEMS[-1][2], "text": "x <"})]
+    lines = ndjson(post("/api/chat", {"model": "default-g", "messages": USER, "options": {"stop": [MARK]}})[2])
+    assert [x["message"]["content"] for x in lines] == ["x ", "<"] and lines[-1]["done_reason"] == "stop"
+
+
+def test_v1_stop_cuts_the_answer(server):
+    engine, post, _ = server
+    engine.items = [("", True, {**stats("Done.\n\n<<anneal:"), "content": "Done.\n\n"})]
+    body = json.loads(post("/v1/chat/completions", v1("default-g", stop=[MARK]))[2])
+    assert engine.jobs[0].stops == (MARK,)
+    assert body["choices"][0]["message"] == {"role": "assistant", "content": "Done.\n\n"}
+    assert body["choices"][0]["finish_reason"] == "stop"
+
+
+def test_v1_stream_holds_back_a_stop_split_over_tokens(server):
+    engine, post, _ = server
+    engine.items = [("Done.", False, 1), ("\n\n<", False, 2), ("<anneal", False, 3), ("", True, {**stats("Done.\n\n<<anneal:"), "content": "Done.\n\n"})]
+    got = events(post("/v1/chat/completions", v1("default-g", stream=True, stop=MARK))[2])
+    deltas = [c["choices"][0]["delta"].get("content", "") for c in got[:-1] if c["choices"]]
+    assert "".join(deltas) == "Done.\n\n" and not any("<" in d for d in deltas)
+    assert got[-2]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_v1_stream_sends_a_held_prefix_that_was_not_a_stop(server):
+    engine, post, _ = server
+    engine.items = [("x <", False, 1), ("<b", False, 2), ("", True, stats("x <<b"))]
+    got = events(post("/v1/chat/completions", v1("default-g", stream=True, stop=[MARK]))[2])
+    assert "".join(c["choices"][0]["delta"].get("content", "") for c in got[:-1] if c["choices"]) == "x <<b"
+
+
+def test_v1_stream_sends_a_held_prefix_when_the_reply_ends_inside_it(server):
+    engine, post, _ = server
+    engine.items = [("x <", False, 1), ("", True, stats("x <"))]
+    got = events(post("/v1/chat/completions", v1("default-g", stream=True, stop=[MARK]))[2])
+    assert [c["choices"][0]["delta"].get("content") for c in got[1:-1] if c["choices"]] == ["x ", "<", None]
+
+
+def test_v1_stream_harmony_stop_applies_to_the_final_channel(server, harmony):
+    engine, post, _ = server
+    _, enc = serve._harmony()
+    # The analysis quotes the mark and does not stop the reply; the final
+    # channel runs into it, and the token that completed it is never yielded.
+    tokens = enc.encode(
+        "<|channel|>analysis<|message|>It ends at <<anneal: here.<|end|><|start|>assistant<|channel|>final<|message|>Hello <<anneal",
+        allowed_special="all",
+    )
+    engine.items = [*[("?", False, t) for t in tokens], ("", True, {**stats("", tokens), "content": "Hello "})]
+    got = events(post("/v1/chat/completions", v1("heavy-o", stream=True, stop=[MARK]))[2])
+    deltas = [c["choices"][0]["delta"].get("content", "") for c in got[:-1] if c["choices"]]
+    assert "".join(deltas) == "Hello " and not any("<" in d for d in deltas)
+
+
+def test_no_stop_leaves_the_job_without_one(server):
+    engine, post, _ = server
+    engine.items = LEGACY_ITEMS
+    post("/api/chat", {"model": "default-g", "stream": False, "messages": USER})
+    engine.items = [("", True, stats("x"))]
+    post("/v1/chat/completions", v1("default-g"))
+    assert [job.stops for job in engine.jobs] == [(), ()]
+
+
+BAD_STOPS = [5, [1], [""], [MARK, None], {"a": 1}, ["s"] * (serve.MAX_STOPS + 1)]
+
+
+@pytest.mark.parametrize("stop", BAD_STOPS)
+def test_api_bad_stop_is_a_400(server, stop):
+    engine, post, _ = server
+    code, _, raw = post("/api/chat", {"model": "default-g", "messages": USER, "options": {"stop": stop}})
+    assert code == 400 and "stop" in json.loads(raw)["error"] and engine.jobs == []
+
+
+@pytest.mark.parametrize("stop", BAD_STOPS)
+def test_v1_bad_stop_is_a_400(server, stop):
+    engine, post, _ = server
+    code, _, raw = post("/v1/chat/completions", v1("default-g", stop=stop))
+    assert code == 400 and "stop" in json.loads(raw)["error"]["message"] and engine.jobs == []
+
+
+def test_stop_with_tools_is_a_400(server):
+    engine, post, _ = server
+    code, _, raw = post("/v1/chat/completions", v1("small-q", tools=TOOLS, stop=[MARK]))
+    assert code == 400 and "stop is not supported with tools" in json.loads(raw)["error"]["message"]
+    code, _, raw = post("/api/chat", {"model": "small-q", "stream": False, "tools": TOOLS, "messages": USER, "options": {"stop": [MARK]}})
+    assert code == 400 and "stop is not supported with tools" in json.loads(raw)["error"]
+    assert engine.jobs == []
+
+
 def test_health_reports_tools_limits_and_cache(server):
     _, _, get = server
     code, body = get("/health")
@@ -357,6 +520,72 @@ def test_health_reports_tools_limits_and_cache(server):
     assert body["tools"] == {"small-q": "qwen3_coder", "default-g": "gemma4", "heavy-o": "harmony"}
     assert body["limits"]["default"]["max_active"] == 3
     assert body["prompt_cache"] == {"default-g": {"entries": 2, "bytes": 1024}}
+
+
+# -- the heavy slot and host memory ------------------------------------------------
+
+DEFERRED = {"need_gb": 73.0, "available_gb": 41.2, "pressure": "warn"}
+USER = [{"role": "user", "content": "hi"}]
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/chat", {"model": "heavy-o", "stream": False, "messages": USER}),
+        ("/api/chat", {"model": "heavy-o", "messages": USER}),  # streams by default
+        ("/api/generate", {"model": "heavy-o", "prompt": "hi"}),
+        ("/api/chat", {"model": "heavy-o", "stream": False, "tools": TOOLS, "messages": USER}),
+    ],
+)
+def test_deferred_heavy_load_is_a_503_on_the_ollama_routes(server, path, body):
+    engine, post, _ = server
+    engine.items = [serve.HeavyDeferred("heavy-o", DEFERRED)]
+    code, ctype, raw = post(path, body)
+    assert code == 503 and ctype == "application/json"
+    assert json.loads(raw) == {"error": "heavy deferred: memory", "model": "heavy-o", **DEFERRED}
+
+
+@pytest.mark.parametrize("extra", [{}, {"stream": True}, {"tools": TOOLS}])
+def test_deferred_heavy_load_is_a_503_on_v1(server, extra):
+    engine, post, _ = server
+    engine.items = [serve.HeavyDeferred("heavy-o", DEFERRED)]
+    code, ctype, raw = post("/v1/chat/completions", v1("heavy-o", **extra))
+    body = json.loads(raw)
+    assert code == 503 and ctype == "application/json"
+    assert body["error"]["message"] == "heavy deferred: memory" and body["error"]["code"] == "heavy_deferred"
+    assert (body["need_gb"], body["available_gb"], body["pressure"]) == (73.0, 41.2, "warn")
+
+
+def test_other_engine_failures_are_still_500(server):
+    engine, post, _ = server
+    engine.items = [RuntimeError("metal went away")]
+    code, _, raw = post("/api/chat", {"model": "heavy-o", "stream": False, "messages": USER})
+    assert code == 500 and "metal went away" in json.loads(raw)["error"]
+
+
+@pytest.mark.parametrize("route", ["/api/ps", "/health"])
+def test_status_reports_memory_and_the_heavy_slot(server, monkeypatch, route):
+    engine, _, get = server
+    monkeypatch.setattr(serve, "memory_probe", lambda: {"available": 41_234_567_890, "pressure": "warn"})
+    engine.heavy = "heavy-o"
+    code, body = get(route)
+    assert code == 200
+    assert body["memory"] == {
+        "pressure": "warn",
+        "available_gb": 41.2,
+        "heavy_loaded": True,
+        "heavy": "heavy-o",
+        "heavy_idle_unload_s": serve.HEAVY_IDLE_S,
+        "heavy_margin_gb": serve.HEAVY_MARGIN_GB,
+    }
+
+
+def test_status_without_a_memory_reading(server, monkeypatch):
+    _, _, get = server
+    monkeypatch.setattr(serve, "memory_probe", lambda: {"available": None, "pressure": None})
+    _, body = get("/api/ps")
+    assert body["memory"]["available_gb"] is None and body["memory"]["heavy_loaded"] is False
+    assert [m["name"] for m in body["models"]] == ["small-q", "default-g"]
 
 
 # -- catalog ---------------------------------------------------------------------
@@ -454,6 +683,33 @@ def test_revision_moves_with_a_models_weights(tmp_path):
     assert serve.Catalog(path).revision != before
 
 
+def test_catalog_reads_the_models_sampling_truncation(tmp_path):
+    (tmp_path / "default-g").mkdir()
+    (tmp_path / "default-g" / "generation_config.json").write_text(
+        json.dumps({"eos_token_id": [1, 106, 50], "temperature": 1.0, "top_k": 64, "top_p": 0.95})
+    )
+    models = serve.Catalog(write_catalog(tmp_path)).models
+    assert models["default-g"]["sampling"] == {"top_k": 64, "top_p": 0.95}
+    assert models["small-q"]["sampling"] == {}
+
+
+@pytest.mark.parametrize("config", ['{"top_k": -1}', '{"top_k": 1.5}', '{"top_p": 0}', '{"top_p": 1.5}', '{"top_p": true}', "{not json"])
+def test_catalog_rejects_a_bad_generation_config(tmp_path, config):
+    (tmp_path / "default-g").mkdir()
+    (tmp_path / "default-g" / "generation_config.json").write_text(config)
+    with pytest.raises(SystemExit, match="generation_config.json"):
+        serve.Catalog(write_catalog(tmp_path))
+
+
+def test_revision_moves_with_a_models_sampling(tmp_path):
+    path = write_catalog(tmp_path)
+    config = tmp_path / "default-g" / "generation_config.json"
+    config.write_text('{"top_p": 0.95}')
+    before = serve.Catalog(path).revision
+    config.write_text('{"top_p": 0.90}')
+    assert serve.Catalog(path).revision != before
+
+
 def test_revision_moves_with_a_package_version(tmp_path, monkeypatch):
     path = write_catalog(tmp_path)
     before = serve.Catalog(path).revision
@@ -516,3 +772,87 @@ def test_a_burst_of_new_connections_is_served(server):
     httpd.shutdown()
     httpd.server_close()
     assert outcomes == ["200"] * n
+
+
+# -- reasoning effort, JSON mode, access log (audit 2026-10-10, F15 + F18) -----------
+
+
+@pytest.mark.parametrize("extra,effort", [
+    ({}, "medium"),
+    ({"reasoning_effort": "high"}, "high"),
+    ({"reasoning": {"effort": "low"}}, "low"),      # OpenRouter's shape
+    ({"reasoning_effort": "none"}, "low"),          # gpt-oss cannot switch reasoning off
+    ({"reasoning_effort": "xhigh"}, "high"),
+])
+def test_v1_reasoning_effort_reaches_the_job(server, extra, effort):
+    engine, post, _ = server
+    engine.items = [("", True, stats("ok"))]
+    status, _, _ = post("/v1/chat/completions", v1("default-g", **extra))
+    assert status == 200 and engine.jobs[-1].effort == effort
+
+
+def test_v1_unknown_reasoning_effort_is_a_400(server):
+    _, post, _ = server
+    status, _, body = post("/v1/chat/completions", v1("default-g", reasoning_effort="extreme"))
+    assert status == 400 and b"reasoning effort" in body
+
+
+def test_v1_json_mode_instructs_the_model(server):
+    engine, post, _ = server
+    engine.items = [("", True, stats("{}"))]
+    post("/v1/chat/completions", v1("default-g", response_format={"type": "json_object"}))
+    assert engine.jobs[-1].messages[0] == {"role": "system", "content": "Respond with one JSON object and no other text."}
+
+
+def test_v1_json_schema_joins_an_existing_system_message(server):
+    engine, post, _ = server
+    engine.items = [("", True, stats("{}"))]
+    body = v1("default-g", response_format={"type": "json_schema", "json_schema": {"schema": {"type": "object"}}})
+    body["messages"] = [{"role": "system", "content": "Be brief."}, *body["messages"]]
+    post("/v1/chat/completions", body)
+    system = engine.jobs[-1].messages[0]["content"]
+    assert system.startswith("Be brief.") and '"type": "object"' in system
+
+
+def test_v1_unsupported_response_format_is_a_400(server):
+    _, post, _ = server
+    status, _, _ = post("/v1/chat/completions", v1("default-g", response_format={"type": "grammar"}))
+    assert status == 400
+
+
+def test_every_request_leaves_one_timed_access_line(server, capsys):
+    engine, post, _ = server
+    engine.items = [("", True, stats("Hello there."))]
+    post("/v1/chat/completions", v1("default-g"))
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if "/v1/chat/completions" in ln]
+    assert len(lines) == 1
+    line = lines[0]
+    assert line[:4].isdigit() and "Z " in line  # ISO timestamp first
+    for field in ("200", "model=default-g", "ms=", "wait_ms=", "accept_ms=", "effort=medium"):
+        assert field in line
+
+
+def test_harmony_system_message_carries_the_effort(harmony):
+    _, enc = serve._harmony()
+    text = enc.decode(enc.render_conversation(serve.harmony_conversation([{"role": "user", "content": "hi"}], None, "high")))
+    assert "Reasoning: high" in text
+
+
+def test_log_lines_from_many_threads_stay_whole(capsys):
+    """print() wrote the text and the newline separately, so two handler threads
+    logging at once ran their access-log lines together ('accept_ms=1' followed
+    straight by the next timestamp)."""
+    import threading
+
+    def write(n):
+        for i in range(200):
+            serve._emit(f"thread={n} line={i} " + "x" * 64)
+
+    threads = [threading.Thread(target=write, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1600
+    assert all(line.startswith("thread=") and line.endswith("x" * 64) and line.count("thread=") == 1 for line in lines)

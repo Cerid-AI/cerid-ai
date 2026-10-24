@@ -67,16 +67,6 @@ export async function fetchInstalledKnowledgePacks(): Promise<InstalledKnowledge
   return res.json()
 }
 
-/** Install a pack by id. Idempotent at the same version. */
-export async function installKnowledgePack(packId: string): Promise<InstallKnowledgePackResponse> {
-  const res = await fetch(
-    `${MCP_BASE}/knowledge_packs/${encodeURIComponent(packId)}/install`,
-    { method: "POST", headers: mcpHeaders() },
-  )
-  if (!res.ok) throw new Error(await extractError(res, `Install failed: ${res.status}`))
-  return res.json()
-}
-
 /** Uninstall a pack by id; removes ingested artifacts from Neo4j + chromadb. */
 export async function uninstallKnowledgePack(packId: string): Promise<UninstallKnowledgePackResponse> {
   const res = await fetch(

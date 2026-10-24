@@ -14,7 +14,6 @@ vi.mock("@/lib/api", () => ({
   queryKB: vi.fn(),
   uploadFile: vi.fn(),
   recategorizeArtifact: vi.fn(),
-  adminDeleteArtifact: vi.fn(),
   updateArtifactTags: vi.fn(),
   reIngestArtifact: vi.fn(),
   previewForgetItems: vi.fn(),

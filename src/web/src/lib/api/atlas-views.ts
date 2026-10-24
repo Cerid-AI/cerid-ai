@@ -114,35 +114,6 @@ export function buildViewPayload(opts: {
   }
 }
 
-/**
- * Build a v3 AtlasViewInput for Constellation saved views (Cycle 4).
- * Includes layout, viewDim, camera3d, and pinnedNodes. The atlasTier
- * field is written by Agent B (Atlas icicle) and round-tripped here.
- */
-export function buildConstellationViewPayload(opts: {
-  name: string
-  layout: MapLayout
-  viewDim: "map" | "3d"
-  camera3d?: { position: [number, number, number]; target: [number, number, number] }
-  pinnedNodes?: Record<string, { x: number; y: number }>
-  atlasTier?: AtlasTierPosition
-}): AtlasViewInput {
-  return {
-    name: opts.name,
-    // entity is required in the schema but not meaningful for constellation
-    // views — use a sentinel that normalizeView accepts unchanged.
-    entity: "",
-    hops: 0,
-    mode: "constellation",
-    version: ATLAS_VIEW_VERSION_V3,
-    layout: opts.layout,
-    viewDim: opts.viewDim,
-    camera3d: opts.camera3d,
-    pinnedNodes: opts.pinnedNodes,
-    atlasTier: opts.atlasTier,
-  }
-}
-
 const BASE = "/atlas/views"
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -163,15 +134,6 @@ export async function listAtlasViews(opts?: { mode?: string }): Promise<AtlasVie
 export async function createAtlasView(input: AtlasViewInput): Promise<AtlasView> {
   const res = await fetch(mcpUrl(BASE).toString(), {
     method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(input),
-  })
-  return normalizeView(await asJson<AtlasView>(res))
-}
-
-export async function updateAtlasView(viewId: string, input: AtlasViewInput): Promise<AtlasView> {
-  const res = await fetch(mcpUrl(`${BASE}/${encodeURIComponent(viewId)}`).toString(), {
-    method: "PATCH",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
   })

@@ -202,12 +202,6 @@ class TestEncryptionModule:
 class TestEncryptionConfig:
     """Test encryption-related configuration."""
 
-    def test_enable_encryption_default(self):
-        """ENABLE_ENCRYPTION defaults to False."""
-        import config
-        # Default is false (unless env var is set in test runner)
-        assert isinstance(config.ENABLE_ENCRYPTION, bool)
-
     def test_sync_backend_default(self):
         """SYNC_BACKEND defaults to 'local'."""
         import config

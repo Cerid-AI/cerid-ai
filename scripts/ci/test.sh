@@ -11,6 +11,13 @@
 # Run from the repo root.
 set -euo pipefail
 
+# Shell scripts under test call the real jq (the backup tests fake only docker, age,
+# ssh and rsync). Hosted runners ship jq; the python:3.12 image used by the
+# containerised macOS path does not.
+if ! command -v jq >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends jq
+fi
+
 pip install -r src/mcp/requirements.txt
 # requirements-dev.txt carries the test-only writers (reportlab builds PDF fixtures);
 # without it the PDF tests cannot even be collected here.
@@ -22,6 +29,14 @@ pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
   python -m pytest tests/ -m "not benchmark_slo and not integration" \
     -v --tb=short --cov=. --cov-report=term-missing \
     --cov-report=xml:coverage.xml --cov-fail-under=20
+)
+
+# The hermetic retrieval eval: ephemeral Chroma and the default ONNX embedder,
+# no live stack. It is marked `integration` (it loads local models), so the run
+# above deselects it; run it by path. -rP prints the recall report on a pass.
+(
+  cd src/mcp
+  python -m pytest tests/eval/test_isolated_retrieval_eval.py -q -rP -p no:cacheprovider
 )
 
 python -m pytest scripts/tests/ -q

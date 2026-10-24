@@ -319,7 +319,10 @@ export default function SubjectsPane() {
             <span aria-hidden="true">×</span>
           </button>
         )}
-        <ViewsPopoverButton
+        {/* Only Atlas can save a view (atlas-saved-views.tsx); in the other
+            modes the list could only ever be empty and point at a control
+            that is not there. */}
+        {mode === "atlas" && <ViewsPopoverButton
           mode={mode}
           onRestore={(view) => {
             setFocalEntity(view.entity)
@@ -339,7 +342,7 @@ export default function SubjectsPane() {
               }
             }
           }}
-        />
+        />}
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}

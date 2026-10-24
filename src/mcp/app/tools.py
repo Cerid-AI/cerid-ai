@@ -927,18 +927,21 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
         from app.scheduler import get_job_status
         return get_job_status()
     elif name == "pkb_check_hallucinations":
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import verification_scope
         from core.agents.hallucination import check_hallucinations
-        return await check_hallucinations(
-            response_text=arguments.get("response_text", ""),
-            conversation_id=arguments.get("conversation_id", ""),
-            chroma_client=get_chroma(),
-            neo4j_driver=get_neo4j(),
-            redis_client=get_redis(),
-            threshold=arguments.get("threshold"),
-            # Private Mode L1+ suppresses the durable hall:{cid} report on this
-            # MCP transport too, matching the REST handlers (CR-018/086).
-            persist_report=not saves_blocked(),
-        )
+        with verification_scope(build_request_context()):
+            return await check_hallucinations(
+                response_text=arguments.get("response_text", ""),
+                conversation_id=arguments.get("conversation_id", ""),
+                chroma_client=get_chroma(),
+                neo4j_driver=get_neo4j(),
+                redis_client=get_redis(),
+                threshold=arguments.get("threshold"),
+                # Private Mode L1+ suppresses the durable hall:{cid} report on this
+                # MCP transport too, matching the REST handlers (CR-018/086).
+                persist_report=not saves_blocked(),
+            )
     elif name == "pkb_memory_extract":
         # Parity with REST POST /agent/memory/extract (private_blocks L1).
         if private_blocks(1):
@@ -959,9 +962,11 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             retention_days=arguments.get("retention_days", 180),
         )
     elif name == "pkb_memory_recall":
-        from app.agents.memory import recall_memories
+        from app.services.request_policy import build_request_context
+        from core.agents.guarded_retrieval import guarded_recall_memories
         from core.utils.time import utcnow_iso as _utcnow_iso
-        results = await recall_memories(
+        results = await guarded_recall_memories(
+            request_context=build_request_context(),
             query=arguments.get("query", ""),
             chroma_client=get_chroma(),
             neo4j_driver=get_neo4j(),
@@ -984,14 +989,18 @@ async def _dispatch_raw(name: str, arguments: dict) -> Any:
             "timestamp": _utcnow_iso(),
         }
     elif name == "pkb_web_search":
+        from app.services.request_policy import build_request_context
         from utils.web_search import search_and_verify
+        # Self-RAG re-reads the knowledge base and auto-ingest writes to it:
+        # Private Mode L2 runs the search without the first, L1 without the second.
+        kb = not build_request_context().blocks_kb
         return await search_and_verify(
             query=arguments.get("query", ""),
-            chroma_client=get_chroma(),
-            neo4j_driver=get_neo4j(),
-            redis_client=get_redis(),
+            chroma_client=get_chroma() if kb else None,
+            neo4j_driver=get_neo4j() if kb else None,
+            redis_client=get_redis() if kb else None,
             max_results=arguments.get("max_results", 5),
-            auto_ingest=arguments.get("auto_ingest", False),
+            auto_ingest=arguments.get("auto_ingest", False) and not saves_blocked(),
         )
     elif name == "pkb_ingest_multimodal":
         from app.services.multimodal import ingest_multimodal

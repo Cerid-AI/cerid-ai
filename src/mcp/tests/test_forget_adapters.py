@@ -28,10 +28,15 @@ def _chroma_with(rows):
 
 
 def test_purge_order_is_derived_first_record_last():
-    assert [a.name for a in ADAPTERS] == [
+    builtin = [
         "artifacts", "chunks", "verified_memories", "transcripts", "verification_report_graph",
         "redis_conversation_keys", "sync_file", "conversation_node",
     ]
+    # A build may register its own stores at boot; they come after these and
+    # serve kinds of their own.
+    assert [a.name for a in ADAPTERS][:len(builtin)] == builtin
+    for extra in ADAPTERS[len(builtin):]:
+        assert not extra.kinds & {"conversation", "artifact", "chunk", "memory"}
 
 
 def test_transcripts_hide_archives_only_chat_artifacts_with_the_forget_reason():
@@ -74,13 +79,33 @@ def test_every_redis_key_claimed_by_the_redis_adapter_is_one_it_deletes():
         pattern.removeprefix("redis:").replace("{cid}", "c1")
         for pattern, owner in CLAIMS.items()
         if owner == "redis_conversation_keys" and pattern.startswith("redis:")
+        and not pattern.endswith(("*", ":"))  # prefixes: matched by scan, tested below
     }
     redis = MagicMock()
     redis.delete.return_value = 0
     redis.zrem.return_value = 0
+    redis.scan_iter.return_value = iter([])
     with patch("app.deps.get_redis", return_value=redis):
         RedisKeysAdapter().purge(S)
-    assert claimed and claimed <= set(redis.delete.call_args.args)
+    assert claimed and claimed <= set(redis.delete.call_args_list[0].args)
+
+
+def test_a_conversation_forget_erases_the_words_its_jobs_hold():
+    """Queued turns, SDK texts and memory-extract results (forget spec §6.5),
+    and nothing of another conversation, even one whose id shares a prefix."""
+    import fakeredis
+
+    from app.db.redis import turn_text
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    mine = [turn_text.new_key("c1"), turn_text.new_key("c1")]
+    theirs = turn_text.new_key("c1:other")
+    for key in (*mine, theirs):
+        turn_text.put(redis, key, {"user_message": "words"})
+    with patch("app.deps.get_redis", return_value=redis):
+        result = RedisKeysAdapter().purge(S)
+    assert not any(redis.exists(k) for k in mine) and redis.exists(theirs)
+    assert result.removed >= len(mine)
 
 
 def test_sync_file_adapter_unlinks_the_conversation(tmp_path, monkeypatch):
@@ -219,6 +244,7 @@ def test_artifact_purge_sweeps_facts_removes_then_settles_the_lineage():
 def test_verified_memory_hide_marks_the_node_and_drops_the_recall_document():
     session = _Session()
     coll = MagicMock()
+    coll.get.return_value = {"ids": [f"{M.id}_0123456789abcdef"]}
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
          patch("app.services.forget.adapters._verified_collection", return_value=coll), \
          patch("app.services.forget.adapters.settle") as settle, \
@@ -226,7 +252,8 @@ def test_verified_memory_hide_marks_the_node_and_drops_the_recall_document():
         VerifiedMemoryAdapter().hide(M, "fg_x")
     query, params = session.queries[0]
     assert "m.status = 'forgotten'" in query and params == {"mid": M.id, "fid": "fg_x"}
-    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
+    # both id forms: the one written before §6.3 and {memory_id}_{h16}
+    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}", f"{M.id}_0123456789abcdef"])
     settle.assert_called_once_with(M.id)
 
 
@@ -242,7 +269,8 @@ def test_verified_memory_restore_rebuilds_the_document_from_the_node_text():
     assert "forget_id: $fid" in session.queries[0][0]
     assert "SET m.status = 'active'" in session.queries[1][0], "the node is reactivated after the document"
     kwargs = coll.upsert.call_args.kwargs
-    assert kwargs["ids"] == [f"verified_memory_{M.id}"]
+    from core.retrieval.artifact_rows import verified_memory_row_id
+    assert kwargs["ids"] == [verified_memory_row_id(M.id, "Water boils at 100 C at sea level.")]
     assert kwargs["documents"] == ["Water boils at 100 C at sea level."]
     meta = kwargs["metadatas"][0]
     assert meta["artifact_id"] == M.id and meta["memory_source_type"] == "verification"
@@ -261,13 +289,14 @@ def test_verified_memory_restore_of_another_forget_changes_nothing():
 def test_verified_memory_purge_deletes_document_and_node():
     session = _Session({"DETACH DELETE m": {"n": 1}})
     coll = MagicMock()
+    coll.get.return_value = {"ids": [f"{M.id}_0123456789abcdef"]}
     with patch("app.deps.get_neo4j", return_value=_driver(session)), \
          patch("app.services.forget.adapters._verified_collection", return_value=coll), \
          patch("core.lineage.writer.lineage_of", return_value=""), \
          patch("app.services.forget.adapters.settle"), \
          patch("app.services.content_lifecycle.invalidate_caches"):
         result = VerifiedMemoryAdapter().purge(M)
-    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}"])
+    coll.delete.assert_called_once_with(ids=[f"verified_memory_{M.id}", f"{M.id}_0123456789abcdef"])
     assert result.removed == 1
 
 
@@ -332,3 +361,20 @@ def test_a_marking_failure_never_leaves_transcripts_readable():
         with pytest.raises(RuntimeError):
             TranscriptsAdapter().hide(S, "fg_x")
     hide.assert_called_once()
+
+
+def test_a_conversation_forget_erases_its_per_message_reports_and_no_others():
+    """Reports are kept per message under a hash of the conversation id: an id
+    holding ":" cannot reach into another conversation's keys."""
+    import fakeredis
+
+    from core.agents.hallucination.persistence import report_key
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    mine = [report_key("c1"), report_key("c1", "m1"), report_key("c1", "m2")]
+    theirs = [report_key("c1:m1"), report_key("c10", "m1"), report_key("c1:x", "m3")]
+    for key in mine + theirs:
+        redis.set(key, "{}")
+    with patch("app.deps.get_redis", return_value=redis):
+        RedisKeysAdapter().purge(S)
+    assert sorted(redis.keys("hall:*")) == sorted(theirs)

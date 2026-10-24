@@ -124,6 +124,8 @@ ci-local: ## Full local validation before push (backend + frontend + guard)
 	@echo "[ci-local] backend · tests"
 	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/ --ignore=src/mcp/tests/eval \
 	  -m "not benchmark_slo and not preservation and not integration" -x -q -p no:cacheprovider
+	@echo "[ci-local] hermetic retrieval eval (ephemeral Chroma, no live stack)"
+	PYTHONPATH=src/mcp .venv/bin/pytest src/mcp/tests/eval/test_isolated_retrieval_eval.py -q -p no:cacheprovider
 	@echo "[ci-local] ReDoS regex audit (matches CI security / dlint)"
 	.venv/bin/python -m flake8 --select=DUO138 src/mcp/
 	@echo "[ci-local] gate probes (scripts/tests)"

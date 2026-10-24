@@ -25,6 +25,7 @@ from core.ingest.frontmatter import (
     "created",
     "updated",
     "source",
+    "title",
 ])
 def test_is_allowlisted_reserved(key):
     assert is_allowlisted(key) is True
@@ -40,7 +41,6 @@ def test_is_allowlisted_cerid_prefix(key):
 
 
 @pytest.mark.parametrize("key", [
-    "title",
     "author",
     "description",
     "TAGS",  # case-sensitive: rejected
@@ -98,15 +98,14 @@ def test_mixed_reserved_and_ignored_keys():
     text = (
         "---\n"
         "status: published\n"
-        "title: Ignored Title\n"
+        "title: Kept Title\n"
         "author: Ignored Author\n"
         "source: web\n"
         "---\n"
         "Body."
     )
     props, body = extract_frontmatter(text)
-    assert props == {"status": "published", "source": "web"}
-    assert "title" not in props
+    assert props == {"status": "published", "title": "Kept Title", "source": "web"}
     assert "author" not in props
     assert body == "Body."
 
@@ -210,7 +209,6 @@ def test_empty_frontmatter_block_yields_empty_props():
 def test_frontmatter_with_only_unknown_keys_drops_all():
     text = (
         "---\n"
-        "title: My Note\n"
         "author: Someone\n"
         "category: Notes\n"
         "---\n"

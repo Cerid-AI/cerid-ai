@@ -27,15 +27,15 @@ src/web/src/components/audit/activity-chart.tsx:88
 # anchor positions itself at the click rect.  Width pin (`w-[300px]`) matches
 # the prior hand-rolled popover width and keeps the layout stable across all
 # expanded states.  Bumped after Phase 4 (V-P0.2 Radix migration).
-src/web/src/components/chat/claim-overlay.tsx:153
-src/web/src/components/chat/claim-overlay.tsx:344
-src/web/src/components/chat/claim-overlay.tsx:361
+src/web/src/components/chat/claim-overlay.tsx:155
+src/web/src/components/chat/claim-overlay.tsx:346
+src/web/src/components/chat/claim-overlay.tsx:363
 
 # Animation stagger delays (typing-indicator dots). Heading-level indent depth
 # and the message-bubble.tsx:131/609 stagger entries migrated to inline
 # `// drift-allowed:` annotations at their real lines (Task 3.5b).
+src/web/src/components/chat/message-bubble.tsx:609
 src/web/src/components/chat/message-bubble.tsx:610
-src/web/src/components/chat/message-bubble.tsx:611
 
 # Console / activity feed scroll heights from container measurements
 src/web/src/components/console/AgentConsole.tsx:282

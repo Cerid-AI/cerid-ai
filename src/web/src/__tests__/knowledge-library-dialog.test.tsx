@@ -13,7 +13,6 @@ const mockInstall = vi.fn()
 vi.mock("@/lib/api", () => ({
   fetchKnowledgePackRegistry: (...args: unknown[]) => mockFetchRegistry(...args),
   fetchInstalledKnowledgePacks: (...args: unknown[]) => mockFetchInstalled(...args),
-  installKnowledgePack: (...args: unknown[]) => mockInstall(...args),
   uninstallKnowledgePack: vi.fn(),
 }))
 

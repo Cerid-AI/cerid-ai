@@ -60,12 +60,6 @@ export async function listConnectors(): Promise<ConnectorStatus[]> {
   return (await r.json()).connectors
 }
 
-export async function getConnector(slug: string): Promise<ConnectorStatus> {
-  const r = await fetch(mcpUrl(`/connectors/${slug}`).toString(), { headers: mcpHeaders() })
-  if (!r.ok) throw new Error(`getConnector failed: ${r.status}`)
-  return r.json()
-}
-
 export async function startConnectorAuth(slug: string): Promise<OAuthStartResponse> {
   const r = await fetch(mcpUrl(`/connectors/${slug}/auth/start`).toString(), {
     method: "POST",

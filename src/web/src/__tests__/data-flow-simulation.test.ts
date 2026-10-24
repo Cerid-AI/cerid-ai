@@ -191,7 +191,7 @@ describe("KB Injection Data Flow", () => {
     const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("How does auth work?") })
-    expect(mockQueryKB).toHaveBeenCalledWith("How does auth work?", undefined, 5, undefined, expect.objectContaining({}))
+    expect(mockQueryKB).toHaveBeenCalledWith("How does auth work?", undefined, 10, undefined, expect.objectContaining({}))
     const sources = opts._sendSpy.mock.calls[0][3]
     expect(sources).toBeDefined()
     expect(sources[0]).toMatchObject({ artifact_id: "art-auth-1", domain: "coding" })
@@ -209,11 +209,13 @@ describe("KB Injection Data Flow", () => {
   })
 
   it("passes domain filter via queryKB args", async () => {
+    // F40: the panel's domain filter and its row count reach the send's own
+    // query; it used to send no domains and a fixed top_k of 5.
     mockQueryKB.mockResolvedValue({ results: [] })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, kbDomains: ["coding"], activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("coding question") })
-    expect(mockQueryKB).toHaveBeenCalledWith("coding question", undefined, 5, undefined, expect.objectContaining({}))
+    expect(mockQueryKB).toHaveBeenCalledWith("coding question", ["coding"], 10, undefined, expect.objectContaining({}))
   })
 
   it("does not inject context when KB returns no results", async () => {

@@ -14,7 +14,7 @@ Usage::
 
     answer = await call_llm(
         [{"role": "user", "content": "Summarize this text..."}],
-        model="openrouter/openai/gpt-4o-mini",
+        model="openrouter/openai/gpt-6-luna",
         breaker_name="bifrost-verify",
     )
 """
@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from core.routing.model_catalog import current_model_id, reasoning_floor
 from core.utils.circuit_breaker import get_breaker
 from core.utils.loop_local import LoopLocal
 from core.utils.tracing import get_request_id, tracing_headers
@@ -77,7 +78,7 @@ def _extract_content(data: dict) -> str:
 # the implicit fallback can't drift from the routing tables. Kept as a local
 # constant (not an import) because this module sits below ``core.routing`` in
 # the import graph and loads on the hot path.
-_DEFAULT_INTERNAL_MODEL = "meta-llama/llama-3.3-70b-instruct"  # model-literal-allowed: designated central internal-LLM fallback constant
+_DEFAULT_INTERNAL_MODEL = "meta-llama/llama-4-scout"  # model-literal-allowed: designated central internal-LLM fallback constant
 
 # ---------------------------------------------------------------------------
 # Singleton connection pool for OpenRouter
@@ -275,12 +276,35 @@ def _build_openrouter_headers(api_key: str, idem_key: str) -> dict[str, str]:
     return headers
 
 
+# Tokens added to ``max_tokens`` for a model that cannot stop reasoning: its
+# lowest effort still reasons, and the answer must fit after it.
+_REASONING_HEADROOM = 1024
+
+
+def _apply_reasoning_floor(payload: dict) -> None:
+    """Ask a model that reasons by default for its lowest effort.
+
+    Internal calls carry small ``max_tokens`` budgets sized for the answer; a
+    model reasoning at its default effort spends them first and returns nothing
+    (gpt-5-nano did). Chat streaming does not come through here and keeps each
+    model's own default. A caller that set ``reasoning`` itself is left alone.
+    """
+    if "reasoning" in payload:
+        return
+    effort = reasoning_floor(str(payload.get("model", "")))
+    if effort is None:
+        return
+    payload["reasoning"] = {"effort": effort}
+    if effort != "none" and isinstance(payload.get("max_tokens"), int):
+        payload["max_tokens"] += _REASONING_HEADROOM
+
+
 def _strip_openrouter_prefix(model: str) -> str:
     """Strip the ``openrouter/`` prefix from model IDs.
 
     Settings store model IDs with this prefix for Bifrost compatibility
-    (e.g. ``openrouter/openai/gpt-4o-mini``).  OpenRouter's API expects
-    the bare ID (``openai/gpt-4o-mini``).
+    (e.g. ``openrouter/openai/gpt-6-luna``).  OpenRouter's API expects
+    the bare ID (``openai/gpt-6-luna``).
     """
     if model.startswith("openrouter/"):
         return model[len("openrouter/"):]
@@ -574,6 +598,9 @@ async def call_llm(
         without an if-else.  When ``model`` is set explicitly, the choice is
         already made and this value is ignored.
     """
+    from core.routing.egress import require_cloud_egress
+
+    require_cloud_egress("cloud LLM call")
     if not model:
         model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
@@ -630,7 +657,7 @@ async def call_llm(
             "was retired and is no longer available as a fallback gateway."
         )
 
-    model = _strip_openrouter_prefix(model)
+    model = _strip_openrouter_prefix(current_model_id(model))
 
     payload: dict = {
         "model": model,
@@ -642,6 +669,7 @@ async def call_llm(
         payload["response_format"] = response_format
     if extra_payload:
         payload.update(extra_payload)
+    _apply_reasoning_floor(payload)
 
     breaker = get_breaker(breaker_name)
     # Generate ONCE per logical call so transport-level retries inside the
@@ -733,6 +761,9 @@ async def call_llm_raw(
     # silently break web-search verification. Verification stays OpenRouter-only by
     # design (operator decision 2026-07-20); a BYOK-only user without an OpenRouter
     # key cannot run external web verification — a documented limitation, not a bug.
+    from core.routing.egress import require_cloud_egress
+
+    require_cloud_egress("cloud LLM call")
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError(
@@ -743,7 +774,7 @@ async def call_llm_raw(
     if not model:
         model = os.getenv("INTERNAL_LLM_MODEL", "") or _DEFAULT_INTERNAL_MODEL
 
-    model = _strip_openrouter_prefix(model)
+    model = _strip_openrouter_prefix(current_model_id(model))
 
     payload: dict = {
         "model": model,
@@ -755,6 +786,7 @@ async def call_llm_raw(
         payload["response_format"] = response_format
     if extra_payload:
         payload.update(extra_payload)
+    _apply_reasoning_floor(payload)
 
     breaker = get_breaker(breaker_name)
     # See call_llm: per-call key, stable across breaker-internal retries.
@@ -798,9 +830,9 @@ async def call_llm_raw(
 
 
 # Estimated cost of the OpenRouter fallback model (``_DEFAULT_INTERNAL_MODEL``,
-# meta-llama/llama-3.3-70b-instruct) — the same per-1K rate ``smart_router.route``
-# stamps for the paid llama-3.3 tier. Keep in sync with _DEFAULT_INTERNAL_MODEL.
-_FALLBACK_COST_PER_1K = 0.00015
+# meta-llama/llama-4-scout) — the same per-1K rate ``smart_router.route``
+# stamps for the paid free-tier slot. Keep in sync with _DEFAULT_INTERNAL_MODEL.
+_FALLBACK_COST_PER_1K = 0.0001
 
 
 def _openrouter_fallback_decision(original: "RouteDecision", *, model: str) -> "RouteDecision":
